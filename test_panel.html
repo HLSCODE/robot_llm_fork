@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>机器人控制测试面板</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --surface2: #263449;
+      --border: #334155;
+      --accent: #3b82f6;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --success: #22c55e;
+      --error: #ef4444;
+      --warning: #f59e0b;
+      --user-bubble: #1d4ed8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: 14px;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .logo { font-size: 18px; }
+    header h1 { font-size: 15px; font-weight: 600; }
+    .conn-bar { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .conn-bar input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      width: 160px;
+    }
+    .conn-bar input:focus { outline: none; border-color: var(--accent); }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--error);
+      flex-shrink: 0;
+    }
+    .status-dot.on { background: var(--success); }
+    .btn {
+      padding: 5px 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      transition: opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:hover:not(:disabled) { opacity: 0.82; }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-danger  { background: var(--error);  color: #fff; }
+    .btn-ghost   { background: var(--surface2); color: var(--text); }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+    /* ── Main layout ── */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Cameras panel (left) ── */
+    .cameras-panel {
+      width: 380px;
+      min-width: 260px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border);
+    }
+    .panel-header {
+      padding: 8px 14px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+    .cameras-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 10px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .camera-card {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color .15s, box-shadow .15s;
+      position: relative;
+      user-select: none;
+    }
+    .camera-card:hover:not(.offline) { border-color: var(--accent); }
+    .camera-card.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(59,130,246,.25);
+    }
+    .camera-card.offline { opacity: .5; cursor: default; }
+    .cam-img-wrap {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+    .cam-img-wrap canvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .cam-placeholder {
+      color: #334155;
+      font-size: 28px;
+    }
+    .cam-status-badge {
+      position: absolute;
+      top: 5px; right: 5px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .cam-status-badge.online  { background: rgba(34,197,94,.85); color:#fff; }
+    .cam-status-badge.offline { background: rgba(239,68,68,.85);  color:#fff; }
+    .cam-sel-badge {
+      position: absolute;
+      top: 5px; left: 5px;
+      background: var(--accent);
+      color: #fff;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .cam-info { padding: 6px 9px 8px; }
+    .cam-name {
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .cam-serial { font-size: 10px; color: var(--text-muted); margin-top: 1px; }
+    .cam-error  { font-size: 10px; color: var(--error); margin-top: 2px; }
+    .no-cameras-hint {
+      grid-column: 1/-1;
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    /* ── Chat panel (right) ── */
+    .chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+    .chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .chat-empty {
+      margin: auto;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+      line-height: 2;
+    }
+    .msg-wrap { display: flex; flex-direction: column; max-width: 78%; }
+    .msg-wrap.user { align-self: flex-end; align-items: flex-end; }
+    .msg-wrap.ai   { align-self: flex-start; align-items: flex-start; }
+    .msg-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; padding: 0 3px; }
+    .msg-bubble {
+      padding: 9px 13px;
+      border-radius: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 13px;
+    }
+    .msg-wrap.user .msg-bubble {
+      background: var(--user-bubble);
+      color: #fff;
+      border-bottom-right-radius: 3px;
+    }
+    .msg-wrap.ai .msg-bubble {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 3px;
+    }
+    .msg-img {
+      max-width: 180px;
+      border-radius: 8px;
+      margin-top: 6px;
+      border: 1px solid var(--border);
+    }
+    /* Typing animation */
+    .typing-bubble { display: flex; gap: 4px; align-items: center; padding: 12px 16px; }
+    .td {
+      width: 7px; height: 7px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      animation: bounce 1.2s infinite;
+    }
+    .td:nth-child(2) { animation-delay: .18s; }
+    .td:nth-child(3) { animation-delay: .36s; }
+    @keyframes bounce {
+      0%,60%,100% { transform: translateY(0); opacity:.3; }
+      30% { transform: translateY(-5px); opacity:1; }
+    }
+
+    /* ── Chat input ── */
+    .chat-footer {
+      border-top: 1px solid var(--border);
+      background: var(--surface);
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .camera-attach {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 11px;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+    }
+    .camera-attach img {
+      width: 72px; height: 54px;
+      object-fit: cover;
+      border-radius: 5px;
+      background: #000;
+    }
+    .camera-attach-info { flex: 1; min-width: 0; }
+    .camera-attach-info strong { display: block; color: var(--accent); font-size: 12px; }
+    .camera-attach-info span  { font-size: 11px; color: var(--text-muted); }
+    .input-row { display: flex; gap: 8px; align-items: flex-end; }
+    textarea.chat-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 9px 13px;
+      border-radius: 8px;
+      font-size: 13px;
+      resize: none;
+      font-family: inherit;
+      line-height: 1.5;
+      min-height: 42px;
+      max-height: 120px;
+      overflow-y: auto;
+    }
+    textarea.chat-input:focus { outline: none; border-color: var(--accent); }
+    .input-hint { font-size: 11px; color: var(--text-muted); align-self: flex-end; padding-bottom: 2px; }
+
+    /* ── Chat panel header ── */
+    .chat-ph-right { display: flex; gap: 8px; align-items: center; }
+    .conn-label { font-size: 11px; font-weight: 400; text-transform: none; }
+
+    /* ── Log panel ── */
+    .log-panel {
+      height: 110px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .log-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 14px;
+      font-family: 'Consolas', 'SFMono-Regular', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .log-row { display: flex; gap: 10px; padding: 1px 0; }
+    .log-time { color: #475569; flex-shrink: 0; }
+    .log-txt { word-break: break-all; }
+    .log-txt.e { color: var(--error); }
+    .log-txt.s { color: var(--success); }
+    .log-txt.w { color: var(--warning); }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════ HEADER ═══════════════════════ -->
+<header>
+  <span class="logo">🤖</span>
+  <h1>机器人控制测试面板</h1>
+  <div class="conn-bar">
+    <div class="status-dot" id="mainDot"></div>
+    <input id="hostInput" type="text" value="localhost:8765" placeholder="host:port">
+    <button class="btn btn-primary" id="connectBtn" onclick="mainConnect()">连接</button>
+    <button class="btn btn-danger" id="disconnectBtn" style="display:none" onclick="mainDisconnect()">断开</button>
+  </div>
+</header>
+
+<!-- ═══════════════════════ MAIN ═══════════════════════ -->
+<div class="main">
+
+  <!-- LEFT: cameras -->
+  <div class="cameras-panel">
+    <div class="panel-header">
+      <span>相机画面</span>
+      <span id="camCountLabel" style="font-weight:400;text-transform:none;font-size:11px">未连接</span>
+    </div>
+    <div class="cameras-grid" id="camerasGrid">
+      <div class="no-cameras-hint">连接服务器后自动显示相机画面<br>点击相机卡片可将画面附加到消息</div>
+    </div>
+  </div>
+
+  <!-- RIGHT: chat -->
+  <div class="chat-panel">
+    <div class="panel-header">
+      <span>AI 对话</span>
+      <div class="chat-ph-right">
+        <span class="conn-label" id="chatConnLabel" style="color:var(--text-muted)">未连接</span>
+        <button class="btn btn-sm btn-ghost" id="chatConnBtn" onclick="chatToggle()" disabled>连接聊天</button>
+        <button class="btn btn-sm btn-ghost" onclick="clearChat()">清空</button>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-empty" id="chatEmpty">
+        连接服务器后点击「连接聊天」开始对话<br>
+        可选择相机画面随消息一起发送
+      </div>
+    </div>
+
+    <div class="chat-footer">
+      <!-- Selected camera preview -->
+      <div id="camAttach" class="camera-attach" style="display:none">
+        <img id="camAttachThumb" src="" alt="camera">
+        <div class="camera-attach-info">
+          <strong id="camAttachName"></strong>
+          <span>当前帧将随下一条消息发送</span>
+        </div>
+        <button class="btn btn-sm btn-ghost" onclick="detachCamera()">✕ 取消</button>
+      </div>
+
+      <div class="input-row">
+        <textarea class="chat-input" id="chatInput"
+          placeholder="输入消息... (Ctrl+Enter 发送)"
+          rows="1"
+          disabled
+          onkeydown="onInputKey(event)"
+          oninput="autoResize(this)"></textarea>
+        <span class="input-hint">Ctrl+Enter</span>
+        <button class="btn btn-primary" id="sendBtn" onclick="sendMsg()" disabled>发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ LOG ═══════════════════════ -->
+<div class="log-panel">
+  <div class="panel-header" style="border-bottom:none;border-top:1px solid var(--border)">
+    <span>日志</span>
+    <button class="btn btn-sm btn-ghost" onclick="document.getElementById('logBody').innerHTML=''">清空</button>
+  </div>
+  <div class="log-body" id="logBody"></div>
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════
+// Utilities
+// ════════════════════════════════════════════════════════
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function log(msg, level='i') {
+  const el = document.getElementById('logBody');
+  const t = new Date().toTimeString().slice(0,8);
+  const row = document.createElement('div');
+  row.className = 'log-row';
+  row.innerHTML = `<span class="log-time">${t}</span><span class="log-txt ${level}">${esc(msg)}</span>`;
+  el.appendChild(row);
+  el.scrollTop = el.scrollHeight;
+}
+
+function getHost() {
+  return document.getElementById('hostInput').value.trim() || 'localhost:8765';
+}
+
+// ════════════════════════════════════════════════════════
+// 单一 WebSocket 连接（所有功能通过 action/event 分发）
+// ════════════════════════════════════════════════════════
+let mainWs = null;
+let chatConnected = false;
+
+function mainConnect() {
+  const url = `ws://${getHost()}/`;
+  log(`连接服务器: ${url}`);
+  mainWs = new WebSocket(url);
+
+  mainWs.onopen = () => {
+    log('服务器已连接', 's');
+    setMainConn(true);
+    // 查询相机状态，然后订阅帧流
+    mainWs.send(JSON.stringify({ action: 'camera_status' }));
+    mainWs.send(JSON.stringify({ action: 'subscribe_camera_frames' }));
+  };
+  mainWs.onmessage = e => {
+    try { handleMsg(JSON.parse(e.data)); } catch {}
+  };
+  mainWs.onerror = () => log('连接错误', 'e');
+  mainWs.onclose = () => {
+    log('服务器已断开');
+    setMainConn(false);
+    setChatConn(false);
+    clearCameras();
+  };
+}
+
+function mainDisconnect() {
+  if (mainWs) {
+    if (chatConnected) {
+      mainWs.send(JSON.stringify({ action: 'chat_disconnect' }));
+    }
+    mainWs.send(JSON.stringify({ action: 'unsubscribe_camera_frames' }));
+    mainWs.close();
+    mainWs = null;
+  }
+}
+
+function setMainConn(on) {
+  document.getElementById('mainDot').className = 'status-dot' + (on ? ' on' : '');
+  document.getElementById('connectBtn').style.display = on ? 'none' : '';
+  document.getElementById('disconnectBtn').style.display = on ? '' : 'none';
+  document.getElementById('chatConnBtn').disabled = !on;
+}
+
+// ════════════════════════════════════════════════════════
+// 消息路由（单一入口）
+// ════════════════════════════════════════════════════════
+function handleMsg(d) {
+  const ev = d.event;
+
+  // ── 相机事件 ──
+  if (ev === 'camera_status') {
+    const cams = d.cameras || [];
+    const online = d.camera_count || 0;
+    document.getElementById('camCountLabel').textContent =
+      cams.length ? `${online}/${cams.length} 在线` : '无配置相机';
+    applyServerCameraStatus(cams);
+    return;
+  }
+  if (ev === 'camera_frames') {
+    (d.frames || []).forEach(f => {
+      const dataUrl = `data:image/jpeg;base64,${f.data}`;
+      if (!cams[f.serial]) {
+        cams[f.serial] = { name: f.name, online: true, dataUrl };
+        renderCameraCard(f.serial);
+        removePlaceholder();
+      } else {
+        cams[f.serial].dataUrl = dataUrl;
+        cams[f.serial].name = f.name;
+      }
+      paintCanvas(f.serial, dataUrl);
+      if (selectedSerial === f.serial) {
+        document.getElementById('camAttachThumb').src = dataUrl;
+      }
+    });
+    return;
+  }
+  if (ev === 'camera_subscribed') {
+    log('相机帧流已订阅', 's');
+    return;
+  }
+  if (ev === 'camera_unsubscribed') {
+    log('相机帧流已取消');
+    return;
+  }
+  if (ev === 'camera_error') {
+    log(`相机: ${d.message}`, 'w');
+    applyServerCameraStatus(d.cameras || []);
+    return;
+  }
+
+  // ── 聊天事件 ──
+  if (ev === 'chat_connected') {
+    log('聊天已连接', 's');
+    setChatConn(true);
+    clearChatEmpty();
+    return;
+  }
+  if (ev === 'chat_disconnected') {
+    log('聊天已断开');
+    setChatConn(false);
+    return;
+  }
+  if (ev === 'chat_data') {
+    // 优先按新协议处理：稳定字段 + 完整 packet，必要时再回退到 raw
+    handleChatDataEvent(d);
+    return;
+  }
+
+  // ── 通用事件 ──
+  if (ev === 'log') { log('SRV: ' + d.message); return; }
+  if (ev === 'error') { log('ERR: ' + d.message, 'e'); return; }
+  if (ev === 'ai_status_changed') { log('AI: ' + d.status); return; }
+}
+
+// ════════════════════════════════════════════════════════
+// 相机管理
+// ════════════════════════════════════════════════════════
+const cams = {};
+let selectedSerial = null;
+
+function clearCameras() {
+  Object.keys(cams).forEach(k => delete cams[k]);
+  selectedSerial = null;
+  document.getElementById('camerasGrid').innerHTML =
+    '<div class="no-cameras-hint">连接服务器后自动显示相机画面<br>点击相机卡片可将画面附加到消息</div>';
+  document.getElementById('camCountLabel').textContent = '未连接';
+  document.getElementById('camAttach').style.display = 'none';
+}
+
+function applyServerCameraStatus(cameras) {
+  cameras.forEach(cam => {
+    if (!cams[cam.serial]) {
+      cams[cam.serial] = { name: cam.name, online: cam.online, dataUrl: null };
+      renderCameraCard(cam.serial);
+      removePlaceholder();
+    } else {
+      cams[cam.serial].online = cam.online;
+      cams[cam.serial].name = cam.name;
+    }
+    refreshCardStatus(cam.serial, cam.online, cam.error);
+  });
+}
+
+function removePlaceholder() {
+  const ph = document.querySelector('.no-cameras-hint');
+  if (ph) ph.remove();
+}
+
+function renderCameraCard(serial) {
+  const state = cams[serial];
+  const grid = document.getElementById('camerasGrid');
+
+  const card = document.createElement('div');
+  card.id = `card-${serial}`;
+  card.className = 'camera-card' + (!state.online ? ' offline' : '');
+  card.onclick = () => selectCamera(serial);
+
+  const imgWrap = document.createElement('div');
+  imgWrap.className = 'cam-img-wrap';
+
+  const canvas = document.createElement('canvas');
+  canvas.id = `cv-${serial}`;
+  canvas.width = 320; canvas.height = 240;
+  imgWrap.appendChild(canvas);
+
+  if (!state.online) {
+    const ph = document.createElement('div');
+    ph.className = 'cam-placeholder';
+    ph.textContent = '📷';
+    imgWrap.appendChild(ph);
+  }
+
+  const statusBadge = document.createElement('div');
+  statusBadge.id = `badge-${serial}`;
+  statusBadge.className = `cam-status-badge ${state.online ? 'online' : 'offline'}`;
+  statusBadge.textContent = state.online ? '在线' : '离线';
+
+  const info = document.createElement('div');
+  info.className = 'cam-info';
+  info.innerHTML = `
+    <div class="cam-name">${esc(state.name)}</div>
+    <div class="cam-serial">${esc(serial)}</div>
+    <div class="cam-error" id="err-${serial}"></div>
+  `;
+
+  card.appendChild(imgWrap);
+  card.appendChild(statusBadge);
+  card.appendChild(info);
+  grid.appendChild(card);
+
+  cams[serial].cardEl = card;
+  cams[serial].canvasEl = canvas;
+}
+
+function paintCanvas(serial, dataUrl) {
+  const canvas = document.getElementById(`cv-${serial}`);
+  if (!canvas) return;
+  const img = new Image();
+  img.onload = () => {
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  };
+  img.src = dataUrl;
+}
+
+function refreshCardStatus(serial, online, error) {
+  const card = document.getElementById(`card-${serial}`);
+  const badge = document.getElementById(`badge-${serial}`);
+  const errEl = document.getElementById(`err-${serial}`);
+  if (!card) return;
+  card.classList.toggle('offline', !online);
+  if (badge) {
+    badge.className = `cam-status-badge ${online ? 'online' : 'offline'}`;
+    badge.textContent = online ? '在线' : '离线';
+  }
+  if (errEl) errEl.textContent = error || '';
+}
+
+function selectCamera(serial) {
+  const state = cams[serial];
+  if (!state || !state.online) return;
+
+  if (selectedSerial === serial) { detachCamera(); return; }
+
+  if (selectedSerial) {
+    const old = document.getElementById(`card-${selectedSerial}`);
+    if (old) { old.classList.remove('selected'); old.querySelector('.cam-sel-badge')?.remove(); }
+  }
+
+  selectedSerial = serial;
+  const card = document.getElementById(`card-${serial}`);
+  if (card) {
+    card.classList.add('selected');
+    const badge = document.createElement('div');
+    badge.className = 'cam-sel-badge';
+    badge.textContent = '✓ 已选';
+    card.appendChild(badge);
+  }
+
+  document.getElementById('camAttach').style.display = 'flex';
+  document.getElementById('camAttachName').textContent = state.name;
+  if (state.dataUrl) document.getElementById('camAttachThumb').src = state.dataUrl;
+
+  log(`已选相机: ${state.name} (${serial})`);
+}
+
+function detachCamera() {
+  if (selectedSerial) {
+    const card = document.getElementById(`card-${selectedSerial}`);
+    if (card) {
+      card.classList.remove('selected');
+      card.querySelector('.cam-sel-badge')?.remove();
+    }
+  }
+  selectedSerial = null;
+  document.getElementById('camAttach').style.display = 'none';
+}
+
+// ════════════════════════════════════════════════════════
+// 聊天（通过主连接的 chat_connect / chat / chat_disconnect）
+// ════════════════════════════════════════════════════════
+let aiMsgEl = null;
+let aiText = '';
+
+function chatToggle() {
+  if (chatConnected) {
+    mainWs.send(JSON.stringify({ action: 'chat_disconnect' }));
+  } else {
+    if (!mainWs || mainWs.readyState !== WebSocket.OPEN) return;
+    log('请求连接聊天...');
+    mainWs.send(JSON.stringify({ action: 'chat_connect' }));
+  }
+}
+
+function setChatConn(on) {
+  chatConnected = on;
+  document.getElementById('chatConnLabel').textContent = on ? '已连接' : '未连接';
+  document.getElementById('chatConnLabel').style.color = on ? 'var(--success)' : 'var(--text-muted)';
+  document.getElementById('chatConnBtn').textContent = on ? '断开' : '连接聊天';
+  document.getElementById('chatInput').disabled = !on;
+  document.getElementById('sendBtn').disabled = !on;
+}
+
+function handleChatDataEvent(data) {
+  removeTyping();
+
+  // 先走后端已经规范化好的稳定字段，别再让前端自己重复猜协议。
+  if (data.type === 'prefill_done') return;
+
+  if (data.type === 'chunk') {
+    if (typeof data.text_delta === 'string' && data.text_delta) {
+      appendAiDelta(data.text_delta);
+    }
+    return;
+  }
+
+  if (data.type === 'done') {
+    if (typeof data.text === 'string') {
+      setAiText(data.text);
+    }
+    finalizeAi();
+    return;
+  }
+
+  if (data.type === 'error') {
+    log('MiniCPM chat error: ' + (data.error || 'unknown error'), 'e');
+    finalizeAi();
+    return;
+  }
+
+  // 未知包型优先尝试完整 packet，其次才回退 raw，兼容新旧两种协议。
+  if (data.packet && typeof data.packet === 'object') {
+    handleChatPacket(data.packet);
+    return;
+  }
+  if (typeof data.raw === 'string' && data.raw) {
+    handleChatFrame(data.raw);
+    return;
+  }
+  if (typeof data.text === 'string' && data.text) {
+    appendAiDelta(data.text);
+  }
+}
+
+function handleChatFrame(raw) {
+  let d;
+  try { d = JSON.parse(raw); } catch { appendAiDelta(raw); return; }
+  handleChatPacket(d);
+}
+
+function handleChatPacket(d) {
+  if (typeof d.text_delta === 'string') { appendAiDelta(d.text_delta); return; }
+  if (typeof d.delta === 'string')      { appendAiDelta(d.delta); return; }
+
+  if (typeof d.text === 'string' && d.text) {
+    setAiText(d.text);
+    if (d.end_of_turn) finalizeAi();
+    return;
+  }
+
+  if (d.type === 'turn_done' || d.end_of_turn === true) { finalizeAi(); return; }
+
+  if (d.choices && d.choices[0]) {
+    const ch = d.choices[0];
+    if (ch.delta?.content) { appendAiDelta(ch.delta.content); return; }
+    if (ch.finish_reason)  { finalizeAi(); return; }
+  }
+}
+
+function appendAiDelta(delta) {
+  if (!aiMsgEl) { aiMsgEl = addAiMsg(); aiText = ''; }
+  aiText += delta;
+  aiMsgEl.querySelector('.msg-bubble').textContent = aiText;
+  scrollChat();
+}
+
+function setAiText(text) {
+  if (!aiMsgEl) aiMsgEl = addAiMsg();
+  aiText = text;
+  aiMsgEl.querySelector('.msg-bubble').textContent = text;
+  scrollChat();
+}
+
+function finalizeAi() {
+  aiMsgEl = null;
+  aiText = '';
+}
+
+function addAiMsg() {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap ai';
+  wrap.innerHTML = `
+    <div class="msg-label">AI</div>
+    <div class="msg-bubble"></div>
+  `;
+  document.getElementById('chatMessages').appendChild(wrap);
+  scrollChat();
+  return wrap;
+}
+
+function addTyping() {
+  const msgs = document.getElementById('chatMessages');
+  const el = document.createElement('div');
+  el.id = 'typingEl';
+  el.className = 'msg-wrap ai';
+  el.innerHTML = `
+    <div class="msg-label">AI</div>
+    <div class="msg-bubble typing-bubble">
+      <div class="td"></div><div class="td"></div><div class="td"></div>
+    </div>
+  `;
+  msgs.appendChild(el);
+  scrollChat();
+}
+
+function removeTyping() {
+  const el = document.getElementById('typingEl');
+  if (el) el.remove();
+}
+
+function clearChatEmpty() {
+  const el = document.getElementById('chatEmpty');
+  if (el) el.remove();
+}
+
+function clearChat() {
+  document.getElementById('chatMessages').innerHTML = '';
+  aiMsgEl = null;
+  aiText = '';
+}
+
+function scrollChat() {
+  const el = document.getElementById('chatMessages');
+  el.scrollTop = el.scrollHeight;
+}
+
+// ════════════════════════════════════════════════════════
+// 发送消息（通过主连接的 chat action）
+// ════════════════════════════════════════════════════════
+function sendMsg() {
+  if (!mainWs || mainWs.readyState !== WebSocket.OPEN || !chatConnected) return;
+
+  const input = document.getElementById('chatInput');
+  const text  = input.value.trim();
+  if (!text) return;
+
+  const camState = selectedSerial ? cams[selectedSerial] : null;
+  const imageDataUrl = camState?.dataUrl || null;
+  const imageBase64  = imageDataUrl
+    ? imageDataUrl.replace(/^data:[^;]+;base64,/, '')
+    : null;
+
+  const content = [{ type: 'text', text }];
+  if (imageBase64) content.push({ type: 'image', data: imageBase64 });
+
+  // 渲染用户气泡
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap user';
+  wrap.innerHTML = `<div class="msg-label">你</div><div class="msg-bubble">${esc(text)}</div>`;
+  if (imageDataUrl) {
+    const img = document.createElement('img');
+    img.src = imageDataUrl;
+    img.className = 'msg-img';
+    img.alt = '相机截图';
+    wrap.appendChild(img);
+  }
+  document.getElementById('chatMessages').appendChild(wrap);
+  scrollChat();
+  addTyping();
+
+  // 通过主连接发送 chat action（MiniCPM-o Chat 格式）
+  mainWs.send(JSON.stringify({
+    action: 'chat',
+    messages: [
+      { role: 'user', content }
+    ],
+    streaming: true,
+    generation: {
+      max_new_tokens: 512,
+      temperature: 0.7,
+      top_p: 0.8,
+      length_penalty: 1.0
+    },
+    tts: {
+      enabled: false
+    }
+  }));
+
+  log(`发送: ${text.slice(0,60)}${text.length>60?'…':''}${imageBase64?' [含图像]':''}`);
+
+  input.value = '';
+  input.style.height = 'auto';
+}
+
+function onInputKey(e) {
+  if (e.key === 'Enter' && e.ctrlKey) {
+    e.preventDefault();
+    sendMsg();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// ════════════════════════════════════════════════════════
+// Boot
+// ════════════════════════════════════════════════════════
+log('就绪 — 请连接服务器 (ws://localhost:8765)');
+</script>
+</body>
+</html>

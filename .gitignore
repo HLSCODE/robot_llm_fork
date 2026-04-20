@@ -1,0 +1,38 @@
+# --- ģ����������ļ� ---
+*.pt
+*.pth
+*.onnx
+*.weights
+*.h5
+*.pb
+# ��������ݼ��ļ��У�����Ҳ�ų�
+data/
+temp_models/
+
+# --- Python �����뻷�� ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+config.env
+env/
+venv/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- ������ IDE �����ļ� ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- ϵͳ��ʱ�ļ� ---
+.DS_Store
+Thumbs.db
+
+# --- ��־�ļ� ---
+*.log
+logs/

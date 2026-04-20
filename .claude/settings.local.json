@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /e/work/robot-control/src/**/*.py)",
+      "Read(//mnt/e/work/**)",
+      "Bash(python -c \"from src.models import ActionDefinition, SequenceItem; print\\('models OK'\\)\")",
+      "Bash(python -c \"from src.action_executor import ActionExecutor; print\\('action_executor OK'\\)\")",
+      "Bash(python -c \"from src.ws_server import RobotWebSocketServer; print\\('ws_server OK'\\)\")",
+      "Bash(python -c \"from src.config_loader import Config; c = Config.load\\(\\); print\\(f'provider={c.MODEL_PROVIDER}, base_url={c.OPENAI_BASE_URL!r}'\\)\")",
+      "Bash(python -c \"from src.config_loader import Config; c = Config.get_instance\\(\\); print\\(f'provider={c.MODEL_PROVIDER}, base_url={c.OPENAI_BASE_URL!r}'\\)\")"
+    ]
+  }
+}

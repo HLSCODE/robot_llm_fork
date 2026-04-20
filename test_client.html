@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robot Action Orchestrator</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", -apple-system, sans-serif; background: #f0f0f0; font-size: 13px; }
+
+  /* ===== 顶部状态栏 ===== */
+  .status-bar {
+    background: #fff; border: 1px solid #ccc; border-radius: 4px;
+    margin: 4px; padding: 8px 12px;
+  }
+  .status-bar-title { font-size: 12px; font-weight: bold; margin-bottom: 4px; }
+  .status-row { display: flex; gap: 24px; align-items: center; }
+  .status-item { display: flex; align-items: center; gap: 4px; font-size: 12px; }
+  .status-dot { width: 14px; height: 14px; border-radius: 50%; background: #555; flex-shrink: 0; }
+  .status-dot.on { background: #28a745; }
+  .status-dot.off { background: #dc3545; }
+
+  /* ===== 连接栏 ===== */
+  .conn-bar {
+    display: flex; align-items: center; gap: 8px;
+    margin: 4px; padding: 6px 12px;
+    background: #fff; border: 1px solid #ccc; border-radius: 4px;
+  }
+  .conn-bar input { flex: 1; border: 1px solid #ccc; padding: 4px 8px; border-radius: 3px; font-size: 12px; }
+
+  /* ===== 主布局：左1/3 + 右2/3 ===== */
+  .main-layout { display: flex; margin: 4px; gap: 4px; height: calc(100vh - 130px); }
+  .left-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .right-panel { flex: 2; display: flex; flex-direction: column; min-width: 0; }
+
+  /* ===== Tab 标签栏 ===== */
+  .tab-bar { display: flex; background: #e0e0e0; border-radius: 4px 4px 0 0; overflow-x: auto; flex-shrink: 0; }
+  .tab-btn {
+    padding: 6px 10px; border: none; background: transparent; cursor: pointer;
+    font-size: 12px; white-space: nowrap; border-bottom: 2px solid transparent;
+  }
+  .tab-btn:hover { background: #d0d0d0; }
+  .tab-btn.active { background: #fff; border-bottom: 2px solid #2196F3; font-weight: bold; }
+
+  /* ===== Tab 内容 ===== */
+  .tab-content {
+    flex: 1; background: #fff; border: 1px solid #ccc; border-top: none;
+    overflow-y: auto; min-height: 0;
+  }
+  .tab-page { display: none; height: 100%; }
+  .tab-page.active { display: flex; flex-direction: column; }
+
+  /* ===== 动作列表 ===== */
+  .action-list { flex: 1; overflow-y: auto; padding: 4px; }
+  .action-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 8px; margin: 2px 0; border-radius: 4px; cursor: pointer;
+    border: 1px solid transparent;
+  }
+  .action-item:hover { background: #f0f0f0; }
+  .action-item.selected { border-color: #2196F3; background: #e3f2fd; }
+  .action-dot { width: 20px; height: 20px; border-radius: 4px; flex-shrink: 0; }
+  .action-dot.move { background: #6495ED; }
+  .action-dot.manipulate { background: #FF8C00; }
+  .action-dot.inspect { background: #3CB371; }
+  .action-dot.change_gun { background: #9370DB; }
+  .action-dot.vision { background: #1E90FF; }
+
+  /* ===== 左下按钮行 ===== */
+  .left-buttons { display: flex; gap: 4px; padding: 4px; flex-shrink: 0; }
+  .left-buttons button { flex: 1; padding: 6px; border: 1px solid #ccc; border-radius: 3px; cursor: pointer; font-size: 12px; background: #fff; }
+  .left-buttons button:hover { background: #e8e8e8; }
+  .btn-camera { background: #27ae60 !important; color: #fff !important; font-weight: bold; border-color: #27ae60 !important; }
+  .btn-camera:hover { background: #219a52 !important; }
+
+  /* ===== 序列区 ===== */
+  .sequence-area {
+    flex: 2; background: #f5f5f5; border: 1px solid #ddd; border-radius: 5px;
+    overflow-x: auto; overflow-y: auto; padding: 8px;
+    display: flex; flex-wrap: wrap; align-content: flex-start; gap: 12px;
+  }
+  .sequence-card {
+    width: 120px; height: 80px; border-radius: 8px; padding: 4px;
+    color: #fff; display: flex; flex-direction: column; cursor: pointer;
+    border: 2px solid transparent; flex-shrink: 0; position: relative;
+  }
+  .sequence-card.selected { border-color: #2196F3; }
+  .sequence-card .card-num { font-size: 18px; font-weight: bold; }
+  .sequence-card .card-name { font-size: 10px; flex: 1; overflow: hidden; }
+  .sequence-card .card-status { font-size: 9px; font-weight: bold; text-align: center; }
+  .card-bg-move { background: #6495ED; }
+  .card-bg-manipulate { background: #FF8C00; }
+  .card-bg-inspect { background: #3CB371; }
+  .card-bg-change_gun { background: #9370DB; }
+  .card-bg-vision { background: #1E90FF; }
+  .card-bg-running { background: #FFA500 !important; border-color: #0f0 !important; border-width: 3px; }
+  .card-bg-success { background: #b4b4b4 !important; }
+  .card-bg-failed { background: #F44336 !important; }
+  .sequence-empty { color: #999; font-size: 12px; padding: 20px; text-align: center; width: 100%; }
+
+  /* ===== 控制面板 ===== */
+  .control-panel { padding: 4px; flex-shrink: 0; }
+  .control-row { display: flex; gap: 4px; margin-bottom: 4px; }
+  .control-row button { flex: 1; padding: 6px; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; color: #333; background: #e0e0e0; }
+  .control-row button:hover { filter: brightness(0.9); }
+  .btn-start { background: #4CAF50 !important; color: #fff !important; font-weight: bold; }
+  .btn-pause { background: #FFC107 !important; color: #000 !important; font-weight: bold; }
+  .btn-stop { background: #F44336 !important; color: #fff !important; font-weight: bold; }
+  .btn-save { background: #2196F3 !important; color: #fff !important; }
+
+  /* ===== 日志区 ===== */
+  .log-area {
+    height: 120px; flex-shrink: 0;
+    background: #fff; border: 1px solid #ccc; border-radius: 4px;
+    overflow-y: auto; padding: 4px 8px;
+    font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.5;
+  }
+  .log-warn  { color: #e65100; }
+  .log-error { color: #c62828; font-weight: bold; }
+
+  /* ===== AI 助手 Tab ===== */
+  .ai-panel { display: flex; flex-direction: column; height: 100%; padding: 8px; }
+  .ai-status-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px; }
+  .ai-status-label { color: #888; }
+  .ai-model-label { color: #4CAF50; }
+  .ai-chat-history {
+    flex: 1; background: #fafafa; border: 1px solid #ddd; border-radius: 4px;
+    padding: 8px; overflow-y: auto; font-size: 12px; min-height: 0;
+  }
+  .ai-msg-user { color: #1a73e8; margin: 4px 0; }
+  .ai-msg-bot { color: #666; margin: 4px 0; }
+  .ai-msg-sys { color: #f57c00; margin: 4px 0; }
+  .ai-skills-box { margin: 8px 0; }
+  .ai-skills-box summary { font-size: 12px; font-weight: bold; cursor: pointer; }
+  .ai-skill-list { max-height: 80px; overflow-y: auto; font-size: 11px; padding: 4px; }
+  .ai-input-row { display: flex; gap: 8px; margin-top: 8px; flex-shrink: 0; }
+  .ai-input-row input { flex: 1; border: 1px solid #ccc; padding: 6px 8px; border-radius: 3px; font-size: 13px; }
+  .ai-input-row button { padding: 6px 16px; border: none; border-radius: 3px; cursor: pointer; }
+  .ai-btn-row { display: flex; gap: 4px; margin-top: 8px; flex-shrink: 0; }
+  .ai-btn-row button { flex: 1; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  .ai-btn-exec { background: #4CAF50; color: #fff; font-weight: bold; }
+  .ai-btn-exec:disabled { background: #ccc; }
+  .ai-btn-preview { background: #e0e0e0; }
+  .ai-btn-preview:disabled { background: #eee; color: #aaa; }
+  .ai-btn-cancel { background: #e0e0e0; }
+  .ai-btn-cancel:disabled { background: #eee; color: #aaa; }
+
+  /* ===== 新建动作弹窗 ===== */
+  .modal-overlay {
+    display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.4); z-index: 100; justify-content: center; align-items: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: #fff; border-radius: 8px; padding: 20px; min-width: 400px; max-width: 500px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .modal h3 { margin-bottom: 12px; }
+  .modal label { display: block; margin: 8px 0 4px; font-size: 12px; color: #555; }
+  .modal input, .modal select { width: 100%; padding: 6px 8px; border: 1px solid #ccc; border-radius: 3px; font-size: 13px; }
+  .modal-buttons { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+  .modal-buttons button { padding: 6px 20px; border: none; border-radius: 3px; cursor: pointer; }
+  .param-group { background: #f9f9f9; padding: 8px; border-radius: 4px; margin-top: 4px; }
+
+  /* ===== 保存/加载弹窗 ===== */
+  .task-list-box { max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; margin: 8px 0; }
+  .task-item { padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  .task-item:hover { background: #e3f2fd; }
+  .task-item.selected { background: #2196F3; color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- ===== 顶部：设备状态栏 ===== -->
+<div class="status-bar">
+  <div class="status-bar-title">设备状态</div>
+  <div class="status-row">
+    <div class="status-item"><div class="status-dot" id="dev-robot1"></div><span id="dev-robot1-text">R1: 未连接</span></div>
+    <div class="status-item"><div class="status-dot" id="dev-robot2"></div><span id="dev-robot2-text">R2: 未连接</span></div>
+    <div class="status-item"><div class="status-dot" id="dev-body"></div><span id="dev-body-text">身体: 未连接</span></div>
+  </div>
+</div>
+
+<!-- ===== 连接栏 ===== -->
+<div class="conn-bar">
+  <div class="status-dot" id="connDot"></div>
+  <span id="connText" style="font-size:12px;min-width:50px">未连接</span>
+  <input id="wsUrl" value="ws://localhost:8765" />
+  <button onclick="doConnect()" style="padding:4px 12px;cursor:pointer">连接</button>
+  <button onclick="doDisconnect()" style="padding:4px 12px;cursor:pointer">断开</button>
+</div>
+
+<!-- ===== 主布局 ===== -->
+<div class="main-layout">
+
+  <!-- ===== 左面板：动作库 Tab ===== -->
+  <div class="left-panel">
+    <div class="tab-bar" id="tabBar">
+      <button class="tab-btn active" onclick="switchTab(0)">移动类</button>
+      <button class="tab-btn" onclick="switchTab(1)">执行类</button>
+      <button class="tab-btn" onclick="switchTab(2)">检测类</button>
+      <button class="tab-btn" onclick="switchTab(3)">换枪类</button>
+      <button class="tab-btn" onclick="switchTab(4)">视觉类</button>
+      <button class="tab-btn" onclick="switchTab(5)">AI助手</button>
+    </div>
+    <div class="tab-content">
+      <!-- 5 个动作类型 Tab -->
+      <div class="tab-page active" id="tab-0"><div class="action-list" id="action-list-0"></div></div>
+      <div class="tab-page" id="tab-1"><div class="action-list" id="action-list-1"></div></div>
+      <div class="tab-page" id="tab-2"><div class="action-list" id="action-list-2"></div></div>
+      <div class="tab-page" id="tab-3"><div class="action-list" id="action-list-3"></div></div>
+      <div class="tab-page" id="tab-4"><div class="action-list" id="action-list-4"></div></div>
+      <!-- AI 助手 Tab -->
+      <div class="tab-page" id="tab-5">
+        <div class="ai-panel">
+          <div class="ai-status-row">
+            <span class="ai-status-label" id="aiStatusLabel">状态: 就绪</span>
+            <span class="ai-model-label" id="aiModelLabel">模型: 未知</span>
+          </div>
+          <div class="ai-chat-history" id="aiChatHistory">
+            <div class="ai-msg-bot">你好！我是AI动作助手。<br>请输入您想要执行的动作，例如：<br>- 帮我抓一个瓶子<br>- 吸取500微升液体</div>
+          </div>
+          <details class="ai-skills-box">
+            <summary>可用技能</summary>
+            <div class="ai-skill-list" id="aiSkillList">点击刷新加载...</div>
+          </details>
+          <div class="ai-input-row">
+            <input id="aiInput" placeholder="请输入您的指令..." onkeydown="if(event.key==='Enter')sendAI()" />
+            <button onclick="sendAI()" style="background:#533483;color:#fff">发送</button>
+          </div>
+          <div class="ai-btn-row">
+            <button class="ai-btn-exec" id="aiExecBtn" disabled onclick="send({action:'ai_confirm'})">执行</button>
+            <button class="ai-btn-preview" id="aiPreviewBtn" disabled>预览详情</button>
+            <button class="ai-btn-cancel" id="aiCancelBtn" disabled onclick="send({action:'ai_cancel'})">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- 左下按钮 -->
+    <div class="left-buttons">
+      <button onclick="openCreateDialog()">新建动作</button>
+      <button onclick="deleteSelectedAction()">删除动作</button>
+      <button class="btn-camera" onclick="send({action:'test_camera'})">测试相机</button>
+    </div>
+  </div>
+
+  <!-- ===== 右面板：序列 + 控制 + 日志 ===== -->
+  <div class="right-panel">
+    <!-- 序列区 -->
+    <div class="sequence-area" id="sequenceArea">
+      <div class="sequence-empty">将左侧动作添加到序列，或点击"新建动作"创建</div>
+    </div>
+
+    <!-- 控制面板 -->
+    <div class="control-panel">
+      <div class="control-row">
+        <button onclick="moveSeqItem(-1)">上移</button>
+        <button onclick="moveSeqItem(1)">下移</button>
+        <button onclick="deleteSeqItem()">删除</button>
+        <button onclick="send({action:'clear_sequence'})">清空</button>
+      </div>
+      <div class="control-row">
+        <button class="btn-save" onclick="openSaveDialog()">保存序列</button>
+        <button class="btn-save" onclick="openLoadDialog()">载入序列</button>
+      </div>
+      <div class="control-row">
+        <button class="btn-start" onclick="send({action:'execute'})">开始执行</button>
+        <button class="btn-pause" id="pauseBtn" onclick="togglePause()">暂停</button>
+      </div>
+      <div class="control-row">
+        <button class="btn-stop" onclick="send({action:'stop'})">紧急停止</button>
+      </div>
+    </div>
+
+    <!-- 日志 -->
+    <div class="log-area" id="logArea"></div>
+  </div>
+</div>
+
+<!-- ===== 新建动作弹窗 ===== -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <h3 id="modalTitle">配置动作</h3>
+    <label>动作名称</label>
+    <input id="modalName" placeholder="输入动作名称" />
+
+    <!-- 移动类参数 -->
+    <div class="param-group" id="params-move" style="display:none">
+      <label>目标</label>
+      <select id="moveTarget" onchange="onMoveTargetChange()">
+        <option value="机械臂">机械臂</option>
+        <option value="身体">身体</option>
+      </select>
+      <div id="moveRobotParams">
+        <label>臂</label>
+        <select id="moveArm"><option value="左">左</option><option value="右">右</option></select>
+        <label>运动模式</label>
+        <select id="moveMode"><option value="move_j">关节运动 (move_j)</option><option value="move_l">直线运动 (move_l)</option></select>
+        <label>点位</label>
+        <input id="movePose" placeholder="例如: [-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]" />
+      </div>
+      <div id="moveBodyParams" style="display:none">
+        <label>目标位置 (脉冲)</label>
+        <input id="movePosition" type="number" value="0" min="0" max="500000" />
+      </div>
+    </div>
+
+    <!-- 执行类参数 -->
+    <div class="param-group" id="params-manipulate" style="display:none">
+      <label>执行器</label>
+      <select id="manipExecutor" onchange="onExecutorChange()">
+        <option value="快换手">快换手</option>
+        <option value="继电器">继电器</option>
+        <option value="夹爪">夹爪</option>
+        <option value="吸液枪">吸液枪</option>
+      </select>
+      <div id="manipNormalParams">
+        <label>编号</label>
+        <select id="manipNumber"><option value="1">1</option><option value="2">2</option></select>
+        <label>操作</label>
+        <select id="manipOp"><option value="开">开</option><option value="关">关</option></select>
+      </div>
+      <div id="manipPipetteParams" style="display:none">
+        <label>操作</label>
+        <select id="pipetteOp"><option value="吸">吸</option><option value="吐">吐</option></select>
+        <label>容量 (ul)</label>
+        <input id="pipetteCapacity" type="number" value="500" min="0" max="10000" />
+      </div>
+    </div>
+
+    <!-- 检测类参数 -->
+    <div class="param-group" id="params-inspect" style="display:none">
+      <label>传感器 ID</label>
+      <input id="inspectSensor" placeholder="传感器ID" />
+      <label>判定阈值</label>
+      <input id="inspectThreshold" type="number" value="0" step="0.1" />
+      <label>超时时间 (秒)</label>
+      <input id="inspectTimeout" type="number" value="5" min="0.1" max="60" step="0.1" />
+    </div>
+
+    <!-- 换枪类参数 -->
+    <div class="param-group" id="params-change_gun" style="display:none">
+      <label>枪位</label>
+      <select id="gunPosition"><option value="1">1</option><option value="2">2</option></select>
+      <label>取/放</label>
+      <select id="gunOp"><option value="取">取</option><option value="放">放</option></select>
+    </div>
+
+    <!-- 视觉类参数 -->
+    <div class="param-group" id="params-vision" style="display:none">
+      <div style="color:#666;font-size:12px;padding:4px">
+        固定配置：Robot1 (左臂) | 工作流: vertical | 置信度: 0.7 | 速度: 15mm/s | 夹爪: 150mm | 调试图片: 开
+      </div>
+    </div>
+
+    <div class="modal-buttons">
+      <button onclick="closeCreateDialog()" style="background:#e0e0e0">取消</button>
+      <button onclick="submitCreateAction()" style="background:#4CAF50;color:#fff">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 保存弹窗 ===== -->
+<div class="modal-overlay" id="saveModal">
+  <div class="modal">
+    <h3>保存任务序列</h3>
+    <label>任务名称</label>
+    <input id="saveTaskName" placeholder="输入任务名称（如：抓瓶子流程）" />
+    <div class="modal-buttons">
+      <button onclick="closeSaveDialog()" style="background:#e0e0e0">取消</button>
+      <button onclick="doSaveTask()" style="background:#2196F3;color:#fff">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 加载弹窗 ===== -->
+<div class="modal-overlay" id="loadModal">
+  <div class="modal">
+    <h3>加载任务序列</h3>
+    <div class="task-list-box" id="taskListBox"></div>
+    <div class="modal-buttons">
+      <button onclick="closeLoadDialog()" style="background:#e0e0e0">取消</button>
+      <button onclick="doLoadTask()" style="background:#2196F3;color:#fff">加载</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 常量 =====
+const ACTION_TYPES = [
+  { key: 'MOVE_TO_POINT',      label: '移动类',  css: 'move' },
+  { key: 'ARM_ACTION',         label: '执行类',  css: 'manipulate' },
+  { key: 'INSPECT_AND_OUTPUT', label: '检测类',  css: 'inspect' },
+  { key: 'CHANGE_GUN',        label: '换枪类',  css: 'change_gun' },
+  { key: 'VISION_CAPTURE',    label: '视觉类',  css: 'vision' },
+];
+
+// ===== 状态 =====
+let ws = null;
+let currentTab = 0;
+let actionsData = {};        // 按类型分组的动作库
+let selectedActionId = null; // 左侧选中的动作 id
+let sequenceData = [];       // 当前序列
+let selectedSeqIdx = -1;     // 右侧选中的序列项索引
+let isPaused = false;
+let selectedTaskName = '';
+
+// ===== WebSocket 连接 =====
+function doConnect() {
+  const url = document.getElementById('wsUrl').value;
+  if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+  ws = new WebSocket(url);
+  ws.onopen = () => {
+    setConn(true);
+    appendLog('已连接到 ' + url);
+    send({ action: 'status' });
+    send({ action: 'list_actions' });
+    send({ action: 'get_sequence' });
+    send({ action: 'ai_status' });
+    send({ action: 'list_skills' });
+  };
+  ws.onclose = () => { setConn(false); appendLog('连接已断开'); };
+  ws.onerror = () => { appendLog('连接错误'); };
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    handleEvent(data);
+  };
+}
+function doDisconnect() { if (ws) ws.close(); }
+function send(data) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { appendLog('未连接'); return; }
+  ws.send(JSON.stringify(data));
+}
+function setConn(on) {
+  document.getElementById('connDot').className = 'status-dot' + (on ? ' on' : '');
+  document.getElementById('connText').textContent = on ? '已连接' : '未连接';
+}
+
+// ===== 事件处理 =====
+function handleEvent(data) {
+  const ev = data.event;
+
+  // 设备状态
+  if (ev === 'status' || ev === 'device_status_changed') {
+    const d = data.devices || {};
+    updateDev('robot1', d.robot1, 'R1');
+    updateDev('robot2', d.robot2, 'R2');
+    updateDev('body', d.body, '身体');
+  }
+
+  // 动作库
+  if (ev === 'actions_list') {
+    actionsData = data.actions || {};
+    renderAllActionLists();
+  }
+  if (ev === 'action_created' || ev === 'action_deleted' || ev === 'action_updated') {
+    send({ action: 'list_actions' }); // 刷新
+  }
+
+  // 序列
+  if (data.sequence && (ev === 'sequence_updated' || ev === 'task_loaded' || ev === 'sequence')) {
+    sequenceData = data.sequence;
+    selectedSeqIdx = -1;
+    renderSequence();
+  }
+
+  // 执行进度
+  if (ev === 'step_started' || ev === 'step_completed' || ev === 'step_failed') {
+    updateCardStatus(data);
+    if (ev === 'step_failed') appendLog('步骤失败: ' + data.name + ' - ' + data.error);
+  }
+  if (ev === 'execution_finished') {
+    appendLog('序列执行完成');
+    isPaused = false;
+    document.getElementById('pauseBtn').textContent = '暂停';
+  }
+
+  // 日志
+  if (ev === 'log') appendLog(data.message, data.level || 'info');
+  if (ev === 'error') appendLog(data.message, 'error');
+
+  // 任务列表
+  if (ev === 'tasks_list') renderTaskList(data.tasks || []);
+  if (ev === 'task_saved') { appendLog('任务已保存: ' + data.name); closeSaveDialog(); }
+  if (ev === 'task_loaded') { appendLog('任务已加载: ' + data.name); closeLoadDialog(); }
+
+  // AI
+  if (ev === 'ai_status') {
+    const m = data.model || '未配置';
+    const p = data.provider || '';
+    document.getElementById('aiModelLabel').textContent = '模型: ' + p + ' ' + m;
+    document.getElementById('aiModelLabel').style.color = data.llm_available ? '#4CAF50' : 'red';
+  }
+  if (ev === 'ai_status_changed') {
+    document.getElementById('aiStatusLabel').textContent = '状态: ' + data.status;
+  }
+  if (ev === 'ai_skill_matched') {
+    addAIMsg('bot', '已识别技能: ' + data.skill_name + '\n参数: ' + JSON.stringify(data.params || {}));
+  }
+  if (ev === 'ai_skill_not_matched') {
+    addAIMsg('sys', '无法理解: ' + data.error);
+  }
+  if (ev === 'ai_preview_ready') {
+    addAIMsg('bot', '技能已展开为 ' + (data.sequence || []).length + ' 个动作，点击"执行"确认');
+    document.getElementById('aiExecBtn').disabled = false;
+    document.getElementById('aiPreviewBtn').disabled = false;
+    document.getElementById('aiCancelBtn').disabled = false;
+  }
+  if (ev === 'ai_cancelled') {
+    addAIMsg('sys', 'AI 规划已取消');
+    resetAIButtons();
+  }
+  if (ev === 'skills_list') {
+    const el = document.getElementById('aiSkillList');
+    el.innerHTML = (data.skills || []).map(s => {
+      const icon = s.icon || '';
+      return `<div>${icon} ${s.name || s.id} (${s.category || ''})</div>`;
+    }).join('') || '暂无技能';
+  }
+
+  // 相机
+  if (ev === 'camera_test_result') {
+    appendLog('[相机测试] ' + data.message);
+  }
+
+  // MiniCPM 指令检测
+  if (ev === 'minicpm_instruction') {
+    appendLog('[MiniCPM 指令] ' + data.instruction);
+    addAIMsg('sys', '检测到指令，正在规划: ' + data.instruction);
+  }
+
+  // AI 执行完成（与 execution_finished 并列推送）
+  if (ev === 'ai_execution_finished') {
+    const icon = data.success ? '✓' : '✗';
+    addAIMsg(data.success ? 'bot' : 'sys', icon + ' ' + (data.message || 'AI 序列执行结束'));
+    resetAIButtons();
+  }
+
+  // 通用响应
+  if (ev === 'accepted') appendLog(data.message);
+  if (ev === 'stopped') { appendLog('已停止'); isPaused = false; document.getElementById('pauseBtn').textContent = '暂停'; }
+  if (ev === 'paused') appendLog('已暂停');
+  if (ev === 'resumed') appendLog('已恢复');
+}
+
+function updateDev(key, connected, label) {
+  const dot = document.getElementById('dev-' + key);
+  const text = document.getElementById('dev-' + key + '-text');
+  if (dot) dot.className = 'status-dot' + (connected ? ' on' : '');
+  if (text) text.textContent = label + ': ' + (connected ? '已连接' : '未连接');
+}
+
+// ===== Tab 切换 =====
+function switchTab(idx) {
+  currentTab = idx;
+  document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', i === idx));
+  document.querySelectorAll('.tab-page').forEach((p, i) => p.classList.toggle('active', i === idx));
+
+  // 切到 AI Tab 时刷新技能
+  if (idx === 5) {
+    send({ action: 'ai_status' });
+    send({ action: 'list_skills' });
+  }
+}
+
+// ===== 动作列表渲染 =====
+function renderAllActionLists() {
+  ACTION_TYPES.forEach((t, i) => {
+    const list = document.getElementById('action-list-' + i);
+    const actions = actionsData[t.key] || [];
+    list.innerHTML = actions.map(a =>
+      `<div class="action-item" data-id="${a.id}" onclick="selectAction('${a.id}', ${i})" ondblclick="addActionToSeq('${a.id}')">
+        <div class="action-dot ${t.css}"></div>
+        <span>${a.name}</span>
+      </div>`
+    ).join('') || '<div style="color:#999;padding:12px;font-size:12px">暂无动作，点击"新建动作"添加</div>';
+  });
+}
+
+function selectAction(id, tabIdx) {
+  selectedActionId = id;
+  document.querySelectorAll('#action-list-' + tabIdx + ' .action-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.id === id);
+  });
+}
+
+// 双击动作：添加到序列
+function addActionToSeq(actionId) {
+  send({ action: 'add_to_sequence', action_ids: [actionId] });
+}
+
+function deleteSelectedAction() {
+  if (!selectedActionId) { appendLog('请先选择要删除的动作'); return; }
+  send({ action: 'delete_action', id: selectedActionId });
+  selectedActionId = null;
+}
+
+// ===== 序列渲染 =====
+function renderSequence() {
+  const area = document.getElementById('sequenceArea');
+  if (!sequenceData || sequenceData.length === 0) {
+    area.innerHTML = '<div class="sequence-empty">将左侧动作添加到序列，或点击"新建动作"创建</div>';
+    return;
+  }
+  area.innerHTML = sequenceData.map((item, i) => {
+    const def = item.definition || {};
+    const name = def.name || '未命名';
+    const type = def.type || '';
+    const status = (item.status || 'PENDING').toUpperCase();
+    const cssType = typeToCss(type);
+    const cssStatus = status === 'RUNNING' ? 'card-bg-running' : status === 'SUCCESS' ? 'card-bg-success' : status === 'FAILED' ? 'card-bg-failed' : 'card-bg-' + cssType;
+    const sel = i === selectedSeqIdx ? ' selected' : '';
+    const truncName = name.length > 8 ? name.substring(0, 8) + '..' : name;
+    const statusText = { PENDING: '等待中', RUNNING: '执行中', SUCCESS: '完成', FAILED: '失败' }[status] || status;
+    return `<div class="sequence-card ${cssStatus}${sel}" onclick="selectSeqItem(${i})">
+      <div class="card-num">#${i + 1}</div>
+      <div class="card-name">${truncName}</div>
+      <div class="card-status">${statusText}</div>
+    </div>`;
+  }).join('');
+}
+
+function typeToCss(type) {
+  const map = { MOVE_TO_POINT: 'move', ARM_ACTION: 'manipulate', INSPECT_AND_OUTPUT: 'inspect', CHANGE_GUN: 'change_gun', VISION_CAPTURE: 'vision' };
+  return map[type] || 'move';
+}
+
+function selectSeqItem(idx) { selectedSeqIdx = idx; renderSequence(); }
+
+function updateCardStatus(data) {
+  const idx = data.index;
+  if (idx < sequenceData.length) {
+    if (data.event === 'step_started') sequenceData[idx].status = 'RUNNING';
+    else if (data.event === 'step_completed') sequenceData[idx].status = 'SUCCESS';
+    else if (data.event === 'step_failed') sequenceData[idx].status = 'FAILED';
+    renderSequence();
+  }
+}
+
+// ===== 序列编辑 =====
+function moveSeqItem(dir) {
+  if (selectedSeqIdx < 0) return;
+  const to = selectedSeqIdx + dir;
+  if (to < 0 || to >= sequenceData.length) return;
+  send({ action: 'move_in_sequence', from: selectedSeqIdx, to: to });
+  selectedSeqIdx = to;
+}
+function deleteSeqItem() {
+  if (selectedSeqIdx < 0) return;
+  send({ action: 'remove_from_sequence', index: selectedSeqIdx });
+  selectedSeqIdx = -1;
+}
+function togglePause() {
+  if (isPaused) { send({ action: 'resume' }); isPaused = false; document.getElementById('pauseBtn').textContent = '暂停'; }
+  else { send({ action: 'pause' }); isPaused = true; document.getElementById('pauseBtn').textContent = '继续'; }
+}
+
+// ===== 新建动作弹窗 =====
+function openCreateDialog() {
+  const typeIdx = currentTab < 5 ? currentTab : 0;
+  const t = ACTION_TYPES[typeIdx];
+  document.getElementById('modalTitle').textContent = '配置 ' + t.label + ' 动作';
+  document.getElementById('modalName').value = '';
+
+  // 隐藏所有参数组
+  ['move','manipulate','inspect','change_gun','vision'].forEach(k => {
+    document.getElementById('params-' + k).style.display = 'none';
+  });
+  // 显示对应参数组
+  const paramKey = ['move','manipulate','inspect','change_gun','vision'][typeIdx];
+  document.getElementById('params-' + paramKey).style.display = 'block';
+
+  // 重置表单
+  if (typeIdx === 0) onMoveTargetChange();
+  if (typeIdx === 1) onExecutorChange();
+
+  document.getElementById('createModal').classList.add('show');
+}
+function closeCreateDialog() { document.getElementById('createModal').classList.remove('show'); }
+
+function onMoveTargetChange() {
+  const t = document.getElementById('moveTarget').value;
+  document.getElementById('moveRobotParams').style.display = t === '机械臂' ? 'block' : 'none';
+  document.getElementById('moveBodyParams').style.display = t === '身体' ? 'block' : 'none';
+}
+function onExecutorChange() {
+  const e = document.getElementById('manipExecutor').value;
+  document.getElementById('manipNormalParams').style.display = e === '吸液枪' ? 'none' : 'block';
+  document.getElementById('manipPipetteParams').style.display = e === '吸液枪' ? 'block' : 'none';
+}
+
+function submitCreateAction() {
+  const name = document.getElementById('modalName').value.trim();
+  if (!name) { alert('请输入动作名称'); return; }
+
+  const typeIdx = currentTab < 5 ? currentTab : 0;
+  const typeKey = ACTION_TYPES[typeIdx].key;
+  let parameters = {};
+
+  if (typeIdx === 0) { // 移动
+    const target = document.getElementById('moveTarget').value;
+    if (target === '机械臂') {
+      parameters = { '目标': target, '臂': document.getElementById('moveArm').value, '模式': document.getElementById('moveMode').value, '点位': document.getElementById('movePose').value };
+    } else {
+      parameters = { '目标': target, '位置': parseInt(document.getElementById('movePosition').value) || 0 };
+    }
+  } else if (typeIdx === 1) { // 执行
+    const executor = document.getElementById('manipExecutor').value;
+    if (executor === '吸液枪') {
+      parameters = { '执行器': executor, '操作': document.getElementById('pipetteOp').value, '容量': parseInt(document.getElementById('pipetteCapacity').value) || 500 };
+    } else {
+      parameters = { '执行器': executor, '编号': parseInt(document.getElementById('manipNumber').value), '操作': document.getElementById('manipOp').value };
+    }
+  } else if (typeIdx === 2) { // 检测
+    parameters = { Sensor_ID: document.getElementById('inspectSensor').value, Threshold: parseFloat(document.getElementById('inspectThreshold').value) || 0, Timeout: parseFloat(document.getElementById('inspectTimeout').value) || 5 };
+  } else if (typeIdx === 3) { // 换枪
+    parameters = { Gun_Position: parseInt(document.getElementById('gunPosition').value), Operation: document.getElementById('gunOp').value };
+  } else if (typeIdx === 4) { // 视觉
+    parameters = { '目标机械臂': 'robot1', '工作流': 'vertical', '置信度': 0.7, '调试图片': true, '移动速度': 15, '夹爪长度': 150.0 };
+  }
+
+  send({ action: 'create_action', name, type: typeKey, parameters });
+  closeCreateDialog();
+}
+
+// ===== 保存/加载弹窗 =====
+function openSaveDialog() { document.getElementById('saveTaskName').value = ''; document.getElementById('saveModal').classList.add('show'); }
+function closeSaveDialog() { document.getElementById('saveModal').classList.remove('show'); }
+function doSaveTask() {
+  let name = document.getElementById('saveTaskName').value.trim();
+  if (!name) { alert('请输入任务名称'); return; }
+  if (!name.endsWith('.task')) name += '.task';
+  send({ action: 'save_task', name });
+}
+
+function openLoadDialog() {
+  send({ action: 'list_tasks' });
+  selectedTaskName = '';
+  document.getElementById('loadModal').classList.add('show');
+}
+function closeLoadDialog() { document.getElementById('loadModal').classList.remove('show'); }
+function renderTaskList(tasks) {
+  const box = document.getElementById('taskListBox');
+  box.innerHTML = tasks.map(t =>
+    `<div class="task-item" onclick="selectTask(this,'${t}')">${t}</div>`
+  ).join('') || '<div style="color:#999;padding:12px;font-size:12px">暂无保存的任务</div>';
+}
+function selectTask(el, name) {
+  selectedTaskName = name;
+  document.querySelectorAll('.task-item').forEach(e => e.classList.remove('selected'));
+  el.classList.add('selected');
+}
+function doLoadTask() {
+  if (!selectedTaskName) { alert('请选择一个任务'); return; }
+  send({ action: 'load_task', name: selectedTaskName });
+}
+
+// ===== AI 助手 =====
+function sendAI() {
+  const text = document.getElementById('aiInput').value.trim();
+  if (!text) return;
+  addAIMsg('user', text);
+  send({ action: 'ai_chat', text });
+  document.getElementById('aiInput').value = '';
+  resetAIButtons();
+}
+function addAIMsg(type, text) {
+  const el = document.getElementById('aiChatHistory');
+  const cls = type === 'user' ? 'ai-msg-user' : type === 'bot' ? 'ai-msg-bot' : 'ai-msg-sys';
+  const prefix = type === 'user' ? '[用户] ' : type === 'bot' ? '[助手] ' : '[系统] ';
+  el.innerHTML += `<div class="${cls}">${prefix}${text.replace(/\n/g,'<br>')}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+function resetAIButtons() {
+  document.getElementById('aiExecBtn').disabled = true;
+  document.getElementById('aiPreviewBtn').disabled = true;
+  document.getElementById('aiCancelBtn').disabled = true;
+}
+
+// ===== 日志 =====
+function appendLog(msg, level = 'info') {
+  const el = document.getElementById('logArea');
+  const now = new Date();
+  const ts = now.toTimeString().substring(0, 8);
+  const cls = level === 'error' ? ' class="log-error"' : level === 'warn' ? ' class="log-warn"' : '';
+  const prefix = level === 'error' ? '[ERR] ' : level === 'warn' ? '[WRN] ' : '';
+  el.innerHTML += `<div${cls}>[${ts}] ${prefix}${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+</script>
+</body>
+</html>
