@@ -18,6 +18,7 @@ from ..devices.kuaihuanshou import Kuaihuanshou
 from ..devices.relay import RelayController
 from ..devices.adp import ADP
 from ..devices import yiyeqiang_out
+from ..core.config_loader import Config
 
 
 class SimpleRobotArm:
@@ -106,9 +107,11 @@ class RobotController:
         self._injected_depth = None
         self._injected_intr = None
 
+        config = Config.get_instance()
+
         # 加载模型
-        self.yolo_model = YOLO("/home/maic/10-robotgui/src/best.pt")
-        self.sam_model = SAM("/home/maic/10-robotgui/src/sam2.1_l.pt")
+        self.yolo_model = YOLO(config.YOLO_MODEL_PATH)
+        self.sam_model = SAM(config.SAM_MODEL_PATH)
 
         # 手眼标定参数
         self.rotation_matrix = [[0.00215684,0.97503835,0.22202606], 
