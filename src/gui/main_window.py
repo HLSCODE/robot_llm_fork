@@ -1,10 +1,11 @@
 import time
 from pathlib import Path
 from typing import List
+import math
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                             QSplitter, QMessageBox, QFileDialog, QMenu,
-                            QTabWidget, QPushButton, QLabel, QFrame)
-from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
+                            QTabWidget, QPushButton, QLabel, QFrame, QApplication)
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QPalette, QColor
 
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus
@@ -53,6 +54,8 @@ class MainWindow(QMainWindow):
 
         # ADP（吸液枪）实例 - 在执行吸液/吐液时才创建
         self.adp_instance = None
+        self.robot_pose_cache = {"robot1": None, "robot2": None}
+        self.pose_timer = None
 
         self.init_ui()
         self.load_actions()
@@ -65,8 +68,8 @@ class MainWindow(QMainWindow):
         if ROBOT_AVAILABLE:
             self.auto_initialize()
         # 注释掉下面 2 行，防止启动时升降平台高度变化
-        # if MODBUS_AVAILABLE:
-        #     self.initialize_body()
+        if MODBUS_AVAILABLE:
+            self.initialize_body()
 
     def init_ui(self):
         self.setWindowTitle("Robot Action Orchestrator")
@@ -183,6 +186,12 @@ class MainWindow(QMainWindow):
         self.sequence_list.setMinimumHeight(140)
         layout.addWidget(self.sequence_list, stretch=2)
 
+        self.pose_panel = self.create_pose_panel()
+        layout.addWidget(self.pose_panel)
+
+        self.basic_control_panel = self.create_basic_control_panel()
+        layout.addWidget(self.basic_control_panel)
+
         # 控制面板
         self.control_panel = ControlPanel()
         self.control_panel.start_clicked.connect(self.start_execution)
@@ -201,6 +210,189 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.log_widget)
 
         return panel
+
+    def create_pose_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
+
+        header_layout = QHBoxLayout()
+        title = QLabel("Arm Pose")
+        title.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.refresh_pose_btn = QPushButton("Refresh")
+        self.refresh_pose_btn.setFixedHeight(24)
+        self.refresh_pose_btn.clicked.connect(self.refresh_arm_poses)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(self.refresh_pose_btn)
+        layout.addLayout(header_layout)
+
+        self.robot1_pose_value_label, self.copy_robot1_pose_btn = self._build_pose_row(layout, "R1")
+        self.robot2_pose_value_label, self.copy_robot2_pose_btn = self._build_pose_row(layout, "R2")
+
+        self.pose_timer = QTimer(self)
+        self.pose_timer.setInterval(1000)
+        self.pose_timer.timeout.connect(self.refresh_arm_poses)
+        self.pose_timer.start()
+
+        return panel
+
+    def create_basic_control_panel(self) -> QWidget:
+        panel = QFrame()
+        panel.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
+
+        title = QLabel("Basic Control")
+        title.setStyleSheet("font-size: 12px; font-weight: bold;")
+        layout.addWidget(title)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(6)
+
+        self.gripper_open_btn = QPushButton("Gripper Open")
+        self.gripper_open_btn.setMinimumHeight(28)
+        self.gripper_open_btn.clicked.connect(self.on_gripper_open_clicked)
+
+        self.gripper_close_btn = QPushButton("Gripper Close")
+        self.gripper_close_btn.setMinimumHeight(28)
+        self.gripper_close_btn.clicked.connect(self.on_gripper_close_clicked)
+
+        self.init_pipette_btn = QPushButton("Init Pipette")
+        self.init_pipette_btn.setMinimumHeight(28)
+        self.init_pipette_btn.clicked.connect(self.initialize_pipette)
+
+        btn_layout.addWidget(self.gripper_open_btn)
+        btn_layout.addWidget(self.gripper_close_btn)
+        btn_layout.addWidget(self.init_pipette_btn)
+        layout.addLayout(btn_layout)
+
+        self.update_basic_control_buttons()
+        return panel
+
+    def update_basic_control_buttons(self):
+        gripper_ready = self.robot_controller is not None and self.robot1_connected
+        if hasattr(self, "gripper_open_btn"):
+            self.gripper_open_btn.setEnabled(gripper_ready)
+        if hasattr(self, "gripper_close_btn"):
+            self.gripper_close_btn.setEnabled(gripper_ready)
+
+    def on_gripper_open_clicked(self):
+        if self.robot_controller is None or not self.robot1_connected:
+            QMessageBox.warning(self, "Warning", "Robot1 is not connected")
+            return
+
+        try:
+            success = self.robot_controller.gripper_open_robot1()
+            if success:
+                self.log_widget.append_log("Robot1 gripper opened")
+            else:
+                QMessageBox.warning(self, "Warning", "Failed to open gripper")
+                self.log_widget.append_log("Robot1 gripper open failed")
+        except Exception as e:
+            QMessageBox.warning(self, "Warning", f"Gripper open error: {e}")
+            self.log_widget.append_log(f"Robot1 gripper open error: {e}")
+
+    def on_gripper_close_clicked(self):
+        if self.robot_controller is None or not self.robot1_connected:
+            QMessageBox.warning(self, "Warning", "Robot1 is not connected")
+            return
+
+        try:
+            success = self.robot_controller.gripper_close_robot1()
+            if success:
+                self.log_widget.append_log("Robot1 gripper closed")
+            else:
+                QMessageBox.warning(self, "Warning", "Failed to close gripper")
+                self.log_widget.append_log("Robot1 gripper close failed")
+        except Exception as e:
+            QMessageBox.warning(self, "Warning", f"Gripper close error: {e}")
+            self.log_widget.append_log(f"Robot1 gripper close error: {e}")
+
+    def _build_pose_row(self, parent_layout: QVBoxLayout, robot_label: str):
+        row = QHBoxLayout()
+        row_label = QLabel(f"{robot_label}:")
+        row_label.setFixedWidth(28)
+        row_label.setStyleSheet("font-weight: bold;")
+
+        pose_label = QLabel("--")
+        pose_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        copy_btn = QPushButton("Copy")
+        copy_btn.setFixedHeight(24)
+        copy_btn.clicked.connect(lambda _, name=robot_label.lower().replace("r", "robot"): self.copy_robot_pose(name))
+
+        row.addWidget(row_label)
+        row.addWidget(pose_label, stretch=1)
+        row.addWidget(copy_btn)
+        parent_layout.addLayout(row)
+
+        return pose_label, copy_btn
+
+    def refresh_arm_poses(self):
+        self._refresh_single_robot_pose("robot1")
+        self._refresh_single_robot_pose("robot2")
+
+    def _refresh_single_robot_pose(self, robot_name: str):
+        pose = self._get_current_pose(robot_name)
+        label = self.robot1_pose_value_label if robot_name == "robot1" else self.robot2_pose_value_label
+
+        if pose is None:
+            self.robot_pose_cache[robot_name] = None
+            label.setText("--")
+            return
+
+        self.robot_pose_cache[robot_name] = pose
+        label.setText(self.format_pose_text(pose))
+
+    def _get_current_pose(self, robot_name: str):
+        if self.robot_controller is None:
+            return None
+
+        ctrl = getattr(self.robot_controller, f"{robot_name}_ctrl", None)
+        robot = getattr(ctrl, "robot", None)
+        if robot is None:
+            return None
+
+        try:
+            ret, state = robot.rm_get_current_arm_state()
+            if ret != 0:
+                return None
+            pose = state.get("pose")
+            if not isinstance(pose, (list, tuple)) or len(pose) < 6:
+                return None
+            return [float(v) for v in pose[:6]]
+        except Exception:
+            return None
+
+    def format_pose_text(self, pose):
+        x_mm = pose[0] * 1000
+        y_mm = pose[1] * 1000
+        z_mm = pose[2] * 1000
+        rx_deg = math.degrees(pose[3])
+        ry_deg = math.degrees(pose[4])
+        rz_deg = math.degrees(pose[5])
+        return (
+            f"X:{x_mm:.1f} Y:{y_mm:.1f} Z:{z_mm:.1f} mm | "
+            f"RX:{rx_deg:.1f} RY:{ry_deg:.1f} RZ:{rz_deg:.1f} deg"
+        )
+
+    def copy_robot_pose(self, robot_name: str):
+        pose = self.robot_pose_cache.get(robot_name)
+        if pose is None:
+            self._refresh_single_robot_pose(robot_name)
+            pose = self.robot_pose_cache.get(robot_name)
+
+        if pose is None:
+            QMessageBox.warning(self, "Warning", f"{robot_name.upper()} pose is unavailable")
+            return
+
+        pose_text = f"[{', '.join([f'{v:.6f}' for v in pose])}]"
+        QApplication.clipboard().setText(pose_text)
+        self.log_widget.append_log(f"Copied {robot_name.upper()} pose: {pose_text}")
 
     def create_status_bar(self) -> QWidget:
         """设备状态栏：竖向两行，每行四个设备"""
@@ -309,6 +501,8 @@ class MainWindow(QMainWindow):
                 self.log_widget.append_log("Robot2 初始化失败")
 
             # 更新状态
+            self.refresh_arm_poses()
+
             if self.robot1_connected and self.robot2_connected:
                 self.log_widget.append_log("机械臂初始化完成")
             else:
@@ -333,6 +527,8 @@ class MainWindow(QMainWindow):
             indicator.setStyleSheet("background-color: #dc3545; border-radius: 8px;")
             status_text.setText("未连接")
 
+        self.update_basic_control_buttons()
+
     def update_pipette_status(self, initialized: bool):
         """更新移液枪状态指示灯"""
         if initialized:
@@ -343,18 +539,29 @@ class MainWindow(QMainWindow):
             self.pipette_status_text.setText("未初始化")
 
     def initialize_pipette(self):
-        """初始化吸液枪（ADP）"""
-        self.log_widget.append_log("开始初始化吸液枪...")
-
-        try:
-            # 创建 ADP 实例
-            self.adp_instance = ADP(port='/dev/hand')
-            self.update_pipette_status(True)
-            set_global_adp(self.adp_instance)
-            self.log_widget.append_log("吸液枪初始化成功")
-        except Exception as e:
-            self.log_widget.append_log(f"吸液枪初始化异常: {str(e)}")
+        """Initialize pipette by YIYEQIANG_INIT."""
+        self.log_widget.append_log("Starting pipette initialization...")
+        if YIYEQIANG_INIT is None:
+            self.log_widget.append_log("Pipette init module is unavailable")
+            QMessageBox.warning(self, "Warning", "Pipette init module is unavailable")
             self.update_pipette_status(False)
+            return
+
+        self.init_pipette_btn.setEnabled(False)
+        try:
+            success = YIYEQIANG_INIT(port='/dev/hand')
+            self.update_pipette_status(bool(success))
+            if success:
+                self.log_widget.append_log("Pipette initialized successfully")
+            else:
+                self.log_widget.append_log("Pipette initialization failed")
+                QMessageBox.warning(self, "Warning", "Pipette initialization failed, please check serial port/device")
+        except Exception as e:
+            self.update_pipette_status(False)
+            self.log_widget.append_log(f"Pipette initialization error: {str(e)}")
+            QMessageBox.warning(self, "Warning", f"Pipette initialization error: {e}")
+        finally:
+            self.init_pipette_btn.setEnabled(True)
 
     def initialize_body(self):
         """初始化身体（ModbusMotor）"""
@@ -692,6 +899,9 @@ class MainWindow(QMainWindow):
         self._camera_test_thread.start()
 
     def closeEvent(self, event):
+        if self.pose_timer is not None:
+            self.pose_timer.stop()
+
         if self.execution_thread and self.execution_thread.isRunning():
             self.execution_thread.stop()
             self.execution_thread.wait()

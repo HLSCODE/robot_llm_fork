@@ -433,7 +433,7 @@ class ActionConfigDialog(QDialog):
                 '工作流': 'bottle',
                 '置信度': 0.7,
                 '调试图片': True,
-                '移动速度': 15,
+                '移动速度': 7,
                 '夹爪长度': 150.0
             }
 
