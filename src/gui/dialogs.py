@@ -99,6 +99,7 @@ class ActionPreviewDialog(QDialog):
             "ARM_ACTION": "执行",
             "INSPECT": "检测",
             "INSPECT_AND_OUTPUT": "检测",
+            "WAIT": "Wait",
             "CHANGE_GUN": "换枪"
         }
 
@@ -287,6 +288,14 @@ class ActionConfigDialog(QDialog):
             form_layout.addRow("判定阈值:", self.threshold_input)
             form_layout.addRow("超时时间:", self.timeout_input)
 
+        elif self.action_type == ActionType.WAIT:
+            self.wait_time_input = QDoubleSpinBox()
+            self.wait_time_input.setRange(0.1, 3600)
+            self.wait_time_input.setDecimals(1)
+            self.wait_time_input.setValue(self.action_data.get('parameters', {}).get('wait_seconds', 1.0))
+            self.wait_time_input.setSuffix(" s")
+
+            form_layout.addRow("Wait Time:", self.wait_time_input)
         elif self.action_type == ActionType.CHANGE_GUN:
             self.gun_position_combo = QComboBox()
             self.gun_position_combo.addItem("1", 1)
@@ -331,6 +340,7 @@ class ActionConfigDialog(QDialog):
             ActionType.MOVE: "移动",
             ActionType.MANIPULATE: "机械臂",
             ActionType.INSPECT: "检测",
+            ActionType.WAIT: "Wait",
             ActionType.CHANGE_GUN: "换枪",
             ActionType.VISION_CAPTURE: "视觉抓取"
         }
@@ -421,6 +431,10 @@ class ActionConfigDialog(QDialog):
                 'Sensor_ID': self.sensor_input.text().strip(),
                 'Threshold': self.threshold_input.value(),
                 'Timeout': self.timeout_input.value()
+            }
+        elif self.action_type == ActionType.WAIT:
+            parameters = {
+                'wait_seconds': self.wait_time_input.value()
             }
         elif self.action_type == ActionType.CHANGE_GUN:
             parameters = {

@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
             ActionType.MOVE: [],
             ActionType.MANIPULATE: [],
             ActionType.INSPECT: [],
+            ActionType.WAIT: [],
             ActionType.CHANGE_GUN: [],
             ActionType.VISION_CAPTURE: []
         }
@@ -138,12 +139,14 @@ class MainWindow(QMainWindow):
         self.move_list = ActionListWidget()
         self.manipulate_list = ActionListWidget()
         self.inspect_list = ActionListWidget()
+        self.wait_list = ActionListWidget()
         self.change_gun_list = ActionListWidget()
         self.vision_capture_list = ActionListWidget()
 
         self.action_tabs.addTab(self.move_list, "移动类")
         self.action_tabs.addTab(self.manipulate_list, "执行类")
         self.action_tabs.addTab(self.inspect_list, "检测类")
+        self.action_tabs.addTab(self.wait_list, "Wait")
         self.action_tabs.addTab(self.change_gun_list, "换枪类")
         self.action_tabs.addTab(self.vision_capture_list, "视觉类")
 
@@ -595,8 +598,9 @@ class MainWindow(QMainWindow):
             0: ActionType.MOVE,
             1: ActionType.MANIPULATE,
             2: ActionType.INSPECT,
-            3: ActionType.CHANGE_GUN,
-            4: ActionType.VISION_CAPTURE
+            3: ActionType.WAIT,
+            4: ActionType.CHANGE_GUN,
+            5: ActionType.VISION_CAPTURE
         }
         action_type = action_type_map.get(current_tab)
 
@@ -613,8 +617,9 @@ class MainWindow(QMainWindow):
             0: ActionType.MOVE,
             1: ActionType.MANIPULATE,
             2: ActionType.INSPECT,
-            3: ActionType.CHANGE_GUN,
-            4: ActionType.VISION_CAPTURE
+            3: ActionType.WAIT,
+            4: ActionType.CHANGE_GUN,
+            5: ActionType.VISION_CAPTURE
         }
         action_type = action_type_map.get(current_tab)
 
@@ -622,6 +627,7 @@ class MainWindow(QMainWindow):
             ActionType.MOVE: self.move_list,
             ActionType.MANIPULATE: self.manipulate_list,
             ActionType.INSPECT: self.inspect_list,
+            ActionType.WAIT: self.wait_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
             ActionType.VISION_CAPTURE: self.vision_capture_list
         }
@@ -643,6 +649,7 @@ class MainWindow(QMainWindow):
             ActionType.MOVE: self.move_list,
             ActionType.MANIPULATE: self.manipulate_list,
             ActionType.INSPECT: self.inspect_list,
+            ActionType.WAIT: self.wait_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
             ActionType.VISION_CAPTURE: self.vision_capture_list
         }

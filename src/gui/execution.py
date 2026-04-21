@@ -84,6 +84,8 @@ class ExecutionThread(QThread):
                 return self._execute_manipulate(params)
             elif definition.type == ActionType.INSPECT:
                 return self._execute_inspect(params)
+            elif definition.type == ActionType.WAIT:
+                return self._execute_wait(params)
             elif definition.type == ActionType.CHANGE_GUN:
                 return self._execute_change_gun(params)
             elif definition.type == ActionType.VISION_CAPTURE:
@@ -310,6 +312,26 @@ class ExecutionThread(QThread):
         self.log_message.emit(f"读取传感器 {sensor_id}, 阈值: {threshold}, 超时: {timeout}s")
         time.sleep(0.8)
         self.log_message.emit("检测完成 - 结果: 通过")
+        return True
+
+
+    def _execute_wait(self, params: dict) -> bool:
+        wait_seconds = float(params.get('wait_seconds', 1.0))
+        if wait_seconds <= 0:
+            return True
+
+        self.log_message.emit(f"Waiting: {wait_seconds:.1f}s")
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline:
+            if self._stop_requested:
+                self.log_message.emit("Wait cancelled by stop request")
+                return False
+            while self._paused:
+                if self._stop_requested:
+                    self.log_message.emit("Wait cancelled by stop request")
+                    return False
+                time.sleep(0.1)
+            time.sleep(0.05)
         return True
 
     def _execute_change_gun(self, params: dict) -> bool:
