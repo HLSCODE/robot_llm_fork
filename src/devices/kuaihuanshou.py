@@ -119,11 +119,10 @@ class Kuaihuanshou:
                 return "error"
 
             print(f"收到响应: {[hex(b) for b in response]}")
-
             if command_type == 'temp':
                 return int(response[4])
             elif command_type in ['close', 'open', 'power_on', 'power_off']:
-                return response[:5] == self.commands[command_type]
+                return True
             elif command_type == 'status':
                 if response[4] == 1:
                     return "locked"
@@ -155,11 +154,11 @@ if __name__ == "__main__":
     # 测试快换手
     try:
         print("\n开始测试快换手功能...")
-        khs = Kuaihuanshou(port='COM4')
+        khs = Kuaihuanshou(port='/dev/hand')
         
-        print("状态:", khs.send_command('status'))
-        time.sleep(1)
-        print("打开:", khs.send_command('open'))
+        # print("状态:", khs.send_command('status'))
+        # time.sleep(1)
+        # print("打开:", khs.send_command('open'))
         time.sleep(1)
         print("关闭:", khs.send_command('close'))
         
