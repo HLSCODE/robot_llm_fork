@@ -18,9 +18,11 @@ def drop_gun1(robot):
     print("退枪头1 (Gun1)")
     print("=" * 40)
 
-    pos_1shang = GUN1_POSITIONS["1shang"]
-    pos_1zhong = GUN1_POSITIONS["1zhong"]
-
+    # pos_1shang = GUN1_POSITIONS["1shang"]
+    # pos_1zhong = GUN1_POSITIONS["1zhong"]
+    pos_1shang = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
+    pos_1zhong = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
+    print(pos_1shang,pos_1zhong)
     # 1. 移动到 1shang
     print(f"\n[1] 移动到 1shang...")
     ret = robot.rm_movel(pos_1shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
