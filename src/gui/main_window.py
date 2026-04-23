@@ -4,7 +4,8 @@ from typing import List
 import math
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                             QSplitter, QMessageBox, QFileDialog, QMenu,
-                            QTabWidget, QPushButton, QLabel, QFrame, QApplication)
+                            QTabWidget, QPushButton, QLabel, QFrame, QApplication,
+                            QInputDialog)
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QAction, QPalette, QColor
 
@@ -20,6 +21,7 @@ try:
     from ..arm_sdk import RobotController
     from ..devices import ModbusMotor
     from ..devices.yiyeqiang_init import init_tip as YIYEQIANG_INIT
+    from ..devices.yiyeqiang_out import eject_tip as YIYEQIANG_EJECT
     ROBOT_AVAILABLE = RobotController is not None
     MODBUS_AVAILABLE = ModbusMotor is not None
 except ImportError as e:
@@ -28,6 +30,7 @@ except ImportError as e:
     RobotController = None
     ModbusMotor = None
     YIYEQIANG_INIT = None
+    YIYEQIANG_EJECT = None
     print(f"机械臂模块导入失败: {e}")
 
 class MainWindow(QMainWindow):
@@ -71,6 +74,7 @@ class MainWindow(QMainWindow):
         # 注释掉下面 2 行，防止启动时升降平台高度变化
         if MODBUS_AVAILABLE:
             self.initialize_body()
+        self.initialize_pipette_on_startup()
 
     def init_ui(self):
         self.setWindowTitle("Robot Action Orchestrator")
@@ -139,14 +143,12 @@ class MainWindow(QMainWindow):
         self.move_list = ActionListWidget()
         self.manipulate_list = ActionListWidget()
         self.inspect_list = ActionListWidget()
-        self.wait_list = ActionListWidget()
         self.change_gun_list = ActionListWidget()
         self.vision_capture_list = ActionListWidget()
 
         self.action_tabs.addTab(self.move_list, "移动类")
         self.action_tabs.addTab(self.manipulate_list, "执行类")
         self.action_tabs.addTab(self.inspect_list, "检测类")
-        self.action_tabs.addTab(self.wait_list, "Wait")
         self.action_tabs.addTab(self.change_gun_list, "换枪类")
         self.action_tabs.addTab(self.vision_capture_list, "视觉类")
 
@@ -162,10 +164,14 @@ class MainWindow(QMainWindow):
         self.create_btn = QPushButton("新建动作")
         self.create_btn.setMinimumHeight(32)
         self.create_btn.clicked.connect(self.create_action)
+        self.edit_btn = QPushButton("修改动作")
+        self.edit_btn.setMinimumHeight(32)
+        self.edit_btn.clicked.connect(self.edit_action)
         self.delete_btn = QPushButton("删除动作")
         self.delete_btn.setMinimumHeight(32)
         self.delete_btn.clicked.connect(self.delete_action)
         btn_layout.addWidget(self.create_btn)
+        btn_layout.addWidget(self.edit_btn)
         btn_layout.addWidget(self.delete_btn)
 
         self.test_camera_btn = QPushButton("测试相机")
@@ -202,6 +208,7 @@ class MainWindow(QMainWindow):
         self.control_panel.stop_clicked.connect(self.stop_execution)
         self.control_panel.move_up_clicked.connect(self.move_item_up)
         self.control_panel.move_down_clicked.connect(self.move_item_down)
+        self.control_panel.edit_clicked.connect(self.edit_sequence_item)
         self.control_panel.delete_clicked.connect(self.delete_item)
         self.control_panel.clear_clicked.connect(self.clear_sequence)
         self.control_panel.save_clicked.connect(self.save_task)
@@ -264,9 +271,9 @@ class MainWindow(QMainWindow):
         self.gripper_close_btn.setMinimumHeight(28)
         self.gripper_close_btn.clicked.connect(self.on_gripper_close_clicked)
 
-        self.init_pipette_btn = QPushButton("Init Pipette")
+        self.init_pipette_btn = QPushButton("退枪头")
         self.init_pipette_btn.setMinimumHeight(28)
-        self.init_pipette_btn.clicked.connect(self.initialize_pipette)
+        self.init_pipette_btn.clicked.connect(self.eject_pipette_tip)
 
         btn_layout.addWidget(self.gripper_open_btn)
         btn_layout.addWidget(self.gripper_close_btn)
@@ -566,6 +573,47 @@ class MainWindow(QMainWindow):
         finally:
             self.init_pipette_btn.setEnabled(True)
 
+    def initialize_pipette_on_startup(self):
+        """Initialize pipette automatically when app starts."""
+        self.log_widget.append_log("Auto initializing pipette...")
+        if YIYEQIANG_INIT is None:
+            self.log_widget.append_log("Pipette init module is unavailable")
+            self.update_pipette_status(False)
+            return
+
+        try:
+            success = YIYEQIANG_INIT(port='/dev/hand')
+            self.update_pipette_status(bool(success))
+            if success:
+                self.log_widget.append_log("Pipette initialized successfully")
+            else:
+                self.log_widget.append_log("Pipette initialization failed")
+        except Exception as e:
+            self.update_pipette_status(False)
+            self.log_widget.append_log(f"Pipette initialization error: {str(e)}")
+
+    def eject_pipette_tip(self):
+        """Eject pipette tip manually."""
+        if YIYEQIANG_EJECT is None:
+            self.log_widget.append_log("Pipette eject module is unavailable")
+            QMessageBox.warning(self, "Warning", "Pipette eject module is unavailable")
+            return
+
+        self.init_pipette_btn.setEnabled(False)
+        try:
+            self.log_widget.append_log("Ejecting pipette tip...")
+            success = YIYEQIANG_EJECT(port='/dev/hand')
+            if success:
+                self.log_widget.append_log("Pipette tip ejected successfully")
+            else:
+                self.log_widget.append_log("Pipette tip eject failed")
+                QMessageBox.warning(self, "Warning", "Failed to eject pipette tip")
+        except Exception as e:
+            self.log_widget.append_log(f"Pipette tip eject error: {str(e)}")
+            QMessageBox.warning(self, "Warning", f"Pipette tip eject error: {e}")
+        finally:
+            self.init_pipette_btn.setEnabled(True)
+
     def initialize_body(self):
         """初始化身体（ModbusMotor）"""
         if not MODBUS_AVAILABLE:
@@ -594,21 +642,15 @@ class MainWindow(QMainWindow):
 
     def create_action(self):
         current_tab = self.action_tabs.currentIndex()
-        action_type_map = {
-            0: ActionType.MOVE,
-            1: ActionType.MANIPULATE,
-            2: ActionType.INSPECT,
-            3: ActionType.WAIT,
-            4: ActionType.CHANGE_GUN,
-            5: ActionType.VISION_CAPTURE
-        }
-        action_type = action_type_map.get(current_tab)
+        action_type = self._resolve_action_type_for_current_tab(current_tab)
+        if action_type is None:
+            return
 
         dialog = ActionConfigDialog(action_type)
         if dialog.exec():
             action = dialog.get_action_definition()
-            self.actions[action_type].append(action)
-            self.refresh_action_list(action_type)
+            self.actions[action.type].append(action)
+            self.refresh_action_list(action.type)
             self.save_actions()
 
     def delete_action(self):
@@ -617,17 +659,17 @@ class MainWindow(QMainWindow):
             0: ActionType.MOVE,
             1: ActionType.MANIPULATE,
             2: ActionType.INSPECT,
-            3: ActionType.WAIT,
-            4: ActionType.CHANGE_GUN,
-            5: ActionType.VISION_CAPTURE
+            3: ActionType.CHANGE_GUN,
+            4: ActionType.VISION_CAPTURE
         }
         action_type = action_type_map.get(current_tab)
+        if action_type is None:
+            return
 
         list_map = {
             ActionType.MOVE: self.move_list,
             ActionType.MANIPULATE: self.manipulate_list,
             ActionType.INSPECT: self.inspect_list,
-            ActionType.WAIT: self.wait_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
             ActionType.VISION_CAPTURE: self.vision_capture_list
         }
@@ -639,17 +681,65 @@ class MainWindow(QMainWindow):
             return
 
         action = current_item.data(Qt.ItemDataRole.UserRole)
-        if action and action in self.actions[action_type]:
-            self.actions[action_type].remove(action)
-            self.refresh_action_list(action_type)
+        if action and action in self.actions[action.type]:
+            self.actions[action.type].remove(action)
+            self.refresh_action_list(action.type)
             self.save_actions()
 
+    def edit_action(self):
+        action_list = self._get_current_action_list_widget()
+        if action_list is None:
+            return
+
+        current_item = action_list.currentItem()
+        if current_item is None:
+            QMessageBox.warning(self, "Warning", "Please select an action to edit")
+            return
+
+        action = current_item.data(Qt.ItemDataRole.UserRole)
+        if action is None:
+            QMessageBox.warning(self, "Warning", "Cannot read selected action")
+            return
+
+        action_data = {
+            "id": action.id,
+            "name": action.name,
+            "parameters": action.parameters
+        }
+        dialog = ActionConfigDialog(action.type, action_data, self)
+        if not dialog.exec():
+            return
+
+        updated_action = dialog.get_action_definition()
+        target_actions = self.actions[action.type]
+        replaced = False
+
+        for idx, existing in enumerate(target_actions):
+            if existing.id == action.id:
+                target_actions[idx] = updated_action
+                replaced = True
+                break
+
+        if not replaced and action in target_actions:
+            target_actions[target_actions.index(action)] = updated_action
+            replaced = True
+
+        if not replaced:
+            QMessageBox.warning(self, "Warning", "Target action not found")
+            return
+
+        self.refresh_action_list(action.type)
+        self.save_actions()
+
     def refresh_action_list(self, action_type: ActionType):
+        if action_type in {ActionType.MANIPULATE, ActionType.WAIT}:
+            self._refresh_execute_merged_list()
+            return
+
         list_map = {
             ActionType.MOVE: self.move_list,
             ActionType.MANIPULATE: self.manipulate_list,
             ActionType.INSPECT: self.inspect_list,
-            ActionType.WAIT: self.wait_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
             ActionType.VISION_CAPTURE: self.vision_capture_list
         }
@@ -667,9 +757,55 @@ class MainWindow(QMainWindow):
 
     def load_actions(self):
         all_actions = StorageManager.load_actions()
+        for action_type in self.actions:
+            self.actions[action_type].clear()
+
         for action in all_actions:
             self.actions[action.type].append(action)
-            self.refresh_action_list(action.type)
+
+        for action_type in self.actions:
+            self.refresh_action_list(action_type)
+
+    def _refresh_execute_merged_list(self):
+        self.manipulate_list.clear()
+        for action in self.actions[ActionType.MANIPULATE]:
+            self.manipulate_list.add_action(action)
+        for action in self.actions[ActionType.WAIT]:
+            self.manipulate_list.add_action(action)
+
+    def _resolve_action_type_for_current_tab(self, current_tab: int):
+        action_type_map = {
+            0: ActionType.MOVE,
+            2: ActionType.INSPECT,
+            3: ActionType.CHANGE_GUN,
+            4: ActionType.VISION_CAPTURE
+        }
+        if current_tab == 1:
+            options = ["Manipulate", "Wait"]
+            selected, ok = QInputDialog.getItem(
+                self,
+                "Select Action Type",
+                "Create under Execute tab:",
+                options,
+                0,
+                False
+            )
+            if not ok:
+                return None
+            return ActionType.WAIT if selected == "Wait" else ActionType.MANIPULATE
+
+        return action_type_map.get(current_tab)
+
+    def _get_current_action_list_widget(self):
+        current_tab = self.action_tabs.currentIndex()
+        tab_list_map = {
+            0: self.move_list,
+            1: self.manipulate_list,
+            2: self.inspect_list,
+            3: self.change_gun_list,
+            4: self.vision_capture_list
+        }
+        return tab_list_map.get(current_tab)
 
     def save_task(self):
         sequence = self.sequence_list.get_sequence()
@@ -763,22 +899,53 @@ class MainWindow(QMainWindow):
         if current_row > 0:
             item = self.sequence_list.takeItem(current_row)
             self.sequence_list.insertItem(current_row - 1, item)
-            self.sequence_list.setCurrentRow(current_row - 1)
-            self.refresh_sequence_numbers()
+            self.refresh_sequence_numbers(selected_row=current_row - 1)
 
     def move_item_down(self):
         current_row = self.sequence_list.currentRow()
         if current_row < self.sequence_list.count() - 1:
             item = self.sequence_list.takeItem(current_row)
             self.sequence_list.insertItem(current_row + 1, item)
-            self.sequence_list.setCurrentRow(current_row + 1)
-            self.refresh_sequence_numbers()
+            self.refresh_sequence_numbers(selected_row=current_row + 1)
 
     def delete_item(self):
         current_row = self.sequence_list.currentRow()
         if current_row >= 0:
             self.sequence_list.takeItem(current_row)
-            self.refresh_sequence_numbers()
+            next_row = min(current_row, self.sequence_list.count() - 1)
+            self.refresh_sequence_numbers(selected_row=next_row)
+
+    def edit_sequence_item(self):
+        current_row = self.sequence_list.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "Warning", "Please select a sequence item to edit")
+            return
+
+        list_item = self.sequence_list.item(current_row)
+        if list_item is None:
+            QMessageBox.warning(self, "Warning", "Cannot read selected sequence item")
+            return
+
+        seq_item = list_item.data(Qt.ItemDataRole.UserRole)
+        if seq_item is None:
+            QMessageBox.warning(self, "Warning", "Cannot read selected sequence item")
+            return
+
+        action_def = seq_item.definition
+        action_data = {
+            "id": action_def.id,
+            "name": action_def.name,
+            "parameters": action_def.parameters,
+        }
+        dialog = ActionConfigDialog(action_def.type, action_data, self)
+        if not dialog.exec():
+            return
+
+        updated_definition = dialog.get_action_definition()
+        seq_item.definition = updated_definition
+        self.sequence_list.update_item_status(current_row, seq_item)
+        self.sequence_list.setCurrentRow(current_row)
+        self.log_widget.append_log(f"已更新序列动作: {updated_definition.name}")
 
     def add_ai_sequence(
         self,
@@ -834,11 +1001,13 @@ class MainWindow(QMainWindow):
             self.sequence_list.clear_sequence()
             self.log_widget.append_log("序列已清空")
 
-    def refresh_sequence_numbers(self):
+    def refresh_sequence_numbers(self, selected_row: int | None = None):
         sequence = self.sequence_list.get_sequence()
         self.sequence_list.clear()
         for item in sequence:
             self.sequence_list.add_sequence_item(item)
+        if selected_row is not None and 0 <= selected_row < self.sequence_list.count():
+            self.sequence_list.setCurrentRow(selected_row)
 
     def test_camera(self):
         """

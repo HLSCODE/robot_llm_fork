@@ -610,7 +610,7 @@ class RobotWebSocketServer:
                         "description": "控制吸液枪吸液/吐液",
                         "fields": {
                             "执行器": {"type": "select", "options": ["吸液枪"], "default": "吸液枪", "label": "执行器"},
-                            "操作":   {"type": "select", "options": ["吸", "吐"], "default": "吸", "label": "操作"},
+                            "操作":   {"type": "select", "options": ["吸", "吐", "退枪头"], "default": "吸", "label": "操作"},
                             "容量":   {"type": "number", "min": 0, "max": 10000, "default": 500, "unit": "ul", "label": "容量"}
                         }
                     }

@@ -54,6 +54,7 @@ class ActionListWidget(QListWidget):
         colors = {
             ActionType.MOVE: QColor(100, 149, 237),
             ActionType.MANIPULATE: QColor(255, 140, 0),
+            ActionType.WAIT: QColor(255, 140, 0),
             ActionType.INSPECT: QColor(60, 179, 113),
             ActionType.CHANGE_GUN: QColor(147, 112, 219),
             ActionType.VISION_CAPTURE: QColor(30, 144, 255),
@@ -174,6 +175,7 @@ class SequenceListWidget(QListWidget):
         colors = {
             ActionType.MOVE: QColor(100, 149, 237),
             ActionType.MANIPULATE: QColor(255, 140, 0),
+            ActionType.WAIT: QColor(255, 140, 0),
             ActionType.INSPECT: QColor(60, 179, 113),
             ActionType.CHANGE_GUN: QColor(147, 112, 219),
             ActionType.VISION_CAPTURE: QColor(30, 144, 255),
@@ -208,6 +210,7 @@ class SequenceListWidget(QListWidget):
         colors = {
             ActionType.MOVE: QColor(100, 149, 237),
             ActionType.MANIPULATE: QColor(255, 140, 0),
+            ActionType.WAIT: QColor(255, 140, 0),
             ActionType.INSPECT: QColor(60, 179, 113),
             ActionType.CHANGE_GUN: QColor(147, 112, 219),
             ActionType.VISION_CAPTURE: QColor(30, 144, 255),
@@ -275,6 +278,7 @@ class ControlPanel(QWidget):
     stop_clicked = pyqtSignal()
     move_up_clicked = pyqtSignal()
     move_down_clicked = pyqtSignal()
+    edit_clicked = pyqtSignal()
     delete_clicked = pyqtSignal()
     clear_clicked = pyqtSignal()
     save_clicked = pyqtSignal()
@@ -299,6 +303,9 @@ class ControlPanel(QWidget):
         self.down_btn = QPushButton("下移")
         self.down_btn.setMinimumHeight(28)
         self.down_btn.clicked.connect(self.move_down_clicked.emit)
+        self.edit_btn = QPushButton("修改")
+        self.edit_btn.setMinimumHeight(28)
+        self.edit_btn.clicked.connect(self.edit_clicked.emit)
         self.delete_btn = QPushButton("删除")
         self.delete_btn.setMinimumHeight(28)
         self.delete_btn.clicked.connect(self.delete_clicked.emit)
@@ -307,6 +314,7 @@ class ControlPanel(QWidget):
         self.clear_btn.clicked.connect(self.clear_clicked.emit)
         edit_row1.addWidget(self.up_btn)
         edit_row1.addWidget(self.down_btn)
+        edit_row1.addWidget(self.edit_btn)
         edit_row1.addWidget(self.delete_btn)
         edit_row1.addWidget(self.clear_btn)
         layout.addLayout(edit_row1)

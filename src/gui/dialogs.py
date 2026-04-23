@@ -247,6 +247,7 @@ class ActionConfigDialog(QDialog):
             self.pipette_operation_combo = QComboBox()
             self.pipette_operation_combo.addItem("吸", "吸")
             self.pipette_operation_combo.addItem("吐", "吐")
+            self.pipette_operation_combo.addItem("退枪头", "退枪头")
             current_pipette_op = self.action_data.get('parameters', {}).get('操作', '吸')
             self.pipette_operation_combo.setCurrentText(current_pipette_op)
 
