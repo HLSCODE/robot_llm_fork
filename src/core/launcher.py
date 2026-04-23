@@ -33,10 +33,11 @@ def init_hardware(simulation: bool = False):
     """
     if simulation:
         print("== 模拟模式：跳过硬件初始化 ==")
-        return None, None
+        return None, None, None
 
     robot_controller = None
     body_controller = None
+    neck_controller = None
 
     # 初始化机械臂
     try:
@@ -74,7 +75,19 @@ def init_hardware(simulation: bool = False):
     except Exception as e:
         print(f"身体初始化异常：{e}")
 
-    return robot_controller, body_controller
+    try:
+        from ..devices import PWMNeckController
+        if PWMNeckController is None:
+            raise ImportError("PWMNeckController 模块不可用")
+        print("正在初始化 PWM 颈部舵机...")
+        neck_controller = PWMNeckController()  # 无参：从 config.env 自动读
+        print("  PWM 颈部舵机初始化成功")
+    except ImportError as e:
+        print(f"PWM 颈部舵机模块导入失败：{e}")
+    except Exception as e:
+        print(f"PWM 颈部舵机初始化异常：{e}")
+
+    return robot_controller, body_controller, neck_controller
 
 
 def run_gui():
@@ -94,7 +107,7 @@ def run_gui():
 def run_server(args, config=None):
     """启动 WebSocket Server 模式"""
     # 初始化硬件
-    robot_controller, body_controller = init_hardware(args.simulation)
+    robot_controller, body_controller, neck_controller = init_hardware(args.simulation)
 
     # 启动 WebSocket 服务
     from ..robot_server.ws_server import RobotWebSocketServer
@@ -106,6 +119,7 @@ def run_server(args, config=None):
     server = RobotWebSocketServer(
         robot_controller=robot_controller,
         body_controller=body_controller,
+        neck_controller=neck_controller,
         host=host,
         port=port,
     )

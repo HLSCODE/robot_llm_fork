@@ -133,6 +133,7 @@ class RobotWebSocketServer:
         self,
         robot_controller=None,
         body_controller=None,
+        neck_controller=None,
         host: str = "0.0.0.0",
         port: int = 8765,
     ):
@@ -143,6 +144,7 @@ class RobotWebSocketServer:
 
         self._robot_controller = robot_controller
         self._body_controller = body_controller
+        self._neck_controller = neck_controller
         self._host = host
         self._port = port
 

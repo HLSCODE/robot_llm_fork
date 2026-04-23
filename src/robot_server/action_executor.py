@@ -31,6 +31,7 @@ class ActionExecutor:
         self,
         robot_controller=None,
         body_controller=None,
+        neck_controller=None,
         on_step_started: Optional[Callable] = None,
         on_step_completed: Optional[Callable] = None,
         on_step_failed: Optional[Callable] = None,
@@ -39,6 +40,7 @@ class ActionExecutor:
     ):
         self._robot_controller = robot_controller
         self._body_controller = body_controller
+        self._neck_controller = neck_controller
 
         # 回调
         self._on_step_started = on_step_started or (lambda *a: None)

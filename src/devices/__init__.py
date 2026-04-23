@@ -19,3 +19,8 @@ try:
     from .modbus_motor import ModbusMotor
 except ImportError:
     ModbusMotor = None
+
+try:
+    from .pwm_neck import PWMNeckController
+except ImportError:
+    PWMNeckController = None
