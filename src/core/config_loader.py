@@ -75,7 +75,21 @@ class Config:
     RELAY_SERIAL_PORT: str = "/dev/power"
     RELAY_BAUDRATE: int = 38400
     RELAY_TIMEOUT: int = 1
-    
+
+    # PWM 颈部舵机配置
+    PWM_NECK_SERIAL_PORT: str = "/dev/neck"
+    PWM_NECK_BAUDRATE: int = 9600
+    PWM_NECK_H_SERVO_ID: int = 0
+    PWM_NECK_H_INITIAL_PWM: int = 1600
+    PWM_NECK_H_PWM_MIN: int = 1100
+    PWM_NECK_H_PWM_MAX: int = 2100
+    PWM_NECK_H_DEFAULT_TIME: int = 1500
+    PWM_NECK_V_SERVO_ID: int = 1
+    PWM_NECK_V_INITIAL_PWM: int = 1600
+    PWM_NECK_V_PWM_MIN: int = 1200
+    PWM_NECK_V_PWM_MAX: int = 1700
+    PWM_NECK_V_DEFAULT_TIME: int = 2500
+
     # WebSocket 服务器配置
     WEBSOCKET_HOST: str = "0.0.0.0"
     WEBSOCKET_PORT: int = 8765
@@ -177,7 +191,21 @@ class Config:
         instance.GRIPPER_PICK_TIMEOUT = int(os.getenv("GRIPPER_PICK_TIMEOUT", "3"))
         instance.GRIPPER_RELEASE_SPEED = int(os.getenv("GRIPPER_RELEASE_SPEED", "100"))
         instance.GRIPPER_RELEASE_TIMEOUT = int(os.getenv("GRIPPER_RELEASE_TIMEOUT", "3"))
-        
+
+        # PWM 颈部舵机
+        instance.PWM_NECK_SERIAL_PORT = os.getenv("PWM_NECK_SERIAL_PORT", "/dev/neck")
+        instance.PWM_NECK_BAUDRATE = int(os.getenv("PWM_NECK_BAUDRATE", "9600"))
+        instance.PWM_NECK_H_SERVO_ID = int(os.getenv("PWM_NECK_H_SERVO_ID", "0"))
+        instance.PWM_NECK_H_INITIAL_PWM = int(os.getenv("PWM_NECK_H_INITIAL_PWM", "1600"))
+        instance.PWM_NECK_H_PWM_MIN = int(os.getenv("PWM_NECK_H_PWM_MIN", "1100"))
+        instance.PWM_NECK_H_PWM_MAX = int(os.getenv("PWM_NECK_H_PWM_MAX", "2100"))
+        instance.PWM_NECK_H_DEFAULT_TIME = int(os.getenv("PWM_NECK_H_DEFAULT_TIME", "1500"))
+        instance.PWM_NECK_V_SERVO_ID = int(os.getenv("PWM_NECK_V_SERVO_ID", "1"))
+        instance.PWM_NECK_V_INITIAL_PWM = int(os.getenv("PWM_NECK_V_INITIAL_PWM", "1600"))
+        instance.PWM_NECK_V_PWM_MIN = int(os.getenv("PWM_NECK_V_PWM_MIN", "1200"))
+        instance.PWM_NECK_V_PWM_MAX = int(os.getenv("PWM_NECK_V_PWM_MAX", "1700"))
+        instance.PWM_NECK_V_DEFAULT_TIME = int(os.getenv("PWM_NECK_V_DEFAULT_TIME", "2500"))
+
         # 串口设备配置
         instance.BODY_SERIAL_PORT = os.getenv("BODY_SERIAL_PORT", "/dev/body")
         instance.BODY_BAUDRATE = int(os.getenv("BODY_BAUDRATE", "115200"))
@@ -358,6 +386,29 @@ class Config:
             "port": instance.RELAY_SERIAL_PORT,
             "baudrate": instance.RELAY_BAUDRATE,
             "timeout": instance.RELAY_TIMEOUT
+        }
+
+    @classmethod
+    def get_pwm_neck_config(cls) -> dict:
+        """获取 PWM 颈部舵机配置"""
+        instance = cls.get_instance()
+        return {
+            "port": instance.PWM_NECK_SERIAL_PORT,
+            "baudrate": instance.PWM_NECK_BAUDRATE,
+            "horizontal": {
+                "servo_id": instance.PWM_NECK_H_SERVO_ID,
+                "initial_pwm": instance.PWM_NECK_H_INITIAL_PWM,
+                "pwm_min": instance.PWM_NECK_H_PWM_MIN,
+                "pwm_max": instance.PWM_NECK_H_PWM_MAX,
+                "default_time": instance.PWM_NECK_H_DEFAULT_TIME,
+            },
+            "vertical": {
+                "servo_id": instance.PWM_NECK_V_SERVO_ID,
+                "initial_pwm": instance.PWM_NECK_V_INITIAL_PWM,
+                "pwm_min": instance.PWM_NECK_V_PWM_MIN,
+                "pwm_max": instance.PWM_NECK_V_PWM_MAX,
+                "default_time": instance.PWM_NECK_V_DEFAULT_TIME,
+            },
         }
 
     @classmethod

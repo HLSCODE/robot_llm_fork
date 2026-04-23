@@ -8,13 +8,13 @@ dependencies = [
     "openai>=1.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "websockets>=12.0",
     "opencv-python>=4.13.0.92",
     "pyserial>=3.5",
     "ultralytics>=8.4.36",
     "scikit-learn>=1.8.0",
     "robotic-arm>=1.1.5",
     "pyrealsense2>=2.57.7.10387",
+    "websockets>=12.0",
 ]
 
 [dependency-groups]

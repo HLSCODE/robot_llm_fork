@@ -31,6 +31,7 @@ class ActionExecutor:
         self,
         robot_controller=None,
         body_controller=None,
+        neck_controller=None,
         on_step_started: Optional[Callable] = None,
         on_step_completed: Optional[Callable] = None,
         on_step_failed: Optional[Callable] = None,
@@ -39,6 +40,7 @@ class ActionExecutor:
     ):
         self._robot_controller = robot_controller
         self._body_controller = body_controller
+        self._neck_controller = neck_controller
 
         # 回调
         self._on_step_started = on_step_started or (lambda *a: None)
@@ -358,19 +360,25 @@ class ActionExecutor:
 
         try:
             from ..devices import ADP
-            adp = ADP(port=port)
+            adp = None
             if operation == '吸':
+                adp = ADP(port=port)
                 self._on_log("正在吸液...")
                 ret = adp.absorb(capacity)
             elif operation == '吐':
+                adp = ADP(port=port)
                 self._on_log("正在吐液...")
                 ret = adp.dispense_all()
+            elif operation == '退枪头':
+                self._on_log("正在退枪头...")
+                from ..devices.yiyeqiang_out import eject_tip
+                ret = eject_tip(port=port)
             else:
                 self._on_log(f"未知的吸液枪操作: {operation}", "error")
-                adp.close()
                 return False
 
-            adp.close()
+            if adp is not None:
+                adp.close()
 
             if ret:
                 self._on_log(f"吸液枪{operation}执行成功")
