@@ -8,7 +8,6 @@ dependencies = [
     "openai>=1.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "websockets>=12.0",
     "opencv-python>=4.13.0.92",
     "pyserial>=3.5",
     "ultralytics>=8.4.36",
