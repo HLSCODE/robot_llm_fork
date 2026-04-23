@@ -14,6 +14,7 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "robotic-arm>=1.1.5",
     "pyrealsense2>=2.57.7.10387",
+    "websockets>=12.0",
 ]
 
 [dependency-groups]
