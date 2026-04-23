@@ -745,10 +745,10 @@ class RobotController:
         if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
             raise Exception("Robot2未连接")
         robot = self.robot2_ctrl.robot
-        # pos_1shang = GUN1_POSITIONS["1shang"]
-        # pos_1zhong = GUN1_POSITIONS["1zhong"]
-        pos_1shang = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
-        pos_1zhong = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
+        pos_1shang = GUN1_POSITIONS["1shang"]
+        pos_1zhong = GUN1_POSITIONS["1zhong"]
+        # pos_1shang = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
+        # pos_1zhong = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
 
         print("退枪头1动作")
         ret = robot.rm_movel(pos_1shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
@@ -784,10 +784,10 @@ class RobotController:
         if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
             raise Exception("Robot2未连接")
         robot = self.robot2_ctrl.robot
-        # pos_2shang = GUN2_POSITIONS["2shang"]
-        # pos_2zhong = GUN2_POSITIONS["2zhong"]
-        pos_2shang = [-0.521046,-0.307949,-0.209037,-3.054,-0.002,2.992]
-        pos_2zhong = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
+        pos_2shang = GUN2_POSITIONS["2shang"]
+        pos_2zhong = GUN2_POSITIONS["2zhong"]
+        # pos_2shang = [-0.521046,-0.307949,-0.209037,-3.054,-0.002,2.992]
+        # pos_2zhong = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
         print("退枪头2动作")
         ret = robot.rm_movel(pos_2shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
         if ret != 0:
