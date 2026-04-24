@@ -3,6 +3,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..core.models import SequenceItem, SequenceItemStatus, ActionType
 from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
+from ..move.move_controller import RobotMoveController
 
 
 
@@ -14,13 +15,14 @@ class ExecutionThread(QThread):
     step_failed = pyqtSignal(int, SequenceItem, str)
     log_message = pyqtSignal(str)
 
-    def __init__(self, sequence: list[SequenceItem], robot_controller=None, body_controller=None):
+    def __init__(self, sequence: list[SequenceItem], robot_controller=None, body_controller=None, move_controller=None):
         super().__init__()
         self.sequence = sequence
         self._stop_requested = False
         self._paused = False
         self._robot_controller = robot_controller
         self._body_controller = body_controller
+        self._move_controller = move_controller  # 底盘移动控制器，由调用方传入
 
     def stop(self):
         self._stop_requested = True
@@ -80,6 +82,8 @@ class ExecutionThread(QThread):
         try:
             if definition.type == ActionType.MOVE:
                 return self._execute_move(params)
+            elif definition.type == ActionType.BASE_MOVE:
+                return self._execute_base_move(params)
             elif definition.type == ActionType.MANIPULATE:
                 return self._execute_manipulate(params)
             elif definition.type == ActionType.INSPECT:
@@ -150,6 +154,65 @@ class ExecutionThread(QThread):
             return False
         except Exception as e:
             self.log_message.emit(f"执行机械臂移动出错: {str(e)}")
+            return False
+
+    def _execute_base_move(self, params: dict) -> bool:
+        """执行底盘移动（统一入口，根据 move_mode 区分）"""
+        move_mode = params.get('move_mode', 'position')
+        
+        if move_mode == 'position':
+            return self._execute_base_move_position(params)
+        elif move_mode == 'distance':
+            return self._execute_base_move_distance(params)
+        else:
+            self.log_message.emit(f"未知的移动方式：{move_mode}")
+            return False
+
+    def _execute_base_move_position(self, params: dict) -> bool:
+        """执行底盘位置移动"""
+        id_value = params.get('id', 0)
+        cid = params.get('cid', 0)
+        
+        self.log_message.emit(f"底盘位置移动：ID={id_value}, CID={cid}")
+        
+        if self._move_controller is None:
+            self.log_message.emit("底盘移动控制器未初始化")
+            return False
+        
+        try:
+            success = self._move_controller.move_to_position(id_value, cid)
+            
+            if success:
+                self.log_message.emit(f"底盘位置移动完成：ID={id_value}, CID={cid}")
+            else:
+                self.log_message.emit(f"底盘位置移动失败：ID={id_value}, CID={cid}")
+            
+            return success
+        except Exception as e:
+            self.log_message.emit(f"执行底盘位置移动出错：{str(e)}")
+            return False
+
+    def _execute_base_move_distance(self, params: dict) -> bool:
+        """执行底盘距离移动"""
+        valueY = params.get('valueY', 0.0)
+        
+        self.log_message.emit(f"底盘距离移动：距离={valueY}m")
+        
+        if self._move_controller is None:
+            self.log_message.emit("底盘移动控制器未初始化")
+            return False
+        
+        try:
+            success = self._move_controller.move_slowly(valueY)
+            
+            if success:
+                self.log_message.emit(f"底盘距离移动完成：距离={valueY}m")
+            else:
+                self.log_message.emit(f"底盘距离移动失败：距离={valueY}m")
+            
+            return success
+        except Exception as e:
+            self.log_message.emit(f"执行底盘距离移动出错：{str(e)}")
             return False
 
     def _execute_body_move(self, params: dict) -> bool:

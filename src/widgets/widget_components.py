@@ -52,7 +52,8 @@ class ActionListWidget(QListWidget):
 
     def _get_icon_for_type(self, action_type: ActionType) -> QIcon:
         colors = {
-            ActionType.MOVE: QColor(100, 149, 237),
+            ActionType.MOVE: QColor(100, 149, 237),  # 机械臂移动 - 蓝色
+            ActionType.BASE_MOVE: QColor(255, 99, 71),  # 底盘移动 - 红色
             ActionType.MANIPULATE: QColor(255, 140, 0),
             ActionType.WAIT: QColor(255, 140, 0),
             ActionType.INSPECT: QColor(60, 179, 113),
@@ -173,7 +174,8 @@ class SequenceListWidget(QListWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         colors = {
-            ActionType.MOVE: QColor(100, 149, 237),
+            ActionType.MOVE: QColor(100, 149, 237),  # 机械臂移动 - 蓝色
+            ActionType.BASE_MOVE: QColor(255, 99, 71),  # 底盘移动 - 红色
             ActionType.MANIPULATE: QColor(255, 140, 0),
             ActionType.WAIT: QColor(255, 140, 0),
             ActionType.INSPECT: QColor(60, 179, 113),
@@ -208,7 +210,8 @@ class SequenceListWidget(QListWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         colors = {
-            ActionType.MOVE: QColor(100, 149, 237),
+            ActionType.MOVE: QColor(100, 149, 237),  # 机械臂移动 - 蓝色
+            ActionType.BASE_MOVE: QColor(255, 99, 71),  # 底盘移动 - 红色
             ActionType.MANIPULATE: QColor(255, 140, 0),
             ActionType.WAIT: QColor(255, 140, 0),
             ActionType.INSPECT: QColor(60, 179, 113),
