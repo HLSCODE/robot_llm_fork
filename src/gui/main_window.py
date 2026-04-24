@@ -38,6 +38,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.actions: dict[ActionType, list[ActionDefinition]] = {
             ActionType.MOVE: [],
+            ActionType.BASE_MOVE: [],
             ActionType.MANIPULATE: [],
             ActionType.INSPECT: [],
             ActionType.WAIT: [],
@@ -55,6 +56,9 @@ class MainWindow(QMainWindow):
         # 身体（ModbusMotor）控制相关
         self.body_controller = None
         self.body_connected = False
+
+        # 底盘移动控制器
+        self.move_controller = None
 
         # ADP（吸液枪）实例 - 在执行吸液/吐液时才创建
         self.adp_instance = None
@@ -479,6 +483,14 @@ class MainWindow(QMainWindow):
         try:
             # 创建机械臂控制器
             self.robot_controller = RobotController()
+            
+            # 创建底盘移动控制器
+            try:
+                from ..move.move_controller import RobotMoveController
+                self.move_controller = RobotMoveController()
+                self.log_widget.append_log("底盘移动控制器初始化成功")
+            except Exception as e:
+                self.log_widget.append_log(f"底盘移动控制器初始化失败：{e}")
 
             # 初始化 Robot1
             self.log_widget.append_log("初始化 Robot1...")
@@ -655,8 +667,22 @@ class MainWindow(QMainWindow):
 
     def delete_action(self):
         current_tab = self.action_tabs.currentIndex()
+        
+        # 移动类 Tab 需要特殊处理，因为包含多种类型
+        if current_tab == 0:
+            current_item = self.move_list.currentItem()
+            if current_item is None:
+                QMessageBox.warning(self, "警告", "请先选择一个要删除的动作")
+                return
+            
+            action = current_item.data(Qt.ItemDataRole.UserRole)
+            if action and action.type in self.actions:
+                self.actions[action.type].remove(action)
+                self.refresh_action_list(action.type)
+                self.save_actions()
+            return
+        
         action_type_map = {
-            0: ActionType.MOVE,
             1: ActionType.MANIPULATE,
             2: ActionType.INSPECT,
             3: ActionType.CHANGE_GUN,
@@ -667,7 +693,6 @@ class MainWindow(QMainWindow):
             return
 
         list_map = {
-            ActionType.MOVE: self.move_list,
             ActionType.MANIPULATE: self.manipulate_list,
             ActionType.INSPECT: self.inspect_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
@@ -736,9 +761,16 @@ class MainWindow(QMainWindow):
             self._refresh_execute_merged_list()
             return
 
+        # 移动类的所有子类型都显示在 move_list 中
+        if action_type in {ActionType.MOVE, ActionType.BASE_MOVE}:
+            self.move_list.clear()
+            for action in self.actions[ActionType.MOVE]:
+                self.move_list.add_action(action)
+            for action in self.actions[ActionType.BASE_MOVE]:
+                self.move_list.add_action(action)
+            return
+
         list_map = {
-            ActionType.MOVE: self.move_list,
-            ActionType.MANIPULATE: self.manipulate_list,
             ActionType.INSPECT: self.inspect_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
             ActionType.VISION_CAPTURE: self.vision_capture_list
@@ -775,7 +807,7 @@ class MainWindow(QMainWindow):
 
     def _resolve_action_type_for_current_tab(self, current_tab: int):
         action_type_map = {
-            0: ActionType.MOVE,
+            0: ActionType.MOVE,  # 移动类 Tab，需要进一步选择
             2: ActionType.INSPECT,
             3: ActionType.CHANGE_GUN,
             4: ActionType.VISION_CAPTURE
@@ -793,6 +825,24 @@ class MainWindow(QMainWindow):
             if not ok:
                 return None
             return ActionType.WAIT if selected == "Wait" else ActionType.MANIPULATE
+        
+        # 移动类 Tab 需要选择具体类型
+        if current_tab == 0:
+            options = ["机械臂/身体移动", "底盘移动"]
+            selected, ok = QInputDialog.getItem(
+                self,
+                "选择移动类型",
+                "创建移动类动作:",
+                options,
+                0,
+                False
+            )
+            if not ok:
+                return None
+            if selected == "机械臂/身体移动":
+                return ActionType.MOVE
+            else:
+                return ActionType.BASE_MOVE
 
         return action_type_map.get(current_tab)
 
@@ -847,7 +897,7 @@ class MainWindow(QMainWindow):
         for i, item in enumerate(sequence):
             self.sequence_list.update_item_status(i, item)
 
-        self.execution_thread = ExecutionThread(sequence, self.robot_controller, self.body_controller)
+        self.execution_thread = ExecutionThread(sequence, self.robot_controller, self.body_controller, self.move_controller)
         self.execution_thread.step_started.connect(self.on_step_started)
         self.execution_thread.step_completed.connect(self.on_step_completed)
         self.execution_thread.step_failed.connect(self.on_step_failed)
@@ -1096,9 +1146,17 @@ class MainWindow(QMainWindow):
                 self.body_controller.close()
                 self.log_widget.append_log("身体已断开连接")
             except Exception as e:
-                print(f"断开身体连接时出错: {e}")
+                print(f"断开身体连接时出错：{e}")
 
-        # 关闭ADP连接
+        # 关闭底盘移动控制器连接
+        if self.move_controller is not None:
+            try:
+                self.move_controller.close()
+                self.log_widget.append_log("底盘移动控制器已断开连接")
+            except Exception as e:
+                print(f"断开底盘移动控制器连接时出错：{e}")
+
+        # 关闭 ADP 连接
         if self.adp_instance is not None:
             try:
                 self.adp_instance.close()
