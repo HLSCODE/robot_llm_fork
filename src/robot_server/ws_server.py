@@ -134,6 +134,7 @@ class RobotWebSocketServer:
         robot_controller=None,
         body_controller=None,
         neck_controller=None,
+        move_controller=None,
         host: str = "0.0.0.0",
         port: int = 8765,
     ):
@@ -145,6 +146,7 @@ class RobotWebSocketServer:
         self._robot_controller = robot_controller
         self._body_controller = body_controller
         self._neck_controller = neck_controller
+        self._move_controller = move_controller  # 底盘移动控制器
         self._host = host
         self._port = port
 
@@ -173,6 +175,7 @@ class RobotWebSocketServer:
             "robot1": False,
             "robot2": False,
             "body": body_controller is not None,
+            "base": move_controller is not None,
         }
         # 检测机械臂连接状态
         if robot_controller is not None:
@@ -212,6 +215,7 @@ class RobotWebSocketServer:
         self._executor = ActionExecutor(
             robot_controller=self._robot_controller,
             body_controller=self._body_controller,
+            move_controller=self._move_controller,
             on_step_started=self._on_step_started,
             on_step_completed=self._on_step_completed,
             on_step_failed=self._on_step_failed,
