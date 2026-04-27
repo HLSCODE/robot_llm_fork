@@ -23,6 +23,17 @@ class ExecutionThread(QThread):
         self._robot_controller = robot_controller
         self._body_controller = body_controller
         self._move_controller = move_controller  # 底盘移动控制器，由调用方传入
+        
+        # 动作类型与执行方法的映射
+        self.execute_methods = {
+            ActionType.MOVE: self._execute_move,
+            ActionType.BASE_MOVE: self._execute_base_move,
+            ActionType.MANIPULATE: self._execute_manipulate,
+            ActionType.INSPECT: self._execute_inspect,
+            ActionType.WAIT: self._execute_wait,
+            ActionType.CHANGE_GUN: self._execute_change_gun,
+            ActionType.VISION_CAPTURE: self._execute_vision_capture,
+        }
 
     def stop(self):
         self._stop_requested = True
@@ -76,26 +87,19 @@ class ExecutionThread(QThread):
         definition = item.definition
         params = definition.parameters
 
-        self.log_message.emit(f"正在执行: {definition.name}")
-        self.log_message.emit(f"参数: {params}")
+        self.log_message.emit(f"正在执行：{definition.name}")
+        self.log_message.emit(f"参数：{params}")
 
         try:
-            if definition.type == ActionType.MOVE:
-                return self._execute_move(params)
-            elif definition.type == ActionType.BASE_MOVE:
-                return self._execute_base_move(params)
-            elif definition.type == ActionType.MANIPULATE:
-                return self._execute_manipulate(params)
-            elif definition.type == ActionType.INSPECT:
-                return self._execute_inspect(params)
-            elif definition.type == ActionType.WAIT:
-                return self._execute_wait(params)
-            elif definition.type == ActionType.CHANGE_GUN:
-                return self._execute_change_gun(params)
-            elif definition.type == ActionType.VISION_CAPTURE:
-                return self._execute_vision_capture(params)
+            # 根据动作类型获取对应的执行方法
+            execute_method = self.execute_methods.get(definition.type)
+            if execute_method:
+                return execute_method(params)
+            else:
+                self.log_message.emit(f"未知的动作类型：{definition.type}")
+                return False
         except Exception as e:
-            self.log_message.emit(f"执行错误: {str(e)}")
+            self.log_message.emit(f"执行错误：{str(e)}")
             return False
 
     def _execute_move(self, params: dict) -> bool:
