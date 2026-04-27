@@ -22,18 +22,14 @@ class RobotMoveController:
 
     def connect(self):
         """连接到服务器"""
-        try:
-            if self.client is None:  # 如果未连接，则创建新的客户端实例
-                self.client = TCPClient(
-                    host=self.server_host,
-                    port=self.server_port,
-                    bind_port=self.client_bind_port
-                )
-                self.client.connect()
-                print(f"Connected to server at {self.server_host}:{self.server_port}")
-        except Exception as e:
-            print(f"Connection failed: {e}")
-            raise
+        if self.client is None:  # 如果未连接，则创建新的客户端实例
+            self.client = TCPClient(
+                host=self.server_host,
+                port=self.server_port,
+                bind_port=self.client_bind_port
+            )
+            self.client.connect()
+            print(f"Connected to server at {self.server_host}:{self.server_port}")
 
     def send_command(self, command):
         """发送命令到服务器"""

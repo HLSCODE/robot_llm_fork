@@ -10,7 +10,11 @@ import threading
 import logging
 from typing import Callable, Optional, List
 
+from ..arm_sdk.controller import RobotController
 from ..core.models import SequenceItem, SequenceItemStatus, ActionType
+from ..devices.modbus_motor import ModbusMotor
+from ..devices.pwm_neck import PWMNeckController
+from ..base_move.move_controller import RobotMoveController
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +33,10 @@ class ActionExecutor:
 
     def __init__(
         self,
-        robot_controller=None,
-        body_controller=None,
-        neck_controller=None,
-        move_controller=None,
+        robot_controller: RobotController | None = None,
+        body_controller: ModbusMotor | None = None,
+        neck_controller: PWMNeckController | None = None,
+        move_controller: RobotMoveController | None = None,
         on_step_started: Optional[Callable] = None,
         on_step_completed: Optional[Callable] = None,
         on_step_failed: Optional[Callable] = None,

@@ -21,6 +21,7 @@ class TCPClient:
             print(f"Connected to server at {self.host}:{self.port}")
         except Exception as e:
             print(f"Connection failed: {e}")
+            raise
 
     def send_command(self, command):
         try:

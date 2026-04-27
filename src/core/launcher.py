@@ -26,21 +26,11 @@ def setup_logging(level: str = "INFO") -> None:
     )
 
 
-def init_hardware(simulation: bool = False):
-    """
-    初始化机器人硬件，返回 (robot_controller, body_controller, neck_controller, move_controller)
-    模拟模式下返回 (None, None, None, None)
-    """
+def _init_robot_controller(simulation: bool = False):
+    """初始化机械臂控制器，模拟模式下返回 None"""
     if simulation:
-        print("== 模拟模式：跳过硬件初始化 ==")
-        return None, None, None, None
+        return None
 
-    robot_controller = None
-    body_controller = None
-    neck_controller = None
-    move_controller = None
-
-    # 初始化机械臂
     try:
         from ..arm_sdk import RobotController
         if RobotController is None:
@@ -60,46 +50,71 @@ def init_hardware(simulation: bool = False):
         else:
             print("  Robot2 初始化失败")
 
+        return robot_controller
     except ImportError as e:
         print(f"机械臂模块导入失败：{e}")
     except Exception as e:
         print(f"机械臂初始化异常：{e}")
 
-    # 初始化身体（ModbusMotor）
+    return None
+
+
+def _init_body_controller(simulation: bool = False):
+    """初始化身体升降平台控制器，模拟模式下返回 None"""
+    if simulation:
+        return None
+
     try:
         from ..devices import ModbusMotor
         print("正在初始化身体控制器...")
         body_controller = ModbusMotor(port="/dev/body", baudrate=115200, slave_id=1, timeout=1)
         print("  身体控制器初始化成功")
+        return body_controller
     except ImportError as e:
         print(f"身体模块导入失败：{e}")
     except Exception as e:
         print(f"身体初始化异常：{e}")
+
+    return None
+
+
+def _init_neck_controller(simulation: bool = False):
+    """初始化PWM颈部舵机控制器，模拟模式下返回 None"""
+    if simulation:
+        return None
 
     try:
         from ..devices import PWMNeckController
         if PWMNeckController is None:
             raise ImportError("PWMNeckController 模块不可用")
         print("正在初始化 PWM 颈部舵机...")
-        neck_controller = PWMNeckController()  # 无参：从 config.env 自动读
-        print("  PWM 颈部舵机初始化成功")
+        neck_controller = PWMNeckController()  # 无参：从 config.env 自动读取配置
+        return neck_controller
     except ImportError as e:
         print(f"PWM 颈部舵机模块导入失败：{e}")
     except Exception as e:
         print(f"PWM 颈部舵机初始化异常：{e}")
 
-    # 初始化底盘移动控制器
+    return None
+
+
+def _init_move_controller(simulation: bool = False):
+    """初始化底盘移动控制器，模拟模式下返回 None"""
+    if simulation:
+        return None
+
     try:
-        from ..move.move_controller import RobotMoveController
+        from ..base_move.move_controller import RobotMoveController
         print("正在初始化底盘移动控制器...")
         move_controller = RobotMoveController()
-        print("  底盘移动控制器初始化成功")
+        move_controller.connect()
+        return move_controller
     except ImportError as e:
         print(f"底盘移动模块导入失败：{e}")
     except Exception as e:
         print(f"底盘移动初始化异常：{e}")
 
-    return robot_controller, body_controller, neck_controller, move_controller
+    return None
 
 
 def run_gui():
@@ -118,9 +133,6 @@ def run_gui():
 
 def run_server(args, config=None):
     """启动 WebSocket Server 模式"""
-    # 初始化硬件
-    robot_controller, body_controller, neck_controller, move_controller = init_hardware(args.simulation)
-
     # 启动 WebSocket 服务
     from ..robot_server.ws_server import RobotWebSocketServer
 
@@ -129,10 +141,10 @@ def run_server(args, config=None):
     port = args.port if args.port != 8765 else (config.WEBSOCKET_PORT if config else 8765)
 
     server = RobotWebSocketServer(
-        robot_controller=robot_controller,
-        body_controller=body_controller,
-        neck_controller=neck_controller,
-        move_controller=move_controller,
+        robot_controller=_init_robot_controller(args.simulation),
+        body_controller=_init_body_controller(args.simulation),
+        neck_controller=_init_neck_controller(args.simulation),
+        move_controller=_init_move_controller(args.simulation),
         host=host,
         port=port,
     )

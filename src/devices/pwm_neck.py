@@ -8,6 +8,9 @@ PWM 颈部舵机控制器（项目适配层）
 - 异常在构造时吞掉并返回 None ser，不阻塞启动
 """
 from typing import Optional
+from ..pwm_sdk import (
+    NeckController, HorizontalServoConfig, VerticalServoConfig, ServoAxis
+)
 
 # 延迟加载配置（避免循环导入，跟 adp.py 同样的套路）
 _pwm_neck_config_cache = None
@@ -55,11 +58,8 @@ class PWMNeckController:
         self.baudrate = baudrate
         self._controller = None  # pwm_sdk.NeckController 实例
 
-        # 延迟 import SDK，避免项目启动时 SDK 任何问题阻塞
+        # 初始化 SDK 实例
         try:
-            from ..pwm_sdk import (
-                NeckController, HorizontalServoConfig, VerticalServoConfig,
-            )
             h_cfg = HorizontalServoConfig(**h_cfg_dict)
             v_cfg = VerticalServoConfig(**v_cfg_dict)
             self._controller = NeckController(port, baudrate, h_cfg, v_cfg)
@@ -71,13 +71,11 @@ class PWMNeckController:
     # ---------------- 对外 API（代理到 SDK）----------------
     def move_horizontal(self, pwm: int, time_ms: Optional[int] = None):
         """水平舵机移到绝对 PWM 值"""
-        from ..pwm_sdk import ServoAxis
         if self._controller is None:
             return
         self._controller.move_to(pwm, ServoAxis.HORIZONTAL, time_ms)
 
     def move_vertical(self, pwm: int, time_ms: Optional[int] = None):
-        from ..pwm_sdk import ServoAxis
         if self._controller is None:
             return
         self._controller.move_to(pwm, ServoAxis.VERTICAL, time_ms)
@@ -88,13 +86,11 @@ class PWMNeckController:
         self._controller.move_to_both(h_pwm, v_pwm, time_ms)
 
     def offset_horizontal(self, offset: int, time_ms: Optional[int] = None):
-        from ..pwm_sdk import ServoAxis
         if self._controller is None:
             return
         self._controller.move_offset(offset, ServoAxis.HORIZONTAL, time_ms)
 
     def offset_vertical(self, offset: int, time_ms: Optional[int] = None):
-        from ..pwm_sdk import ServoAxis
         if self._controller is None:
             return
         self._controller.move_offset(offset, ServoAxis.VERTICAL, time_ms)

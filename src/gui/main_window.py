@@ -74,7 +74,10 @@ class MainWindow(QMainWindow):
 
         # 自动初始化机械臂和移液枪
         if ROBOT_AVAILABLE:
-            self.auto_initialize()
+            self.initialize_robots()
+
+        # 初始化底盘移动控制器
+        self.initialize_move_controller()
         # 注释掉下面 2 行，防止启动时升降平台高度变化
         if MODBUS_AVAILABLE:
             self.initialize_body()
@@ -467,11 +470,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(status_layout)
         return bar
 
-    def auto_initialize(self):
-        """自动初始化机械臂"""
-        # 只自动初始化机械臂
-        self.initialize_robots()
-
     def initialize_robots(self):
         """初始化机械臂"""
         if not ROBOT_AVAILABLE:
@@ -483,14 +481,6 @@ class MainWindow(QMainWindow):
         try:
             # 创建机械臂控制器
             self.robot_controller = RobotController()
-            
-            # 创建底盘移动控制器
-            try:
-                from ..move.move_controller import RobotMoveController
-                self.move_controller = RobotMoveController()
-                self.log_widget.append_log("底盘移动控制器初始化成功")
-            except Exception as e:
-                self.log_widget.append_log(f"底盘移动控制器初始化失败：{e}")
 
             # 初始化 Robot1
             self.log_widget.append_log("初始化 Robot1...")
@@ -532,6 +522,17 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             self.log_widget.append_log(f"机械臂初始化异常: {str(e)}")
+
+    def initialize_move_controller(self) -> None:
+        """初始化底盘移动控制器"""
+        try:
+            from ..base_move.move_controller import RobotMoveController
+            self.log_widget.append_log("初始化底盘移动控制器...")
+            self.move_controller = RobotMoveController()
+            self.move_controller.connect()
+            self.log_widget.append_log("底盘移动控制器初始化成功")
+        except Exception as e:
+            self.log_widget.append_log(f"底盘移动控制器初始化失败：{e}")
 
     def update_robot_status(self, robot_name: str, connected: bool):
         """更新机械臂状态指示灯"""
