@@ -152,6 +152,17 @@ class ActionConfigDialog(QDialog):
             ActionType.VISION_CAPTURE: self._init_vision_capture_ui,
         }
         
+        # 动作类型与参数构建方法的映射
+        self.param_build_methods = {
+            ActionType.MOVE: self._build_move_params,
+            ActionType.MANIPULATE: self._build_manipulate_params,
+            ActionType.INSPECT: self._build_inspect_params,
+            ActionType.WAIT: self._build_wait_params,
+            ActionType.BASE_MOVE: self._build_base_move_params,
+            ActionType.CHANGE_GUN: self._build_change_gun_params,
+            ActionType.VISION_CAPTURE: self._build_vision_capture_params,
+        }
+        
         self.init_ui()
 
     def init_ui(self):
@@ -491,83 +502,102 @@ class ActionConfigDialog(QDialog):
 
     def get_action_definition(self) -> ActionDefinition:
         name = self.name_input.text().strip()
-        parameters = {}
-
+        
         # 如果是新建动作（没有 id），生成新的 UUID
         action_id = self.action_data.get('id', '')
         if not action_id:
             from uuid import uuid4
             action_id = str(uuid4())
-
-        if self.action_type == ActionType.MOVE:
-            target = self.target_combo.currentData()
-            if target == '机械臂':
-                parameters = {
-                    '目标': target,
-                    '臂': self.arm_combo.currentText(),
-                    '模式': self.mode_combo.currentData(),
-                    '点位': self.target_pose_input.text().strip()
-                }
-            else:
-                parameters = {
-                    '目标': target,
-                    '位置': self.position_input.value()
-                }
-        elif self.action_type == ActionType.MANIPULATE:
-            executor = self.executor_combo.currentData()
-            if executor == '吸液枪':
-                parameters = {
-                    '执行器': executor,
-                    '操作': self.pipette_operation_combo.currentText(),
-                    '容量': self.capacity_input.value()
-                }
-            else:
-                parameters = {
-                    '执行器': executor,
-                    '编号': self.number_combo.currentData(),
-                    '操作': self.operation_combo.currentText()
-                }
-        elif self.action_type == ActionType.BASE_MOVE:
-            move_mode = self.move_mode_combo.currentData()
-            if move_mode == 'position':
-                parameters = {
-                    'move_mode': 'position',
-                    'id': self.id_input.value(),
-                    'cid': self.cid_input.value()
-                }
-            else:
-                parameters = {
-                    'move_mode': 'distance',
-                    'valueY': self.valueY_input.value()
-                }
-        elif self.action_type == ActionType.INSPECT:
-            parameters = {
-                'Sensor_ID': self.sensor_input.text().strip(),
-                'Threshold': self.threshold_input.value(),
-                'Timeout': self.timeout_input.value()
-            }
-        elif self.action_type == ActionType.WAIT:
-            parameters = {
-                'wait_seconds': self.wait_time_input.value()
-            }
-        elif self.action_type == ActionType.CHANGE_GUN:
-            parameters = {
-                'Gun_Position': self.gun_position_combo.currentData(),
-                'Operation': self.operation_combo.currentText()
-            }
-        elif self.action_type == ActionType.VISION_CAPTURE:
-            parameters = {
-                '目标机械臂': 'robot1',
-                '工作流': 'bottle',
-                '置信度': 0.7,
-                '调试图片': True,
-                '移动速度': 15,
-                '夹爪长度': 150.0
-            }
-
+        
+        # 根据动作类型构建参数
+        build_method = self.param_build_methods.get(self.action_type)
+        if build_method:
+            parameters = build_method()
+        else:
+            parameters = {}
+        
         return ActionDefinition(
             id=action_id,
             name=name,
             type=self.action_type,
             parameters=parameters
         )
+    
+    def _build_move_params(self) -> dict:
+        """构建机械臂/身体移动动作参数"""
+        target = self.target_combo.currentData()
+        if target == '机械臂':
+            return {
+                '目标': target,
+                '臂': self.arm_combo.currentText(),
+                '模式': self.mode_combo.currentData(),
+                '点位': self.target_pose_input.text().strip()
+            }
+        else:
+            return {
+                '目标': target,
+                '位置': self.position_input.value()
+            }
+    
+    def _build_manipulate_params(self) -> dict:
+        """构建执行类动作参数"""
+        executor = self.executor_combo.currentData()
+        if executor == '吸液枪':
+            return {
+                '执行器': executor,
+                '操作': self.pipette_operation_combo.currentText(),
+                '容量': self.capacity_input.value()
+            }
+        else:
+            return {
+                '执行器': executor,
+                '编号': self.number_combo.currentData(),
+                '操作': self.operation_combo.currentText()
+            }
+    
+    def _build_base_move_params(self) -> dict:
+        """构建底盘移动动作参数"""
+        move_mode = self.move_mode_combo.currentData()
+        if move_mode == 'position':
+            return {
+                'move_mode': 'position',
+                'id': self.id_input.value(),
+                'cid': self.cid_input.value()
+            }
+        else:
+            return {
+                'move_mode': 'distance',
+                'valueY': self.valueY_input.value()
+            }
+    
+    def _build_inspect_params(self) -> dict:
+        """构建检测类动作参数"""
+        return {
+            'Sensor_ID': self.sensor_input.text().strip(),
+            'Threshold': self.threshold_input.value(),
+            'Timeout': self.timeout_input.value()
+        }
+    
+    def _build_wait_params(self) -> dict:
+        """构建 Wait 动作参数"""
+        return {
+            'wait_seconds': self.wait_time_input.value()
+        }
+    
+    def _build_change_gun_params(self) -> dict:
+        """构建换枪动作参数"""
+        return {
+            'Gun_Position': self.gun_position_combo.currentData(),
+            'Operation': self.operation_combo.currentText()
+        }
+    
+    def _build_vision_capture_params(self) -> dict:
+        """构建视觉抓取动作参数"""
+        return {
+            '目标机械臂': 'robot1',
+            '工作流': 'bottle',
+            '置信度': 0.7,
+            '调试图片': True,
+            '移动速度': 15,
+            '夹爪长度': 150.0
+        }
