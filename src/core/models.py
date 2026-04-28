@@ -7,6 +7,7 @@ import json
 
 class ActionType(Enum):
     MOVE = "MOVE_TO_POINT"
+    BASE_MOVE = "BASE_MOVE"  # 底盘移动（通过 move_mode 区分位置移动和距离移动）
     MANIPULATE = "ARM_ACTION"
     INSPECT = "INSPECT_AND_OUTPUT"
     WAIT = "WAIT"

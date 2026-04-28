@@ -24,7 +24,7 @@ from enum import Enum
 
 import serial
 
-from pwm_sdk.config import HorizontalServoConfig, ServoConfig, VerticalServoConfig
+from .config import HorizontalServoConfig, ServoConfig, VerticalServoConfig
 
 
 class ServoAxis(Enum):

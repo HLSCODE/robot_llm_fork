@@ -48,6 +48,9 @@ class Config:
     ROBOT2_IP: str = "192.168.3.19"
     ROBOT2_PORT: int = 8080
     ROBOT2_INITIAL_POSE: list = None
+    MOVE_CONTROLLER_HOST: str = "192.168.1.216"
+    MOVE_CONTROLLER_PORT: int = 12345
+    MOVE_CONTROLLER_CLIENT_BIND_PORT: int = None
     MOVE_SPEED: int = 10
     MOVE_VELOCITY: int = 10
     MOVE_RADIUS: int = 0
@@ -180,6 +183,10 @@ class Config:
         instance.ROBOT2_IP = os.getenv("ROBOT2_IP", "192.168.3.19")
         instance.ROBOT2_PORT = int(os.getenv("ROBOT2_PORT", "8080"))
         instance.ROBOT2_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT2_INITIAL_POSE", "-0.053437,0.24741,-0.120801,3.114,-0.032,-2.935"))
+        instance.MOVE_CONTROLLER_HOST = os.getenv("MOVE_CONTROLLER_HOST", "192.168.1.216")
+        instance.MOVE_CONTROLLER_PORT = int(os.getenv("MOVE_CONTROLLER_PORT", "12345"))
+        move_client_bind_port = os.getenv("MOVE_CONTROLLER_CLIENT_BIND_PORT")
+        instance.MOVE_CONTROLLER_CLIENT_BIND_PORT = int(move_client_bind_port) if move_client_bind_port else None
         instance.MOVE_SPEED = int(os.getenv("MOVE_SPEED", "10"))
         instance.MOVE_VELOCITY = int(os.getenv("MOVE_VELOCITY", "10"))
         instance.MOVE_RADIUS = int(os.getenv("MOVE_RADIUS", "0"))
@@ -328,6 +335,16 @@ class Config:
             "radius": instance.MOVE_RADIUS,
             "connect": instance.MOVE_CONNECT,
             "block": instance.MOVE_BLOCK
+        }
+
+    @classmethod
+    def get_move_controller_config(cls) -> dict:
+        """获取移动控制器TCP连接配置"""
+        instance = cls.get_instance()
+        return {
+            "host": instance.MOVE_CONTROLLER_HOST,
+            "port": instance.MOVE_CONTROLLER_PORT,
+            "client_bind_port": instance.MOVE_CONTROLLER_CLIENT_BIND_PORT
         }
 
     @classmethod

@@ -10,7 +10,11 @@ import threading
 import logging
 from typing import Callable, Optional, List
 
+from ..arm_sdk.controller import RobotController
 from ..core.models import SequenceItem, SequenceItemStatus, ActionType
+from ..devices.modbus_motor import ModbusMotor
+from ..devices.pwm_neck import PWMNeckController
+from ..base_move.move_controller import RobotMoveController
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +33,10 @@ class ActionExecutor:
 
     def __init__(
         self,
-        robot_controller=None,
-        body_controller=None,
-        neck_controller=None,
+        robot_controller: RobotController | None = None,
+        body_controller: ModbusMotor | None = None,
+        neck_controller: PWMNeckController | None = None,
+        move_controller: RobotMoveController | None = None,
         on_step_started: Optional[Callable] = None,
         on_step_completed: Optional[Callable] = None,
         on_step_failed: Optional[Callable] = None,
@@ -41,6 +46,7 @@ class ActionExecutor:
         self._robot_controller = robot_controller
         self._body_controller = body_controller
         self._neck_controller = neck_controller
+        self._move_controller = move_controller  # 底盘移动控制器
 
         # 回调
         self._on_step_started = on_step_started or (lambda *a: None)
@@ -54,6 +60,17 @@ class ActionExecutor:
         self._paused = False
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        
+        # 动作类型与执行方法的映射
+        self._execute_methods = {
+            ActionType.MOVE: self._execute_move,
+            ActionType.BASE_MOVE: self._execute_base_move,
+            ActionType.MANIPULATE: self._execute_manipulate,
+            ActionType.INSPECT: self._execute_inspect,
+            ActionType.WAIT: self._execute_wait,
+            ActionType.CHANGE_GUN: self._execute_change_gun,
+            ActionType.VISION_CAPTURE: self._execute_vision_capture,
+        }
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -149,18 +166,10 @@ class ActionExecutor:
         self._on_log(f"参数: {params}")
 
         try:
-            if definition.type == ActionType.MOVE:
-                return self._execute_move(params)
-            elif definition.type == ActionType.MANIPULATE:
-                return self._execute_manipulate(params)
-            elif definition.type == ActionType.INSPECT:
-                return self._execute_inspect(params)
-            elif definition.type == ActionType.WAIT:
-                return self._execute_wait(params)
-            elif definition.type == ActionType.CHANGE_GUN:
-                return self._execute_change_gun(params)
-            elif definition.type == ActionType.VISION_CAPTURE:
-                return self._execute_vision_capture(params)
+            # 根据动作类型获取对应的执行方法
+            execute_method = self._execute_methods.get(definition.type)
+            if execute_method:
+                return execute_method(params)
             else:
                 self._on_log(f"未知的动作类型: {definition.type}", "error")
                 return False
@@ -256,6 +265,65 @@ class ActionExecutor:
                 time.sleep(0.1)
         except Exception as e:
             self._on_log(f"执行身体移动出错: {str(e)}", "error")
+            return False
+
+    def _execute_base_move(self, params: dict) -> bool:
+        """执行底盘移动（统一入口，根据 move_mode 区分）"""
+        move_mode = params.get('move_mode', 'position')
+        
+        if move_mode == 'position':
+            return self._execute_base_move_position(params)
+        elif move_mode == 'distance':
+            return self._execute_base_move_distance(params)
+        else:
+            self._on_log(f"未知的移动方式：{move_mode}", "error")
+            return False
+
+    def _execute_base_move_position(self, params: dict) -> bool:
+        """执行底盘位置移动"""
+        id_value = params.get('id', 0)
+        cid = params.get('cid', 0)
+        
+        self._on_log(f"底盘位置移动：ID={id_value}, CID={cid}")
+        
+        if self._move_controller is None:
+            self._on_log("底盘移动控制器未初始化", "error")
+            return False
+        
+        try:
+            success = self._move_controller.move_to_position(id_value, cid)
+            
+            if success:
+                self._on_log(f"底盘位置移动完成：ID={id_value}, CID={cid}")
+            else:
+                self._on_log(f"底盘位置移动失败：ID={id_value}, CID={cid}", "error")
+            
+            return success
+        except Exception as e:
+            self._on_log(f"执行底盘位置移动出错：{str(e)}", "error")
+            return False
+
+    def _execute_base_move_distance(self, params: dict) -> bool:
+        """执行底盘距离移动"""
+        valueY = params.get('valueY', 0.0)
+        
+        self._on_log(f"底盘距离移动：距离={valueY}m")
+        
+        if self._move_controller is None:
+            self._on_log("底盘移动控制器未初始化", "error")
+            return False
+        
+        try:
+            success = self._move_controller.move_slowly(valueY)
+            
+            if success:
+                self._on_log(f"底盘距离移动完成：距离={valueY}m")
+            else:
+                self._on_log(f"底盘距离移动失败：距离={valueY}m", "error")
+            
+            return success
+        except Exception as e:
+            self._on_log(f"执行底盘距离移动出错：{str(e)}", "error")
             return False
 
     # ------------------------------------------------------------------

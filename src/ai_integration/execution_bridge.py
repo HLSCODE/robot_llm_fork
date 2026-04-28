@@ -130,9 +130,10 @@ class ExecutionBridge(QObject):
             return False
 
         try:
-            # 获取 robot_controller 和 body_controller
+            # 获取 robot_controller、body_controller 和 move_controller
             robot_controller = getattr(self._main_window, 'robot_controller', None)
             body_controller = getattr(self._main_window, 'body_controller', None)
+            move_controller = getattr(self._main_window, 'move_controller', None)
 
             # 导入 ExecutionThread
             from ..gui.execution import ExecutionThread
@@ -141,7 +142,8 @@ class ExecutionBridge(QObject):
             self._execution_thread = ExecutionThread(
                 sequence=items,
                 robot_controller=robot_controller,
-                body_controller=body_controller
+                body_controller=body_controller,
+                move_controller=move_controller,
             )
 
             # 连接信号
