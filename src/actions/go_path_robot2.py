@@ -179,6 +179,16 @@ class RobotArmController:
 
         print(f"Robot2??????: {result}")
 
+        if result[0] != 0:
+            print("Robot2发送项目失败,错误代码:", result[0])
+            return False
+        if result[1] != -1:
+            print("Robot2项目发送未成功运行,返回行:", result[1])
+            return False
+
+        print("Robot2项目发送并运行成功")
+        return True
+
         if result[0] == 0:
             if result[1] == -1:
                 print("Robot2?????????")
@@ -315,7 +325,9 @@ if __name__ == '__main__':
     print("\nAPI ??:", rm_api_version(), "\n")
 
     # ???????????
-    robot_controller.demo_send_project(file_path)
+    if not robot_controller.demo_send_project(file_path):
+        robot_controller.disconnect()
+        raise SystemExit(1)
 
     time.sleep(1)
     while True:
@@ -323,4 +335,4 @@ if __name__ == '__main__':
      time.sleep(0.5)
      print(rst)
      if rst:
-         break 
+         break

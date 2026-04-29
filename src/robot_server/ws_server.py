@@ -651,6 +651,14 @@ class RobotWebSocketServer:
                     "夹爪长度":   {"type": "number", "default": 150.0, "unit": "mm", "label": "夹爪长度", "readonly": True}
                 },
                 "note": "视觉抓取参数已固定，前端仅需填写动作名称即可"
+            },
+            "TRAJECTORY": {
+                "label": "轨迹类",
+                "description": "执行已录制的机械臂轨迹文件",
+                "fields": {
+                    "robot": {"type": "select", "options": ["robot1", "robot2"], "default": "robot1", "label": "机械臂"},
+                    "file_path": {"type": "text", "label": "轨迹文件", "required": True}
+                }
             }
         }
 

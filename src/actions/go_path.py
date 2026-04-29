@@ -137,7 +137,7 @@ class RobotArmController:
             file.writelines(lines_to_add)
             file.write(original_content)
 
-    def demo_send_project(self, file_path, plan_speed=20, only_save=0, save_id=0, step_flag=0, auto_start=0, project_type=0):
+    def demo_send_project(self, file_path, plan_speed=20, only_save=0, save_id=0, step_flag=0, auto_start=0, project_type=1):
         """
         向机械臂发送项目。
 
@@ -160,6 +160,16 @@ class RobotArmController:
 
         send_project = rm_send_project_t(file_path, plan_speed, only_save, save_id, step_flag, auto_start, project_type)
         result = self.robot.rm_send_project(send_project)
+
+        if result[0] != 0:
+            print("发送项目失败,错误代码:", result[0])
+            return False
+        if result[1] != -1:
+            print("项目发送未成功运行,返回行:", result[1])
+            return False
+
+        print("项目发送并运行成功")
+        return True
 
         if result[0] == 0:
             if result[1] == -1:
@@ -284,7 +294,9 @@ if __name__ == '__main__':
     print("\nAPI 版本:", rm_api_version(), "\n")
 
     # 发送项目并查询运行状态
-    robot_controller.demo_send_project(file_path)
+    if not robot_controller.demo_send_project(file_path):
+        robot_controller.disconnect()
+        raise SystemExit(1)
 
     time.sleep(1)
     while True:
