@@ -537,6 +537,7 @@ class RobotWebSocketServer:
             "INSPECT_AND_OUTPUT": [],
             "CHANGE_GUN": [],
             "VISION_CAPTURE": [],
+            "TRAJECTORY": [],
         }
         for a in all_actions:
             type_key = a.type.value

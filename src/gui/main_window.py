@@ -16,6 +16,56 @@ from .dialogs import ActionConfigDialog
 from ..core.storage import StorageManager
 from .execution import ExecutionThread
 
+
+class TrajectoryExecutionThread(QThread):
+    log_message = pyqtSignal(str)
+    succeeded = pyqtSignal(str)
+    failed = pyqtSignal(str)
+
+    def __init__(self, robot, file_path: str, arm_label: str, timeout_seconds: int = 600):
+        super().__init__()
+        self.robot = robot
+        self.file_path = file_path
+        self.arm_label = arm_label
+        self.timeout_seconds = timeout_seconds
+
+    def run(self):
+        try:
+            from Robotic_Arm.rm_robot_interface import rm_send_project_t
+
+            if not Path(self.file_path).exists():
+                self.failed.emit(f"{self.arm_label} trajectory file not found: {self.file_path}")
+                return
+
+            self.log_message.emit(f"{self.arm_label} sending trajectory: {self.file_path}")
+            send_project = rm_send_project_t(self.file_path, 20, 0, 0, 0, 0, 1)
+            result = self.robot.rm_send_project(send_project)
+
+            if result[0] != 0:
+                self.failed.emit(f"{self.arm_label} failed to send trajectory, code: {result[0]}")
+                return
+            if result[1] != -1:
+                self.failed.emit(f"{self.arm_label} trajectory send returned abnormal line: {result[1]}")
+                return
+
+            start_time = time.time()
+            while time.time() - start_time < self.timeout_seconds:
+                time.sleep(1)
+                ret, state = self.robot.rm_get_program_run_state()
+                if ret != 0:
+                    self.failed.emit(f"{self.arm_label} failed to query run state, code: {ret}")
+                    return
+
+                run_state = state.get("run_state") if isinstance(state, dict) else state
+                self.log_message.emit(f"{self.arm_label} trajectory run_state: {run_state}")
+                if run_state == 0:
+                    self.succeeded.emit(f"{self.arm_label} trajectory completed")
+                    return
+
+            self.failed.emit(f"{self.arm_label} trajectory execution timed out")
+        except Exception as e:
+            self.failed.emit(f"{self.arm_label} trajectory execution error: {e}")
+
 # 尝试导入机械臂控制模块
 try:
     from ..arm_sdk import RobotController
@@ -43,7 +93,8 @@ class MainWindow(QMainWindow):
             ActionType.INSPECT: [],
             ActionType.WAIT: [],
             ActionType.CHANGE_GUN: [],
-            ActionType.VISION_CAPTURE: []
+            ActionType.VISION_CAPTURE: [],
+            ActionType.TRAJECTORY: []
         }
         self.execution_thread: ExecutionThread = None
         self.is_paused = False
@@ -152,6 +203,7 @@ class MainWindow(QMainWindow):
         self.inspect_list = ActionListWidget()
         self.change_gun_list = ActionListWidget()
         self.vision_capture_list = ActionListWidget()
+        self.trajectory_list = ActionListWidget()
 
         self.action_tabs.addTab(self.move_list, "移动类")
         self.action_tabs.addTab(self.manipulate_list, "执行类")
@@ -162,6 +214,8 @@ class MainWindow(QMainWindow):
         # AI助手 Tab
         self.ai_assistant_widget = AIAssistantWidget()
         self.action_tabs.addTab(self.ai_assistant_widget, "🤖 AI助手")
+
+        self.action_tabs.addTab(self.trajectory_list, "Trajectory")
 
         layout.addWidget(self.action_tabs, stretch=1)
 
@@ -207,6 +261,7 @@ class MainWindow(QMainWindow):
 
         self.basic_control_panel = self.create_basic_control_panel()
         layout.addWidget(self.basic_control_panel)
+
 
         # 控制面板
         self.control_panel = ControlPanel()
@@ -328,6 +383,127 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Warning", f"Gripper close error: {e}")
             self.log_widget.append_log(f"Robot1 gripper close error: {e}")
+
+    def record_trajectory(self, robot_name: str):
+        robot = self._get_trajectory_robot(robot_name)
+        if robot is None:
+            QMessageBox.warning(self, "Warning", f"{robot_name.upper()} is not connected")
+            return
+
+        default_path = self._next_trajectory_file(robot_name)
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Save {robot_name.upper()} trajectory",
+            str(default_path),
+            "Trajectory Files (*.txt);;All Files (*)"
+        )
+        if not filename:
+            return
+
+        try:
+            self.log_widget.append_log(f"{robot_name.upper()} starting drag teach")
+            result = robot.rm_start_drag_teach(1)
+            if result != 0:
+                QMessageBox.warning(self, "Warning", f"Failed to start drag teach, code: {result}")
+                self.log_widget.append_log(f"{robot_name.upper()} drag teach start failed: {result}")
+                return
+
+            QMessageBox.information(
+                self,
+                "Trajectory Recording",
+                f"{robot_name.upper()} is recording now. Move the arm by hand, then click OK to stop and save."
+            )
+
+            stop_result = robot.rm_stop_drag_teach()
+            if stop_result != 0:
+                QMessageBox.warning(self, "Warning", f"Failed to stop drag teach, code: {stop_result}")
+                self.log_widget.append_log(f"{robot_name.upper()} drag teach stop failed: {stop_result}")
+                return
+
+            Path(filename).parent.mkdir(parents=True, exist_ok=True)
+            save_result = robot.rm_save_trajectory(filename)
+            if save_result[0] == 0:
+                self.log_widget.append_log(
+                    f"{robot_name.upper()} trajectory saved: {filename}, points: {save_result[1]}"
+                )
+                QMessageBox.information(self, "Trajectory Saved", f"Saved to:\n{filename}")
+                return filename
+            else:
+                QMessageBox.warning(self, "Warning", f"Failed to save trajectory, code: {save_result[0]}")
+                self.log_widget.append_log(f"{robot_name.upper()} trajectory save failed: {save_result[0]}")
+        except Exception as e:
+            QMessageBox.warning(self, "Warning", f"Trajectory record error: {e}")
+            self.log_widget.append_log(f"{robot_name.upper()} trajectory record error: {e}")
+        return None
+
+    def run_trajectory(self, robot_name: str):
+        robot = self._get_trajectory_robot(robot_name)
+        if robot is None:
+            QMessageBox.warning(self, "Warning", f"{robot_name.upper()} is not connected")
+            return
+
+        start_dir = self._trajectory_dir(robot_name)
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select {robot_name.upper()} trajectory",
+            str(start_dir),
+            "Trajectory Files (*.txt);;All Files (*)"
+        )
+        if not filename:
+            return
+
+        self._set_trajectory_buttons_enabled(False)
+        thread = TrajectoryExecutionThread(robot, filename, robot_name.upper())
+        self.trajectory_execution_thread = thread
+        thread.log_message.connect(self.log_widget.append_log)
+        thread.succeeded.connect(self.on_trajectory_succeeded)
+        thread.failed.connect(self.on_trajectory_failed)
+        thread.finished.connect(lambda: self._set_trajectory_buttons_enabled(True))
+        thread.start()
+
+    def on_trajectory_succeeded(self, message: str):
+        self.log_widget.append_log(message)
+        QMessageBox.information(self, "Trajectory", message)
+
+    def on_trajectory_failed(self, message: str):
+        self.log_widget.append_log(message)
+        QMessageBox.warning(self, "Trajectory", message)
+
+    def _get_trajectory_robot(self, robot_name: str):
+        if self.robot_controller is None:
+            return None
+
+        ctrl_name = "robot1_ctrl" if robot_name == "robot1" else "robot2_ctrl"
+        ctrl = getattr(self.robot_controller, ctrl_name, None)
+        return getattr(ctrl, "robot", None)
+
+    def _trajectory_dir(self, robot_name: str) -> Path:
+        return Path(__file__).resolve().parents[1] / "actions" / "Path" / robot_name
+
+    def _next_trajectory_file(self, robot_name: str) -> Path:
+        trajectory_dir = self._trajectory_dir(robot_name)
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+
+        existing_numbers = []
+        for path in trajectory_dir.glob("trajectory_*.txt"):
+            number_text = path.stem.rsplit("_", 1)[-1]
+            if number_text.isdigit():
+                existing_numbers.append(int(number_text))
+
+        next_number = max(existing_numbers, default=0) + 1
+        return trajectory_dir / f"trajectory_{next_number:03d}.txt"
+
+    def _set_trajectory_buttons_enabled(self, enabled: bool):
+        self.update_basic_control_buttons()
+        if not enabled:
+            for attr in (
+                "record_robot1_path_btn",
+                "run_robot1_path_btn",
+                "record_robot2_path_btn",
+                "run_robot2_path_btn",
+            ):
+                if hasattr(self, attr):
+                    getattr(self, attr).setEnabled(False)
 
     def _build_pose_row(self, parent_layout: QVBoxLayout, robot_label: str):
         row = QHBoxLayout()
@@ -659,12 +835,86 @@ class MainWindow(QMainWindow):
         if action_type is None:
             return
 
+        if action_type == ActionType.TRAJECTORY:
+            self.create_trajectory_action()
+            return
+
         dialog = ActionConfigDialog(action_type)
         if dialog.exec():
             action = dialog.get_action_definition()
             self.actions[action.type].append(action)
             self.refresh_action_list(action.type)
             self.save_actions()
+
+    def create_trajectory_action(self):
+        options = ["Record R1", "Record R2", "Use Existing File"]
+        selected, ok = QInputDialog.getItem(
+            self,
+            "Trajectory Action",
+            "Create trajectory action:",
+            options,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        if selected == "Record R1":
+            robot_name = "robot1"
+            file_path = self.record_trajectory(robot_name)
+        elif selected == "Record R2":
+            robot_name = "robot2"
+            file_path = self.record_trajectory(robot_name)
+        else:
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select trajectory file",
+                str(self._trajectory_dir("robot1")),
+                "Trajectory Files (*.txt);;All Files (*)"
+            )
+            if not file_path:
+                return
+            robot_options = ["R1", "R2"]
+            robot_selected, robot_ok = QInputDialog.getItem(
+                self,
+                "Trajectory Robot",
+                "Run trajectory on:",
+                robot_options,
+                0,
+                False
+            )
+            if not robot_ok:
+                return
+            robot_name = "robot2" if robot_selected == "R2" else "robot1"
+
+        if not file_path:
+            return
+
+        default_name = f"{robot_name.upper()} {Path(file_path).stem}"
+        name, name_ok = QInputDialog.getText(
+            self,
+            "Trajectory Action Name",
+            "Action name:",
+            text=default_name
+        )
+        if not name_ok:
+            return
+
+        name = name.strip() or default_name
+        from uuid import uuid4
+        action = ActionDefinition(
+            id=str(uuid4()),
+            name=name,
+            type=ActionType.TRAJECTORY,
+            parameters={
+                "robot": robot_name,
+                "file_path": file_path
+            }
+        )
+        self.actions[ActionType.TRAJECTORY].append(action)
+        self.refresh_action_list(ActionType.TRAJECTORY)
+        self.save_actions()
+        self.log_widget.append_log(f"Trajectory action created: {name}")
 
     def delete_action(self):
         current_tab = self.action_tabs.currentIndex()
@@ -687,7 +937,8 @@ class MainWindow(QMainWindow):
             1: ActionType.MANIPULATE,
             2: ActionType.INSPECT,
             3: ActionType.CHANGE_GUN,
-            4: ActionType.VISION_CAPTURE
+            4: ActionType.VISION_CAPTURE,
+            6: ActionType.TRAJECTORY
         }
         action_type = action_type_map.get(current_tab)
         if action_type is None:
@@ -697,7 +948,8 @@ class MainWindow(QMainWindow):
             ActionType.MANIPULATE: self.manipulate_list,
             ActionType.INSPECT: self.inspect_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
-            ActionType.VISION_CAPTURE: self.vision_capture_list
+            ActionType.VISION_CAPTURE: self.vision_capture_list,
+            ActionType.TRAJECTORY: self.trajectory_list
         }
         action_list = list_map[action_type]
 
@@ -774,7 +1026,8 @@ class MainWindow(QMainWindow):
         list_map = {
             ActionType.INSPECT: self.inspect_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
-            ActionType.VISION_CAPTURE: self.vision_capture_list
+            ActionType.VISION_CAPTURE: self.vision_capture_list,
+            ActionType.TRAJECTORY: self.trajectory_list
         }
         action_list = list_map[action_type]
         action_list.clear()
@@ -811,7 +1064,8 @@ class MainWindow(QMainWindow):
             0: ActionType.MOVE,  # 移动类 Tab，需要进一步选择
             2: ActionType.INSPECT,
             3: ActionType.CHANGE_GUN,
-            4: ActionType.VISION_CAPTURE
+            4: ActionType.VISION_CAPTURE,
+            6: ActionType.TRAJECTORY
         }
         if current_tab == 1:
             options = ["Manipulate", "Wait"]
@@ -854,7 +1108,8 @@ class MainWindow(QMainWindow):
             1: self.manipulate_list,
             2: self.inspect_list,
             3: self.change_gun_list,
-            4: self.vision_capture_list
+            4: self.vision_capture_list,
+            6: self.trajectory_list
         }
         return tab_list_map.get(current_tab)
 

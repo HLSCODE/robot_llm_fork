@@ -13,6 +13,7 @@ class ActionType(Enum):
     WAIT = "WAIT"
     CHANGE_GUN = "CHANGE_GUN"
     VISION_CAPTURE = "VISION_CAPTURE"
+    TRAJECTORY = "TRAJECTORY"
 
 
 

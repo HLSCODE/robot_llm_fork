@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..core.models import SequenceItem, SequenceItemStatus, ActionType
@@ -34,6 +35,7 @@ class ExecutionThread(QThread):
             ActionType.WAIT: self._execute_wait,
             ActionType.CHANGE_GUN: self._execute_change_gun,
             ActionType.VISION_CAPTURE: self._execute_vision_capture,
+            ActionType.TRAJECTORY: self._execute_trajectory,
         }
 
     def stop(self):
@@ -407,6 +409,49 @@ class ExecutionThread(QThread):
                 time.sleep(0.1)
             time.sleep(0.05)
         return True
+
+    def _execute_trajectory(self, params: dict) -> bool:
+        robot_name = params.get("robot", "robot1")
+        file_path = params.get("file_path", "")
+
+        self.log_message.emit(f"执行轨迹动作: robot={robot_name}, file={file_path}")
+
+        if self._robot_controller is None:
+            self.log_message.emit("机械臂控制器未初始化")
+            return False
+        if not file_path or not Path(file_path).exists():
+            self.log_message.emit(f"轨迹文件不存在: {file_path}")
+            return False
+
+        ctrl_name = "robot1_ctrl" if robot_name == "robot1" else "robot2_ctrl"
+        ctrl = getattr(self._robot_controller, ctrl_name, None)
+        robot = getattr(ctrl, "robot", None)
+        if robot is None:
+            self.log_message.emit(f"{robot_name} 未连接")
+            return False
+
+        try:
+            if not self._robot_controller.demo_send_project(robot, file_path, project_type=1):
+                self.log_message.emit("轨迹发送失败")
+                return False
+
+            start_time = time.time()
+            timeout_seconds = float(params.get("timeout_seconds", 600))
+            while time.time() - start_time < timeout_seconds:
+                if self._stop_requested:
+                    self.log_message.emit("轨迹执行已停止")
+                    return False
+                rst = self._robot_controller.demo_get_program_run_state(robot, time_sleep=1, max_retries=1)
+                if rst:
+                    self.log_message.emit("轨迹执行完成")
+                    return True
+                time.sleep(0.5)
+
+            self.log_message.emit("轨迹执行超时")
+            return False
+        except Exception as e:
+            self.log_message.emit(f"轨迹执行异常: {e}")
+            return False
 
     def _execute_change_gun(self, params: dict) -> bool:
         """执行换枪动作"""

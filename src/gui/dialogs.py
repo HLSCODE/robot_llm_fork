@@ -1,7 +1,8 @@
 from PyQt6.QtWidgets import (QDialog, QFormLayout, QLineEdit, QComboBox,
                             QDoubleSpinBox, QDialogButtonBox, QVBoxLayout,
                             QHBoxLayout, QLabel, QSpinBox, QWidget, QStackedLayout,
-                            QGroupBox, QListWidget, QListWidgetItem, QPushButton)
+                            QGroupBox, QListWidget, QListWidgetItem, QPushButton,
+                            QFileDialog)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from ..core.models import ActionType, ActionDefinition
@@ -93,6 +94,7 @@ class ActionPreviewDialog(QDialog):
 
     def _populate_step_list(self):
         action_type_names = {
+            "TRAJECTORY": "Trajectory",
             "MOVE": "移动",
             "MOVE_TO_POINT": "移动",
             "BASE_MOVE": "底盘移动",
@@ -103,7 +105,6 @@ class ActionPreviewDialog(QDialog):
             "WAIT": "Wait",
             "CHANGE_GUN": "换枪"
         }
-
         for idx, item in enumerate(self._items):
             definition = item.get("definition", {})
             action_name = definition.get("name", "未知")
@@ -150,6 +151,7 @@ class ActionConfigDialog(QDialog):
             ActionType.BASE_MOVE: self._init_base_move_ui,
             ActionType.CHANGE_GUN: self._init_change_gun_ui,
             ActionType.VISION_CAPTURE: self._init_vision_capture_ui,
+            ActionType.TRAJECTORY: self._init_trajectory_ui,
         }
         
         # 动作类型与参数构建方法的映射
@@ -161,6 +163,7 @@ class ActionConfigDialog(QDialog):
             ActionType.BASE_MOVE: self._build_base_move_params,
             ActionType.CHANGE_GUN: self._build_change_gun_params,
             ActionType.VISION_CAPTURE: self._build_vision_capture_params,
+            ActionType.TRAJECTORY: self._build_trajectory_params,
         }
         
         self.init_ui()
@@ -422,6 +425,42 @@ class ActionConfigDialog(QDialog):
 
         form_layout.addRow("", fixed_label)
 
+    def _init_trajectory_ui(self, form_layout: QFormLayout):
+        self.trajectory_robot_combo = QComboBox()
+        self.trajectory_robot_combo.addItem("R1", "robot1")
+        self.trajectory_robot_combo.addItem("R2", "robot2")
+        current_robot = self.action_data.get('parameters', {}).get('robot', 'robot1')
+        index = self.trajectory_robot_combo.findData(current_robot)
+        if index >= 0:
+            self.trajectory_robot_combo.setCurrentIndex(index)
+
+        path_row = QWidget()
+        path_layout = QHBoxLayout(path_row)
+        path_layout.setContentsMargins(0, 0, 0, 0)
+        path_layout.setSpacing(4)
+
+        self.trajectory_path_input = QLineEdit()
+        self.trajectory_path_input.setText(self.action_data.get('parameters', {}).get('file_path', ''))
+        self.trajectory_path_input.setPlaceholderText("Select recorded trajectory .txt file")
+
+        browse_btn = QPushButton("Browse")
+        browse_btn.clicked.connect(self._browse_trajectory_file)
+        path_layout.addWidget(self.trajectory_path_input, stretch=1)
+        path_layout.addWidget(browse_btn)
+
+        form_layout.addRow("Robot:", self.trajectory_robot_combo)
+        form_layout.addRow("Trajectory:", path_row)
+
+    def _browse_trajectory_file(self):
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select trajectory file",
+            "",
+            "Trajectory Files (*.txt);;All Files (*)"
+        )
+        if filename:
+            self.trajectory_path_input.setText(filename)
+
     def _on_executor_changed(self):
         """根据选择的执行器类型切换参数面板"""
         if hasattr(self, 'executor_combo') and hasattr(self, 'param_stack'):
@@ -451,6 +490,7 @@ class ActionConfigDialog(QDialog):
 
     def get_type_display(self) -> str:
         type_map = {
+            ActionType.TRAJECTORY: "Trajectory",
             ActionType.MOVE: "移动",
             ActionType.BASE_MOVE: "底盘移动",
             ActionType.MANIPULATE: "机械臂",
@@ -496,6 +536,12 @@ class ActionConfigDialog(QDialog):
             sensor_id = self.sensor_input.text().strip()
             if not sensor_id:
                 self.sensor_input.setFocus()
+                return
+
+        if self.action_type == ActionType.TRAJECTORY:
+            file_path = self.trajectory_path_input.text().strip()
+            if not file_path:
+                self.trajectory_path_input.setFocus()
                 return
 
         self.accept()
@@ -600,4 +646,9 @@ class ActionConfigDialog(QDialog):
             '调试图片': True,
             '移动速度': 15,
             '夹爪长度': 150.0
+        }
+    def _build_trajectory_params(self) -> dict:
+        return {
+            'robot': self.trajectory_robot_combo.currentData(),
+            'file_path': self.trajectory_path_input.text().strip()
         }
