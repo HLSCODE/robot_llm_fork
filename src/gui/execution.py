@@ -7,7 +7,7 @@ from ..core.models import SequenceItem, SequenceItemStatus, ActionType
 from ..arm_sdk.controller import RobotController
 from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
 from ..base_move.move_controller import RobotMoveController
-
+from ..core.config_loader import Config
 class ExecutionThread(QThread):
     started = pyqtSignal()
     finished = pyqtSignal()
@@ -25,6 +25,8 @@ class ExecutionThread(QThread):
         self._robot_controller = robot_controller
         self._body_controller = body_controller
         self._move_controller = move_controller
+
+        self.config = Config.get_instance()
         
         self.execute_methods = {
             ActionType.MOVE: self._execute_move,

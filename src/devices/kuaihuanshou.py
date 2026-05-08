@@ -154,7 +154,7 @@ if __name__ == "__main__":
     # 测试快换手
     try:
         print("\n开始测试快换手功能...")
-        khs = Kuaihuanshou(port='/dev/ttyUSB2')
+        khs = Kuaihuanshou(port='/dev/hand')
         
         # print("状态:", khs.send_command('status'))
         # time.sleep(1)

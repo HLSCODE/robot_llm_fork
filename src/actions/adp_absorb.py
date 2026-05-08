@@ -15,7 +15,7 @@ from src.devices.adp import ADP
 #from .src.devices.adp import ADP
 
 
-ADP_PORT = '/dev/ttyUSB2'
+ADP_PORT = '/dev/ttyUSB0'
 ABSORB_VOLUME = 500 # 吸液体积（微升）
 
 
