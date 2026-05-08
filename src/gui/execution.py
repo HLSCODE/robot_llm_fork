@@ -6,8 +6,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ..core.models import SequenceItem, SequenceItemStatus, ActionType
 from ..arm_sdk.controller import RobotController
 from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
-
-
+from ..base_move.move_controller import RobotMoveController
 
 class ExecutionThread(QThread):
     started = pyqtSignal()
@@ -17,14 +16,16 @@ class ExecutionThread(QThread):
     step_failed = pyqtSignal(int, SequenceItem, str)
     log_message = pyqtSignal(str)
 
-    def __init__(self, sequence: list[SequenceItem], robot_controller: RobotController | None = None, body_controller: ModbusMotor | None = None, move_controller: RobotMoveController | None = None):
+    def __init__(self, sequence: list[SequenceItem], robot_controller: RobotController | None = None, body_controller: ModbusMotor | None = None,
+    move_controller: RobotMoveController | None = None):
         super().__init__()
         self.sequence = sequence
         self._stop_requested = False
         self._paused = False
         self._robot_controller = robot_controller
         self._body_controller = body_controller
-
+        self._move_controller = move_controller
+        
         self.execute_methods = {
             ActionType.MOVE: self._execute_move,
             ActionType.BASE_MOVE: self._execute_base_move,

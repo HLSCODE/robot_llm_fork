@@ -46,6 +46,7 @@ class ActionExecutor:
         self._robot_controller = robot_controller
         self._body_controller = body_controller
         self._neck_controller = neck_controller
+        self._move_controller = move_controller
 
         # 回调
         self._on_step_started = on_step_started or (lambda *a: None)
