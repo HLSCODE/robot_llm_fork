@@ -14,7 +14,7 @@ import sys
 import os
 import argparse
 import logging
-
+from ..core.config_loader import Config
 
 
 def setup_logging(level: str = "INFO") -> None:
@@ -67,7 +67,8 @@ def _init_body_controller(simulation: bool = False):
     try:
         from ..devices import ModbusMotor
         print("正在初始化身体控制器...")
-        body_controller = ModbusMotor(port="/dev/body", baudrate=115200, slave_id=1, timeout=1)
+        
+        body_controller = ModbusMotor(port=Config.get_instance().BODY_SERIAL_PORT, baudrate=115200, slave_id=1, timeout=1)
         print("  身体控制器初始化成功")
         return body_controller
     except ImportError as e:

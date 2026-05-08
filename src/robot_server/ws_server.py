@@ -1507,8 +1507,9 @@ class RobotWebSocketServer:
         """
         try:
             from ..devices import ModbusMotor
+            config = Config.get_instance()
             self._body_controller = ModbusMotor(
-                port="/dev/body", baudrate=115200, slave_id=1, timeout=1
+                port=config.BODY_SERIAL_PORT, baudrate=115200, slave_id=1, timeout=1
             )
             self._device_status["body"] = True
             self._executor._body_controller = self._body_controller

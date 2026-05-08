@@ -82,8 +82,8 @@ try:
     )
 except ImportError:
     # 独立运行时的最小化默认值
-    ROBOT1_CONFIG = {"ip": "192.168.3.18", "port": 8080}
-    ROBOT2_CONFIG = {"ip": "192.168.3.19", "port": 8080}
+    ROBOT1_CONFIG = {"ip": "192.168.3.19", "port": 8080}
+    ROBOT2_CONFIG = {"ip": "192.168.3.18", "port": 8080}
     MOVE_CONFIG   = {"velocity": 10, "radius": 0, "connect": 0, "block": 1}
     GRIPPER_CONFIG = {
         "pick":    {"speed": 100, "force": 300, "timeout": 3},
@@ -91,7 +91,7 @@ except ImportError:
     }
     MAX_ATTEMPTS = 5
 
-
+s
 # ---------------------------------------------------------------
 # 调试图片保存根目录（可用 VisionCaptureAction(debug_save_root=...) 覆盖）
 # ---------------------------------------------------------------

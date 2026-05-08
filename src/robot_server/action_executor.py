@@ -18,8 +18,7 @@ from ..devices.pwm_neck import PWMNeckController
 from ..base_move.move_controller import RobotMoveController
 
 logger = logging.getLogger(__name__)
-
-
+from ..core.config_loader import Config
 class ActionExecutor:
     """
     动作序列执行器（纯 Python，无 Qt 依赖）
@@ -47,7 +46,6 @@ class ActionExecutor:
         self._robot_controller = robot_controller
         self._body_controller = body_controller
         self._neck_controller = neck_controller
-        self._move_controller = move_controller  # 底盘移动控制器
 
         # 回调
         self._on_step_started = on_step_started or (lambda *a: None)
@@ -339,7 +337,7 @@ class ActionExecutor:
 
         if executor == '快换手':
             from ..devices import Kuaihuanshou
-            kuaihuanshou = Kuaihuanshou(port='/dev/hand')
+            kuaihuanshou = Kuaihuanshou(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             try:
                 if operation == '开':
                     result = kuaihuanshou.send_command('open')
@@ -424,7 +422,7 @@ class ActionExecutor:
         """执行吸液枪动作（吸/吐）"""
         operation = params.get('操作', '吸')
         capacity = params.get('容量', 500)
-        port = params.get('端口', '/dev/hand')
+        port = params.get('端口', self.config.KUAIHUANSHOU_SERIAL_PORT)
 
         self._on_log(f"吸液枪动作: 操作={operation}, 容量={capacity}ul")
 

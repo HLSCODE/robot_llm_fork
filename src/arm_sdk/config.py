@@ -23,8 +23,8 @@ def _get_config():
         except Exception as e:
             print(f"加载配置失败：{e}，使用默认值")
             _config_cache = {
-                'robot1': {"ip": "192.168.3.18", "port": 8080, "initial_pose": [-0.04844, -0.269769, -0.101888, 3.109, -0.094, -1.592]},
-                'robot2': {"ip": "192.168.3.19", "port": 8080, "initial_pose": [-0.053437, 0.24741, -0.120801, 3.114, -0.032, -2.935]},
+                'robot1': {"ip": "192.168.3.19", "port": 8080, "initial_pose": [-0.04844, -0.269769, -0.101888, 3.109, -0.094, -1.592]},
+                'robot2': {"ip": "192.168.3.18", "port": 8080, "initial_pose": [-0.053437, 0.24741, -0.120801, 3.114, -0.032, -2.935]},
                 'move': {"velocity": 10, "radius": 0, "connect": 0, "block": 1},
                 'gripper': {"pick": {"speed": 200, "force": 1000, "timeout": 3}, "release": {"speed": 100, "timeout": 3}},
                 'max_attempts': 5,

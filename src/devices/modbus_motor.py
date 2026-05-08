@@ -20,7 +20,7 @@ def _get_motor_config():
         except Exception as e:
             print(f"加载身体控制器配置失败：{e}，使用默认值")
             _motor_config_cache = {
-                "port": "/dev/body",
+                "port": "/dev/ttyUSB1",
                 "baudrate": 115200,
                 "slave_id": 1,
                 "timeout": 1
@@ -44,7 +44,7 @@ class ModbusMotor:
         if port is None or baudrate is None or slave_id is None or timeout is None:
             config = _get_motor_config()
             if port is None:
-                port = config.get("port", "/dev/body")
+                port = config.get("port", "/dev/ttyUSB1")
             if baudrate is None:
                 baudrate = config.get("baudrate", 115200)
             if slave_id is None:

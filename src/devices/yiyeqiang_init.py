@@ -18,12 +18,12 @@ import time
 import sys
 
 
-def init_tip(port='/dev/hand', baudrate=115200):
+def init_tip(port='/dev/ttyUSB2', baudrate=115200):
     """
     初始化枪头 - 使用RS-485协议
     
     Args:
-        port: 串口号，默认/dev/hand
+        port: 串口号，默认/dev/ttyUSB2
         baudrate: 波特率，默认115200
     
     Returns:
@@ -75,7 +75,7 @@ def init_tip(port='/dev/hand', baudrate=115200):
         return False
 
 
-def init_tip_modbus(port='/dev/hand', baudrate=115200):
+def init_tip_modbus(port='/dev/ttyUSB0', baudrate=115200):
     """
     使用ModBus-RTU协议初始化枪头（备用方式）
     
@@ -130,7 +130,7 @@ def init_tip_modbus(port='/dev/hand', baudrate=115200):
 def main():
     """主函数"""
     # 可以通过命令行参数指定串口
-    port = sys.argv[1] if len(sys.argv) > 1 else '/dev/hand'
+    port = sys.argv[1] if len(sys.argv) > 1 else '/dev/ttyUSB2'
     
     print("="*50)
     print("移液枪初始化 (YIYEQIANG_INIT)")

@@ -15,7 +15,7 @@ def _get_relay_config():
         except Exception as e:
             print(f"加载继电器配置失败：{e}，使用默认值")
             _relay_config_cache = {
-                "port": "/dev/power",
+                "port": "/dev/ttyUSB0",
                 "baudrate": 38400,
                 "timeout": 1
             }
@@ -33,7 +33,7 @@ class RelayController:
         if port is None or baudrate is None or timeout is None:
             config = _get_relay_config()
             if port is None:
-                port = config.get("port", "/dev/power")
+                port = config.get("port", "/dev/ttyUSB0")
             if baudrate is None:
                 baudrate = config.get("baudrate", 38400)
             if timeout is None:

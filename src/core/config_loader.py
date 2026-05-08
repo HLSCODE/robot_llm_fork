@@ -42,10 +42,10 @@ class Config:
     VISION_DEBUG_SAVE_DIR: str = "pictures"
     
     # 机械臂配置
-    ROBOT1_IP: str = "192.168.3.18"
+    ROBOT1_IP: str = "192.168.3.19"
     ROBOT1_PORT: int = 8080
     ROBOT1_INITIAL_POSE: list = None
-    ROBOT2_IP: str = "192.168.3.19"
+    ROBOT2_IP: str = "192.168.3.18"
     ROBOT2_PORT: int = 8080
     ROBOT2_INITIAL_POSE: list = None
     MOVE_CONTROLLER_HOST: str = "192.168.1.216"
@@ -64,18 +64,18 @@ class Config:
     GRIPPER_RELEASE_TIMEOUT: int = 3
     
     # 串口设备配置
-    BODY_SERIAL_PORT: str = "/dev/body"
+    BODY_SERIAL_PORT: str = "/dev/ttyUSB1"
     BODY_BAUDRATE: int = 115200
     BODY_SLAVE_ID: int = 1
     BODY_TIMEOUT: int = 1
-    KUAIHUANSHOU_SERIAL_PORT: str = "/dev/hand"
+    KUAIHUANSHOU_SERIAL_PORT: str = "/dev/ttyUSB2"
     KUAIHUANSHOU_BAUDRATE: int = 115200
     KUAIHUANSHOU_TIMEOUT: int = 3
-    ADP_SERIAL_PORT: str = "/dev/hand"
+    ADP_SERIAL_PORT: str = "/dev/ttyUSB2"
     ADP_BAUDRATE: int = 115200
     ADP_TIMEOUT: int = 5
     ADP_MAX_RETRIES: int = 3
-    RELAY_SERIAL_PORT: str = "/dev/power"
+    RELAY_SERIAL_PORT: str = "/dev/ttyUSB0"
     RELAY_BAUDRATE: int = 38400
     RELAY_TIMEOUT: int = 1
 
@@ -177,10 +177,10 @@ class Config:
         instance.VISION_DEBUG_SAVE_DIR = os.getenv("VISION_DEBUG_SAVE_DIR", "pictures")
         
         # 机械臂配置
-        instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.18")
+        instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.19")
         instance.ROBOT1_PORT = int(os.getenv("ROBOT1_PORT", "8080"))
         instance.ROBOT1_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT1_INITIAL_POSE", "-0.04844,-0.269769,-0.101888,3.109,-0.094,-1.592"))
-        instance.ROBOT2_IP = os.getenv("ROBOT2_IP", "192.168.3.19")
+        instance.ROBOT2_IP = os.getenv("ROBOT2_IP", "192.168.3.18")
         instance.ROBOT2_PORT = int(os.getenv("ROBOT2_PORT", "8080"))
         instance.ROBOT2_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT2_INITIAL_POSE", "-0.053437,0.24741,-0.120801,3.114,-0.032,-2.935"))
         instance.MOVE_CONTROLLER_HOST = os.getenv("MOVE_CONTROLLER_HOST", "192.168.1.216")
@@ -214,18 +214,18 @@ class Config:
         instance.PWM_NECK_V_DEFAULT_TIME = int(os.getenv("PWM_NECK_V_DEFAULT_TIME", "2500"))
 
         # 串口设备配置
-        instance.BODY_SERIAL_PORT = os.getenv("BODY_SERIAL_PORT", "/dev/body")
+        instance.BODY_SERIAL_PORT = os.getenv("BODY_SERIAL_PORT", "/dev/ttyUSB1")
         instance.BODY_BAUDRATE = int(os.getenv("BODY_BAUDRATE", "115200"))
         instance.BODY_SLAVE_ID = int(os.getenv("BODY_SLAVE_ID", "1"))
         instance.BODY_TIMEOUT = int(os.getenv("BODY_TIMEOUT", "1"))
-        instance.KUAIHUANSHOU_SERIAL_PORT = os.getenv("KUAIHUANSHOU_SERIAL_PORT", "/dev/hand")
+        instance.KUAIHUANSHOU_SERIAL_PORT = os.getenv("KUAIHUANSHOU_SERIAL_PORT", "/dev/ttyUSB2")
         instance.KUAIHUANSHOU_BAUDRATE = int(os.getenv("KUAIHUANSHOU_BAUDRATE", "115200"))
         instance.KUAIHUANSHOU_TIMEOUT = int(os.getenv("KUAIHUANSHOU_TIMEOUT", "3"))
-        instance.ADP_SERIAL_PORT = os.getenv("ADP_SERIAL_PORT", "/dev/hand")
+        instance.ADP_SERIAL_PORT = os.getenv("ADP_SERIAL_PORT", "/dev/ttyUSB2")
         instance.ADP_BAUDRATE = int(os.getenv("ADP_BAUDRATE", "115200"))
         instance.ADP_TIMEOUT = int(os.getenv("ADP_TIMEOUT", "5"))
         instance.ADP_MAX_RETRIES = int(os.getenv("ADP_MAX_RETRIES", "3"))
-        instance.RELAY_SERIAL_PORT = os.getenv("RELAY_SERIAL_PORT", "/dev/power")
+        instance.RELAY_SERIAL_PORT = os.getenv("RELAY_SERIAL_PORT", "/dev/ttyUSB0")
         instance.RELAY_BAUDRATE = int(os.getenv("RELAY_BAUDRATE", "38400"))
         instance.RELAY_TIMEOUT = int(os.getenv("RELAY_TIMEOUT", "1"))
         

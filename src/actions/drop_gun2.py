@@ -51,7 +51,7 @@ def drop_gun2(robot):
 
     # 4. 退枪头（弹出枪头）
     print(f"\n[4] 退枪头（弹出枪头）...")
-    result = yiyeqiang_out.eject_tip(port='/dev/hand')
+    result = yiyeqiang_out.eject_tip(port='/dev/ttyUSB2')
     if result:
         print("退枪头成功!")
     else:

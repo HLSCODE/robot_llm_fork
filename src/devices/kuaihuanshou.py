@@ -16,7 +16,7 @@ def _get_kuaihuanshou_config():
         except Exception as e:
             print(f"加载快换手配置失败：{e}，使用默认值")
             _kuaihuanshou_config_cache = {
-                "port": "/dev/hand",
+                "port": "/dev/ttyUSB2",
                 "baudrate": 115200,
                 "timeout": 3
             }
@@ -35,7 +35,7 @@ class Kuaihuanshou:
         if port is None or baudrate is None or timeout is None:
             config = _get_kuaihuanshou_config()
             if port is None:
-                port = config.get("port", "/dev/hand")
+                port = config.get("port", "/dev/ttyUSB2")
             if baudrate is None:
                 baudrate = config.get("baudrate", 115200)
             if timeout is None:
@@ -154,7 +154,7 @@ if __name__ == "__main__":
     # 测试快换手
     try:
         print("\n开始测试快换手功能...")
-        khs = Kuaihuanshou(port='/dev/hand')
+        khs = Kuaihuanshou(port='/dev/ttyUSB2')
         
         # print("状态:", khs.send_command('status'))
         # time.sleep(1)

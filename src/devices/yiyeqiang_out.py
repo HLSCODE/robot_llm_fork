@@ -76,7 +76,7 @@ def eject_tip(port='COM4', baudrate=115200):
 def main():
     """主函数"""
     # 可以通过命令行参数指定串口
-    port = sys.argv[1] if len(sys.argv) > 1 else '/dev/hand'
+    port = sys.argv[1] if len(sys.argv) > 1 else '/dev/ttyUSB2'
     
     print("="*50)
     print("移液枪弹出枪头 (YIYEQIANG_OUT)")

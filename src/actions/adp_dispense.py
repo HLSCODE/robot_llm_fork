@@ -2,9 +2,18 @@
 """
 ADP 吐液（全部吐出）
 """
-from ..devices.adp import ADP
 
-ADP_PORT = '/dev/hand'
+import sys
+import os
+
+# 将项目根目录添加到系统路径
+project_root = '/home/maic/robot_llm_fork'
+sys.path.insert(0, project_root)
+
+# 然后使用相对的模块路径进行导入
+from src.devices.adp import ADP
+
+ADP_PORT = '/dev/ttyUSB2'
 
 
 def main():

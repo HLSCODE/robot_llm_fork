@@ -19,7 +19,7 @@ from ..arm_sdk.controller import RobotController
 from .base_controller import RobotController as BSCTL
 from ..devices.adp import ADP
 from ultralytics import YOLO, SAM
-
+from ..core.config_loader import Config
 
 # 初始化模型
 yolo_model = YOLO("/home/maic/rm1/runs/train/bottle/weights/best.pt")
@@ -208,7 +208,8 @@ class MotorControlPanel:
 
     def connect_motor(self):
         try:
-            self.motor = ModbusMotor()
+            config = Config.get_instance()
+            self.motor = ModbusMotor(config.BODY_SERIAL_PORT)
             self.update_status("已连接", '#27ae60')
             self._set_buttons_state(tk.NORMAL)
             threading.Thread(target=self._auto_home, daemon=True).start()
@@ -780,13 +781,15 @@ def create_gui(runtime=None):
     
     eject_btn = tk.Button(end_effector_frame, text="弹出枪头", command=eject_tip_action, **button_style)
     eject_btn.pack(fill='x', pady=3)
-    
+   
     # 初始化枪头按钮
     def init_tip_action():
         def worker():
             try:
+                
                 from ..devices import yiyeqiang_init
-                result = yiyeqiang_init.init_tip(port='/dev/hand')
+                config = Config.get_instance() 
+                result = yiyeqiang_init.init_tip(port=config.KUAIHUANSHOU_SERIAL_PORT)
                 if result:
                     root.after(0, lambda: messagebox.showinfo("成功", "枪头初始化成功!"))
                 else:

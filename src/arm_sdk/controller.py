@@ -86,6 +86,9 @@ class RobotController:
         # 初始化并连接双机械臂
         self.robot1_ctrl = SimpleRobotArm(ROBOT1_CONFIG, "Robot1")
         self.robot2_ctrl = SimpleRobotArm(ROBOT2_CONFIG, "Robot2")
+        print("robot1controller",ROBOT1_CONFIG)
+        
+        #print("robot1controller",)
 
         try:
             self.robot1_ctrl.connect()
@@ -107,11 +110,11 @@ class RobotController:
         self._injected_depth = None
         self._injected_intr = None
 
-        config = Config.get_instance()
+        self.config = Config.get_instance()
 
         # 加载模型
-        self.yolo_model = YOLO(config.YOLO_MODEL_PATH)
-        self.sam_model = SAM(config.SAM_MODEL_PATH)
+        self.yolo_model = YOLO(self.config.YOLO_MODEL_PATH)
+        self.sam_model = SAM(self.config.SAM_MODEL_PATH)
 
         # 手眼标定参数
         self.rotation_matrix = [[0.00215684,0.97503835,0.22202606], 
@@ -762,7 +765,8 @@ class RobotController:
             return False
 
         print(f"\n[4] 退枪头（弹出枪头）...")
-        result = yiyeqiang_out.eject_tip(port='/dev/hand')
+        
+        result = yiyeqiang_out.eject_tip(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
         if result:
             print("退枪头成功!")
         else:
@@ -800,7 +804,7 @@ class RobotController:
             return False
         
         print(f"\n[4] 退枪头（弹出枪头）...")
-        result = yiyeqiang_out.eject_tip(port='/dev/hand')
+        result = yiyeqiang_out.eject_tip(port=self.config.KUAIHUANSHOU_SERIAL_PORT )
         if result:
             print("退枪头成功!")
         else:

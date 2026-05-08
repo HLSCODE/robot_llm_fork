@@ -1,3 +1,4 @@
+from __future__ import annotations
 import time
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -5,7 +6,6 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from ..core.models import SequenceItem, SequenceItemStatus, ActionType
 from ..arm_sdk.controller import RobotController
 from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
-from ..base_move.move_controller import RobotMoveController
 
 
 
@@ -24,9 +24,7 @@ class ExecutionThread(QThread):
         self._paused = False
         self._robot_controller = robot_controller
         self._body_controller = body_controller
-        self._move_controller = move_controller  # 底盘移动控制器，由调用方传入
-        
-        # 动作类型与执行方法的映射
+
         self.execute_methods = {
             ActionType.MOVE: self._execute_move,
             ActionType.BASE_MOVE: self._execute_base_move,
@@ -37,6 +35,7 @@ class ExecutionThread(QThread):
             ActionType.VISION_CAPTURE: self._execute_vision_capture,
             ActionType.TRAJECTORY: self._execute_trajectory,
         }
+
 
     def stop(self):
         self._stop_requested = True
@@ -49,7 +48,8 @@ class ExecutionThread(QThread):
 
     def run(self):
         self.started.emit()
-
+     
+        
         for index, item in enumerate(self.sequence):
             if self._stop_requested:
                 self.log_message.emit("执行已停止")
@@ -83,8 +83,9 @@ class ExecutionThread(QThread):
                 error_msg = f"执行异常: {str(e)}"
                 self.step_failed.emit(index, item, error_msg)
                 break
-
-        self.finished.emit()
+        
+            self.finished.emit()
+      
 
     def _execute_action(self, item: SequenceItem) -> bool:
         definition = item.definition
@@ -261,7 +262,8 @@ class ExecutionThread(QThread):
         operation = params.get('操作', '开')
 
         if executor == '快换手':
-            kuaihuanshou = Kuaihuanshou(port='/dev/hand')
+
+            kuaihuanshou = Kuaihuanshou(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             try:
                 if operation == '开':
                     result = kuaihuanshou.send_command('open')
@@ -345,7 +347,7 @@ class ExecutionThread(QThread):
         """执行吸液枪动作（吸/吐）"""
         operation = params.get('操作', '吸')
         capacity = params.get('容量', 500)
-        port = params.get('端口', '/dev/hand')
+        port = params.get('端口', self.config.KUAIHUANSHOU_SERIAL_PORT)
 
         self.log_message.emit(f"吸液枪动作: 操作={operation}, 容量={capacity}ul")
 

@@ -15,7 +15,7 @@ def _get_adp_config():
         except Exception as e:
             print(f"加载 ADP 配置失败：{e}，使用默认值")
             _adp_config_cache = {
-                "port": "/dev/hand",
+                "port": "/dev/ttyUSB2",
                 "baudrate": 115200,
                 "timeout": 5,
                 "max_retries": 3
@@ -39,7 +39,7 @@ class ADP:
         if port is None or baudrate is None or timeout is None or max_retries is None:
             config = _get_adp_config()
             if port is None:
-                port = config.get("port", "/dev/hand")
+                port = config.get("port", "/dev/ttyUSB2")
             if baudrate is None:
                 baudrate = config.get("baudrate", 115200)
             if timeout is None:

@@ -15,57 +15,7 @@ from ..widgets.ai_assistant import AIAssistantWidget
 from .dialogs import ActionConfigDialog
 from ..core.storage import StorageManager
 from .execution import ExecutionThread
-
-
-class TrajectoryExecutionThread(QThread):
-    log_message = pyqtSignal(str)
-    succeeded = pyqtSignal(str)
-    failed = pyqtSignal(str)
-
-    def __init__(self, robot, file_path: str, arm_label: str, timeout_seconds: int = 600):
-        super().__init__()
-        self.robot = robot
-        self.file_path = file_path
-        self.arm_label = arm_label
-        self.timeout_seconds = timeout_seconds
-
-    def run(self):
-        try:
-            from Robotic_Arm.rm_robot_interface import rm_send_project_t
-
-            if not Path(self.file_path).exists():
-                self.failed.emit(f"{self.arm_label} trajectory file not found: {self.file_path}")
-                return
-
-            self.log_message.emit(f"{self.arm_label} sending trajectory: {self.file_path}")
-            send_project = rm_send_project_t(self.file_path, 20, 0, 0, 0, 0, 1)
-            result = self.robot.rm_send_project(send_project)
-
-            if result[0] != 0:
-                self.failed.emit(f"{self.arm_label} failed to send trajectory, code: {result[0]}")
-                return
-            if result[1] != -1:
-                self.failed.emit(f"{self.arm_label} trajectory send returned abnormal line: {result[1]}")
-                return
-
-            start_time = time.time()
-            while time.time() - start_time < self.timeout_seconds:
-                time.sleep(1)
-                ret, state = self.robot.rm_get_program_run_state()
-                if ret != 0:
-                    self.failed.emit(f"{self.arm_label} failed to query run state, code: {ret}")
-                    return
-
-                run_state = state.get("run_state") if isinstance(state, dict) else state
-                self.log_message.emit(f"{self.arm_label} trajectory run_state: {run_state}")
-                if run_state == 0:
-                    self.succeeded.emit(f"{self.arm_label} trajectory completed")
-                    return
-
-            self.failed.emit(f"{self.arm_label} trajectory execution timed out")
-        except Exception as e:
-            self.failed.emit(f"{self.arm_label} trajectory execution error: {e}")
-
+from ..core.config_loader import Config
 # 尝试导入机械臂控制模块
 try:
     from ..arm_sdk import RobotController
@@ -98,7 +48,7 @@ class MainWindow(QMainWindow):
         }
         self.execution_thread: ExecutionThread = None
         self.is_paused = False
-
+        self.config = Config.get_instance()
         # 机械臂控制相关
         self.robot_controller = None
         self.robot1_connected = False
@@ -667,6 +617,7 @@ class MainWindow(QMainWindow):
                 if success1:
                     self.robot1_connected = True
                     self.update_robot_status("robot1", True)
+                    
                     self.log_widget.append_log("Robot1 初始化成功")
                 else:
                     self.log_widget.append_log("Robot1 移动到初始位置失败")
@@ -748,7 +699,7 @@ class MainWindow(QMainWindow):
 
         self.init_pipette_btn.setEnabled(False)
         try:
-            success = YIYEQIANG_INIT(port='/dev/hand')
+            success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             self.update_pipette_status(bool(success))
             if success:
                 self.log_widget.append_log("Pipette initialized successfully")
@@ -771,7 +722,7 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            success = YIYEQIANG_INIT(port='/dev/hand')
+            success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             self.update_pipette_status(bool(success))
             if success:
                 self.log_widget.append_log("Pipette initialized successfully")
@@ -791,7 +742,7 @@ class MainWindow(QMainWindow):
         self.init_pipette_btn.setEnabled(False)
         try:
             self.log_widget.append_log("Ejecting pipette tip...")
-            success = YIYEQIANG_EJECT(port='/dev/hand')
+            success = YIYEQIANG_EJECT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             if success:
                 self.log_widget.append_log("Pipette tip ejected successfully")
             else:
@@ -812,7 +763,7 @@ class MainWindow(QMainWindow):
         self.log_widget.append_log("开始初始化身体...")
 
         try:
-            self.body_controller = ModbusMotor(port="/dev/body", baudrate=115200, slave_id=1, timeout=1)
+            self.body_controller = ModbusMotor(port=self.config.BODY_SERIAL_PORT, baudrate=115200, slave_id=1, timeout=1)
             self.body_connected = True
             self.update_body_status(True)
             self.log_widget.append_log("身体初始化成功")
@@ -1149,7 +1100,7 @@ class MainWindow(QMainWindow):
 
         for item in sequence:
             item.status = SequenceItemStatus.PENDING
-
+      
         for i, item in enumerate(sequence):
             self.sequence_list.update_item_status(i, item)
 
