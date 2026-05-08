@@ -2,12 +2,14 @@ import time
 from pathlib import Path
 from typing import List
 import math
+import json
+from uuid import uuid4
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                             QSplitter, QMessageBox, QFileDialog, QMenu,
                             QTabWidget, QPushButton, QLabel, QFrame, QApplication,
-                            QInputDialog)
-from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QAction, QPalette, QColor
+                            QInputDialog, QGroupBox, QListWidget, QListWidgetItem)
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer, QMimeData
+from PyQt6.QtGui import QAction, QPalette, QColor, QDrag, QIcon
 
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus
 from ..widgets import ActionListWidget, SequenceListWidget, ControlPanel, LogWidget
@@ -16,6 +18,146 @@ from .dialogs import ActionConfigDialog
 from ..core.storage import StorageManager
 from .execution import ExecutionThread
 from ..core.config_loader import Config
+
+
+class TaskLibraryListWidget(QListWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setViewMode(QListWidget.ViewMode.ListMode)
+        self.setIconSize(QSize(24, 24))
+        self.setSpacing(2)
+        self.setResizeMode(QListWidget.ResizeMode.Adjust)
+
+    def startDrag(self, supportedActions):
+        current_item = self.currentItem()
+        if current_item is None:
+            return
+
+        task_name = current_item.data(Qt.ItemDataRole.UserRole)
+        if not task_name:
+            return
+
+        mime = QMimeData()
+        mime.setData("application/x-task-name", task_name.encode("utf-8"))
+
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(current_item.icon().pixmap(50, 50))
+        drag.exec(Qt.DropAction.CopyAction)
+
+
+class TaskComposerListWidget(QListWidget):
+    order_changed = pyqtSignal()
+    task_dropped = pyqtSignal(str, int)
+    action_dropped = pyqtSignal(object, int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.setDragEnabled(True)
+        self.setDropIndicatorShown(True)
+        self.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.setViewMode(QListWidget.ViewMode.IconMode)
+        self.setFlow(QListWidget.Flow.LeftToRight)
+        self.setSpacing(12)
+        self.setIconSize(QSize(120, 80))
+        self.setStyleSheet("""
+            QListWidget {
+                background-color: #f5f5f5;
+                border: 1px solid #ddd;
+                border-radius: 5px;
+            }
+            QListWidget::item {
+                border: 2px solid #ddd;
+                border-radius: 8px;
+                padding: 2px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QListWidget::item:selected {
+                border: 2px solid #2196F3;
+            }
+        """)
+
+    def startDrag(self, supportedActions):
+        current_item = self.currentItem()
+        if current_item is None:
+            return
+
+        entry = current_item.data(Qt.ItemDataRole.UserRole)
+        if not entry:
+            return
+
+        payload = {
+            "row": self.currentRow(),
+        }
+        mime = QMimeData()
+        mime.setData("application/x-task-composer-item", json.dumps(payload).encode("utf-8"))
+
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(current_item.icon().pixmap(80, 54))
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dragEnterEvent(self, event):
+        if (
+            event.mimeData().hasFormat("application/x-task-name")
+            or event.mimeData().hasFormat("application/x-action")
+            or event.mimeData().hasFormat("application/x-task-composer-item")
+        ):
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if (
+            event.mimeData().hasFormat("application/x-task-name")
+            or event.mimeData().hasFormat("application/x-action")
+            or event.mimeData().hasFormat("application/x-task-composer-item")
+        ):
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        insert_row = self._drop_row(event)
+
+        if event.mimeData().hasFormat("application/x-task-composer-item"):
+            payload = json.loads(bytes(event.mimeData().data("application/x-task-composer-item")).decode("utf-8"))
+            source_row = payload["row"]
+            if 0 <= source_row < self.count():
+                item = self.takeItem(source_row)
+                if source_row < insert_row:
+                    insert_row -= 1
+                self.insertItem(insert_row, item)
+                self.setCurrentRow(insert_row)
+                self.order_changed.emit()
+                event.accept()
+            return
+
+        if event.mimeData().hasFormat("application/x-task-name"):
+            task_name = bytes(event.mimeData().data("application/x-task-name")).decode("utf-8")
+            self.task_dropped.emit(task_name, insert_row)
+            event.accept()
+            return
+
+        if event.mimeData().hasFormat("application/x-action"):
+            data = event.mimeData().data("application/x-action")
+            action_dict = json.loads(bytes(data).decode("utf-8"))
+            action = ActionDefinition.from_dict(action_dict)
+            self.action_dropped.emit(action, insert_row)
+            event.accept()
+            return
+
+        event.ignore()
+
+    def _drop_row(self, event) -> int:
+        position = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        item = self.itemAt(position)
+        if item is None:
+            return self.count()
+        return self.row(item)
 # 尝试导入机械臂控制模块
 try:
     from ..arm_sdk import RobotController
@@ -101,6 +243,9 @@ class MainWindow(QMainWindow):
         self.status_bar = self.create_status_bar()
         layout.addWidget(self.status_bar)
 
+        self.pose_panel = self.create_pose_panel()
+        layout.addWidget(self.pose_panel)
+
         # 底部：横向 Splitter，左=动作库，右=序列+控制+日志
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -167,7 +312,18 @@ class MainWindow(QMainWindow):
 
         self.action_tabs.addTab(self.trajectory_list, "Trajectory")
 
-        layout.addWidget(self.action_tabs, stretch=1)
+        layout.addWidget(self.action_tabs, stretch=2)
+
+        task_library_group = QGroupBox("Saved Tasks")
+        task_library_layout = QVBoxLayout(task_library_group)
+        task_library_layout.setContentsMargins(6, 6, 6, 6)
+        task_library_layout.setSpacing(4)
+        self.task_library_list = TaskLibraryListWidget()
+        self.task_library_list.setMinimumHeight(140)
+        self.task_library_list.itemDoubleClicked.connect(lambda _: self.add_task_to_composer())
+        task_library_layout.addWidget(self.task_library_list)
+        layout.addWidget(task_library_group, stretch=1)
+        self.refresh_task_library()
 
         # 底部按钮行
         btn_layout = QHBoxLayout()
@@ -206,8 +362,8 @@ class MainWindow(QMainWindow):
         self.sequence_list.setMinimumHeight(140)
         layout.addWidget(self.sequence_list, stretch=2)
 
-        self.pose_panel = self.create_pose_panel()
-        layout.addWidget(self.pose_panel)
+        self.task_composer_panel = self.create_task_composer_panel()
+        layout.addWidget(self.task_composer_panel, stretch=2)
 
         self.basic_control_panel = self.create_basic_control_panel()
         layout.addWidget(self.basic_control_panel)
@@ -230,6 +386,73 @@ class MainWindow(QMainWindow):
         # 日志
         self.log_widget = LogWidget()
         layout.addWidget(self.log_widget)
+
+        return panel
+
+    def create_task_composer_panel(self) -> QWidget:
+        panel = QGroupBox("Task Composer")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
+
+        composer_layout = QVBoxLayout()
+        composer_title = QLabel("Combined Plan")
+        composer_title.setStyleSheet("font-size: 12px; font-weight: bold;")
+        self.task_composer_list = TaskComposerListWidget()
+        self.task_composer_list.setMinimumHeight(140)
+        self.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
+        self.task_composer_list.action_dropped.connect(self._add_action_to_composer)
+        self.task_composer_list.order_changed.connect(self._refresh_task_composer_display)
+        composer_layout.addWidget(composer_title)
+        composer_layout.addWidget(self.task_composer_list)
+        layout.addLayout(composer_layout, stretch=1)
+
+        edit_row = QHBoxLayout()
+        edit_row.setSpacing(4)
+        self.refresh_tasks_btn = QPushButton("Refresh")
+        self.refresh_tasks_btn.setMinimumHeight(26)
+        self.refresh_tasks_btn.clicked.connect(self.refresh_task_library)
+        self.add_task_btn = QPushButton("Add")
+        self.add_task_btn.setMinimumHeight(26)
+        self.add_task_btn.clicked.connect(self.add_task_to_composer)
+        self.remove_task_btn = QPushButton("Remove")
+        self.remove_task_btn.setMinimumHeight(26)
+        self.remove_task_btn.clicked.connect(self.remove_task_from_composer)
+        self.task_up_btn = QPushButton("Up")
+        self.task_up_btn.setMinimumHeight(26)
+        self.task_up_btn.clicked.connect(self.move_composed_task_up)
+        self.task_down_btn = QPushButton("Down")
+        self.task_down_btn.setMinimumHeight(26)
+        self.task_down_btn.clicked.connect(self.move_composed_task_down)
+        edit_row.addWidget(self.refresh_tasks_btn)
+        edit_row.addWidget(self.add_task_btn)
+        edit_row.addWidget(self.remove_task_btn)
+        edit_row.addWidget(self.task_up_btn)
+        edit_row.addWidget(self.task_down_btn)
+        layout.addLayout(edit_row)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(4)
+        self.replace_sequence_btn = QPushButton("Replace Sequence")
+        self.replace_sequence_btn.setMinimumHeight(28)
+        self.replace_sequence_btn.setStyleSheet("background-color: #607D8B; color: white; font-weight: bold;")
+        self.replace_sequence_btn.clicked.connect(lambda: self.expand_composed_tasks(replace=True))
+        self.append_sequence_btn = QPushButton("Append")
+        self.append_sequence_btn.setMinimumHeight(28)
+        self.append_sequence_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        self.append_sequence_btn.clicked.connect(lambda: self.expand_composed_tasks(replace=False))
+        self.save_combined_task_btn = QPushButton("Save Combined")
+        self.save_combined_task_btn.setMinimumHeight(28)
+        self.save_combined_task_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.save_combined_task_btn.clicked.connect(self.save_composed_task)
+        self.clear_composer_btn = QPushButton("Clear")
+        self.clear_composer_btn.setMinimumHeight(28)
+        self.clear_composer_btn.clicked.connect(self.clear_task_composer)
+        action_row.addWidget(self.replace_sequence_btn)
+        action_row.addWidget(self.append_sequence_btn)
+        action_row.addWidget(self.save_combined_task_btn)
+        action_row.addWidget(self.clear_composer_btn)
+        layout.addLayout(action_row)
 
         return panel
 
@@ -1064,6 +1287,265 @@ class MainWindow(QMainWindow):
         }
         return tab_list_map.get(current_tab)
 
+    def refresh_task_library(self):
+        if not hasattr(self, "task_library_list"):
+            return
+
+        self.task_library_list.clear()
+        for task_name in sorted(StorageManager.list_tasks()):
+            step_count = len(StorageManager.load_sequence(task_name))
+            item = QListWidgetItem(f"{task_name} ({step_count} steps)")
+            item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            item.setSizeHint(QSize(100, 36))
+            item.setIcon(self._create_task_list_icon())
+            item.setToolTip(f"{task_name}\nSteps: {step_count}\nDrag to Combined Plan")
+            item.setData(Qt.ItemDataRole.UserRole, task_name)
+            self.task_library_list.addItem(item)
+
+    def _create_task_list_icon(self) -> QIcon:
+        from PyQt6.QtGui import QPixmap, QPainter
+
+        pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setBrush(QColor(76, 132, 180))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(2, 2, 20, 20, 4, 4)
+        painter.end()
+        return QIcon(pixmap)
+
+    def add_task_to_composer(self):
+        current_item = self.task_library_list.currentItem()
+        if current_item is None:
+            QMessageBox.warning(self, "Warning", "Please select a saved task first")
+            return
+
+        task_name = current_item.data(Qt.ItemDataRole.UserRole)
+        self._add_task_name_to_composer(task_name, self.task_composer_list.count())
+
+    def _add_task_name_to_composer(self, task_name: str, insert_row: int | None = None):
+        step_count = len(StorageManager.load_sequence(task_name))
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, {"kind": "task", "task_name": task_name})
+        if insert_row is None or insert_row >= self.task_composer_list.count():
+            self.task_composer_list.addItem(item)
+        else:
+            self.task_composer_list.insertItem(max(0, insert_row), item)
+        self._refresh_task_composer_display()
+
+        if hasattr(self, "log_widget"):
+            self.log_widget.append_log(f"Added task to composer: {task_name} ({step_count} steps)")
+
+    def _add_action_to_composer(self, action: ActionDefinition, insert_row: int | None = None):
+        item = QListWidgetItem()
+        item.setData(Qt.ItemDataRole.UserRole, {"kind": "action", "action": action})
+        if insert_row is None or insert_row >= self.task_composer_list.count():
+            self.task_composer_list.addItem(item)
+        else:
+            self.task_composer_list.insertItem(max(0, insert_row), item)
+        self._refresh_task_composer_display()
+
+        if hasattr(self, "log_widget"):
+            self.log_widget.append_log(f"Added action to composer: {action.name}")
+
+    def remove_task_from_composer(self):
+        row = self.task_composer_list.currentRow()
+        if row >= 0:
+            self.task_composer_list.takeItem(row)
+            self._refresh_task_composer_display()
+
+    def move_composed_task_up(self):
+        self._move_composed_task(-1)
+
+    def move_composed_task_down(self):
+        self._move_composed_task(1)
+
+    def _move_composed_task(self, offset: int):
+        current_row = self.task_composer_list.currentRow()
+        target_row = current_row + offset
+        if current_row < 0 or target_row < 0 or target_row >= self.task_composer_list.count():
+            return
+
+        item = self.task_composer_list.takeItem(current_row)
+        self.task_composer_list.insertItem(target_row, item)
+        self.task_composer_list.setCurrentRow(target_row)
+        self._refresh_task_composer_display()
+
+    def clear_task_composer(self):
+        self.task_composer_list.clear()
+
+    def expand_composed_tasks(self, replace: bool):
+        sequence = self._build_composed_task_sequence()
+        if not sequence:
+            QMessageBox.warning(self, "Warning", "Please add at least one task to the composer")
+            return
+
+        if replace:
+            self.sequence_list.clear_sequence()
+
+        for item in sequence:
+            self.sequence_list.add_sequence_item(item)
+
+        mode = "replaced" if replace else "appended"
+        self.log_widget.append_log(f"Task composer {mode} sequence with {len(sequence)} actions")
+
+    def save_composed_task(self):
+        sequence = self._build_composed_task_sequence()
+        if not sequence:
+            QMessageBox.warning(self, "Warning", "Please add at least one task to the composer")
+            return
+
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save Combined Task", "", "Task Files (*.task)"
+        )
+        if not filename:
+            return
+
+        task_name = Path(filename).name
+        StorageManager.save_sequence(sequence, task_name)
+        self.refresh_task_library()
+        self.log_widget.append_log(f"Combined task saved: {task_name}")
+
+    def _build_composed_task_sequence(self) -> list[SequenceItem]:
+        sequence: list[SequenceItem] = []
+        for row in range(self.task_composer_list.count()):
+            list_item = self.task_composer_list.item(row)
+            entry = list_item.data(Qt.ItemDataRole.UserRole)
+            if entry.get("kind") == "action":
+                cloned_item = SequenceItem(
+                    uuid=str(uuid4()),
+                    definition=entry["action"],
+                    status=SequenceItemStatus.PENDING,
+                )
+                sequence.append(cloned_item)
+                continue
+
+            task_name = entry.get("task_name", "")
+            for task_item in StorageManager.load_sequence(task_name):
+                cloned_item = SequenceItem(
+                    uuid=str(uuid4()),
+                    definition=task_item.definition,
+                    status=SequenceItemStatus.PENDING,
+                )
+                sequence.append(cloned_item)
+        return sequence
+
+    def _refresh_task_composer_display(self):
+        for row in range(self.task_composer_list.count()):
+            item = self.task_composer_list.item(row)
+            entry = item.data(Qt.ItemDataRole.UserRole)
+            if entry.get("kind") == "action":
+                action = entry["action"]
+                item.setText(f"{action.name} (action)")
+                item.setIcon(self._create_action_card_icon(action))
+                item.setToolTip(f"{action.name}\nType: {action.type.value}\nDrag to reorder")
+                continue
+
+            task_name = entry.get("task_name", "")
+            step_count = len(StorageManager.load_sequence(task_name))
+            item.setText(f"{task_name} ({step_count} steps)")
+            item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
+            item.setToolTip(f"{task_name}\nSteps: {step_count}\nDrag to reorder")
+
+    def _create_task_card_icon(self, task_name: str, step_count: int, title: str | None = None):
+        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
+        from PyQt6.QtCore import QRectF
+
+        width, height = 120, 80
+        pixmap = QPixmap(width, height)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QColor(76, 132, 180) if title is None else QColor(96, 125, 139))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
+
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(16)
+        painter.setFont(font)
+        header_source = title[:-5] if title and title.endswith(".task") else (title or "TASK")
+        header = header_source[:12] + ".." if len(header_source) > 12 else header_source
+        painter.drawText(QRectF(6, 6, width - 12, 24), Qt.AlignmentFlag.AlignLeft, header)
+
+        font.setPointSize(10)
+        font.setBold(False)
+        painter.setFont(font)
+        display_name = task_name[:-5] if task_name.endswith(".task") else task_name
+        truncated_name = display_name[:10] + ".." if len(display_name) > 10 else display_name
+        painter.drawText(
+            QRectF(6, 34, width - 12, 22),
+            Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
+            truncated_name,
+        )
+
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(
+            QRectF(0, height - 22, width, 18),
+            Qt.AlignmentFlag.AlignCenter,
+            f"{step_count} steps",
+        )
+        painter.end()
+        return QIcon(pixmap)
+
+    def _create_action_card_icon(self, action: ActionDefinition):
+        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
+        from PyQt6.QtCore import QRectF
+
+        width, height = 120, 80
+        pixmap = QPixmap(width, height)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        colors = {
+            ActionType.MOVE: QColor(100, 149, 237),
+            ActionType.BASE_MOVE: QColor(255, 99, 71),
+            ActionType.MANIPULATE: QColor(255, 140, 0),
+            ActionType.WAIT: QColor(255, 140, 0),
+            ActionType.INSPECT: QColor(60, 179, 113),
+            ActionType.CHANGE_GUN: QColor(147, 112, 219),
+            ActionType.VISION_CAPTURE: QColor(30, 144, 255),
+            ActionType.TRAJECTORY: QColor(0, 150, 136),
+        }
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(colors.get(action.type, QColor(128, 128, 128)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
+
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(16)
+        painter.setFont(font)
+        header = action.name[:12] + ".." if len(action.name) > 12 else action.name
+        painter.drawText(QRectF(6, 6, width - 12, 24), Qt.AlignmentFlag.AlignLeft, header)
+
+        font.setPointSize(10)
+        font.setBold(False)
+        painter.setFont(font)
+        truncated_name = action.name[:10] + ".." if len(action.name) > 10 else action.name
+        painter.drawText(
+            QRectF(6, 34, width - 12, 22),
+            Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
+            truncated_name,
+        )
+
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.drawText(
+            QRectF(0, height - 22, width, 18),
+            Qt.AlignmentFlag.AlignCenter,
+            "action",
+        )
+        painter.end()
+        return QIcon(pixmap)
+
     def save_task(self):
         sequence = self.sequence_list.get_sequence()
         if not sequence:
@@ -1076,6 +1558,7 @@ class MainWindow(QMainWindow):
         if filename:
             task_name = Path(filename).name
             StorageManager.save_sequence(sequence, task_name)
+            self.refresh_task_library()
             self.log_widget.append_log(f"任务已保存: {task_name}")
 
     def load_task(self):
@@ -1088,6 +1571,7 @@ class MainWindow(QMainWindow):
             self.sequence_list.clear()
             for item in sequence:
                 self.sequence_list.add_sequence_item(item)
+            self.refresh_task_library()
             self.log_widget.append_log(f"任务已加载: {task_name}")
 
     def start_execution(self):

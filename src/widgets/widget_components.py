@@ -147,6 +147,7 @@ class SequenceListWidget(QListWidget):
         status_text = self._get_status_text(item.status)
         # 图标模式：序号 + 动作名 + 状态
         display_text = f"{index + 1}. {item.definition.name} [{status_text}]"
+        display_text = f"{item.definition.name} [{status_text}]"
         list_item.setText(display_text)
         list_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         list_item.setToolTip(f"{item.definition.name}\n状态: {status_text}\n参数: {item.definition.parameters}")
@@ -200,7 +201,7 @@ class SequenceListWidget(QListWidget):
         painter.end()
         return QIcon(pixmap)
 
-    def _create_text_icon(self, text: str, action_type: ActionType, status: SequenceItemStatus, index: int) -> QIcon:
+    def _create_text_icon(self, text: str, action_type: ActionType, status: SequenceItemStatus, index: int | None = None) -> QIcon:
         from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor, QPen
         from PyQt6.QtCore import QRectF
 
@@ -242,16 +243,18 @@ class SequenceListWidget(QListWidget):
         painter.setPen(QColor(255, 255, 255))
         font = QFont()
         font.setBold(True)
-        font.setPointSize(18)
+        font.setPointSize(11)
         painter.setFont(font)
+        truncated_text = text[:12] + ".." if len(text) > 12 else text
         painter.drawText(QRectF(4, 4, width - 8, 32),
-                         Qt.AlignmentFlag.AlignLeft, f"#{index + 1}")
+                         Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                         truncated_text)
 
         # 动作名（截断）
         font.setPointSize(10)
         font.setBold(False)
         painter.setFont(font)
-        truncated_text = text[:8] + ".." if len(text) > 8 else text
+        truncated_text = text[:12] + ".." if len(text) > 12 else text
         painter.drawText(QRectF(4, 34, width - 8, 28),
                          Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
                          truncated_text)
