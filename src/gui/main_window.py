@@ -351,25 +351,24 @@ class MainWindow(QMainWindow):
         return panel
 
     def create_right_panel(self) -> QWidget:
-        """右侧面板：序列列表 + 控制面板 + 日志，竖向堆叠"""
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
 
-        # 序列列表：自占剩余空间（横向卡片区需保证最小高度，避免被挤没）
+        self.workflow_tabs = QTabWidget()
+        self.workflow_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        self.workflow_tabs.setMovable(False)
+
+        action_page = QWidget()
+        action_layout = QVBoxLayout(action_page)
+        action_layout.setContentsMargins(2, 2, 2, 2)
+        action_layout.setSpacing(2)
+
         self.sequence_list = SequenceListWidget()
         self.sequence_list.setMinimumHeight(140)
-        layout.addWidget(self.sequence_list, stretch=2)
+        action_layout.addWidget(self.sequence_list, stretch=2)
 
-        self.task_composer_panel = self.create_task_composer_panel()
-        layout.addWidget(self.task_composer_panel, stretch=2)
-
-        self.basic_control_panel = self.create_basic_control_panel()
-        layout.addWidget(self.basic_control_panel)
-
-
-        # 控制面板
         self.control_panel = ControlPanel()
         self.control_panel.start_clicked.connect(self.start_execution)
         self.control_panel.pause_clicked.connect(self.toggle_pause)
@@ -381,14 +380,26 @@ class MainWindow(QMainWindow):
         self.control_panel.clear_clicked.connect(self.clear_sequence)
         self.control_panel.save_clicked.connect(self.save_task)
         self.control_panel.load_clicked.connect(self.load_task)
-        layout.addWidget(self.control_panel)
+        action_layout.addWidget(self.control_panel)
 
-        # 日志
+        task_page = QWidget()
+        task_layout = QVBoxLayout(task_page)
+        task_layout.setContentsMargins(2, 2, 2, 2)
+        task_layout.setSpacing(2)
+        self.task_composer_panel = self.create_task_composer_panel()
+        task_layout.addWidget(self.task_composer_panel, stretch=1)
+
+        self.workflow_tabs.addTab(action_page, "动作编排")
+        self.workflow_tabs.addTab(task_page, "Task 组合")
+        layout.addWidget(self.workflow_tabs, stretch=1)
+
+        self.basic_control_panel = self.create_basic_control_panel()
+        layout.addWidget(self.basic_control_panel)
+
         self.log_widget = LogWidget()
         layout.addWidget(self.log_widget)
 
         return panel
-
     def create_task_composer_panel(self) -> QWidget:
         panel = QGroupBox("Task Composer")
         layout = QVBoxLayout(panel)
@@ -433,23 +444,18 @@ class MainWindow(QMainWindow):
 
         action_row = QHBoxLayout()
         action_row.setSpacing(4)
-        self.replace_sequence_btn = QPushButton("Replace Sequence")
-        self.replace_sequence_btn.setMinimumHeight(28)
-        self.replace_sequence_btn.setStyleSheet("background-color: #607D8B; color: white; font-weight: bold;")
-        self.replace_sequence_btn.clicked.connect(lambda: self.expand_composed_tasks(replace=True))
-        self.append_sequence_btn = QPushButton("Append")
-        self.append_sequence_btn.setMinimumHeight(28)
-        self.append_sequence_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
-        self.append_sequence_btn.clicked.connect(lambda: self.expand_composed_tasks(replace=False))
+        self.execute_composed_task_btn = QPushButton("执行当前组合")
+        self.execute_composed_task_btn.setMinimumHeight(28)
+        self.execute_composed_task_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.execute_composed_task_btn.clicked.connect(self.execute_composed_task)
         self.save_combined_task_btn = QPushButton("Save Combined")
         self.save_combined_task_btn.setMinimumHeight(28)
-        self.save_combined_task_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.save_combined_task_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
         self.save_combined_task_btn.clicked.connect(self.save_composed_task)
         self.clear_composer_btn = QPushButton("Clear")
         self.clear_composer_btn.setMinimumHeight(28)
         self.clear_composer_btn.clicked.connect(self.clear_task_composer)
-        action_row.addWidget(self.replace_sequence_btn)
-        action_row.addWidget(self.append_sequence_btn)
+        action_row.addWidget(self.execute_composed_task_btn)
         action_row.addWidget(self.save_combined_task_btn)
         action_row.addWidget(self.clear_composer_btn)
         layout.addLayout(action_row)
@@ -1580,13 +1586,30 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先添加动作到序列中")
             return
 
-        self.log_widget.append_log("开始执行序列...")
+        self._start_sequence_execution(sequence, display_list=self.sequence_list, label="动作编排序列")
+
+    def execute_composed_task(self):
+        sequence = self._build_composed_task_sequence()
+        if not sequence:
+            QMessageBox.warning(self, "Warning", "Please add at least one task or action to the composer")
+            return
+
+        self._start_sequence_execution(sequence, display_list=None, label="Task 组合序列")
+
+    def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
+        if self.execution_thread and self.execution_thread.isRunning():
+            QMessageBox.warning(self, "Warning", "A sequence is already running")
+            return
+
+        self.log_widget.append_log(f"开始执行{label}...")
+        self._execution_display_list = display_list
 
         for item in sequence:
             item.status = SequenceItemStatus.PENDING
       
-        for i, item in enumerate(sequence):
-            self.sequence_list.update_item_status(i, item)
+        if display_list is not None:
+            for i, item in enumerate(sequence):
+                display_list.update_item_status(i, item)
 
         self.execution_thread = ExecutionThread(sequence, self.robot_controller, self.body_controller, self.move_controller)
         self.execution_thread.step_started.connect(self.on_step_started)
@@ -1620,20 +1643,29 @@ class MainWindow(QMainWindow):
         self.control_panel.pause_btn.setText("暂停")
 
     def on_step_started(self, index: int, item: SequenceItem):
-        self.sequence_list.update_item_status(index, item)
-        self.sequence_list.scrollToItem(self.sequence_list.item(index))
+        display_list = getattr(self, "_execution_display_list", self.sequence_list)
+        if display_list is not None:
+            display_list.update_item_status(index, item)
+            list_item = display_list.item(index)
+            if list_item is not None:
+                display_list.scrollToItem(list_item)
 
     def on_step_completed(self, index: int, item: SequenceItem):
-        self.sequence_list.update_item_status(index, item)
+        display_list = getattr(self, "_execution_display_list", self.sequence_list)
+        if display_list is not None:
+            display_list.update_item_status(index, item)
 
     def on_step_failed(self, index: int, item: SequenceItem, error_msg: str):
-        self.sequence_list.update_item_status(index, item)
+        display_list = getattr(self, "_execution_display_list", self.sequence_list)
+        if display_list is not None:
+            display_list.update_item_status(index, item)
         QMessageBox.critical(self, "执行失败", f"步骤 {index + 1} 失败:\n{error_msg}")
 
     def on_execution_finished(self):
         self.log_widget.append_log("序列执行完成")
         self.is_paused = False
         self.control_panel.pause_btn.setText("暂停")
+        self._execution_display_list = self.sequence_list
 
     def move_item_up(self):
         current_row = self.sequence_list.currentRow()
