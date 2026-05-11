@@ -4,6 +4,7 @@ import numpy as np
 from ultralytics import YOLO, SAM
 from ..vision.interface import vertical_catch
 import os
+import threading
 from sklearn.mixture import GaussianMixture
 import socket
 import pickle
@@ -34,6 +35,7 @@ class SimpleRobotArm:
         self.handle = None
         self.is_connected = False
         self.last_error = None
+        self.sdk_lock = threading.RLock()
 
     def connect(self):
         """连接到机械臂"""
@@ -66,19 +68,22 @@ class SimpleRobotArm:
 
     def disconnect(self):
         """断开机械臂连接"""
-        if self.robot is not None:
-            try:
-                if self.handle is not None:
-                    self.robot.rm_delete_robot_arm()
-            except Exception as e:
-                print(f"{self.robot_name}断开连接时出错: {e}")
-                self.last_error = str(e)
-            finally:
-                self.robot = None
-                self.handle = None
-                self.is_connected = False
-                print(f"{self.robot_name}连接已断开")
+        with self.sdk_lock:
+            if self.robot is not None:
+                try:
+                    if self.handle is not None:
+                        self.robot.rm_delete_robot_arm()
+                except Exception as e:
+                    print(f"{self.robot_name}断开连接时出错: {e}")
+                    self.last_error = str(e)
+                finally:
+                    self.robot = None
+                    self.handle = None
+                    self.is_connected = False
+                    print(f"{self.robot_name}连接已断开")
 
+    def owns_robot(self, robot) -> bool:
+        return self.robot is robot
 
 class RobotController:
     
@@ -934,14 +939,66 @@ class RobotController:
                 return True
         return False
 
+    def _sdk_lock_for_robot(self, robot):
+        for ctrl in (self.robot1_ctrl, self.robot2_ctrl):
+            if ctrl.owns_robot(robot):
+                return ctrl.sdk_lock
+        return threading.RLock()
+
     def demo_send_project(self, robot, file_path, plan_speed=20, only_save=0, save_id=0, step_flag=0, auto_start=0, project_type=1):
         """向机械臂发送项目"""
-        if not os.path.exists(file_path):
-            print("文件路径不存在:", file_path)
+        if not file_path:
+            print("文件路径为空")
             return False
 
-        send_project = rm_send_project_t(file_path, plan_speed, only_save, save_id, step_flag, auto_start, project_type)
-        result = robot.rm_send_project(send_project)
+        file_path = os.path.abspath(os.fspath(file_path))
+        if not os.path.isfile(file_path):
+            print("文件路径不存在或不是文件:", file_path)
+            return False
+
+        path_bytes = file_path.encode("utf-8")
+        if len(path_bytes) >= 300:
+            print(f"项目路径过长: {len(path_bytes)} bytes，SDK 限制小于 300 bytes")
+            print("请把轨迹文件移动到更短的英文路径后重试:", file_path)
+            return False
+
+        file_size = os.path.getsize(file_path)
+        if file_size <= 0:
+            print("项目文件为空:", file_path)
+            return False
+
+        with self._sdk_lock_for_robot(robot):
+            try:
+                ret, state = robot.rm_get_current_arm_state()
+            except Exception as exc:
+                print("发送项目前读取机械臂状态异常:", exc)
+                return False
+
+            if ret != 0:
+                print(f"发送项目前读取机械臂状态失败, 错误代码: {ret}")
+                print("通常表示与控制器通信异常，请检查机器人上电、网线/IP、控制器是否被其他程序占用。")
+                return False
+
+            state_error = state.get("error_code", 0) if isinstance(state, dict) else 0
+            if state_error != 0:
+                print(f"机械臂当前存在错误, error_code: {state_error}")
+                print("请先在示教器或控制器端清除机械臂错误后再下发项目。")
+                return False
+
+            print(
+                "发送项目参数:",
+                f"path={file_path}",
+                f"size={file_size}",
+                f"plan_speed={plan_speed}",
+                f"only_save={only_save}",
+                f"save_id={save_id}",
+                f"step_flag={step_flag}",
+                f"auto_start={auto_start}",
+                f"project_type={project_type}",
+            )
+
+            send_project = rm_send_project_t(file_path, plan_speed, only_save, save_id, step_flag, auto_start, project_type)
+            result = robot.rm_send_project(send_project)
 
         if result[0] == 0:
             if result[1] == -1:
@@ -955,6 +1012,9 @@ class RobotController:
                 return False
         else:
             print("发送项目失败,错误代码:", result[0])
+            if result[0] == 1:
+                print("错误代码 1 一般是控制器通信/响应失败；若 SDK 同时打印 project_state: false，请重点检查文件类型是否匹配、网络连接和控制器当前状态。")
+                print("拖动示教轨迹应使用 project_type=1；在线编程文件应使用 project_type=0。")
             return False
 
     def demo_get_program_run_state(self, robot, time_sleep=1, max_retries=10):
@@ -962,7 +1022,8 @@ class RobotController:
         retries = 0
         while retries < max_retries:
             time.sleep(time_sleep)
-            result = robot.rm_get_program_run_state()
+            with self._sdk_lock_for_robot(robot):
+                result = robot.rm_get_program_run_state()
 
             if result[0] == 0:
                 print("程序运行状态:", result[1])

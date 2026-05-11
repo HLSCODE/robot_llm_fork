@@ -631,14 +631,16 @@ class MainWindow(QMainWindow):
         if not filename:
             return
 
-        self._set_trajectory_buttons_enabled(False)
-        thread = TrajectoryExecutionThread(robot, filename, robot_name.upper())
-        self.trajectory_execution_thread = thread
-        thread.log_message.connect(self.log_widget.append_log)
-        thread.succeeded.connect(self.on_trajectory_succeeded)
-        thread.failed.connect(self.on_trajectory_failed)
-        thread.finished.connect(lambda: self._set_trajectory_buttons_enabled(True))
-        thread.start()
+        action = ActionDefinition(
+            id=str(uuid4()),
+            name=f"{robot_name.upper()} {Path(filename).stem}",
+            type=ActionType.TRAJECTORY,
+            parameters={
+                "robot": robot_name,
+                "file_path": filename,
+            },
+        )
+        self._start_sequence_execution([SequenceItem.from_definition(action)], display_list=None, label="轨迹")
 
     def on_trajectory_succeeded(self, message: str):
         self.log_widget.append_log(message)
@@ -683,6 +685,14 @@ class MainWindow(QMainWindow):
             ):
                 if hasattr(self, attr):
                     getattr(self, attr).setEnabled(False)
+
+    def _pause_pose_refresh(self):
+        if self.pose_timer is not None and self.pose_timer.isActive():
+            self.pose_timer.stop()
+
+    def _resume_pose_refresh(self):
+        if self.pose_timer is not None and not self.pose_timer.isActive():
+            self.pose_timer.start()
 
     def _build_pose_row(self, parent_layout: QVBoxLayout, robot_label: str):
         row = QHBoxLayout()
@@ -729,7 +739,13 @@ class MainWindow(QMainWindow):
         if robot is None:
             return None
 
+        lock = getattr(ctrl, "sdk_lock", None)
+        lock_acquired = False
         try:
+            if lock is not None:
+                lock_acquired = lock.acquire(blocking=False)
+                if not lock_acquired:
+                    return self.robot_pose_cache.get(robot_name)
             ret, state = robot.rm_get_current_arm_state()
             if ret != 0:
                 return None
@@ -739,6 +755,9 @@ class MainWindow(QMainWindow):
             return [float(v) for v in pose[:6]]
         except Exception:
             return None
+        finally:
+            if lock is not None and lock_acquired:
+                lock.release()
 
     def format_pose_text(self, pose):
         x_mm = pose[0] * 1000
@@ -1603,6 +1622,8 @@ class MainWindow(QMainWindow):
 
         self.log_widget.append_log(f"开始执行{label}...")
         self._execution_display_list = display_list
+        self._set_trajectory_buttons_enabled(False)
+        self._pause_pose_refresh()
 
         for item in sequence:
             item.status = SequenceItemStatus.PENDING
@@ -1666,6 +1687,9 @@ class MainWindow(QMainWindow):
         self.is_paused = False
         self.control_panel.pause_btn.setText("暂停")
         self._execution_display_list = self.sequence_list
+        self._set_trajectory_buttons_enabled(True)
+        self._resume_pose_refresh()
+        self.refresh_arm_poses()
 
     def move_item_up(self):
         current_row = self.sequence_list.currentRow()
