@@ -161,16 +161,19 @@ class TaskComposerListWidget(QListWidget):
 # 尝试导入机械臂控制模块
 try:
     from ..arm_sdk import RobotController
-    from ..devices import ModbusMotor
+    from ..devices import ModbusMotor, RelayController
     from ..devices.yiyeqiang_init import init_tip as YIYEQIANG_INIT
     from ..devices.yiyeqiang_out import eject_tip as YIYEQIANG_EJECT
     ROBOT_AVAILABLE = RobotController is not None
     MODBUS_AVAILABLE = ModbusMotor is not None
+    RELAY_AVAILABLE = RelayController is not None
 except ImportError as e:
     ROBOT_AVAILABLE = False
     MODBUS_AVAILABLE = False
+    RELAY_AVAILABLE = False
     RobotController = None
     ModbusMotor = None
+    RelayController = None
     YIYEQIANG_INIT = None
     YIYEQIANG_EJECT = None
     print(f"机械臂模块导入失败: {e}")
@@ -199,6 +202,7 @@ class MainWindow(QMainWindow):
         # 身体（ModbusMotor）控制相关
         self.body_controller = None
         self.body_connected = False
+        self.relay_controller = None
 
         # 底盘移动控制器
         self.move_controller = None
@@ -227,7 +231,7 @@ class MainWindow(QMainWindow):
         self.initialize_pipette_on_startup()
 
     def init_ui(self):
-        self.setWindowTitle("Robot Action Orchestrator")
+        self.setWindowTitle("机器人动作编排器")
         self.setMinimumSize(540, 800)
         self.resize(540, 960)
 
@@ -310,11 +314,11 @@ class MainWindow(QMainWindow):
         self.ai_assistant_widget = AIAssistantWidget()
         self.action_tabs.addTab(self.ai_assistant_widget, "🤖 AI助手")
 
-        self.action_tabs.addTab(self.trajectory_list, "Trajectory")
+        self.action_tabs.addTab(self.trajectory_list, "轨迹类")
 
         layout.addWidget(self.action_tabs, stretch=2)
 
-        task_library_group = QGroupBox("Saved Tasks")
+        task_library_group = QGroupBox("已保存任务")
         task_library_layout = QVBoxLayout(task_library_group)
         task_library_layout.setContentsMargins(6, 6, 6, 6)
         task_library_layout.setSpacing(4)
@@ -390,7 +394,7 @@ class MainWindow(QMainWindow):
         task_layout.addWidget(self.task_composer_panel, stretch=1)
 
         self.workflow_tabs.addTab(action_page, "动作编排")
-        self.workflow_tabs.addTab(task_page, "Task 组合")
+        self.workflow_tabs.addTab(task_page, "任务组合")
         layout.addWidget(self.workflow_tabs, stretch=1)
 
         self.basic_control_panel = self.create_basic_control_panel()
@@ -401,13 +405,13 @@ class MainWindow(QMainWindow):
 
         return panel
     def create_task_composer_panel(self) -> QWidget:
-        panel = QGroupBox("Task Composer")
+        panel = QGroupBox("任务组合器")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
 
         composer_layout = QVBoxLayout()
-        composer_title = QLabel("Combined Plan")
+        composer_title = QLabel("组合计划")
         composer_title.setStyleSheet("font-size: 12px; font-weight: bold;")
         self.task_composer_list = TaskComposerListWidget()
         self.task_composer_list.setMinimumHeight(140)
@@ -420,19 +424,19 @@ class MainWindow(QMainWindow):
 
         edit_row = QHBoxLayout()
         edit_row.setSpacing(4)
-        self.refresh_tasks_btn = QPushButton("Refresh")
+        self.refresh_tasks_btn = QPushButton("刷新")
         self.refresh_tasks_btn.setMinimumHeight(26)
         self.refresh_tasks_btn.clicked.connect(self.refresh_task_library)
-        self.add_task_btn = QPushButton("Add")
+        self.add_task_btn = QPushButton("添加")
         self.add_task_btn.setMinimumHeight(26)
         self.add_task_btn.clicked.connect(self.add_task_to_composer)
-        self.remove_task_btn = QPushButton("Remove")
+        self.remove_task_btn = QPushButton("移除")
         self.remove_task_btn.setMinimumHeight(26)
         self.remove_task_btn.clicked.connect(self.remove_task_from_composer)
-        self.task_up_btn = QPushButton("Up")
+        self.task_up_btn = QPushButton("上移")
         self.task_up_btn.setMinimumHeight(26)
         self.task_up_btn.clicked.connect(self.move_composed_task_up)
-        self.task_down_btn = QPushButton("Down")
+        self.task_down_btn = QPushButton("下移")
         self.task_down_btn.setMinimumHeight(26)
         self.task_down_btn.clicked.connect(self.move_composed_task_down)
         edit_row.addWidget(self.refresh_tasks_btn)
@@ -448,11 +452,11 @@ class MainWindow(QMainWindow):
         self.execute_composed_task_btn.setMinimumHeight(28)
         self.execute_composed_task_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
         self.execute_composed_task_btn.clicked.connect(self.execute_composed_task)
-        self.save_combined_task_btn = QPushButton("Save Combined")
+        self.save_combined_task_btn = QPushButton("保存组合")
         self.save_combined_task_btn.setMinimumHeight(28)
         self.save_combined_task_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
         self.save_combined_task_btn.clicked.connect(self.save_composed_task)
-        self.clear_composer_btn = QPushButton("Clear")
+        self.clear_composer_btn = QPushButton("清空")
         self.clear_composer_btn.setMinimumHeight(28)
         self.clear_composer_btn.clicked.connect(self.clear_task_composer)
         action_row.addWidget(self.execute_composed_task_btn)
@@ -470,9 +474,9 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
 
         header_layout = QHBoxLayout()
-        title = QLabel("Arm Pose")
+        title = QLabel("机械臂位姿")
         title.setStyleSheet("font-size: 12px; font-weight: bold;")
-        self.refresh_pose_btn = QPushButton("Refresh")
+        self.refresh_pose_btn = QPushButton("刷新")
         self.refresh_pose_btn.setFixedHeight(24)
         self.refresh_pose_btn.clicked.connect(self.refresh_arm_poses)
         header_layout.addWidget(title)
@@ -497,18 +501,18 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
 
-        title = QLabel("Basic Control")
+        title = QLabel("基础控制")
         title.setStyleSheet("font-size: 12px; font-weight: bold;")
         layout.addWidget(title)
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
 
-        self.gripper_open_btn = QPushButton("Gripper Open")
+        self.gripper_open_btn = QPushButton("夹爪打开")
         self.gripper_open_btn.setMinimumHeight(28)
         self.gripper_open_btn.clicked.connect(self.on_gripper_open_clicked)
 
-        self.gripper_close_btn = QPushButton("Gripper Close")
+        self.gripper_close_btn = QPushButton("夹爪关闭")
         self.gripper_close_btn.setMinimumHeight(28)
         self.gripper_close_btn.clicked.connect(self.on_gripper_close_clicked)
 
@@ -521,6 +525,42 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.init_pipette_btn)
         layout.addLayout(btn_layout)
 
+        relay_group = QGroupBox("继电器控制")
+        relay_group.setCheckable(True)
+        relay_group.setChecked(False)
+        relay_layout = QVBoxLayout(relay_group)
+        relay_layout.setContentsMargins(8, 6, 8, 6)
+        relay_layout.setSpacing(6)
+
+        # relay_hint = QLabel("展开后可控制两个继电器通道")
+        # relay_hint.setStyleSheet("font-size: 11px; color: #666;")
+        # relay_layout.addWidget(relay_hint)
+
+        relay_btn_row = QHBoxLayout()
+        relay_btn_row.setSpacing(6)
+        self.relay_y1_on_btn = QPushButton("Y1 打开")
+        self.relay_y1_off_btn = QPushButton("Y1 关闭")
+        self.relay_y2_on_btn = QPushButton("Y2 打开")
+        self.relay_y2_off_btn = QPushButton("Y2 关闭")
+        for btn in (
+            self.relay_y1_on_btn,
+            self.relay_y1_off_btn,
+            self.relay_y2_on_btn,
+            self.relay_y2_off_btn,
+        ):
+            btn.setMinimumHeight(28)
+            relay_btn_row.addWidget(btn)
+
+        self.relay_y1_on_btn.clicked.connect(lambda: self._set_relay_state("Y1", True))
+        self.relay_y1_off_btn.clicked.connect(lambda: self._set_relay_state("Y1", False))
+        self.relay_y2_on_btn.clicked.connect(lambda: self._set_relay_state("Y2", True))
+        self.relay_y2_off_btn.clicked.connect(lambda: self._set_relay_state("Y2", False))
+        relay_layout.addLayout(relay_btn_row)
+        relay_group.toggled.connect(lambda checked: self._set_relay_content_visible(relay_group, checked))
+        layout.addWidget(relay_group)
+        self.relay_group = relay_group
+        self._set_relay_content_visible(relay_group, False)
+
         self.update_basic_control_buttons()
         return panel
 
@@ -530,103 +570,134 @@ class MainWindow(QMainWindow):
             self.gripper_open_btn.setEnabled(gripper_ready)
         if hasattr(self, "gripper_close_btn"):
             self.gripper_close_btn.setEnabled(gripper_ready)
+        relay_ready = RELAY_AVAILABLE
+        for attr in ("relay_y1_on_btn", "relay_y1_off_btn", "relay_y2_on_btn", "relay_y2_off_btn"):
+            if hasattr(self, attr):
+                getattr(self, attr).setEnabled(relay_ready)
+
+    def _set_relay_content_visible(self, relay_group: QGroupBox, visible: bool):
+        for child in relay_group.findChildren(QWidget):
+            child.setVisible(visible)
+
+    def _get_relay_controller(self):
+        if not RELAY_AVAILABLE or RelayController is None:
+            raise RuntimeError("继电器模块不可用")
+        if self.relay_controller is None:
+            self.relay_controller = RelayController(
+                port=self.config.RELAY_SERIAL_PORT,
+                baudrate=self.config.RELAY_BAUDRATE,
+                timeout=self.config.RELAY_TIMEOUT,
+            )
+            self.log_widget.append_log("继电器串口已连接")
+        return self.relay_controller
+
+    def _set_relay_state(self, channel: str, turn_on: bool):
+        action_text = "打开" if turn_on else "关闭"
+        try:
+            relay = self._get_relay_controller()
+            method_name = f"turn_{'on' if turn_on else 'off'}_relay_{channel}"
+            getattr(relay, method_name)()
+            self.log_widget.append_log(f"继电器 {channel} 已{action_text}")
+        except Exception as e:
+            self.log_widget.append_log(f"继电器 {channel} {action_text}失败: {e}")
+            QMessageBox.warning(self, "警告", f"继电器 {channel} {action_text}失败:\n{e}")
 
     def on_gripper_open_clicked(self):
         if self.robot_controller is None or not self.robot1_connected:
-            QMessageBox.warning(self, "Warning", "Robot1 is not connected")
+            QMessageBox.warning(self, "警告", "Robot1 未连接")
             return
 
         try:
             success = self.robot_controller.gripper_open_robot1()
             if success:
-                self.log_widget.append_log("Robot1 gripper opened")
+                self.log_widget.append_log("Robot1 夹爪已打开")
             else:
-                QMessageBox.warning(self, "Warning", "Failed to open gripper")
-                self.log_widget.append_log("Robot1 gripper open failed")
+                QMessageBox.warning(self, "警告", "夹爪打开失败")
+                self.log_widget.append_log("Robot1 夹爪打开失败")
         except Exception as e:
-            QMessageBox.warning(self, "Warning", f"Gripper open error: {e}")
-            self.log_widget.append_log(f"Robot1 gripper open error: {e}")
+            QMessageBox.warning(self, "警告", f"夹爪打开异常: {e}")
+            self.log_widget.append_log(f"Robot1 夹爪打开异常: {e}")
 
     def on_gripper_close_clicked(self):
         if self.robot_controller is None or not self.robot1_connected:
-            QMessageBox.warning(self, "Warning", "Robot1 is not connected")
+            QMessageBox.warning(self, "警告", "Robot1 未连接")
             return
 
         try:
             success = self.robot_controller.gripper_close_robot1()
             if success:
-                self.log_widget.append_log("Robot1 gripper closed")
+                self.log_widget.append_log("Robot1 夹爪已关闭")
             else:
-                QMessageBox.warning(self, "Warning", "Failed to close gripper")
-                self.log_widget.append_log("Robot1 gripper close failed")
+                QMessageBox.warning(self, "警告", "夹爪关闭失败")
+                self.log_widget.append_log("Robot1 夹爪关闭失败")
         except Exception as e:
-            QMessageBox.warning(self, "Warning", f"Gripper close error: {e}")
-            self.log_widget.append_log(f"Robot1 gripper close error: {e}")
+            QMessageBox.warning(self, "警告", f"夹爪关闭异常: {e}")
+            self.log_widget.append_log(f"Robot1 夹爪关闭异常: {e}")
 
     def record_trajectory(self, robot_name: str):
         robot = self._get_trajectory_robot(robot_name)
         if robot is None:
-            QMessageBox.warning(self, "Warning", f"{robot_name.upper()} is not connected")
+            QMessageBox.warning(self, "警告", f"{robot_name.upper()} 未连接")
             return
 
         default_path = self._next_trajectory_file(robot_name)
         filename, _ = QFileDialog.getSaveFileName(
             self,
-            f"Save {robot_name.upper()} trajectory",
+            f"保存 {robot_name.upper()} 轨迹",
             str(default_path),
-            "Trajectory Files (*.txt);;All Files (*)"
+            "轨迹文件 (*.txt);;所有文件 (*)"
         )
         if not filename:
             return
 
         try:
-            self.log_widget.append_log(f"{robot_name.upper()} starting drag teach")
+            self.log_widget.append_log(f"{robot_name.upper()} 开始拖动示教")
             result = robot.rm_start_drag_teach(1)
             if result != 0:
-                QMessageBox.warning(self, "Warning", f"Failed to start drag teach, code: {result}")
-                self.log_widget.append_log(f"{robot_name.upper()} drag teach start failed: {result}")
+                QMessageBox.warning(self, "警告", f"拖动示教启动失败，错误码: {result}")
+                self.log_widget.append_log(f"{robot_name.upper()} 拖动示教启动失败: {result}")
                 return
 
             QMessageBox.information(
                 self,
-                "Trajectory Recording",
-                f"{robot_name.upper()} is recording now. Move the arm by hand, then click OK to stop and save."
+                "轨迹录制",
+                f"{robot_name.upper()} 正在录制。请手动拖动机械臂，完成后点击确定停止并保存。"
             )
 
             stop_result = robot.rm_stop_drag_teach()
             if stop_result != 0:
-                QMessageBox.warning(self, "Warning", f"Failed to stop drag teach, code: {stop_result}")
-                self.log_widget.append_log(f"{robot_name.upper()} drag teach stop failed: {stop_result}")
+                QMessageBox.warning(self, "警告", f"拖动示教停止失败，错误码: {stop_result}")
+                self.log_widget.append_log(f"{robot_name.upper()} 拖动示教停止失败: {stop_result}")
                 return
 
             Path(filename).parent.mkdir(parents=True, exist_ok=True)
             save_result = robot.rm_save_trajectory(filename)
             if save_result[0] == 0:
                 self.log_widget.append_log(
-                    f"{robot_name.upper()} trajectory saved: {filename}, points: {save_result[1]}"
+                    f"{robot_name.upper()} 轨迹已保存: {filename}, 点数: {save_result[1]}"
                 )
-                QMessageBox.information(self, "Trajectory Saved", f"Saved to:\n{filename}")
+                QMessageBox.information(self, "轨迹已保存", f"保存到:\n{filename}")
                 return filename
             else:
-                QMessageBox.warning(self, "Warning", f"Failed to save trajectory, code: {save_result[0]}")
-                self.log_widget.append_log(f"{robot_name.upper()} trajectory save failed: {save_result[0]}")
+                QMessageBox.warning(self, "警告", f"轨迹保存失败，错误码: {save_result[0]}")
+                self.log_widget.append_log(f"{robot_name.upper()} 轨迹保存失败: {save_result[0]}")
         except Exception as e:
-            QMessageBox.warning(self, "Warning", f"Trajectory record error: {e}")
-            self.log_widget.append_log(f"{robot_name.upper()} trajectory record error: {e}")
+            QMessageBox.warning(self, "警告", f"轨迹录制异常: {e}")
+            self.log_widget.append_log(f"{robot_name.upper()} 轨迹录制异常: {e}")
         return None
 
     def run_trajectory(self, robot_name: str):
         robot = self._get_trajectory_robot(robot_name)
         if robot is None:
-            QMessageBox.warning(self, "Warning", f"{robot_name.upper()} is not connected")
+            QMessageBox.warning(self, "警告", f"{robot_name.upper()} 未连接")
             return
 
         start_dir = self._trajectory_dir(robot_name)
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            f"Select {robot_name.upper()} trajectory",
+            f"选择 {robot_name.upper()} 轨迹",
             str(start_dir),
-            "Trajectory Files (*.txt);;All Files (*)"
+            "轨迹文件 (*.txt);;所有文件 (*)"
         )
         if not filename:
             return
@@ -644,11 +715,11 @@ class MainWindow(QMainWindow):
 
     def on_trajectory_succeeded(self, message: str):
         self.log_widget.append_log(message)
-        QMessageBox.information(self, "Trajectory", message)
+        QMessageBox.information(self, "轨迹", message)
 
     def on_trajectory_failed(self, message: str):
         self.log_widget.append_log(message)
-        QMessageBox.warning(self, "Trajectory", message)
+        QMessageBox.warning(self, "轨迹", message)
 
     def _get_trajectory_robot(self, robot_name: str):
         if self.robot_controller is None:
@@ -703,7 +774,7 @@ class MainWindow(QMainWindow):
         pose_label = QLabel("--")
         pose_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        copy_btn = QPushButton("Copy")
+        copy_btn = QPushButton("复制")
         copy_btn.setFixedHeight(24)
         copy_btn.clicked.connect(lambda _, name=robot_label.lower().replace("r", "robot"): self.copy_robot_pose(name))
 
@@ -778,7 +849,7 @@ class MainWindow(QMainWindow):
             pose = self.robot_pose_cache.get(robot_name)
 
         if pose is None:
-            QMessageBox.warning(self, "Warning", f"{robot_name.upper()} pose is unavailable")
+            QMessageBox.warning(self, "警告", f"{robot_name.upper()} 位姿不可用")
             return
 
         pose_text = f"[{', '.join([f'{v:.6f}' for v in pose])}]"
@@ -938,10 +1009,10 @@ class MainWindow(QMainWindow):
 
     def initialize_pipette(self):
         """Initialize pipette by YIYEQIANG_INIT."""
-        self.log_widget.append_log("Starting pipette initialization...")
+        self.log_widget.append_log("开始初始化移液枪...")
         if YIYEQIANG_INIT is None:
-            self.log_widget.append_log("Pipette init module is unavailable")
-            QMessageBox.warning(self, "Warning", "Pipette init module is unavailable")
+            self.log_widget.append_log("移液枪初始化模块不可用")
+            QMessageBox.warning(self, "警告", "移液枪初始化模块不可用")
             self.update_pipette_status(False)
             return
 
@@ -950,22 +1021,22 @@ class MainWindow(QMainWindow):
             success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             self.update_pipette_status(bool(success))
             if success:
-                self.log_widget.append_log("Pipette initialized successfully")
+                self.log_widget.append_log("移液枪初始化成功")
             else:
-                self.log_widget.append_log("Pipette initialization failed")
-                QMessageBox.warning(self, "Warning", "Pipette initialization failed, please check serial port/device")
+                self.log_widget.append_log("移液枪初始化失败")
+                QMessageBox.warning(self, "警告", "移液枪初始化失败，请检查串口或设备")
         except Exception as e:
             self.update_pipette_status(False)
-            self.log_widget.append_log(f"Pipette initialization error: {str(e)}")
-            QMessageBox.warning(self, "Warning", f"Pipette initialization error: {e}")
+            self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
+            QMessageBox.warning(self, "警告", f"移液枪初始化异常: {e}")
         finally:
             self.init_pipette_btn.setEnabled(True)
 
     def initialize_pipette_on_startup(self):
         """Initialize pipette automatically when app starts."""
-        self.log_widget.append_log("Auto initializing pipette...")
+        self.log_widget.append_log("自动初始化移液枪...")
         if YIYEQIANG_INIT is None:
-            self.log_widget.append_log("Pipette init module is unavailable")
+            self.log_widget.append_log("移液枪初始化模块不可用")
             self.update_pipette_status(False)
             return
 
@@ -973,32 +1044,32 @@ class MainWindow(QMainWindow):
             success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             self.update_pipette_status(bool(success))
             if success:
-                self.log_widget.append_log("Pipette initialized successfully")
+                self.log_widget.append_log("移液枪初始化成功")
             else:
-                self.log_widget.append_log("Pipette initialization failed")
+                self.log_widget.append_log("移液枪初始化失败")
         except Exception as e:
             self.update_pipette_status(False)
-            self.log_widget.append_log(f"Pipette initialization error: {str(e)}")
+            self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
 
     def eject_pipette_tip(self):
         """Eject pipette tip manually."""
         if YIYEQIANG_EJECT is None:
-            self.log_widget.append_log("Pipette eject module is unavailable")
-            QMessageBox.warning(self, "Warning", "Pipette eject module is unavailable")
+            self.log_widget.append_log("退枪头模块不可用")
+            QMessageBox.warning(self, "警告", "退枪头模块不可用")
             return
 
         self.init_pipette_btn.setEnabled(False)
         try:
-            self.log_widget.append_log("Ejecting pipette tip...")
+            self.log_widget.append_log("正在退枪头...")
             success = YIYEQIANG_EJECT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
             if success:
-                self.log_widget.append_log("Pipette tip ejected successfully")
+                self.log_widget.append_log("枪头已退出")
             else:
-                self.log_widget.append_log("Pipette tip eject failed")
-                QMessageBox.warning(self, "Warning", "Failed to eject pipette tip")
+                self.log_widget.append_log("退枪头失败")
+                QMessageBox.warning(self, "警告", "退枪头失败")
         except Exception as e:
-            self.log_widget.append_log(f"Pipette tip eject error: {str(e)}")
-            QMessageBox.warning(self, "Warning", f"Pipette tip eject error: {e}")
+            self.log_widget.append_log(f"退枪头异常: {str(e)}")
+            QMessageBox.warning(self, "警告", f"退枪头异常: {e}")
         finally:
             self.init_pipette_btn.setEnabled(True)
 
@@ -1046,11 +1117,11 @@ class MainWindow(QMainWindow):
             self.save_actions()
 
     def create_trajectory_action(self):
-        options = ["Record R1", "Record R2", "Use Existing File"]
+        options = ["录制 R1", "录制 R2", "使用已有文件"]
         selected, ok = QInputDialog.getItem(
             self,
-            "Trajectory Action",
-            "Create trajectory action:",
+            "轨迹动作",
+            "创建轨迹动作:",
             options,
             0,
             False
@@ -1058,26 +1129,26 @@ class MainWindow(QMainWindow):
         if not ok:
             return
 
-        if selected == "Record R1":
+        if selected == "录制 R1":
             robot_name = "robot1"
             file_path = self.record_trajectory(robot_name)
-        elif selected == "Record R2":
+        elif selected == "录制 R2":
             robot_name = "robot2"
             file_path = self.record_trajectory(robot_name)
         else:
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
-                "Select trajectory file",
+                "选择轨迹文件",
                 str(self._trajectory_dir("robot1")),
-                "Trajectory Files (*.txt);;All Files (*)"
+                "轨迹文件 (*.txt);;所有文件 (*)"
             )
             if not file_path:
                 return
             robot_options = ["R1", "R2"]
             robot_selected, robot_ok = QInputDialog.getItem(
                 self,
-                "Trajectory Robot",
-                "Run trajectory on:",
+                "轨迹执行机械臂",
+                "选择执行轨迹的机械臂:",
                 robot_options,
                 0,
                 False
@@ -1092,8 +1163,8 @@ class MainWindow(QMainWindow):
         default_name = f"{robot_name.upper()} {Path(file_path).stem}"
         name, name_ok = QInputDialog.getText(
             self,
-            "Trajectory Action Name",
-            "Action name:",
+            "轨迹动作名称",
+            "动作名称:",
             text=default_name
         )
         if not name_ok:
@@ -1113,7 +1184,7 @@ class MainWindow(QMainWindow):
         self.actions[ActionType.TRAJECTORY].append(action)
         self.refresh_action_list(ActionType.TRAJECTORY)
         self.save_actions()
-        self.log_widget.append_log(f"Trajectory action created: {name}")
+        self.log_widget.append_log(f"轨迹动作已创建: {name}")
 
     def delete_action(self):
         current_tab = self.action_tabs.currentIndex()
@@ -1170,12 +1241,12 @@ class MainWindow(QMainWindow):
 
         current_item = action_list.currentItem()
         if current_item is None:
-            QMessageBox.warning(self, "Warning", "Please select an action to edit")
+            QMessageBox.warning(self, "警告", "请先选择要修改的动作")
             return
 
         action = current_item.data(Qt.ItemDataRole.UserRole)
         if action is None:
-            QMessageBox.warning(self, "Warning", "Cannot read selected action")
+            QMessageBox.warning(self, "警告", "无法读取选中的动作")
             return
 
         action_data = {
@@ -1202,7 +1273,7 @@ class MainWindow(QMainWindow):
             replaced = True
 
         if not replaced:
-            QMessageBox.warning(self, "Warning", "Target action not found")
+            QMessageBox.warning(self, "警告", "未找到目标动作")
             return
 
         self.refresh_action_list(action.type)
@@ -1267,18 +1338,18 @@ class MainWindow(QMainWindow):
             6: ActionType.TRAJECTORY
         }
         if current_tab == 1:
-            options = ["Manipulate", "Wait"]
+            options = ["执行器动作", "等待"]
             selected, ok = QInputDialog.getItem(
                 self,
-                "Select Action Type",
-                "Create under Execute tab:",
+                "选择动作类型",
+                "在执行类下创建:",
                 options,
                 0,
                 False
             )
             if not ok:
                 return None
-            return ActionType.WAIT if selected == "Wait" else ActionType.MANIPULATE
+            return ActionType.WAIT if selected == "等待" else ActionType.MANIPULATE
         
         # 移动类 Tab 需要选择具体类型
         if current_tab == 0:
@@ -1319,11 +1390,11 @@ class MainWindow(QMainWindow):
         self.task_library_list.clear()
         for task_name in sorted(StorageManager.list_tasks()):
             step_count = len(StorageManager.load_sequence(task_name))
-            item = QListWidgetItem(f"{task_name} ({step_count} steps)")
+            item = QListWidgetItem(f"{task_name} ({step_count} 步)")
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item.setSizeHint(QSize(100, 36))
             item.setIcon(self._create_task_list_icon())
-            item.setToolTip(f"{task_name}\nSteps: {step_count}\nDrag to Combined Plan")
+            item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖到组合计划中")
             item.setData(Qt.ItemDataRole.UserRole, task_name)
             self.task_library_list.addItem(item)
 
@@ -1342,7 +1413,7 @@ class MainWindow(QMainWindow):
     def add_task_to_composer(self):
         current_item = self.task_library_list.currentItem()
         if current_item is None:
-            QMessageBox.warning(self, "Warning", "Please select a saved task first")
+            QMessageBox.warning(self, "警告", "请先选择一个已保存任务")
             return
 
         task_name = current_item.data(Qt.ItemDataRole.UserRole)
@@ -1359,7 +1430,7 @@ class MainWindow(QMainWindow):
         self._refresh_task_composer_display()
 
         if hasattr(self, "log_widget"):
-            self.log_widget.append_log(f"Added task to composer: {task_name} ({step_count} steps)")
+            self.log_widget.append_log(f"已加入任务组合: {task_name} ({step_count} 步)")
 
     def _add_action_to_composer(self, action: ActionDefinition, insert_row: int | None = None):
         item = QListWidgetItem()
@@ -1371,7 +1442,7 @@ class MainWindow(QMainWindow):
         self._refresh_task_composer_display()
 
         if hasattr(self, "log_widget"):
-            self.log_widget.append_log(f"Added action to composer: {action.name}")
+            self.log_widget.append_log(f"已加入动作组合: {action.name}")
 
     def remove_task_from_composer(self):
         row = self.task_composer_list.currentRow()
@@ -1402,7 +1473,7 @@ class MainWindow(QMainWindow):
     def expand_composed_tasks(self, replace: bool):
         sequence = self._build_composed_task_sequence()
         if not sequence:
-            QMessageBox.warning(self, "Warning", "Please add at least one task to the composer")
+            QMessageBox.warning(self, "警告", "请先向组合计划中添加至少一个任务")
             return
 
         if replace:
@@ -1411,17 +1482,17 @@ class MainWindow(QMainWindow):
         for item in sequence:
             self.sequence_list.add_sequence_item(item)
 
-        mode = "replaced" if replace else "appended"
-        self.log_widget.append_log(f"Task composer {mode} sequence with {len(sequence)} actions")
+        mode = "替换" if replace else "追加"
+        self.log_widget.append_log(f"任务组合已{mode}到序列，共 {len(sequence)} 个动作")
 
     def save_composed_task(self):
         sequence = self._build_composed_task_sequence()
         if not sequence:
-            QMessageBox.warning(self, "Warning", "Please add at least one task to the composer")
+            QMessageBox.warning(self, "警告", "请先向组合计划中添加至少一个任务")
             return
 
         filename, _ = QFileDialog.getSaveFileName(
-            self, "Save Combined Task", "", "Task Files (*.task)"
+            self, "保存组合任务", "", "任务文件 (*.task)"
         )
         if not filename:
             return
@@ -1429,7 +1500,7 @@ class MainWindow(QMainWindow):
         task_name = Path(filename).name
         StorageManager.save_sequence(sequence, task_name)
         self.refresh_task_library()
-        self.log_widget.append_log(f"Combined task saved: {task_name}")
+        self.log_widget.append_log(f"组合任务已保存: {task_name}")
 
     def _build_composed_task_sequence(self) -> list[SequenceItem]:
         sequence: list[SequenceItem] = []
@@ -1461,16 +1532,16 @@ class MainWindow(QMainWindow):
             entry = item.data(Qt.ItemDataRole.UserRole)
             if entry.get("kind") == "action":
                 action = entry["action"]
-                item.setText(f"{action.name} (action)")
+                item.setText(f"{action.name} (动作)")
                 item.setIcon(self._create_action_card_icon(action))
-                item.setToolTip(f"{action.name}\nType: {action.type.value}\nDrag to reorder")
+                item.setToolTip(f"{action.name}\n类型: {action.type.value}\n拖动可调整顺序")
                 continue
 
             task_name = entry.get("task_name", "")
             step_count = len(StorageManager.load_sequence(task_name))
-            item.setText(f"{task_name} ({step_count} steps)")
+            item.setText(f"{task_name} ({step_count} 步)")
             item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
-            item.setToolTip(f"{task_name}\nSteps: {step_count}\nDrag to reorder")
+            item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖动可调整顺序")
 
     def _create_task_card_icon(self, task_name: str, step_count: int, title: str | None = None):
         from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
@@ -1578,7 +1649,7 @@ class MainWindow(QMainWindow):
             return
 
         filename, _ = QFileDialog.getSaveFileName(
-            self, "保存任务序列", "", "Task Files (*.task)"
+            self, "保存任务序列", "", "任务文件 (*.task)"
         )
         if filename:
             task_name = Path(filename).name
@@ -1588,7 +1659,7 @@ class MainWindow(QMainWindow):
 
     def load_task(self):
         filename, _ = QFileDialog.getOpenFileName(
-            self, "加载任务序列", str(StorageManager.TASKS_DIR), "Task Files (*.task)"
+            self, "加载任务序列", str(StorageManager.TASKS_DIR), "任务文件 (*.task)"
         )
         if filename:
             task_name = Path(filename).name
@@ -1610,14 +1681,14 @@ class MainWindow(QMainWindow):
     def execute_composed_task(self):
         sequence = self._build_composed_task_sequence()
         if not sequence:
-            QMessageBox.warning(self, "Warning", "Please add at least one task or action to the composer")
+            QMessageBox.warning(self, "警告", "请先向组合计划中添加至少一个任务或动作")
             return
 
-        self._start_sequence_execution(sequence, display_list=None, label="Task 组合序列")
+        self._start_sequence_execution(sequence, display_list=None, label="任务组合序列")
 
     def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
         if self.execution_thread and self.execution_thread.isRunning():
-            QMessageBox.warning(self, "Warning", "A sequence is already running")
+            QMessageBox.warning(self, "警告", "当前已有序列正在执行")
             return
 
         self.log_widget.append_log(f"开始执行{label}...")
@@ -1715,17 +1786,17 @@ class MainWindow(QMainWindow):
     def edit_sequence_item(self):
         current_row = self.sequence_list.currentRow()
         if current_row < 0:
-            QMessageBox.warning(self, "Warning", "Please select a sequence item to edit")
+            QMessageBox.warning(self, "警告", "请先选择要修改的序列项")
             return
 
         list_item = self.sequence_list.item(current_row)
         if list_item is None:
-            QMessageBox.warning(self, "Warning", "Cannot read selected sequence item")
+            QMessageBox.warning(self, "警告", "无法读取选中的序列项")
             return
 
         seq_item = list_item.data(Qt.ItemDataRole.UserRole)
         if seq_item is None:
-            QMessageBox.warning(self, "Warning", "Cannot read selected sequence item")
+            QMessageBox.warning(self, "警告", "无法读取选中的序列项")
             return
 
         action_def = seq_item.definition
@@ -1847,9 +1918,9 @@ class MainWindow(QMainWindow):
                             color = frames.get_color_frame()
                             depth = frames.get_depth_frame()
                             if color and depth:
-                                msg = (f"SUCCESS: color={color.width}x{color.height}  "
-                                       f"depth={depth.get_distance(320, 240):.3f}m  "
-                                       f"(SN={sn or 'auto-select'})")
+                                msg = (f"成功: 彩色={color.width}x{color.height}  "
+                                       f"深度={depth.get_distance(320, 240):.3f}m  "
+                                       f"(序列号={sn or '自动选择'})")
                                 pipeline.stop()
                                 self.result.emit(True, msg)
                                 return
@@ -1894,6 +1965,13 @@ class MainWindow(QMainWindow):
                 self.log_widget.append_log("身体已断开连接")
             except Exception as e:
                 print(f"断开身体连接时出错：{e}")
+
+        if self.relay_controller is not None:
+            try:
+                self.relay_controller.close()
+                self.log_widget.append_log("继电器串口已关闭")
+            except Exception as e:
+                print(f"关闭继电器串口时出错: {e}")
 
         # 关闭底盘移动控制器连接
         if self.move_controller is not None:
