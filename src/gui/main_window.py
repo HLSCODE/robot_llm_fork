@@ -57,7 +57,7 @@ class TaskComposerListWidget(QListWidget):
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDropIndicatorShown(True)
-        self.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
         self.setViewMode(QListWidget.ViewMode.IconMode)
         self.setFlow(QListWidget.Flow.LeftToRight)
         self.setSpacing(12)
@@ -380,6 +380,7 @@ class MainWindow(QMainWindow):
         self.control_panel.move_up_clicked.connect(self.move_item_up)
         self.control_panel.move_down_clicked.connect(self.move_item_down)
         self.control_panel.edit_clicked.connect(self.edit_sequence_item)
+        self.control_panel.repeat_clicked.connect(self.repeat_sequence_selection)
         self.control_panel.delete_clicked.connect(self.delete_item)
         self.control_panel.clear_clicked.connect(self.clear_sequence)
         self.control_panel.save_clicked.connect(self.save_task)
@@ -439,11 +440,15 @@ class MainWindow(QMainWindow):
         self.task_down_btn = QPushButton("下移")
         self.task_down_btn.setMinimumHeight(26)
         self.task_down_btn.clicked.connect(self.move_composed_task_down)
+        self.task_repeat_btn = QPushButton("循环")
+        self.task_repeat_btn.setMinimumHeight(26)
+        self.task_repeat_btn.clicked.connect(self.repeat_composer_selection)
         edit_row.addWidget(self.refresh_tasks_btn)
         edit_row.addWidget(self.add_task_btn)
         edit_row.addWidget(self.remove_task_btn)
         edit_row.addWidget(self.task_up_btn)
         edit_row.addWidget(self.task_down_btn)
+        edit_row.addWidget(self.task_repeat_btn)
         layout.addLayout(edit_row)
 
         action_row = QHBoxLayout()
@@ -1467,6 +1472,48 @@ class MainWindow(QMainWindow):
         self.task_composer_list.setCurrentRow(target_row)
         self._refresh_task_composer_display()
 
+    def repeat_composer_selection(self):
+        rows = self._selected_contiguous_rows(self.task_composer_list, "请选择要循环的连续任务或动作")
+        if rows is None:
+            return
+
+        repeat_count, ok = QInputDialog.getInt(
+            self,
+            "循环执行",
+            "循环次数 n:",
+            2,
+            1,
+            999,
+            1,
+        )
+        if not ok or repeat_count <= 1:
+            return
+
+        entries = [
+            self._clone_composer_entry(self.task_composer_list.item(row).data(Qt.ItemDataRole.UserRole))
+            for row in range(self.task_composer_list.count())
+        ]
+        start_row = rows[0]
+        end_row = rows[-1]
+        block = [self._clone_composer_entry(entries[row]) for row in rows]
+        insert_at = end_row + 1
+
+        repeated_entries = entries[:insert_at]
+        for _ in range(repeat_count - 1):
+            repeated_entries.extend(self._clone_composer_entry(entry) for entry in block)
+        repeated_entries.extend(entries[insert_at:])
+
+        self.task_composer_list.clear()
+        for entry in repeated_entries:
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, entry)
+            self.task_composer_list.addItem(item)
+
+        self._refresh_task_composer_display()
+        for row in range(start_row, start_row + len(block) * repeat_count):
+            self.task_composer_list.item(row).setSelected(True)
+        self.log_widget.append_log(f"组合块已设置为循环 {repeat_count} 次")
+
     def clear_task_composer(self):
         self.task_composer_list.clear()
 
@@ -1525,6 +1572,11 @@ class MainWindow(QMainWindow):
                 )
                 sequence.append(cloned_item)
         return sequence
+
+    def _clone_composer_entry(self, entry: dict) -> dict:
+        if entry.get("kind") == "action":
+            return {"kind": "action", "action": entry["action"]}
+        return {"kind": "task", "task_name": entry.get("task_name", "")}
 
     def _refresh_task_composer_display(self):
         for row in range(self.task_composer_list.count()):
@@ -1782,6 +1834,58 @@ class MainWindow(QMainWindow):
             self.sequence_list.takeItem(current_row)
             next_row = min(current_row, self.sequence_list.count() - 1)
             self.refresh_sequence_numbers(selected_row=next_row)
+
+    def repeat_sequence_selection(self):
+        rows = self._selected_contiguous_rows(self.sequence_list, "请选择要循环的连续动作")
+        if rows is None:
+            return
+
+        repeat_count, ok = QInputDialog.getInt(
+            self,
+            "循环执行",
+            "循环次数 n:",
+            2,
+            1,
+            999,
+            1,
+        )
+        if not ok or repeat_count <= 1:
+            return
+
+        sequence = self.sequence_list.get_sequence()
+        start_row = rows[0]
+        end_row = rows[-1]
+        block = [self._clone_sequence_item(sequence[row]) for row in rows]
+        insert_at = end_row + 1
+
+        expanded = sequence[:insert_at]
+        for _ in range(repeat_count - 1):
+            expanded.extend(self._clone_sequence_item(item) for item in block)
+        expanded.extend(sequence[insert_at:])
+
+        self.sequence_list.clear_sequence()
+        for item in expanded:
+            self.sequence_list.add_sequence_item(item)
+        for row in range(start_row, start_row + len(block) * repeat_count):
+            self.sequence_list.item(row).setSelected(True)
+        self.log_widget.append_log(f"动作块已设置为循环 {repeat_count} 次")
+
+    def _selected_contiguous_rows(self, list_widget: QListWidget, empty_message: str) -> list[int] | None:
+        rows = sorted(index.row() for index in list_widget.selectedIndexes())
+        if not rows:
+            QMessageBox.warning(self, "警告", empty_message)
+            return None
+        if rows != list(range(rows[0], rows[-1] + 1)):
+            QMessageBox.warning(self, "警告", "只能循环连续选中的项目")
+            return None
+        return rows
+
+    def _clone_sequence_item(self, item: SequenceItem) -> SequenceItem:
+        return SequenceItem(
+            uuid=str(uuid4()),
+            definition=item.definition,
+            status=SequenceItemStatus.PENDING,
+        )
 
     def edit_sequence_item(self):
         current_row = self.sequence_list.currentRow()
