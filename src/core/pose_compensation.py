@@ -35,23 +35,33 @@ def parse_pose(value) -> list[float]:
 
 def compensate_pose(taught_pose, teach_offset: dict, current_offset: dict) -> list[float]:
     """Return pose corrected from current UDP offset back to the taught offset."""
-    t_pose = pose_to_matrix(parse_pose(taught_pose))
-    t_teach = offset_to_matrix(teach_offset)
-    t_current = offset_to_matrix(current_offset)
-    corrected = matmul(matmul(invert_transform(t_current), t_teach), t_pose)
+    pose = parse_pose(taught_pose)
+    dx_cm = _offset_value(current_offset, "x") - _offset_value(teach_offset, "x")
+    dy_cm = _offset_value(current_offset, "y") - _offset_value(teach_offset, "y")
+    dangle_deg = _offset_value(current_offset, "angle") - _offset_value(teach_offset, "angle")
+
+    # Localization/base axes mapped into the arm base frame:
+    # base +X -> arm -Y, base +Y -> arm +X. To keep the world target fixed,
+    # the commanded arm pose moves opposite to the chassis displacement.
+    compensation = {
+        "x": dy_cm,
+        "y": -dx_cm,
+        "angle": -dangle_deg,
+    }
+
+    t_pose = pose_to_matrix(pose)
+    corrected = matmul(invert_transform(offset_to_matrix(compensation)), t_pose)
     return matrix_to_pose(corrected)
 
 
 def offset_to_matrix(offset: dict) -> list[list[float]]:
-    base_x_cm = _offset_value(offset, "x")
-    base_y_cm = _offset_value(offset, "y")
+    x_cm = _offset_value(offset, "x")
+    y_cm = _offset_value(offset, "y")
     angle_deg = _offset_value(offset, "angle")
 
-    # Localization/base axes mapped into the arm base frame:
-    # base +X -> arm -Y, base +Y -> arm +X. Base yaw is clockwise-positive.
-    x_units = base_y_cm * POSE_LINEAR_UNITS_PER_UDP_CM
-    y_units = -base_x_cm * POSE_LINEAR_UNITS_PER_UDP_CM
-    angle_rad = math.radians(-angle_deg)
+    x_units = x_cm * POSE_LINEAR_UNITS_PER_UDP_CM
+    y_units = y_cm * POSE_LINEAR_UNITS_PER_UDP_CM
+    angle_rad = math.radians(angle_deg)
     c = math.cos(angle_rad)
     s = math.sin(angle_rad)
 

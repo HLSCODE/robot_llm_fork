@@ -5,6 +5,7 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 设置轨迹文件路径
 file_path = os.path.join(_THIS_DIR, "Path", "trajectory_005.txt")
+# file_path = r"/home/maic/robot_llm_fork/data/tasks/trajectory_023.txt"
 class RobotArmController:
     def __init__(self, ip, port, level=3, mode=2):
         """
