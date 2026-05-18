@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QDialog, QFormLayout, QLineEdit, QComboBox,
                             QDoubleSpinBox, QDialogButtonBox, QVBoxLayout,
                             QHBoxLayout, QLabel, QSpinBox, QWidget, QStackedLayout,
                             QGroupBox, QListWidget, QListWidgetItem, QPushButton,
-                            QFileDialog)
+                            QFileDialog, QCheckBox, QMessageBox)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from ..core.models import ActionType, ActionDefinition
@@ -226,9 +226,29 @@ class ActionConfigDialog(QDialog):
         self.target_pose_input.setText(self.action_data.get('parameters', {}).get('点位', ''))
         self.target_pose_input.setPlaceholderText("例如：[-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]")
 
+        localization_config = self.action_data.get('parameters', {}).get('定位补偿', {})
+        self.localization_reference = localization_config.get('teach_offset')
+        self.localization_checkbox = QCheckBox("启用定位补偿")
+        default_localization_enabled = bool(localization_config.get('enabled', not self.action_data))
+        self.localization_checkbox.setChecked(default_localization_enabled)
+
+        localization_row = QWidget()
+        localization_layout = QHBoxLayout(localization_row)
+        localization_layout.setContentsMargins(0, 0, 0, 0)
+        localization_layout.setSpacing(4)
+
+        self.localization_status_label = QLabel(self._format_localization_reference(self.localization_reference))
+        self.localization_status_label.setStyleSheet("color: #666;")
+        capture_localization_btn = QPushButton("读取当前定位")
+        capture_localization_btn.clicked.connect(self._capture_localization_reference)
+        localization_layout.addWidget(self.localization_status_label, stretch=1)
+        localization_layout.addWidget(capture_localization_btn)
+
         robot_layout.addRow("臂:", self.arm_combo)
         robot_layout.addRow("运动模式:", self.mode_combo)
         robot_layout.addRow("点位:", self.target_pose_input)
+        robot_layout.addRow("", self.localization_checkbox)
+        robot_layout.addRow("创建定位:", localization_row)
         self.robot_widget.setLayout(robot_layout)
 
         # 身体参数面板
@@ -461,6 +481,39 @@ class ActionConfigDialog(QDialog):
         if filename:
             self.trajectory_path_input.setText(filename)
 
+    def _capture_localization_reference(self):
+        try:
+            from .udp_receive import get_latest_position
+
+            position = get_latest_position(max_age=2.0, wait_timeout=1.5)
+        except Exception as exc:
+            QMessageBox.warning(self, "定位补偿", f"读取 UDP 定位失败:\n{exc}")
+            return
+
+        if position is None:
+            QMessageBox.warning(self, "定位补偿", "未收到有效定位数据，请确认 UDP Tag 已检测到")
+            return
+
+        self.localization_reference = {
+            "id": position.get("id", -99),
+            "x": position.get("x", 0.0),
+            "y": position.get("y", 0.0),
+            "angle": position.get("angle", 0.0),
+            "timestamp": position.get("timestamp", 0.0),
+        }
+        self.localization_checkbox.setChecked(True)
+        self.localization_status_label.setText(self._format_localization_reference(self.localization_reference))
+
+    def _format_localization_reference(self, reference: dict | None) -> str:
+        if not reference:
+            return "未读取"
+        return (
+            f"ID={reference.get('id', -99)}  "
+            f"X={float(reference.get('x', 0.0)):.3f}cm  "
+            f"Y={float(reference.get('y', 0.0)):.3f}cm  "
+            f"Angle={float(reference.get('angle', 0.0)):.3f}deg"
+        )
+
     def _on_executor_changed(self):
         """根据选择的执行器类型切换参数面板"""
         if hasattr(self, 'executor_combo') and hasattr(self, 'param_stack'):
@@ -516,6 +569,14 @@ class ActionConfigDialog(QDialog):
                     if not target_pose:
                         self.target_pose_input.setFocus()
                         return
+                    if (
+                        hasattr(self, 'localization_checkbox')
+                        and self.localization_checkbox.isChecked()
+                        and not self.localization_reference
+                    ):
+                        self._capture_localization_reference()
+                        if not self.localization_reference:
+                            return
                 # 身体模式不需要额外验证
             else:
                 target_pose = self.target_pose_input.text().strip()
@@ -573,12 +634,22 @@ class ActionConfigDialog(QDialog):
         """构建机械臂/身体移动动作参数"""
         target = self.target_combo.currentData()
         if target == '机械臂':
-            return {
+            params = {
                 '目标': target,
                 '臂': self.arm_combo.currentText(),
                 '模式': self.mode_combo.currentData(),
                 '点位': self.target_pose_input.text().strip()
             }
+            if hasattr(self, 'localization_checkbox') and self.localization_checkbox.isChecked():
+                params['定位补偿'] = {
+                    'enabled': True,
+                    'teach_offset': self.localization_reference,
+                    'udp_linear_unit': 'cm',
+                    'udp_angle_unit': 'deg',
+                    'pose_linear_unit': 'mm',
+                    'pose_angle_unit': 'rad',
+                }
+            return params
         else:
             return {
                 '目标': target,

@@ -5,7 +5,6 @@
 """
 
 import time
-import json
 import threading
 import logging
 from pathlib import Path
@@ -202,7 +201,30 @@ class ActionExecutor:
             return False
 
         try:
-            target_pose = json.loads(target_pose_str)
+            from ..core.pose_compensation import compensate_pose, parse_pose
+
+            target_pose = parse_pose(target_pose_str)
+            localization_config = params.get('定位补偿', {})
+            if localization_config.get('enabled'):
+                teach_offset = localization_config.get('teach_offset')
+                if not teach_offset:
+                    self._on_log("定位补偿已启用，但动作中缺少创建时定位基准", "error")
+                    return False
+
+                from ..gui.udp_receive import get_latest_position
+
+                current_offset = get_latest_position(max_age=2.0, wait_timeout=1.5)
+                if current_offset is None:
+                    self._on_log("定位补偿已启用，但未收到当前有效定位数据", "error")
+                    return False
+
+                target_pose = compensate_pose(target_pose, teach_offset, current_offset)
+                self._on_log(
+                    "定位补偿: "
+                    f"teach=({teach_offset.get('x')}, {teach_offset.get('y')}, {teach_offset.get('angle')}) "
+                    f"current=({current_offset.get('x')}, {current_offset.get('y')}, {current_offset.get('angle')})"
+                )
+                self._on_log(f"补偿后点位: {target_pose}")
 
             if arm == '左':
                 if mode == 'move_j':
