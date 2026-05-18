@@ -43,13 +43,15 @@ def compensate_pose(taught_pose, teach_offset: dict, current_offset: dict) -> li
 
 
 def offset_to_matrix(offset: dict) -> list[list[float]]:
-    x = _offset_value(offset, "x")
-    y = _offset_value(offset, "y")
+    base_x_cm = _offset_value(offset, "x")
+    base_y_cm = _offset_value(offset, "y")
     angle_deg = _offset_value(offset, "angle")
 
-    x_units = x * POSE_LINEAR_UNITS_PER_UDP_CM
-    y_units = y * POSE_LINEAR_UNITS_PER_UDP_CM
-    angle_rad = math.radians(angle_deg)
+    # Localization/base axes mapped into the arm base frame:
+    # base +X -> arm -Y, base +Y -> arm +X. Base yaw is clockwise-positive.
+    x_units = base_y_cm * POSE_LINEAR_UNITS_PER_UDP_CM
+    y_units = -base_x_cm * POSE_LINEAR_UNITS_PER_UDP_CM
+    angle_rad = math.radians(-angle_deg)
     c = math.cos(angle_rad)
     s = math.sin(angle_rad)
 
@@ -63,7 +65,7 @@ def offset_to_matrix(offset: dict) -> list[list[float]]:
 
 def pose_to_matrix(pose: Iterable[float]) -> list[list[float]]:
     x, y, z, rx, ry, rz = [float(v) for v in pose]
-    r = rotvec_to_matrix([rx, ry, rz])
+    r = euler_xyz_to_matrix(rx, ry, rz)
     return [
         [r[0][0], r[0][1], r[0][2], x],
         [r[1][0], r[1][1], r[1][2], y],
@@ -74,45 +76,40 @@ def pose_to_matrix(pose: Iterable[float]) -> list[list[float]]:
 
 def matrix_to_pose(matrix: list[list[float]]) -> list[float]:
     rot = [row[:3] for row in matrix[:3]]
-    rx, ry, rz = matrix_to_rotvec(rot)
+    rx, ry, rz = matrix_to_euler_xyz(rot)
     pose = [matrix[0][3], matrix[1][3], matrix[2][3], rx, ry, rz]
     return [round(v, 6) for v in pose]
 
 
-def rotvec_to_matrix(rotvec: Iterable[float]) -> list[list[float]]:
-    rx, ry, rz = [float(v) for v in rotvec]
-    theta = math.sqrt(rx * rx + ry * ry + rz * rz)
-    if theta < 1e-12:
-        return identity3()
+def euler_xyz_to_matrix(rx: float, ry: float, rz: float) -> list[list[float]]:
+    """Convert RealMan pose Euler angles to a rotation matrix.
 
-    kx, ky, kz = rx / theta, ry / theta, rz / theta
-    c = math.cos(theta)
-    s = math.sin(theta)
-    v = 1.0 - c
+    The rest of the project uses scipy/vision convention R = Rz @ Ry @ Rx.
+    """
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
 
     return [
-        [kx * kx * v + c, kx * ky * v - kz * s, kx * kz * v + ky * s],
-        [ky * kx * v + kz * s, ky * ky * v + c, ky * kz * v - kx * s],
-        [kz * kx * v - ky * s, kz * ky * v + kx * s, kz * kz * v + c],
+        [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
+        [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
+        [-sy, cy * sx, cy * cx],
     ]
 
 
-def matrix_to_rotvec(rot: list[list[float]]) -> list[float]:
-    trace = rot[0][0] + rot[1][1] + rot[2][2]
-    cos_theta = max(-1.0, min(1.0, (trace - 1.0) / 2.0))
-    theta = math.acos(cos_theta)
-    if theta < 1e-12:
-        return [0.0, 0.0, 0.0]
+def matrix_to_euler_xyz(rot: list[list[float]]) -> list[float]:
+    sy = max(-1.0, min(1.0, -rot[2][0]))
+    ry = math.asin(sy)
+    cy = math.cos(ry)
 
-    if abs(math.pi - theta) < 1e-6:
-        return _rotvec_near_pi(rot, theta)
+    if abs(cy) > 1e-9:
+        rx = math.atan2(rot[2][1], rot[2][2])
+        rz = math.atan2(rot[1][0], rot[0][0])
+    else:
+        rx = 0.0
+        rz = math.atan2(-rot[0][1], rot[1][1])
 
-    scale = theta / (2.0 * math.sin(theta))
-    return [
-        (rot[2][1] - rot[1][2]) * scale,
-        (rot[0][2] - rot[2][0]) * scale,
-        (rot[1][0] - rot[0][1]) * scale,
-    ]
+    return [rx, ry, rz]
 
 
 def matmul(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
@@ -138,34 +135,8 @@ def invert_transform(t: list[list[float]]) -> list[list[float]]:
     ]
 
 
-def identity3() -> list[list[float]]:
-    return [
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
-    ]
-
-
 def transpose3(m: list[list[float]]) -> list[list[float]]:
     return [[m[j][i] for j in range(3)] for i in range(3)]
-
-
-def _rotvec_near_pi(rot: list[list[float]], theta: float) -> list[float]:
-    axis = [
-        math.sqrt(max(0.0, (rot[0][0] + 1.0) / 2.0)),
-        math.sqrt(max(0.0, (rot[1][1] + 1.0) / 2.0)),
-        math.sqrt(max(0.0, (rot[2][2] + 1.0) / 2.0)),
-    ]
-
-    if rot[0][1] < 0.0:
-        axis[1] = -axis[1]
-    if rot[0][2] < 0.0:
-        axis[2] = -axis[2]
-
-    norm = math.sqrt(sum(v * v for v in axis))
-    if norm < 1e-12:
-        return [theta, 0.0, 0.0]
-    return [theta * v / norm for v in axis]
 
 
 def _offset_value(offset: dict, key: str) -> float:
