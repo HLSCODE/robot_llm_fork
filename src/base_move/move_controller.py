@@ -134,7 +134,7 @@ class RobotMoveController:
     def move_slowly(self, valueY):
         """
         缓慢移动底盘。
-        :param valueY: 移动的目标值
+        :param valueY: 移动的目标值，单位 cm
         :return: True 如果移动成功，False 如果失败
         """
         try:
@@ -176,4 +176,3 @@ if __name__ == "__main__":
 
     # 关闭连接（在所有操作完成后手动关闭）
     controller.close()
-

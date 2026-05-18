@@ -229,7 +229,7 @@ class ExecutionThread(QThread):
         """执行底盘距离移动"""
         valueY = params.get('valueY', 0.0)
         
-        self.log_message.emit(f"底盘距离移动：距离={valueY}m")
+        self.log_message.emit(f"底盘距离移动：距离={valueY}cm")
         
         if self._move_controller is None:
             self.log_message.emit("底盘移动控制器未初始化")
@@ -239,9 +239,9 @@ class ExecutionThread(QThread):
             success = self._move_controller.move_slowly(valueY)
             
             if success:
-                self.log_message.emit(f"底盘距离移动完成：距离={valueY}m")
+                self.log_message.emit(f"底盘距离移动完成：距离={valueY}cm")
             else:
-                self.log_message.emit(f"底盘距离移动失败：距离={valueY}m")
+                self.log_message.emit(f"底盘距离移动失败：距离={valueY}cm")
             
             return success
         except Exception as e:

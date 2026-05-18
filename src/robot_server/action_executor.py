@@ -330,7 +330,7 @@ class ActionExecutor:
         """执行底盘距离移动"""
         valueY = params.get('valueY', 0.0)
         
-        self._on_log(f"底盘距离移动：距离={valueY}m")
+        self._on_log(f"底盘距离移动：距离={valueY}cm")
         
         if self._move_controller is None:
             self._on_log("底盘移动控制器未初始化", "error")
@@ -340,9 +340,9 @@ class ActionExecutor:
             success = self._move_controller.move_slowly(valueY)
             
             if success:
-                self._on_log(f"底盘距离移动完成：距离={valueY}m")
+                self._on_log(f"底盘距离移动完成：距离={valueY}cm")
             else:
-                self._on_log(f"底盘距离移动失败：距离={valueY}m", "error")
+                self._on_log(f"底盘距离移动失败：距离={valueY}cm", "error")
             
             return success
         except Exception as e:

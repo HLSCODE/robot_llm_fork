@@ -7,7 +7,7 @@ import re
 from typing import Iterable
 
 
-POSE_LINEAR_UNITS_PER_UDP_CM = 10.0
+POSE_LINEAR_UNITS_PER_UDP_CM = 0.01  # UDP localization x/y are cm, robot pose x/y/z are m.
 POSE_LENGTH = 6
 
 

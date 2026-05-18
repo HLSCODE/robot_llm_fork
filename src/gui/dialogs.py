@@ -397,9 +397,9 @@ class ActionConfigDialog(QDialog):
         distance_layout = QFormLayout()
         
         self.valueY_input = QDoubleSpinBox()
-        self.valueY_input.setRange(-10.0, 10.0)
+        self.valueY_input.setRange(-1000.0, 1000.0)
         self.valueY_input.setDecimals(3)
-        self.valueY_input.setSuffix(" m")
+        self.valueY_input.setSuffix(" cm")
         self.valueY_input.setValue(self.action_data.get('parameters', {}).get('valueY', 0.0))
         
         distance_layout.addRow("移动距离:", self.valueY_input)
@@ -646,7 +646,7 @@ class ActionConfigDialog(QDialog):
                     'teach_offset': self.localization_reference,
                     'udp_linear_unit': 'cm',
                     'udp_angle_unit': 'deg',
-                    'pose_linear_unit': 'mm',
+                    'pose_linear_unit': 'm',
                     'pose_angle_unit': 'rad',
                 }
             return params
