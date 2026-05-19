@@ -53,7 +53,11 @@ def compensate_pose(taught_pose, teach_offset: dict, current_offset: dict) -> li
     corrected = matmul(invert_transform(offset_to_matrix(compensation)), t_pose)
     return matrix_to_pose(corrected)
 
- 
+
+def offset_to_matrix(offset: dict) -> list[list[float]]:
+    x_cm = _offset_value(offset, "x")
+    y_cm = _offset_value(offset, "y")
+    angle_deg = _offset_value(offset, "angle")
 
     x_units = x_cm * POSE_LINEAR_UNITS_PER_UDP_CM
     y_units = y_cm * POSE_LINEAR_UNITS_PER_UDP_CM
