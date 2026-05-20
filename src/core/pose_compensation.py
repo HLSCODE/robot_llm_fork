@@ -44,6 +44,7 @@ def compensate_pose(taught_pose, teach_offset: dict, current_offset: dict) -> li
         localization_offset_to_matrix(teach_offset),
     )
     compensation = localization_transform_to_arm_transform(current_from_teach)
+    flip_planar_rotation(compensation)
     t_pose = pose_to_matrix(pose)
     corrected = matmul(compensation, t_pose)
     return matrix_to_pose(corrected)
@@ -79,6 +80,11 @@ def localization_transform_to_arm_transform(transform: list[list[float]]) -> lis
     arm_transform[1][3] *= POSE_LINEAR_UNITS_PER_UDP_CM
     arm_transform[2][3] *= POSE_LINEAR_UNITS_PER_UDP_CM
     return arm_transform
+
+
+def flip_planar_rotation(transform: list[list[float]]) -> None:
+    """Reverse the yaw compensation direction while keeping x/y compensation."""
+    transform[0][1], transform[1][0] = transform[1][0], transform[0][1]
 
 
 def offset_to_matrix(offset: dict) -> list[list[float]]:
