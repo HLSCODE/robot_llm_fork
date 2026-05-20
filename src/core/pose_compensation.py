@@ -36,22 +36,49 @@ def parse_pose(value) -> list[float]:
 def compensate_pose(taught_pose, teach_offset: dict, current_offset: dict) -> list[float]:
     """Return pose corrected from current UDP offset back to the taught offset."""
     pose = parse_pose(taught_pose)
-    dx_cm = _offset_value(current_offset, "x") - _offset_value(teach_offset, "x")
-    dy_cm = _offset_value(current_offset, "y") - _offset_value(teach_offset, "y")
-    dangle_deg = _offset_value(current_offset, "angle") - _offset_value(teach_offset, "angle")
-
-    # Localization/base axes mapped into the arm base frame:
-    # base +X -> arm -Y, base +Y -> arm +X. To keep the world target fixed,
-    # the commanded arm pose moves opposite to the chassis displacement.
-    compensation = {
-        "x": dy_cm,
-        "y": -dx_cm,
-        "angle": -dangle_deg,
-    }
-
+    # Compute the full relative chassis transform before mapping axes. A plain
+    # x/y difference works for single-direction moves, but loses the rotation
+    # center once the chassis angle changes.
+    current_from_teach = matmul(
+        invert_transform(localization_offset_to_matrix(current_offset)),
+        localization_offset_to_matrix(teach_offset),
+    )
+    compensation = localization_transform_to_arm_transform(current_from_teach)
     t_pose = pose_to_matrix(pose)
-    corrected = matmul(invert_transform(offset_to_matrix(compensation)), t_pose)
+    corrected = matmul(compensation, t_pose)
     return matrix_to_pose(corrected)
+
+
+def localization_offset_to_matrix(offset: dict) -> list[list[float]]:
+    x_cm = _offset_value(offset, "x")
+    y_cm = _offset_value(offset, "y")
+    angle_deg = _offset_value(offset, "angle")
+    angle_rad = math.radians(angle_deg)
+    c = math.cos(angle_rad)
+    s = math.sin(angle_rad)
+
+    return [
+        [c, -s, 0.0, x_cm],
+        [s, c, 0.0, y_cm],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+
+
+def localization_transform_to_arm_transform(transform: list[list[float]]) -> list[list[float]]:
+    # Localization/base axes mapped into the arm base frame:
+    # base +X -> arm -Y, base +Y -> arm +X.
+    m = [
+        [0.0, 1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
+    arm_transform = matmul(matmul(m, transform), invert_transform(m))
+    arm_transform[0][3] *= POSE_LINEAR_UNITS_PER_UDP_CM
+    arm_transform[1][3] *= POSE_LINEAR_UNITS_PER_UDP_CM
+    arm_transform[2][3] *= POSE_LINEAR_UNITS_PER_UDP_CM
+    return arm_transform
 
 
 def offset_to_matrix(offset: dict) -> list[list[float]]:
