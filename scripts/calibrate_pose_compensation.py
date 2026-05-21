@@ -11,19 +11,18 @@ from typing import Iterable
 
 CM_TO_M = 0.01
 POSE_LENGTH = 6
-LOCALIZATION_POSITION_SIGN = 1.0
 
 # Arm axes relative to the robot body/localization axes:
 # body +X = forward, body +Y = left
-# arm  +X = forward, arm  +Y = left
+# arm  +X = left,    arm  +Y = back
 BODY_FROM_ARM_3 = [
+    [0.0, -1.0, 0.0],
     [1.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ]
 ARM_FROM_BODY_3 = [
-    [1.0, 0.0, 0.0],
     [0.0, 1.0, 0.0],
+    [-1.0, 0.0, 0.0],
     [0.0, 0.0, 1.0],
 ]
 
@@ -76,9 +75,9 @@ def main() -> int:
     parser.add_argument(
         "--angle-sign",
         choices=("both", "cw-positive", "ccw-positive"),
-        default="both",
+        default="cw-positive",
         help=(
-            "How UDP angle maps to math rotation. Use both to let residuals decide."
+            "How UDP angle maps to math rotation. Use both to compare both directions."
         ),
     )
     parser.add_argument(
@@ -195,21 +194,28 @@ def sample_equations(
     sample: Sample,
     angle_sign: float,
 ) -> tuple[list[tuple[float, float]], list[float]]:
-    loc_t = localization_xy_m(sample.teach_offset)
-    loc_c = localization_xy_m(sample.current_offset)
     theta_t = localization_theta_rad(sample.teach_offset, angle_sign)
     theta_c = localization_theta_rad(sample.current_offset, angle_sign)
     rot_t = rot2(theta_t)
     rot_c = rot2(theta_c)
+    body_rel = mat2_mul(transpose2(rot_c), rot_t)
     taught_tcp_body = arm_xy_to_body_xy(sample.taught_pose[:2])
     correct_tcp_body = arm_xy_to_body_xy(sample.correct_pose[:2])
+    locator_delta_body = (
+        (_offset_value(sample.current_offset, "x") - _offset_value(sample.teach_offset, "x"))
+        * CM_TO_M,
+        (_offset_value(sample.current_offset, "y") - _offset_value(sample.teach_offset, "y"))
+        * CM_TO_M,
+    )
 
-    # (R_t - R_c) * locator_to_arm_base =
-    # locator_c - locator_t + R_c * correct_tcp_body - R_t * taught_tcp_body
-    a = mat2_sub(rot_t, rot_c)
+    # current_tcp_body = R_current^-1 * R_teach * (base_offset + taught_tcp_body)
+    #                    - base_offset - locator_delta_body
+    # (body_rel - I) * base_offset =
+    # current_tcp_body - body_rel * taught_tcp_body + locator_delta_body
+    a = mat2_sub(body_rel, [[1.0, 0.0], [0.0, 1.0]])
     rhs = vec2_add(
-        vec2_sub(loc_c, loc_t),
-        vec2_sub(mat2_vec(rot_c, correct_tcp_body), mat2_vec(rot_t, taught_tcp_body)),
+        vec2_sub(correct_tcp_body, mat2_vec(body_rel, taught_tcp_body)),
+        locator_delta_body,
     )
 
     return [(a[0][0], a[0][1]), (a[1][0], a[1][1])], [rhs[0], rhs[1]]
@@ -243,21 +249,22 @@ def predict_current_pose(
     offset_m: tuple[float, float],
     angle_sign: float,
 ) -> list[float]:
-    loc_t = localization_xy_m(sample.teach_offset)
-    loc_c = localization_xy_m(sample.current_offset)
     theta_t = localization_theta_rad(sample.teach_offset, angle_sign)
     theta_c = localization_theta_rad(sample.current_offset, angle_sign)
     rot_t = rot2(theta_t)
     rot_c = rot2(theta_c)
+    body_rel = mat2_mul(transpose2(rot_c), rot_t)
 
     taught_tcp_body = arm_xy_to_body_xy(sample.taught_pose[:2])
-    taught_tcp_world = vec2_add(
-        loc_t,
-        mat2_vec(rot_t, vec2_add(offset_m, taught_tcp_body)),
+    locator_delta_body = (
+        (_offset_value(sample.current_offset, "x") - _offset_value(sample.teach_offset, "x"))
+        * CM_TO_M,
+        (_offset_value(sample.current_offset, "y") - _offset_value(sample.teach_offset, "y"))
+        * CM_TO_M,
     )
     current_tcp_body = vec2_sub(
-        mat2_vec(transpose2(rot_c), vec2_sub(taught_tcp_world, loc_c)),
-        offset_m,
+        vec2_sub(mat2_vec(body_rel, vec2_add(offset_m, taught_tcp_body)), offset_m),
+        locator_delta_body,
     )
     current_tcp_arm = body_xy_to_arm_xy(current_tcp_body)
 
@@ -358,10 +365,7 @@ def parse_pose(value) -> list[float]:
 
 
 def localization_xy_m(offset: dict) -> tuple[float, float]:
-    return (
-        LOCALIZATION_POSITION_SIGN * _offset_value(offset, "x") * CM_TO_M,
-        LOCALIZATION_POSITION_SIGN * _offset_value(offset, "y") * CM_TO_M,
-    )
+    return (_offset_value(offset, "x") * CM_TO_M, _offset_value(offset, "y") * CM_TO_M)
 
 
 def localization_theta_rad(offset: dict, angle_sign: float) -> float:
@@ -382,12 +386,12 @@ def _offset_value(offset: dict, key: str) -> float:
 
 def arm_xy_to_body_xy(point: Iterable[float]) -> tuple[float, float]:
     x_arm, y_arm = [float(v) for v in point]
-    return (x_arm, y_arm)
+    return (-y_arm, x_arm)
 
 
 def body_xy_to_arm_xy(point: Iterable[float]) -> tuple[float, float]:
     x_body, y_body = [float(v) for v in point]
-    return (x_body, y_body)
+    return (y_body, -x_body)
 
 
 def rot2(theta: float) -> list[list[float]]:
@@ -405,6 +409,19 @@ def mat2_vec(matrix: list[list[float]], vector: tuple[float, float]) -> tuple[fl
         matrix[0][0] * vector[0] + matrix[0][1] * vector[1],
         matrix[1][0] * vector[0] + matrix[1][1] * vector[1],
     )
+
+
+def mat2_mul(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
+    return [
+        [
+            a[0][0] * b[0][0] + a[0][1] * b[1][0],
+            a[0][0] * b[0][1] + a[0][1] * b[1][1],
+        ],
+        [
+            a[1][0] * b[0][0] + a[1][1] * b[1][0],
+            a[1][0] * b[0][1] + a[1][1] * b[1][1],
+        ],
+    ]
 
 
 def mat2_sub(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
