@@ -21,10 +21,10 @@ RIGHT_ARM_LOCATOR_TO_BASE_CM = {
 
 # Arm axes relative to the localization/body axes:
 # body +X = forward, body +Y = left
-# arm  +X = left,    arm  +Y = back
+# arm  +X = forward, arm  +Y = left
 BODY_FROM_ARM_ROT = [
-    [0.0, -1.0, 0.0],
     [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ]
 
@@ -61,14 +61,56 @@ def compensate_pose(
     pose = parse_pose(taught_pose)
     locator_to_arm_base_cm = locator_to_arm_base_cm or RIGHT_ARM_LOCATOR_TO_BASE_CM
 
-    taught_world_from_tcp = matmul(
-        world_from_arm_base_matrix(teach_offset, locator_to_arm_base_cm),
-        pose_to_matrix(pose),
+    corrected = corrected_arm_base_from_tcp_matrix(
+        pose,
+        teach_offset,
+        current_offset,
+        locator_to_arm_base_cm,
     )
-    current_arm_from_world = invert_transform(
-        world_from_arm_base_matrix(current_offset, locator_to_arm_base_cm)
+    return matrix_to_pose(corrected)
+
+
+def corrected_arm_base_from_tcp_matrix(
+    pose: list[float],
+    teach_offset: dict,
+    current_offset: dict,
+    locator_to_arm_base_cm: dict | Iterable[float],
+) -> list[list[float]]:
+    teach_yaw = localization_yaw_rad(teach_offset)
+    current_yaw = localization_yaw_rad(current_offset)
+    body_rel_rot = matmul(transpose3(yaw_matrix(current_yaw)), yaw_matrix(teach_yaw))
+    arm_from_body_rot = transpose3(BODY_FROM_ARM_ROT)
+    current_arm_from_teach_arm = matmul(
+        matmul(arm_from_body_rot, body_rel_rot),
+        BODY_FROM_ARM_ROT,
     )
-    return matrix_to_pose(matmul(current_arm_from_world, taught_world_from_tcp))
+    corrected_rot = matmul(current_arm_from_teach_arm, euler_xyz_to_matrix(*pose[3:6]))
+
+    arm_base_body = locator_to_arm_base_m(locator_to_arm_base_cm)
+    taught_tcp_body = rotate_point(BODY_FROM_ARM_ROT, pose[:3])
+    rotated_tcp_body = rotate_point(
+        body_rel_rot,
+        vector_add(arm_base_body, taught_tcp_body),
+    )
+    locator_delta_body = [
+        (_offset_value(current_offset, "x") - _offset_value(teach_offset, "x"))
+        * POSE_LINEAR_UNITS_PER_UDP_CM,
+        (_offset_value(current_offset, "y") - _offset_value(teach_offset, "y"))
+        * POSE_LINEAR_UNITS_PER_UDP_CM,
+        0.0,
+    ]
+    corrected_position_body = vector_sub(
+        vector_sub(rotated_tcp_body, arm_base_body),
+        locator_delta_body,
+    )
+    corrected_position = rotate_point(arm_from_body_rot, corrected_position_body)
+
+    return [
+        [corrected_rot[0][0], corrected_rot[0][1], corrected_rot[0][2], corrected_position[0]],
+        [corrected_rot[1][0], corrected_rot[1][1], corrected_rot[1][2], corrected_position[1]],
+        [corrected_rot[2][0], corrected_rot[2][1], corrected_rot[2][2], corrected_position[2]],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 
 
 def world_from_arm_base_matrix(
@@ -110,6 +152,27 @@ def yaw_matrix(yaw_rad: float) -> list[list[float]]:
         [s, c, 0.0],
         [0.0, 0.0, 1.0],
     ]
+
+
+def rotate_point(rot: list[list[float]], point: Iterable[float]) -> list[float]:
+    x, y, z = [float(v) for v in point]
+    return [
+        rot[0][0] * x + rot[0][1] * y + rot[0][2] * z,
+        rot[1][0] * x + rot[1][1] * y + rot[1][2] * z,
+        rot[2][0] * x + rot[2][1] * y + rot[2][2] * z,
+    ]
+
+
+def vector_add(a: Iterable[float], b: Iterable[float]) -> list[float]:
+    a_values = [float(v) for v in a]
+    b_values = [float(v) for v in b]
+    return [a_values[i] + b_values[i] for i in range(3)]
+
+
+def vector_sub(a: Iterable[float], b: Iterable[float]) -> list[float]:
+    a_values = [float(v) for v in a]
+    b_values = [float(v) for v in b]
+    return [a_values[i] - b_values[i] for i in range(3)]
 
 
 def locator_to_arm_base_m(offset_cm: dict | Iterable[float]) -> list[float]:

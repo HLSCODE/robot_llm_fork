@@ -11,18 +11,19 @@ from typing import Iterable
 
 CM_TO_M = 0.01
 POSE_LENGTH = 6
+LOCALIZATION_POSITION_SIGN = 1.0
 
 # Arm axes relative to the robot body/localization axes:
 # body +X = forward, body +Y = left
-# arm  +X = left,    arm  +Y = back
+# arm  +X = forward, arm  +Y = left
 BODY_FROM_ARM_3 = [
-    [0.0, -1.0, 0.0],
     [1.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0],
     [0.0, 0.0, 1.0],
 ]
 ARM_FROM_BODY_3 = [
+    [1.0, 0.0, 0.0],
     [0.0, 1.0, 0.0],
-    [-1.0, 0.0, 0.0],
     [0.0, 0.0, 1.0],
 ]
 
@@ -357,7 +358,10 @@ def parse_pose(value) -> list[float]:
 
 
 def localization_xy_m(offset: dict) -> tuple[float, float]:
-    return (_offset_value(offset, "x") * CM_TO_M, _offset_value(offset, "y") * CM_TO_M)
+    return (
+        LOCALIZATION_POSITION_SIGN * _offset_value(offset, "x") * CM_TO_M,
+        LOCALIZATION_POSITION_SIGN * _offset_value(offset, "y") * CM_TO_M,
+    )
 
 
 def localization_theta_rad(offset: dict, angle_sign: float) -> float:
@@ -378,12 +382,12 @@ def _offset_value(offset: dict, key: str) -> float:
 
 def arm_xy_to_body_xy(point: Iterable[float]) -> tuple[float, float]:
     x_arm, y_arm = [float(v) for v in point]
-    return (-y_arm, x_arm)
+    return (x_arm, y_arm)
 
 
 def body_xy_to_arm_xy(point: Iterable[float]) -> tuple[float, float]:
     x_body, y_body = [float(v) for v in point]
-    return (y_body, -x_body)
+    return (x_body, y_body)
 
 
 def rot2(theta: float) -> list[list[float]]:
