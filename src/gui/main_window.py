@@ -491,6 +491,7 @@ class MainWindow(QMainWindow):
 
         self.robot1_pose_value_label, self.copy_robot1_pose_btn = self._build_pose_row(layout, "R1")
         self.robot2_pose_value_label, self.copy_robot2_pose_btn = self._build_pose_row(layout, "R2")
+        self.localization_pose_value_label = self._build_localization_row(layout)
 
         self.pose_timer = QTimer(self)
         self.pose_timer.setInterval(1000)
@@ -790,9 +791,45 @@ class MainWindow(QMainWindow):
 
         return pose_label, copy_btn
 
+    def _build_localization_row(self, parent_layout: QVBoxLayout):
+        row = QHBoxLayout()
+        row_label = QLabel("底盘:")
+        row_label.setFixedWidth(36)
+        row_label.setStyleSheet("font-weight: bold;")
+
+        localization_label = QLabel("--")
+        localization_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        localization_label.setStyleSheet("color: #555;")
+
+        row.addWidget(row_label)
+        row.addWidget(localization_label, stretch=1)
+        parent_layout.addLayout(row)
+
+        return localization_label
+
     def refresh_arm_poses(self):
         self._refresh_single_robot_pose("robot1")
         self._refresh_single_robot_pose("robot2")
+        self.refresh_localization_position()
+
+    def refresh_localization_position(self):
+        if not hasattr(self, "localization_pose_value_label"):
+            return
+
+        try:
+            from .udp_receive import get_localization_receiver
+
+            receiver = get_localization_receiver()
+            position = receiver.get_latest(max_age=10.0, valid_only=False, wait_timeout=0.0)
+            if position is None:
+                error = receiver.last_error
+                self.localization_pose_value_label.setText(f"UDP -- ({error})" if error else "UDP --")
+                return
+        except Exception as exc:
+            self.localization_pose_value_label.setText(f"UDP error: {exc}")
+            return
+
+        self.localization_pose_value_label.setText(self.format_localization_text(position))
 
     def _refresh_single_robot_pose(self, robot_name: str):
         pose = self._get_current_pose(robot_name)
@@ -845,6 +882,20 @@ class MainWindow(QMainWindow):
         return (
             f"X:{x_mm:.1f} Y:{y_mm:.1f} Z:{z_mm:.1f} mm | "
             f"RX:{rx_deg:.1f} RY:{ry_deg:.1f} RZ:{rz_deg:.1f} deg"
+        )
+
+    def format_localization_text(self, position: dict):
+        age = max(0.0, time.time() - float(position.get("timestamp", 0.0)))
+        tag_id = int(position.get("id", -99))
+        if tag_id == -99:
+            return f"Tag未检测 | age:{age:.1f}s"
+
+        return (
+            f"ID:{tag_id} | "
+            f"X:{float(position.get('x', 0.0)):.2f}cm "
+            f"Y:{float(position.get('y', 0.0)):.2f}cm "
+            f"Angle:{float(position.get('angle', 0.0)):.2f}deg | "
+            f"age:{age:.1f}s"
         )
 
     def copy_robot_pose(self, robot_name: str):

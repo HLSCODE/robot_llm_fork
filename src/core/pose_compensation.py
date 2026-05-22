@@ -14,8 +14,8 @@ LOCALIZATION_ANGLE_SIGN = -1.0  # UDP angle is clockwise-positive; math yaw is c
 # Right arm calibration from scripts/calibrate_pose_compensation.py.
 # Coordinates are in the localization/body frame: +x forward, +y left.
 RIGHT_ARM_LOCATOR_TO_BASE_CM = {
-    "x": 53.493937,
-    "y": -27.437055,
+    "x": 43.056575,
+    "y": -38.818584,
     "z": 0.0,
 }
 
