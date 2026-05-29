@@ -147,7 +147,7 @@ class ExecutionThread(QThread):
                     self.log_message.emit("定位补偿已启用，但未收到当前有效定位数据")
                     return False
 
-                target_pose = compensate_pose(target_pose, teach_offset, current_offset)
+                target_pose = compensate_pose(target_pose, teach_offset, current_offset, arm=arm)
                 self.log_message.emit(
                     "定位补偿: "
                     f"teach=({teach_offset.get('x')}, {teach_offset.get('y')}, {teach_offset.get('angle')}) "

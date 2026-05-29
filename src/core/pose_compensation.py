@@ -11,29 +11,30 @@ POSE_LINEAR_UNITS_PER_UDP_CM = 0.01  # UDP localization x/y are cm, robot pose x
 POSE_LENGTH = 6
 LOCALIZATION_ANGLE_SIGN = -1.0  # UDP angle is clockwise-positive; math yaw is counterclockwise-positive.
 
-# Right arm calibration from scripts/calibrate_pose_compensation.py.
+# Arm calibration from scripts/calibrate_pose_compensation.py.
 # Coordinates are in the localization/body frame: +x forward, +y left.
+LEFT_ARM_LOCATOR_TO_BASE_CM = {
+    "x": 50.206008,
+    "y": -24.282551,
+    "z": 0.0,
+}
+
 RIGHT_ARM_LOCATOR_TO_BASE_CM = {
-    "x": 43.056575,
-    "y": -38.818584,
+    "x": 48.708676,
+    "y": -30.002009,
     "z": 0.0,
 }
 
 # Arm axes relative to the localization/body axes:
 # body +X = forward, body +Y = left
 # arm  +X = left,    arm  +Y = back
-BODY_FROM_ARM_ROT = [
-    [0.0, -1.0, 0.0],
-    [1.0, 0.0, 0.0],
-    [0.0, 0.0, 1.0],
-]
-
-
+ 
 def parse_pose(value) -> list[float]:
     """Parse a robot pose [x, y, z, rx, ry, rz] from list or text."""
     if isinstance(value, (list, tuple)):
         pose = [float(v) for v in value]
     elif isinstance(value, str):
+             
         text = value.strip()
         try:
             parsed = json.loads(text)
@@ -55,11 +56,12 @@ def compensate_pose(
     taught_pose,
     teach_offset: dict,
     current_offset: dict,
+    arm: str | None = None,
     locator_to_arm_base_cm: dict | Iterable[float] | None = None,
 ) -> list[float]:
     """Return pose corrected from current UDP offset back to the taught offset."""
     pose = parse_pose(taught_pose)
-    locator_to_arm_base_cm = locator_to_arm_base_cm or RIGHT_ARM_LOCATOR_TO_BASE_CM
+    locator_to_arm_base_cm = locator_to_arm_base_cm or get_arm_locator_to_base_cm(arm)
 
     corrected = corrected_arm_base_from_tcp_matrix(
         pose,
@@ -68,6 +70,22 @@ def compensate_pose(
         locator_to_arm_base_cm,
     )
     return matrix_to_pose(corrected)
+
+
+def get_arm_locator_to_base_cm(arm: str | None) -> dict:
+    arm_key = normalize_arm_name(arm)
+    if arm_key == "left":
+        return LEFT_ARM_LOCATOR_TO_BASE_CM
+    return RIGHT_ARM_LOCATOR_TO_BASE_CM
+
+
+def normalize_arm_name(arm: str | None) -> str:
+    text = str(arm or "").strip().lower()
+    if text in {"left", "l", "robot1", "r1", "1", "左", "×ó"}:
+        return "left"
+    if text in {"right", "r", "robot2", "r2", "2", "右", "óò"}:
+        return "right"
+    return "right"
 
 
 def corrected_arm_base_from_tcp_matrix(
