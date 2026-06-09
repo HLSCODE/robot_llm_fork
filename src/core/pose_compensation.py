@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import ast
 import json
@@ -28,13 +28,18 @@ RIGHT_ARM_LOCATOR_TO_BASE_CM = {
 # Arm axes relative to the localization/body axes:
 # body +X = forward, body +Y = left
 # arm  +X = left,    arm  +Y = back
- 
+BODY_FROM_ARM_ROT = [
+    [0.0, -1.0, 0.0],
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+]
+
+
 def parse_pose(value) -> list[float]:
     """Parse a robot pose [x, y, z, rx, ry, rz] from list or text."""
     if isinstance(value, (list, tuple)):
         pose = [float(v) for v in value]
     elif isinstance(value, str):
-             
         text = value.strip()
         try:
             parsed = json.loads(text)
@@ -81,9 +86,9 @@ def get_arm_locator_to_base_cm(arm: str | None) -> dict:
 
 def normalize_arm_name(arm: str | None) -> str:
     text = str(arm or "").strip().lower()
-    if text in {"left", "l", "robot1", "r1", "1", "左", "×ó"}:
+    if text in {"left", "l", "left_arm", "robot1", "r1", "1", "\u5de6", "\u5de6\u81c2"}:
         return "left"
-    if text in {"right", "r", "robot2", "r2", "2", "右", "óò"}:
+    if text in {"right", "r", "right_arm", "robot2", "r2", "2", "\u53f3", "\u53f3\u81c2"}:
         return "right"
     return "right"
 

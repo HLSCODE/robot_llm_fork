@@ -248,7 +248,7 @@ def predict_current_pose(
     sample: Sample,
     offset_m: tuple[float, float],
     angle_sign: float,
-) -> list[float]:
+) -> list[float]: 
     theta_t = localization_theta_rad(sample.teach_offset, angle_sign)
     theta_c = localization_theta_rad(sample.current_offset, angle_sign)
     rot_t = rot2(theta_t)
@@ -493,3 +493,4 @@ def wrap_angle(value: float) -> float:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
