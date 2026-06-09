@@ -109,7 +109,7 @@ def get_default_skills() -> List[Skill]:
                     step_id="2",
                     action_name="xiye",
                     action_type="MANIPULATE",
-                    parameters={"执行器": "吸液枪", "操作": "吸", "容量": 500},
+                    parameters={"执行器": "吸液枪", "操作": "吸", "容量": 500, "吸液速度": 1200},
                     description="吸取液体",
                     estimated_time=2.0
                 ),
@@ -130,7 +130,14 @@ def get_default_skills() -> List[Skill]:
                     step_id="1",
                     action_name="tuye",
                     action_type="MANIPULATE",
-                    parameters={"执行器": "吸液枪", "操作": "吐", "容量": 500},
+                    parameters={
+                        "执行器": "吸液枪",
+                        "操作": "吐",
+                        "容量": 500,
+                        "吐液速度": 800,
+                        "吐液容量模式": "指定容量",
+                        "全吐": False,
+                    },
                     description="释放液体",
                     estimated_time=2.0
                 ),

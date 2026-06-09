@@ -322,9 +322,15 @@
       </div>
       <div id="manipPipetteParams" style="display:none">
         <label>操作</label>
-        <select id="pipetteOp"><option value="吸">吸</option><option value="吐">吐</option></select>
+        <select id="pipetteOp" onchange="onPipetteChange()"><option value="吸">吸</option><option value="吐">吐</option><option value="退枪头">退枪头</option></select>
         <label>容量 (ul)</label>
         <input id="pipetteCapacity" type="number" value="500" min="0" max="10000" />
+        <label>吸液速度 (ul/s)</label>
+        <input id="pipetteAbsorbSpeed" type="number" value="1200" min="1" max="9999" />
+        <label>吐液速度 (ul/s)</label>
+        <input id="pipetteDispenseSpeed" type="number" value="800" min="1" max="9999" />
+        <label>吐液容量</label>
+        <select id="pipetteDispenseMode" onchange="onPipetteChange()"><option value="指定容量">指定容量</option><option value="全吐">全吐</option></select>
       </div>
     </div>
 
@@ -687,6 +693,15 @@ function onExecutorChange() {
   const e = document.getElementById('manipExecutor').value;
   document.getElementById('manipNormalParams').style.display = e === '吸液枪' ? 'none' : 'block';
   document.getElementById('manipPipetteParams').style.display = e === '吸液枪' ? 'block' : 'none';
+  onPipetteChange();
+}
+function onPipetteChange() {
+  const op = document.getElementById('pipetteOp').value;
+  const mode = document.getElementById('pipetteDispenseMode').value;
+  document.getElementById('pipetteCapacity').disabled = op === '吐' && mode === '全吐';
+  document.getElementById('pipetteAbsorbSpeed').disabled = op !== '吸';
+  document.getElementById('pipetteDispenseSpeed').disabled = op !== '吐';
+  document.getElementById('pipetteDispenseMode').disabled = op !== '吐';
 }
 
 function submitCreateAction() {
@@ -707,7 +722,17 @@ function submitCreateAction() {
   } else if (typeIdx === 1) { // 执行
     const executor = document.getElementById('manipExecutor').value;
     if (executor === '吸液枪') {
-      parameters = { '执行器': executor, '操作': document.getElementById('pipetteOp').value, '容量': parseInt(document.getElementById('pipetteCapacity').value) || 500 };
+      const operation = document.getElementById('pipetteOp').value;
+      const dispenseMode = document.getElementById('pipetteDispenseMode').value;
+      parameters = {
+        '执行器': executor,
+        '操作': operation,
+        '容量': parseInt(document.getElementById('pipetteCapacity').value) || 500,
+        '吸液速度': parseInt(document.getElementById('pipetteAbsorbSpeed').value) || 1200,
+        '吐液速度': parseInt(document.getElementById('pipetteDispenseSpeed').value) || 800,
+        '吐液容量模式': dispenseMode,
+        '全吐': operation === '吐' && dispenseMode === '全吐'
+      };
     } else {
       parameters = { '执行器': executor, '编号': parseInt(document.getElementById('manipNumber').value), '操作': document.getElementById('manipOp').value };
     }

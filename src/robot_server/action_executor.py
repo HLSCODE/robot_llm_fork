@@ -445,21 +445,49 @@ class ActionExecutor:
         """执行吸液枪动作（吸/吐）"""
         operation = params.get('操作', '吸')
         capacity = params.get('容量', 500)
+        absorb_speed = params.get('吸液速度')
+        dispense_speed = params.get('吐液速度')
+        dispense_mode = params.get('吐液容量模式')
+        full_dispense = params.get('全吐')
+        if full_dispense is None:
+            full_dispense = operation == '吐' and dispense_mode is None
+        full_dispense = bool(full_dispense or dispense_mode == '全吐')
         port = params.get('端口', self.config.KUAIHUANSHOU_SERIAL_PORT)
 
-        self._on_log(f"吸液枪动作: 操作={operation}, 容量={capacity}ul")
+        self._on_log(
+            f"吸液枪动作: 操作={operation}, 容量={capacity}ul, "
+            f"吸液速度={absorb_speed or '-'}ul/s, 吐液速度={dispense_speed or '-'}ul/s"
+        )
 
         try:
             from ..devices import ADP
             adp = None
             if operation == '吸':
                 adp = ADP(port=port)
-                self._on_log("正在吸液...")
-                ret = adp.absorb(capacity)
+                if absorb_speed:
+                    self._on_log(f"正在设置吸液速度: {absorb_speed}ul/s")
+                    if not adp.set_absorb_speed(absorb_speed):
+                        self._on_log("设置吸液速度失败", "error")
+                        ret = False
+                    else:
+                        self._on_log("正在吸液...")
+                        ret = adp.absorb(capacity)
+                else:
+                    self._on_log("正在吸液...")
+                    ret = adp.absorb(capacity)
             elif operation == '吐':
                 adp = ADP(port=port)
-                self._on_log("正在吐液...")
-                ret = adp.dispense_all()
+                if dispense_speed:
+                    self._on_log(f"正在设置吐液速度: {dispense_speed}ul/s")
+                    if not adp.set_dispense_speed(dispense_speed):
+                        self._on_log("设置吐液速度失败", "error")
+                        ret = False
+                    else:
+                        self._on_log("正在吐液...")
+                        ret = adp.dispense_all() if full_dispense else adp.dispense(capacity)
+                else:
+                    self._on_log("正在吐液...")
+                    ret = adp.dispense_all() if full_dispense else adp.dispense(capacity)
             elif operation == '退枪头':
                 self._on_log("正在退枪头...")
                 from ..devices.yiyeqiang_out import eject_tip

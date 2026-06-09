@@ -316,15 +316,39 @@ class ActionConfigDialog(QDialog):
         self.pipette_operation_combo.addItem("退枪头", "退枪头")
         current_pipette_op = self.action_data.get('parameters', {}).get('操作', '吸')
         self.pipette_operation_combo.setCurrentText(current_pipette_op)
+        self.pipette_operation_combo.currentTextChanged.connect(self._on_pipette_operation_changed)
 
         self.capacity_input = QSpinBox()
         self.capacity_input.setRange(0, 10000)
         self.capacity_input.setSuffix(" ul")
         self.capacity_input.setValue(self.action_data.get('parameters', {}).get('容量', 500))
 
+        self.absorb_speed_input = QSpinBox()
+        self.absorb_speed_input.setRange(1, 9999)
+        self.absorb_speed_input.setSuffix(" ul/s")
+        self.absorb_speed_input.setValue(self.action_data.get('parameters', {}).get('吸液速度', 1200))
+
+        self.dispense_speed_input = QSpinBox()
+        self.dispense_speed_input.setRange(1, 9999)
+        self.dispense_speed_input.setSuffix(" ul/s")
+        self.dispense_speed_input.setValue(self.action_data.get('parameters', {}).get('吐液速度', 800))
+
+        self.dispense_mode_combo = QComboBox()
+        self.dispense_mode_combo.addItem("指定容量", "指定容量")
+        self.dispense_mode_combo.addItem("全吐", "全吐")
+        current_dispense_mode = self.action_data.get('parameters', {}).get('吐液容量模式')
+        if current_dispense_mode is None and self.action_data.get('parameters', {}).get('全吐', False):
+            current_dispense_mode = "全吐"
+        self.dispense_mode_combo.setCurrentText(current_dispense_mode or "指定容量")
+        self.dispense_mode_combo.currentTextChanged.connect(self._on_pipette_operation_changed)
+
         pipette_layout.addRow("操作:", self.pipette_operation_combo)
         pipette_layout.addRow("容量:", self.capacity_input)
+        pipette_layout.addRow("吸液速度:", self.absorb_speed_input)
+        pipette_layout.addRow("吐液速度:", self.dispense_speed_input)
+        pipette_layout.addRow("吐液容量:", self.dispense_mode_combo)
         self.pipette_widget.setLayout(pipette_layout)
+        self._on_pipette_operation_changed()
 
         # 使用堆叠布局根据执行器类型显示不同面板
         self.param_stack = QStackedLayout()
@@ -523,6 +547,28 @@ class ActionConfigDialog(QDialog):
             else:
                 self.param_stack.setCurrentWidget(self.normal_widget)
 
+    def _on_pipette_operation_changed(self):
+        """根据吸液枪操作切换可编辑参数。"""
+        if not hasattr(self, 'pipette_operation_combo'):
+            return
+
+        operation = self.pipette_operation_combo.currentText()
+        is_absorb = operation == '吸'
+        is_dispense = operation == '吐'
+        is_full_dispense = (
+            hasattr(self, 'dispense_mode_combo')
+            and self.dispense_mode_combo.currentText() == '全吐'
+        )
+
+        if hasattr(self, 'capacity_input'):
+            self.capacity_input.setEnabled(is_absorb or (is_dispense and not is_full_dispense))
+        if hasattr(self, 'absorb_speed_input'):
+            self.absorb_speed_input.setEnabled(is_absorb)
+        if hasattr(self, 'dispense_speed_input'):
+            self.dispense_speed_input.setEnabled(is_dispense)
+        if hasattr(self, 'dispense_mode_combo'):
+            self.dispense_mode_combo.setEnabled(is_dispense)
+
     def _on_move_mode_changed(self):
         """根据选择的移动方式切换参数面板"""
         if hasattr(self, 'move_mode_combo') and hasattr(self, 'move_mode_stack'):
@@ -660,10 +706,16 @@ class ActionConfigDialog(QDialog):
         """构建执行类动作参数"""
         executor = self.executor_combo.currentData()
         if executor == '吸液枪':
+            operation = self.pipette_operation_combo.currentText()
+            dispense_mode = self.dispense_mode_combo.currentText()
             return {
                 '执行器': executor,
-                '操作': self.pipette_operation_combo.currentText(),
-                '容量': self.capacity_input.value()
+                '操作': operation,
+                '容量': self.capacity_input.value(),
+                '吸液速度': self.absorb_speed_input.value(),
+                '吐液速度': self.dispense_speed_input.value(),
+                '吐液容量模式': dispense_mode,
+                '全吐': operation == '吐' and dispense_mode == '全吐',
             }
         else:
             return {

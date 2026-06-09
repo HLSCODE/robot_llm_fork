@@ -616,7 +616,10 @@ class RobotWebSocketServer:
                         "fields": {
                             "执行器": {"type": "select", "options": ["吸液枪"], "default": "吸液枪", "label": "执行器"},
                             "操作":   {"type": "select", "options": ["吸", "吐", "退枪头"], "default": "吸", "label": "操作"},
-                            "容量":   {"type": "number", "min": 0, "max": 10000, "default": 500, "unit": "ul", "label": "容量"}
+                            "容量":   {"type": "number", "min": 0, "max": 10000, "default": 500, "unit": "ul", "label": "容量"},
+                            "吸液速度": {"type": "number", "min": 1, "max": 9999, "default": 1200, "unit": "ul/s", "label": "吸液速度"},
+                            "吐液速度": {"type": "number", "min": 1, "max": 9999, "default": 800, "unit": "ul/s", "label": "吐液速度"},
+                            "吐液容量模式": {"type": "select", "options": ["指定容量", "全吐"], "default": "指定容量", "label": "吐液容量"}
                         }
                     }
                 },

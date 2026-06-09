@@ -116,6 +116,15 @@ class ADP:
         crc_str = f"{crc_value:04X}"
         return frame + crc_str
 
+    @staticmethod
+    def _validate_speed(speed_ul):
+        if speed_ul is None:
+            return None
+        speed = int(speed_ul)
+        if speed <= 0 or speed > 9999:
+            raise ValueError(f"ADP speed must be in 1-9999 uL/s, got {speed}")
+        return speed
+
     def send_command(self, command_str):
         """发送命令到设备
         
@@ -142,6 +151,22 @@ class ADP:
     def initialize(self):
         """初始化空气泵"""
         command = self._create_command('G')
+        return self.send_command(command)
+
+    def set_absorb_speed(self, speed_ul):
+        """设置吸液速度，单位 uL/s，范围 1-9999。"""
+        speed = self._validate_speed(speed_ul)
+        if speed is None:
+            return True
+        command = self._create_command('4', speed)
+        return self.send_command(command)
+
+    def set_dispense_speed(self, speed_ul):
+        """设置吐液速度，单位 uL/s，范围 1-9999。"""
+        speed = self._validate_speed(speed_ul)
+        if speed is None:
+            return True
+        command = self._create_command('B', speed)
         return self.send_command(command)
 
     def absorb(self, volume):
