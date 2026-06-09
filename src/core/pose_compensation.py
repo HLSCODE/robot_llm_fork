@@ -20,11 +20,13 @@ LEFT_ARM_LOCATOR_TO_BASE_CM = {
 }
 
 RIGHT_ARM_LOCATOR_TO_BASE_CM = {
-    "x": 48.708676,
-    "y": -30.002009,
+    "x": 29.418679,
+    "y": -16.077423,
     "z": 0.0,
 }
-
+# "x": 48.708676,
+#     "y": -30.002009,
+#     "z": 0.0,
 # Arm axes relative to the localization/body axes:
 # body +X = forward, body +Y = left
 # arm  +X = left,    arm  +Y = back

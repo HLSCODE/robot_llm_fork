@@ -63,7 +63,7 @@ def main() -> int:
     parser.add_argument(
         "samples",
         nargs="?",
-        default=Path(r"C:\HLE\Work\robot_llm-fork\scripts\data.json"),
+        default=Path(r"/home/maic/robot_llm_fork/scripts/data.json"),
         type=Path,
         help="JSON file containing taught pose and calibration samples.",
 )
