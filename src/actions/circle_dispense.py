@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import threading
 import time
 from contextlib import nullcontext
 from typing import Callable
@@ -133,44 +134,86 @@ def execute_right_arm_circle_dispense(
                 log("设置吐液速度失败", "error")
                 return False
 
-            log(f"开始吐液: {volume:.1f}ul")
-            if not adp.dispense(int(round(volume))):
-                log("吐液命令发送失败", "error")
+            start_signal = threading.Event()
+            started_at = [0.0]
+            results = {
+                "motion": False,
+                "dispense": False,
+                "motion_error": "",
+                "dispense_error": "",
+            }
+
+            def run_dispense() -> None:
+                try:
+                    start_signal.wait()
+                    log(f"开始吐液: {volume:.1f}ul")
+                    if adp.dispense(int(round(volume))):
+                        results["dispense"] = True
+                    else:
+                        results["dispense_error"] = "吐液命令发送失败"
+                except Exception as exc:
+                    results["dispense_error"] = f"吐液线程异常: {exc}"
+
+            def run_motion() -> None:
+                try:
+                    start_signal.wait()
+                    for step in range(1, total_segments + 1):
+                        if stop_requested():
+                            results["motion_error"] = "右臂转圈注液已停止"
+                            return
+                        while paused():
+                            if stop_requested():
+                                results["motion_error"] = "右臂转圈注液已停止"
+                                return
+                            time.sleep(0.1)
+
+                        target_pose = circle_pose(step)
+                        is_last = step == total_segments
+                        connect = 1 if continuous_motion and not is_last else 0
+                        block = 0 if continuous_motion and not is_last else 1
+                        r = blend_radius if continuous_motion and not is_last else 0
+                        with sdk_lock:
+                            ret = robot.rm_movel(target_pose, v=move_velocity, r=r, connect=connect, block=block)
+                        if ret != 0:
+                            results["motion_error"] = (
+                                f"圆周第 {step}/{total_segments} 段移动失败，错误码: {ret}"
+                            )
+                            return
+
+                        if not continuous_motion:
+                            target_elapsed = duration * step / total_segments
+                            remaining = target_elapsed - (time.monotonic() - started_at[0])
+                            if remaining > 0:
+                                time.sleep(remaining)
+
+                    results["motion"] = True
+                except Exception as exc:
+                    results["motion_error"] = f"运动线程异常: {exc}"
+
+            motion_thread = threading.Thread(target=run_motion, name="CircleDispenseMotion")
+            dispense_thread = threading.Thread(target=run_dispense, name="CircleDispenseADP")
+            motion_thread.start()
+            dispense_thread.start()
+
+            log("同步启动右臂转圈与吐液...")
+            started_at[0] = time.monotonic()
+            start_signal.set()
+
+            motion_thread.join()
+            dispense_thread.join()
+
+            if not results["dispense"]:
+                log(results["dispense_error"] or "吐液命令发送失败", "error")
                 return False
+            if not results["motion"]:
+                log(results["motion_error"] or "圆周运动失败", "error")
+                return False
+
+            extra_wait = duration - (time.monotonic() - started_at[0])
+            if extra_wait > 0:
+                time.sleep(extra_wait)
         finally:
             adp.close()
-
-        start_time = time.monotonic()
-        for step in range(1, total_segments + 1):
-            if stop_requested():
-                log("右臂转圈注液已停止")
-                return False
-            while paused():
-                if stop_requested():
-                    log("右臂转圈注液已停止")
-                    return False
-                time.sleep(0.1)
-
-            target_pose = circle_pose(step)
-            is_last = step == total_segments
-            connect = 1 if continuous_motion and not is_last else 0
-            block = 0 if continuous_motion and not is_last else 1
-            r = blend_radius if continuous_motion and not is_last else 0
-            with sdk_lock:
-                ret = robot.rm_movel(target_pose, v=move_velocity, r=r, connect=connect, block=block)
-            if ret != 0:
-                log(f"圆周第 {step}/{total_segments} 段移动失败，错误码: {ret}", "error")
-                return False
-
-            if not continuous_motion:
-                target_elapsed = duration * step / total_segments
-                remaining = target_elapsed - (time.monotonic() - start_time)
-                if remaining > 0:
-                    time.sleep(remaining)
-
-        extra_wait = duration - (time.monotonic() - start_time)
-        if extra_wait > 0:
-            time.sleep(extra_wait)
 
         log("右臂转圈注液完成")
         return True
