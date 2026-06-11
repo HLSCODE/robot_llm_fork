@@ -19,6 +19,14 @@ def _to_float(params: dict, key: str, default: float) -> float:
     return float(value)
 
 
+def _to_bool(value, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on", "是"}
+    return bool(value)
+
+
 def _radius_to_meters(radius: float) -> float:
     # Poses in this project use meters. For operator friendliness, values
     # larger than 1 are treated as millimeters.
@@ -56,7 +64,9 @@ def execute_right_arm_circle_dispense(
         circle_count = _to_float(params, "圈数", 1.0)
         segments = max(8, int(_to_float(params, "分段数", 72.0)))
         move_velocity = int(_to_float(params, "运动速度", 10.0))
-        clockwise = bool(params.get("顺时针", False))
+        blend_radius = int(_to_float(params, "过渡半径", params.get("平滑半径", 20.0)))
+        continuous_motion = _to_bool(params.get("连续运动"), True)
+        clockwise = _to_bool(params.get("顺时针"), False)
         port = params.get("端口", default_port)
     except Exception as exc:
         log(f"右臂转圈注液参数错误: {exc}", "error")
@@ -73,6 +83,9 @@ def execute_right_arm_circle_dispense(
         return False
     if circle_count <= 0:
         log("圈数必须大于0", "error")
+        return False
+    if blend_radius < 0:
+        log("过渡半径不能小于0", "error")
         return False
 
     duration = volume / dispense_speed
@@ -99,7 +112,8 @@ def execute_right_arm_circle_dispense(
             "右臂转圈注液: "
             f"center=({cx:.4f}, {cy:.4f}, {z:.4f}), "
             f"R={radius * 1000:.1f}mm, volume={volume:.1f}ul, "
-            f"speed={dispense_speed:.1f}ul/s, duration={duration:.2f}s"
+            f"speed={dispense_speed:.1f}ul/s, duration={duration:.2f}s, "
+            f"segments={total_segments}, blend={blend_radius}, continuous={continuous_motion}"
         )
 
         start_pose = circle_pose(0)
@@ -138,16 +152,21 @@ def execute_right_arm_circle_dispense(
                 time.sleep(0.1)
 
             target_pose = circle_pose(step)
+            is_last = step == total_segments
+            connect = 1 if continuous_motion and not is_last else 0
+            block = 0 if continuous_motion and not is_last else 1
+            r = blend_radius if continuous_motion and not is_last else 0
             with sdk_lock:
-                ret = robot.rm_movel(target_pose, v=move_velocity, r=0, connect=0, block=1)
+                ret = robot.rm_movel(target_pose, v=move_velocity, r=r, connect=connect, block=block)
             if ret != 0:
                 log(f"圆周第 {step}/{total_segments} 段移动失败，错误码: {ret}", "error")
                 return False
 
-            target_elapsed = duration * step / total_segments
-            remaining = target_elapsed - (time.monotonic() - start_time)
-            if remaining > 0:
-                time.sleep(remaining)
+            if not continuous_motion:
+                target_elapsed = duration * step / total_segments
+                remaining = target_elapsed - (time.monotonic() - start_time)
+                if remaining > 0:
+                    time.sleep(remaining)
 
         extra_wait = duration - (time.monotonic() - start_time)
         if extra_wait > 0:

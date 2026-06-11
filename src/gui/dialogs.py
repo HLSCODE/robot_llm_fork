@@ -421,9 +421,16 @@ class ActionConfigDialog(QDialog):
         self.circle_segments_input.setRange(8, 360)
         self.circle_segments_input.setValue(self._param_int(circle_params, '分段数', 72))
 
+        self.circle_blend_radius_input = QSpinBox()
+        self.circle_blend_radius_input.setRange(0, 100)
+        self.circle_blend_radius_input.setValue(self._param_int(circle_params, '过渡半径', 20))
+
         self.circle_move_velocity_input = QSpinBox()
         self.circle_move_velocity_input.setRange(1, 100)
         self.circle_move_velocity_input.setValue(self._param_int(circle_params, '运动速度', 10))
+
+        self.circle_continuous_checkbox = QCheckBox("连续运动")
+        self.circle_continuous_checkbox.setChecked(self._param_bool(circle_params, '连续运动', True))
 
         self.circle_clockwise_checkbox = QCheckBox("顺时针")
         self.circle_clockwise_checkbox.setChecked(self._param_bool(circle_params, '顺时针', False))
@@ -434,7 +441,9 @@ class ActionConfigDialog(QDialog):
         circle_layout.addRow("吐液量:", self.circle_volume_input)
         circle_layout.addRow("圈数:", self.circle_count_input)
         circle_layout.addRow("每圈分段:", self.circle_segments_input)
+        circle_layout.addRow("过渡半径:", self.circle_blend_radius_input)
         circle_layout.addRow("运动速度:", self.circle_move_velocity_input)
+        circle_layout.addRow("", self.circle_continuous_checkbox)
         circle_layout.addRow("", self.circle_clockwise_checkbox)
         self.circle_dispense_widget.setLayout(circle_layout)
 
@@ -824,7 +833,9 @@ class ActionConfigDialog(QDialog):
                 '吐液量': self.circle_volume_input.value(),
                 '圈数': self.circle_count_input.value(),
                 '分段数': self.circle_segments_input.value(),
+                '过渡半径': self.circle_blend_radius_input.value(),
                 '运动速度': self.circle_move_velocity_input.value(),
+                '连续运动': self.circle_continuous_checkbox.isChecked(),
                 '顺时针': self.circle_clockwise_checkbox.isChecked(),
             }
         else:

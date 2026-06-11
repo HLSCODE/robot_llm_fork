@@ -632,7 +632,9 @@ class RobotWebSocketServer:
                             "吐液量": {"type": "number", "min": 1, "max": 10000, "default": 500, "unit": "ul", "label": "吐液量"},
                             "圈数": {"type": "number", "min": 0.1, "max": 20, "default": 1, "label": "圈数"},
                             "分段数": {"type": "number", "min": 8, "max": 360, "default": 72, "label": "每圈分段"},
+                            "过渡半径": {"type": "number", "min": 0, "max": 100, "default": 20, "label": "过渡半径"},
                             "运动速度": {"type": "number", "min": 1, "max": 100, "default": 10, "label": "运动速度"},
+                            "连续运动": {"type": "boolean", "default": True, "label": "连续运动"},
                             "顺时针": {"type": "boolean", "default": False, "label": "顺时针"}
                         }
                     }
