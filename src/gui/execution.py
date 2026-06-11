@@ -8,6 +8,7 @@ from ..arm_sdk.controller import RobotController
 from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
 from ..base_move.move_controller import RobotMoveController
 from ..core.config_loader import Config
+from ..actions.circle_dispense import execute_right_arm_circle_dispense
 class ExecutionThread(QThread):
     started = pyqtSignal()
     finished = pyqtSignal()
@@ -332,6 +333,15 @@ class ExecutionThread(QThread):
             return self._execute_gripper(operation)
         elif executor == '吸液枪':
             return self._execute_pipette(params)
+        elif executor == '右臂转圈注液':
+            return execute_right_arm_circle_dispense(
+                robot_controller=self._robot_controller,
+                params=params,
+                default_port=self.config.ADP_SERIAL_PORT,
+                log=lambda message, level="info": self.log_message.emit(message),
+                stop_requested=lambda: self._stop_requested,
+                paused=lambda: self._paused,
+            )
         else:
             self.log_message.emit(f"未知的执行器: {executor}")
             return False

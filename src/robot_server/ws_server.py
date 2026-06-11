@@ -621,6 +621,20 @@ class RobotWebSocketServer:
                             "吐液速度": {"type": "number", "min": 1, "max": 9999, "default": 800, "unit": "ul/s", "label": "吐液速度"},
                             "吐液容量模式": {"type": "select", "options": ["指定容量", "全吐"], "default": "指定容量", "label": "吐液容量"}
                         }
+                    },
+                    "右臂转圈注液": {
+                        "description": "Robot2 以给定位姿的 x/y 为圆心画圆，同时控制吸液枪吐液",
+                        "fields": {
+                            "执行器": {"type": "select", "options": ["右臂转圈注液"], "default": "右臂转圈注液", "label": "执行器"},
+                            "位姿": {"type": "text", "placeholder": "例如: [-0.058,-0.412,-0.154,-2.934,0.428,-2.722]", "label": "圆心位姿", "required": True},
+                            "半径R": {"type": "number", "min": 0.1, "max": 500, "default": 10, "unit": "mm", "label": "半径R"},
+                            "吐液速度": {"type": "number", "min": 1, "max": 9999, "default": 800, "unit": "ul/s", "label": "吐液速度"},
+                            "吐液量": {"type": "number", "min": 1, "max": 10000, "default": 500, "unit": "ul", "label": "吐液量"},
+                            "圈数": {"type": "number", "min": 0.1, "max": 20, "default": 1, "label": "圈数"},
+                            "分段数": {"type": "number", "min": 8, "max": 360, "default": 72, "label": "每圈分段"},
+                            "运动速度": {"type": "number", "min": 1, "max": 100, "default": 10, "label": "运动速度"},
+                            "顺时针": {"type": "boolean", "default": False, "label": "顺时针"}
+                        }
                     }
                 },
                 "variant_key": "执行器"

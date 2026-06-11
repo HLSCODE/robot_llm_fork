@@ -282,6 +282,7 @@ class ActionConfigDialog(QDialog):
         self.executor_combo.addItem("继电器", "继电器")
         self.executor_combo.addItem("夹爪", "夹爪")
         self.executor_combo.addItem("吸液枪", "吸液枪")
+        self.executor_combo.addItem("右臂转圈注液", "右臂转圈注液")
         current_executor = self.action_data.get('parameters', {}).get('执行器', '快换手')
         self.executor_combo.setCurrentText(current_executor)
         self.executor_combo.currentIndexChanged.connect(self._on_executor_changed)
@@ -350,10 +351,64 @@ class ActionConfigDialog(QDialog):
         self.pipette_widget.setLayout(pipette_layout)
         self._on_pipette_operation_changed()
 
+        # 右臂转圈注液参数面板
+        self.circle_dispense_widget = QWidget()
+        circle_layout = QFormLayout()
+        circle_params = self.action_data.get('parameters', {})
+
+        self.circle_pose_input = QLineEdit()
+        self.circle_pose_input.setText(circle_params.get('位姿', ''))
+        self.circle_pose_input.setPlaceholderText("[-0.058,-0.412,-0.154,-2.934,0.428,-2.722]")
+
+        self.circle_radius_input = QDoubleSpinBox()
+        self.circle_radius_input.setRange(0.1, 500.0)
+        self.circle_radius_input.setDecimals(3)
+        self.circle_radius_input.setSuffix(" mm")
+        self.circle_radius_input.setValue(float(circle_params.get('半径R', 10.0)))
+
+        self.circle_dispense_speed_input = QDoubleSpinBox()
+        self.circle_dispense_speed_input.setRange(1.0, 9999.0)
+        self.circle_dispense_speed_input.setDecimals(1)
+        self.circle_dispense_speed_input.setSuffix(" ul/s")
+        self.circle_dispense_speed_input.setValue(float(circle_params.get('吐液速度', 800.0)))
+
+        self.circle_volume_input = QDoubleSpinBox()
+        self.circle_volume_input.setRange(1.0, 10000.0)
+        self.circle_volume_input.setDecimals(1)
+        self.circle_volume_input.setSuffix(" ul")
+        self.circle_volume_input.setValue(float(circle_params.get('吐液量', 500.0)))
+
+        self.circle_count_input = QDoubleSpinBox()
+        self.circle_count_input.setRange(0.1, 20.0)
+        self.circle_count_input.setDecimals(2)
+        self.circle_count_input.setValue(float(circle_params.get('圈数', 1.0)))
+
+        self.circle_segments_input = QSpinBox()
+        self.circle_segments_input.setRange(8, 360)
+        self.circle_segments_input.setValue(int(circle_params.get('分段数', 72)))
+
+        self.circle_move_velocity_input = QSpinBox()
+        self.circle_move_velocity_input.setRange(1, 100)
+        self.circle_move_velocity_input.setValue(int(circle_params.get('运动速度', 10)))
+
+        self.circle_clockwise_checkbox = QCheckBox("顺时针")
+        self.circle_clockwise_checkbox.setChecked(bool(circle_params.get('顺时针', False)))
+
+        circle_layout.addRow("圆心位姿:", self.circle_pose_input)
+        circle_layout.addRow("半径R:", self.circle_radius_input)
+        circle_layout.addRow("吐液速度:", self.circle_dispense_speed_input)
+        circle_layout.addRow("吐液量:", self.circle_volume_input)
+        circle_layout.addRow("圈数:", self.circle_count_input)
+        circle_layout.addRow("每圈分段:", self.circle_segments_input)
+        circle_layout.addRow("运动速度:", self.circle_move_velocity_input)
+        circle_layout.addRow("", self.circle_clockwise_checkbox)
+        self.circle_dispense_widget.setLayout(circle_layout)
+
         # 使用堆叠布局根据执行器类型显示不同面板
         self.param_stack = QStackedLayout()
         self.param_stack.addWidget(self.normal_widget)
         self.param_stack.addWidget(self.pipette_widget)
+        self.param_stack.addWidget(self.circle_dispense_widget)
         self.param_stack.setCurrentWidget(self.normal_widget)
 
         form_layout.addRow("执行器:", self.executor_combo)
@@ -544,6 +599,8 @@ class ActionConfigDialog(QDialog):
             executor = self.executor_combo.currentData()
             if executor == '吸液枪':
                 self.param_stack.setCurrentWidget(self.pipette_widget)
+            elif executor == '右臂转圈注液':
+                self.param_stack.setCurrentWidget(self.circle_dispense_widget)
             else:
                 self.param_stack.setCurrentWidget(self.normal_widget)
 
@@ -645,6 +702,13 @@ class ActionConfigDialog(QDialog):
                 self.sensor_input.setFocus()
                 return
 
+        if self.action_type == ActionType.MANIPULATE and hasattr(self, 'executor_combo'):
+            if self.executor_combo.currentData() == '右臂转圈注液':
+                pose = self.circle_pose_input.text().strip()
+                if not pose:
+                    self.circle_pose_input.setFocus()
+                    return
+
         if self.action_type == ActionType.TRAJECTORY:
             file_path = self.trajectory_path_input.text().strip()
             if not file_path:
@@ -716,6 +780,18 @@ class ActionConfigDialog(QDialog):
                 '吐液速度': self.dispense_speed_input.value(),
                 '吐液容量模式': dispense_mode,
                 '全吐': operation == '吐' and dispense_mode == '全吐',
+            }
+        elif executor == '右臂转圈注液':
+            return {
+                '执行器': executor,
+                '位姿': self.circle_pose_input.text().strip(),
+                '半径R': self.circle_radius_input.value(),
+                '吐液速度': self.circle_dispense_speed_input.value(),
+                '吐液量': self.circle_volume_input.value(),
+                '圈数': self.circle_count_input.value(),
+                '分段数': self.circle_segments_input.value(),
+                '运动速度': self.circle_move_velocity_input.value(),
+                '顺时针': self.circle_clockwise_checkbox.isChecked(),
             }
         else:
             return {

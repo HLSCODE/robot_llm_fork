@@ -15,6 +15,7 @@ from ..core.models import SequenceItem, SequenceItemStatus, ActionType
 from ..devices.modbus_motor import ModbusMotor
 from ..devices.pwm_neck import PWMNeckController
 from ..base_move.move_controller import RobotMoveController
+from ..actions.circle_dispense import execute_right_arm_circle_dispense
 
 logger = logging.getLogger(__name__)
 from ..core.config_loader import Config
@@ -46,6 +47,7 @@ class ActionExecutor:
         self._body_controller = body_controller
         self._neck_controller = neck_controller
         self._move_controller = move_controller
+        self.config = Config.get_instance()
 
         # 回调
         self._on_step_started = on_step_started or (lambda *a: None)
@@ -405,6 +407,15 @@ class ActionExecutor:
             return self._execute_gripper(operation)
         elif executor == '吸液枪':
             return self._execute_pipette(params)
+        elif executor == '右臂转圈注液':
+            return execute_right_arm_circle_dispense(
+                robot_controller=self._robot_controller,
+                params=params,
+                default_port=self.config.ADP_SERIAL_PORT,
+                log=self._on_log,
+                stop_requested=lambda: self._stop_requested,
+                paused=lambda: self._paused,
+            )
         else:
             self._on_log(f"未知的执行器: {executor}", "error")
             return False
