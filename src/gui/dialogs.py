@@ -196,6 +196,40 @@ class ActionConfigDialog(QDialog):
 
         self.setLayout(layout)
 
+    @staticmethod
+    def _param_text(params: dict, key: str, default: str = "") -> str:
+        value = params.get(key, default)
+        if value is None:
+            return default
+        return str(value)
+
+    @staticmethod
+    def _param_float(params: dict, key: str, default: float) -> float:
+        value = params.get(key, default)
+        if value is None or value == "":
+            return float(default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
+
+    @staticmethod
+    def _param_int(params: dict, key: str, default: int) -> int:
+        value = params.get(key, default)
+        if value is None or value == "":
+            return int(default)
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return int(default)
+
+    @staticmethod
+    def _param_bool(params: dict, key: str, default: bool = False) -> bool:
+        value = params.get(key, default)
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on", "是"}
+        return bool(value)
+
     def _init_move_ui(self, form_layout: QFormLayout):
         """初始化机械臂/身体移动 UI"""
         # 目标选择：机械臂 或 身体
@@ -322,17 +356,17 @@ class ActionConfigDialog(QDialog):
         self.capacity_input = QSpinBox()
         self.capacity_input.setRange(0, 10000)
         self.capacity_input.setSuffix(" ul")
-        self.capacity_input.setValue(self.action_data.get('parameters', {}).get('容量', 500))
+        self.capacity_input.setValue(self._param_int(self.action_data.get('parameters', {}), '容量', 500))
 
         self.absorb_speed_input = QSpinBox()
         self.absorb_speed_input.setRange(1, 9999)
         self.absorb_speed_input.setSuffix(" ul/s")
-        self.absorb_speed_input.setValue(self.action_data.get('parameters', {}).get('吸液速度', 1200))
+        self.absorb_speed_input.setValue(self._param_int(self.action_data.get('parameters', {}), '吸液速度', 1200))
 
         self.dispense_speed_input = QSpinBox()
         self.dispense_speed_input.setRange(1, 9999)
         self.dispense_speed_input.setSuffix(" ul/s")
-        self.dispense_speed_input.setValue(self.action_data.get('parameters', {}).get('吐液速度', 800))
+        self.dispense_speed_input.setValue(self._param_int(self.action_data.get('parameters', {}), '吐液速度', 800))
 
         self.dispense_mode_combo = QComboBox()
         self.dispense_mode_combo.addItem("指定容量", "指定容量")
@@ -357,42 +391,42 @@ class ActionConfigDialog(QDialog):
         circle_params = self.action_data.get('parameters', {})
 
         self.circle_pose_input = QLineEdit()
-        self.circle_pose_input.setText(circle_params.get('位姿', ''))
+        self.circle_pose_input.setText(self._param_text(circle_params, '位姿', ''))
         self.circle_pose_input.setPlaceholderText("[-0.058,-0.412,-0.154,-2.934,0.428,-2.722]")
 
         self.circle_radius_input = QDoubleSpinBox()
         self.circle_radius_input.setRange(0.1, 500.0)
         self.circle_radius_input.setDecimals(3)
         self.circle_radius_input.setSuffix(" mm")
-        self.circle_radius_input.setValue(float(circle_params.get('半径R', 10.0)))
+        self.circle_radius_input.setValue(self._param_float(circle_params, '半径R', 10.0))
 
         self.circle_dispense_speed_input = QDoubleSpinBox()
         self.circle_dispense_speed_input.setRange(1.0, 9999.0)
         self.circle_dispense_speed_input.setDecimals(1)
         self.circle_dispense_speed_input.setSuffix(" ul/s")
-        self.circle_dispense_speed_input.setValue(float(circle_params.get('吐液速度', 800.0)))
+        self.circle_dispense_speed_input.setValue(self._param_float(circle_params, '吐液速度', 800.0))
 
         self.circle_volume_input = QDoubleSpinBox()
         self.circle_volume_input.setRange(1.0, 10000.0)
         self.circle_volume_input.setDecimals(1)
         self.circle_volume_input.setSuffix(" ul")
-        self.circle_volume_input.setValue(float(circle_params.get('吐液量', 500.0)))
+        self.circle_volume_input.setValue(self._param_float(circle_params, '吐液量', 500.0))
 
         self.circle_count_input = QDoubleSpinBox()
         self.circle_count_input.setRange(0.1, 20.0)
         self.circle_count_input.setDecimals(2)
-        self.circle_count_input.setValue(float(circle_params.get('圈数', 1.0)))
+        self.circle_count_input.setValue(self._param_float(circle_params, '圈数', 1.0))
 
         self.circle_segments_input = QSpinBox()
         self.circle_segments_input.setRange(8, 360)
-        self.circle_segments_input.setValue(int(circle_params.get('分段数', 72)))
+        self.circle_segments_input.setValue(self._param_int(circle_params, '分段数', 72))
 
         self.circle_move_velocity_input = QSpinBox()
         self.circle_move_velocity_input.setRange(1, 100)
-        self.circle_move_velocity_input.setValue(int(circle_params.get('运动速度', 10)))
+        self.circle_move_velocity_input.setValue(self._param_int(circle_params, '运动速度', 10))
 
         self.circle_clockwise_checkbox = QCheckBox("顺时针")
-        self.circle_clockwise_checkbox.setChecked(bool(circle_params.get('顺时针', False)))
+        self.circle_clockwise_checkbox.setChecked(self._param_bool(circle_params, '顺时针', False))
 
         circle_layout.addRow("圆心位姿:", self.circle_pose_input)
         circle_layout.addRow("半径R:", self.circle_radius_input)
