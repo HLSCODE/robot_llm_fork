@@ -49,104 +49,153 @@ class AIAssistantWidget(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        # ===== 顶部：状态栏 =====
-        status_layout = QHBoxLayout()
+        # ── Status bar ──
+        status_widget = QWidget()
+        status_widget.setStyleSheet("""
+            QWidget { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px; }
+        """)
+        status_layout = QHBoxLayout(status_widget)
+        status_layout.setContentsMargins(8, 2, 8, 2)
 
-        self.status_label = QLabel("状态: 就绪")
-        self.status_label.setStyleSheet("font-size: 12px; padding: 4px;")
+        self.status_label = QLabel("⚡ 状态: 就绪")
+        self.status_label.setStyleSheet("font-size: 12px; font-weight: 600; color: #334155; border: none; background: transparent;")
         status_layout.addWidget(self.status_label)
 
-        self.model_label = QLabel("模型: GPT-4o")
-        self.model_label.setStyleSheet("font-size: 12px; color: #888;")
+        self.model_label = QLabel("模型: —")
+        self.model_label.setStyleSheet("font-size: 11px; color: #64748b; border: none; background: transparent;")
         status_layout.addWidget(self.model_label)
 
         status_layout.addStretch()
 
         self.simulation_checkbox = QCheckBox("模拟模式")
         self.simulation_checkbox.setChecked(False)
+        self.simulation_checkbox.setStyleSheet("border: none; background: transparent;")
         self.simulation_checkbox.stateChanged.connect(self._on_simulation_changed)
         status_layout.addWidget(self.simulation_checkbox)
 
-        layout.addLayout(status_layout)
+        layout.addWidget(status_widget)
 
-        # ===== 中部：对话历史区域 =====
-        history_group = QGroupBox("对话历史")
-        history_layout = QVBoxLayout(history_group)
-
+        # ── Chat history ──
         self.chat_history = QTextEdit()
         self.chat_history.setReadOnly(True)
-        self.chat_history.setMaximumHeight(250)
-        self.chat_history.setPlaceholderText("对话历史将显示在这里...\n\n提示：输入您想要机器人执行的动作，例如：\n- 帮我抓一个瓶子\n- 吸取500微升液体\n- 回到安全位置")
-        history_layout.addWidget(self.chat_history)
+        self.chat_history.setMaximumHeight(220)
+        self.chat_history.setStyleSheet("""
+            QTextEdit {
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 10px;
+                padding: 10px;
+                font-size: 12px;
+                font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+            }
+        """)
+        self.chat_history.setPlaceholderText(
+            "🤖 你好！我是 AI 动作助手。\n\n"
+            "请输入您想要执行的动作，例如：\n"
+            "• 帮我抓一个瓶子\n"
+            "• 吸取 500 微升液体\n"
+            "• 回到安全位置"
+        )
+        layout.addWidget(self.chat_history)
 
-        layout.addWidget(history_group)
-
-        # ===== 技能列表 =====
-        skills_group = QGroupBox("可用技能")
+        # ── Skills ──
+        skills_group = QGroupBox("⚙ 可用技能")
         skills_layout = QVBoxLayout(skills_group)
+        skills_layout.setContentsMargins(4, 4, 4, 4)
 
         self.skill_list = QListWidget()
-        self.skill_list.setMaximumHeight(100)
+        self.skill_list.setMaximumHeight(90)
+        self.skill_list.setStyleSheet("""
+            QListWidget {
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+                font-size: 11px;
+            }
+            QListWidget::item { padding: 4px 8px; }
+            QListWidget::item:hover { background: #eff6ff; }
+        """)
         skills_layout.addWidget(self.skill_list)
-
-        # 填充技能列表
         self._refresh_skill_list()
 
         layout.addWidget(skills_group)
 
-        # ===== 底部：输入区域 =====
+        # ── Input row ──
         input_layout = QHBoxLayout()
+        input_layout.setSpacing(6)
 
         self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("请输入您的指令...")
+        self.input_field.setPlaceholderText("请输入您的指令，按 Enter 发送...")
+        self.input_field.setMinimumHeight(34)
+        self.input_field.setStyleSheet("""
+            QLineEdit {
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 13px;
+                background: #ffffff;
+            }
+            QLineEdit:focus { border-color: #3b82f6; background: #ffffff; }
+        """)
         self.input_field.returnPressed.connect(self._on_send_clicked)
         input_layout.addWidget(self.input_field, stretch=1)
 
-        self.send_button = QPushButton("发送")
+        self.send_button = QPushButton("➤ 发送")
         self.send_button.setMinimumWidth(80)
+        self.send_button.setMinimumHeight(34)
+        self.send_button.setStyleSheet("""
+            QPushButton { background: #3b82f6; color: #fff; font-weight: 700; border: none; border-radius: 8px; font-size: 13px; }
+            QPushButton:hover { background: #2563eb; }
+            QPushButton:pressed { background: #1d4ed8; }
+            QPushButton:disabled { background: #94a3b8; }
+        """)
         self.send_button.clicked.connect(self._on_send_clicked)
         input_layout.addWidget(self.send_button)
 
         layout.addLayout(input_layout)
 
-        # ===== 底部：操作按钮 =====
+        # ── Action buttons ──
         action_layout = QHBoxLayout()
+        action_layout.setSpacing(6)
 
-        self.execute_button = QPushButton("执行")
+        self.execute_button = QPushButton("✅ 执行")
         self.execute_button.setEnabled(False)
+        self.execute_button.setMinimumHeight(34)
         self.execute_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:disabled {
-                background-color: #ccc;
-            }
-            QPushButton:hover:!disabled {
-                background-color: #45a049;
-            }
+            QPushButton { background: #22c55e; color: #fff; font-weight: 700; border: none; border-radius: 8px; font-size: 13px; }
+            QPushButton:hover { background: #16a34a; }
+            QPushButton:pressed { background: #15803d; }
+            QPushButton:disabled { background: #cbd5e1; color: #94a3b8; }
         """)
         self.execute_button.clicked.connect(self._on_execute_clicked)
         action_layout.addWidget(self.execute_button)
 
-        self.preview_button = QPushButton("预览详情")
+        self.preview_button = QPushButton("🔍 预览详情")
         self.preview_button.setEnabled(False)
+        self.preview_button.setMinimumHeight(34)
+        self.preview_button.setStyleSheet("""
+            QPushButton { background: #ffffff; border: 1px solid #e2e8f0; color: #334155; font-weight: 500; border-radius: 8px; }
+            QPushButton:hover { background: #f8fafc; border-color: #3b82f6; color: #3b82f6; }
+            QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
+        """)
         self.preview_button.clicked.connect(self._on_preview_clicked)
         action_layout.addWidget(self.preview_button)
 
-        self.cancel_button = QPushButton("取消")
+        self.cancel_button = QPushButton("✕ 取消")
         self.cancel_button.setEnabled(False)
+        self.cancel_button.setMinimumHeight(34)
+        self.cancel_button.setStyleSheet("""
+            QPushButton { background: #ffffff; border: 1px solid #e2e8f0; color: #ef4444; font-weight: 500; border-radius: 8px; }
+            QPushButton:hover { background: #fef2f2; border-color: #ef4444; }
+            QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
+        """)
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
         action_layout.addWidget(self.cancel_button)
 
         layout.addLayout(action_layout)
 
-        # 初始化欢迎消息
-        self._add_bot_message("你好！我是AI动作助手。\n\n请输入您想要执行的动作，我将帮您规划并执行。\n\n示例：\n- 帮我抓一个瓶子\n- 吸取500微升液体\n- 回到安全位置")
+        # Welcome
+        self._add_bot_message("你好！我是 AI 动作助手。\n\n请输入您想要执行的动作，我将帮您规划并执行。\n\n💡 示例：\n• 帮我抓一个瓶子\n• 吸取 500 微升液体\n• 回到安全位置")
 
     def set_main_window(self, main_window):
         """设置主窗口引用，并桥接执行信号到右侧序列列表（仅应调用一次）。"""
@@ -188,50 +237,44 @@ class AIAssistantWidget(QWidget):
         """添加用户消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        # 用户消息样式
-        self.chat_history.setTextColor(QColor("#1a73e8"))
-        cursor.insertText(f"\n[用户] {text}\n\n")
-        self.chat_history.setTextColor(QColor("#333"))
-
+        self.chat_history.setTextColor(QColor("#3b82f6"))
+        cursor.insertText(f"\n👤 {text}\n\n")
+        self.chat_history.setTextColor(QColor("#1e293b"))
         self.chat_history.ensureCursorVisible()
 
     def _add_bot_message(self, text: str):
         """添加机器人消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        self.chat_history.setTextColor(QColor("#666"))
-        cursor.insertText(f"\n[助手] {text}\n")
-        self.chat_history.setTextColor(QColor("#333"))
-
+        self.chat_history.setTextColor(QColor("#334155"))
+        cursor.insertText(f"\n🤖 {text}\n")
+        self.chat_history.setTextColor(QColor("#1e293b"))
         self.chat_history.ensureCursorVisible()
 
     def _add_system_message(self, text: str):
         """添加系统消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-
-        self.chat_history.setTextColor(QColor("#f57c00"))
-        cursor.insertText(f"[系统] {text}\n\n")
-        self.chat_history.setTextColor(QColor("#333"))
+        self.chat_history.setTextColor(QColor("#d97706"))
+        cursor.insertText(f"⚡ {text}\n\n")
+        self.chat_history.setTextColor(QColor("#1e293b"))
+        self.chat_history.ensureCursorVisible()
 
         self.chat_history.ensureCursorVisible()
 
     def _update_status_display(self):
         """更新状态显示"""
-        # 检查API Key
         if not self._ai_controller.is_api_key_set():
-            self.model_label.setText("模型: 未配置")
-            self.model_label.setStyleSheet("font-size: 12px; color: red;")
+            self.model_label.setText("模型: 未配置 🔴")
+            self.model_label.setStyleSheet("font-size: 11px; color: #ef4444; font-weight: 600; border: none; background: transparent;")
         elif self._ai_controller.is_llm_available():
             provider = self._ai_controller.get_model_provider()
             model_name = self._ai_controller.get_llm_model_name()
-            self.model_label.setText(f"模型: {provider} {model_name}")
-            self.model_label.setStyleSheet("font-size: 12px; color: #4CAF50;")
+            self.model_label.setText(f"模型: {provider} {model_name} 🟢")
+            self.model_label.setStyleSheet("font-size: 11px; color: #16a34a; font-weight: 600; border: none; background: transparent;")
         else:
-            self.model_label.setText("模型: 连接失败")
-            self.model_label.setStyleSheet("font-size: 12px; color: red;")
+            self.model_label.setText("模型: 连接失败 🔴")
+            self.model_label.setStyleSheet("font-size: 11px; color: #ef4444; font-weight: 600; border: none; background: transparent;")
 
     def _set_input_enabled(self, enabled: bool):
         """设置输入控件的启用状态"""

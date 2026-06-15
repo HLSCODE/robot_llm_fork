@@ -30,66 +30,63 @@ class ActionPreviewDialog(QDialog):
         estimated_time = self._skill_info.get("estimated_time", 0)
 
         self.setWindowTitle(f"动作预览 - {icon} {skill_name} ({step_count}步)")
-        self.setMinimumSize(500, 400)
+        self.setMinimumSize(500, 420)
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
 
-        # 技能信息
-        info_label = QLabel(f"技能：{icon} {skill_name}")
-        info_label.setStyleSheet("font-size: 14px; font-weight: bold;")
-        layout.addWidget(info_label)
-
-        desc_label = QLabel(f"描述：{self._skill_info.get('description', '')}")
+        # Header card
+        header = QWidget()
+        header.setStyleSheet("background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px;")
+        header_layout = QVBoxLayout(header)
+        info_label = QLabel(f"{icon} {skill_name}")
+        info_label.setStyleSheet("font-size: 16px; font-weight: 700; color: #1e293b; border: none; background: transparent;")
+        header_layout.addWidget(info_label)
+        desc_label = QLabel(self._skill_info.get('description', ''))
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet("color: #666; font-size: 12px;")
-        layout.addWidget(desc_label)
+        desc_label.setStyleSheet("color: #64748b; font-size: 12px; border: none; background: transparent;")
+        header_layout.addWidget(desc_label)
+        layout.addWidget(header)
 
-        # 动作步骤列表
-        steps_group = QGroupBox(f"动作步骤 ({step_count}步)")
-        steps_layout = QVBoxLayout(steps_group)
-
+        # Steps
         self.step_list = QListWidget()
+        self.step_list.setStyleSheet("""
+            QListWidget { border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff; font-size: 12px; }
+            QListWidget::item { padding: 6px 10px; }
+        """)
         self._populate_step_list()
-        steps_layout.addWidget(self.step_list)
+        layout.addWidget(self.step_list, stretch=1)
 
-        layout.addWidget(steps_group, stretch=1)
-
-        # 预计时间
-        time_label = QLabel(f"预计执行时间：~{estimated_time:.0f}秒")
-        time_label.setStyleSheet("color: #666; font-size: 12px;")
+        # Time estimate
+        time_label = QLabel(f"⏱ 预计执行时间：~{estimated_time:.0f} 秒")
+        time_label.setStyleSheet("color: #64748b; font-size: 12px;")
         layout.addWidget(time_label)
 
         if estimated_time > 30:
-            warning_label = QLabel("提示：动作较多，执行时间较长")
-            warning_label.setStyleSheet("color: #f57c00; font-size: 12px;")
+            warning_label = QLabel("⚠ 提示：动作较多，执行时间较长")
+            warning_label.setStyleSheet("color: #d97706; font-size: 12px; font-weight: 600;")
             layout.addWidget(warning_label)
 
-        # 按钮
+        # Buttons
         button_layout = QHBoxLayout()
-
         cancel_button = QPushButton("取消")
+        cancel_button.setMinimumHeight(34)
+        cancel_button.setStyleSheet("""
+            QPushButton { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; color: #334155; font-weight: 500; padding: 6px 20px; }
+            QPushButton:hover { background: #f8fafc; }
+        """)
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
-
         button_layout.addStretch()
 
-        confirm_button = QPushButton("确认执行")
+        confirm_button = QPushButton("✅ 确认执行")
+        confirm_button.setMinimumHeight(34)
         confirm_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 8px 24px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
+            QPushButton { background: #22c55e; color: #fff; font-weight: 700; border: none; border-radius: 8px; padding: 8px 24px; font-size: 13px; }
+            QPushButton:hover { background: #16a34a; }
         """)
         confirm_button.clicked.connect(self.accept_and_emit)
         button_layout.addWidget(confirm_button)
-
         layout.addLayout(button_layout)
 
     def _populate_step_list(self):
@@ -126,7 +123,7 @@ class ActionPreviewDialog(QDialog):
             list_item.setToolTip(tooltip)
 
             if step_num <= 3:
-                list_item.setForeground(QColor("#4CAF50"))
+                list_item.setForeground(QColor("#16a34a"))
 
             self.step_list.addItem(list_item)
 
@@ -137,10 +134,14 @@ class ActionPreviewDialog(QDialog):
 
 
 class ActionConfigDialog(QDialog):
-    def __init__(self, action_type: ActionType, action_data: dict = None, parent=None):
+    def __init__(self, action_type: ActionType, action_data: dict = None, parent=None, existing_names: set = None):
         super().__init__(parent)
         self.action_type = action_type
         self.action_data = action_data or {}
+        self._existing_names = existing_names or set()
+        # 编辑模式下，排除自身的名称（允许不改名保存）
+        if action_data and action_data.get('name'):
+            self._existing_names.discard(action_data['name'])
         
         # 动作类型与初始化方法的映射
         self.init_methods = {
@@ -272,7 +273,7 @@ class ActionConfigDialog(QDialog):
         localization_layout.setSpacing(4)
 
         self.localization_status_label = QLabel(self._format_localization_reference(self.localization_reference))
-        self.localization_status_label.setStyleSheet("color: #666;")
+        self.localization_status_label.setStyleSheet("color: #64748b; font-size: 11px;")
         capture_localization_btn = QPushButton("读取当前定位")
         capture_localization_btn.clicked.connect(self._capture_localization_reference)
         localization_layout.addWidget(self.localization_status_label, stretch=1)
@@ -562,7 +563,7 @@ class ActionConfigDialog(QDialog):
             "固定配置：Robot1 (左臂) | 工作流：bottle | 置信度：0.7 | "
             "速度：15mm/s | 夹爪：150mm | 调试图片：开"
         )
-        fixed_label.setStyleSheet("color: #666; font-size: 12px; padding: 4px;")
+        fixed_label.setStyleSheet("color: #64748b; font-size: 12px; padding: 6px; background: #f8fafc; border-radius: 6px;")
         fixed_label.setWordWrap(True)
 
         form_layout.addRow("", fixed_label)
@@ -704,6 +705,13 @@ class ActionConfigDialog(QDialog):
         name = self.name_input.text().strip()
         if not name:
             self.name_input.setFocus()
+            return
+
+        # Dedup check
+        if name in self._existing_names:
+            QMessageBox.warning(self, "名称重复", f'动作名称 "{name}" 已存在，请使用其他名称。')
+            self.name_input.setFocus()
+            self.name_input.selectAll()
             return
 
         if self.action_type == ActionType.MOVE:

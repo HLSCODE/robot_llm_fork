@@ -52,16 +52,16 @@ class ActionListWidget(QListWidget):
 
     def _get_icon_for_type(self, action_type: ActionType) -> QIcon:
         colors = {
-            ActionType.MOVE: QColor(100, 149, 237),  # 机械臂移动 - 蓝色
-            ActionType.BASE_MOVE: QColor(255, 99, 71),  # 底盘移动 - 红色
-            ActionType.MANIPULATE: QColor(255, 140, 0),
-            ActionType.WAIT: QColor(255, 140, 0),
-            ActionType.INSPECT: QColor(60, 179, 113),
-            ActionType.CHANGE_GUN: QColor(147, 112, 219),
-            ActionType.VISION_CAPTURE: QColor(30, 144, 255),
-            ActionType.TRAJECTORY: QColor(0, 150, 136),
+            ActionType.MOVE: QColor(99, 102, 241),        # indigo
+            ActionType.BASE_MOVE: QColor(239, 68, 68),    # red
+            ActionType.MANIPULATE: QColor(249, 115, 22),  # orange
+            ActionType.WAIT: QColor(249, 115, 22),
+            ActionType.INSPECT: QColor(16, 185, 129),     # emerald
+            ActionType.CHANGE_GUN: QColor(139, 92, 246),  # violet
+            ActionType.VISION_CAPTURE: QColor(14, 165, 233),  # sky
+            ActionType.TRAJECTORY: QColor(20, 184, 166),  # teal
         }
-        color = colors.get(action_type, QColor(128, 128, 128))
+        color = colors.get(action_type, QColor(148, 163, 184))
         return self._create_colored_icon(color)
 
     def _create_colored_icon(self, color: QColor) -> QIcon:
@@ -91,19 +91,25 @@ class SequenceListWidget(QListWidget):
         self.setIconSize(QSize(120, 80))
         self.setStyleSheet("""
             QListWidget {
-                background-color: #f5f5f5;
-                border: 1px solid #ddd;
-                border-radius: 5px;
+                background-color: #f8fafc;
+                border: 2px dashed #e2e8f0;
+                border-radius: 10px;
             }
             QListWidget::item {
-                border: 2px solid #ddd;
-                border-radius: 8px;
+                border: 2px solid #e2e8f0;
+                border-radius: 10px;
                 padding: 2px;
                 font-size: 11px;
                 font-weight: bold;
+                background: #ffffff;
+            }
+            QListWidget::item:hover {
+                border-color: #3b82f6;
+                background: #eff6ff;
             }
             QListWidget::item:selected {
-                border: 2px solid #2196F3;
+                border: 2px solid #3b82f6;
+                background: #eff6ff;
             }
         """)
 
@@ -161,10 +167,10 @@ class SequenceListWidget(QListWidget):
 
     def _get_status_text(self, status: SequenceItemStatus) -> str:
         text_map = {
-            SequenceItemStatus.PENDING: "等待中",
-            SequenceItemStatus.RUNNING: "执行中",
-            SequenceItemStatus.SUCCESS: "完成",
-            SequenceItemStatus.FAILED: "失败"
+            SequenceItemStatus.PENDING: "⏳ 等待中",
+            SequenceItemStatus.RUNNING: "▶ 执行中",
+            SequenceItemStatus.SUCCESS: "✅ 完成",
+            SequenceItemStatus.FAILED: "❌ 失败"
         }
         return text_map.get(status, "未知")
 
@@ -213,53 +219,52 @@ class SequenceListWidget(QListWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         colors = {
-            ActionType.MOVE: QColor(100, 149, 237),  # 机械臂移动 - 蓝色
-            ActionType.BASE_MOVE: QColor(255, 99, 71),  # 底盘移动 - 红色
-            ActionType.MANIPULATE: QColor(255, 140, 0),
-            ActionType.WAIT: QColor(255, 140, 0),
-            ActionType.INSPECT: QColor(60, 179, 113),
-            ActionType.CHANGE_GUN: QColor(147, 112, 219),
-            ActionType.VISION_CAPTURE: QColor(30, 144, 255),
-            ActionType.TRAJECTORY: QColor(0, 150, 136),
+            ActionType.MOVE: QColor(99, 102, 241),        # indigo-500
+            ActionType.BASE_MOVE: QColor(239, 68, 68),    # red-500
+            ActionType.MANIPULATE: QColor(249, 115, 22),  # orange-500
+            ActionType.WAIT: QColor(249, 115, 22),
+            ActionType.INSPECT: QColor(16, 185, 129),     # emerald-500
+            ActionType.CHANGE_GUN: QColor(139, 92, 246),  # violet-500
+            ActionType.VISION_CAPTURE: QColor(14, 165, 233),  # sky-500
+            ActionType.TRAJECTORY: QColor(20, 184, 166),  # teal-500
         }
 
         if status == SequenceItemStatus.RUNNING:
-            painter.setBrush(QColor(255, 165, 0))
-            pen = QPen(QColor(0, 255, 0), 4)
+            painter.setBrush(QColor(251, 191, 36))  # amber-400
+            pen = QPen(QColor(34, 197, 94), 4)      # green-500
             painter.setPen(pen)
         elif status == SequenceItemStatus.SUCCESS:
-            painter.setBrush(QColor(180, 180, 180))
+            painter.setBrush(QColor(148, 163, 184))  # slate-400
             painter.setPen(Qt.PenStyle.NoPen)
         elif status == SequenceItemStatus.FAILED:
-            painter.setBrush(QColor(244, 67, 54))
+            painter.setBrush(QColor(239, 68, 68))    # red-500
             painter.setPen(Qt.PenStyle.NoPen)
         else:
-            painter.setBrush(colors.get(action_type, QColor(128, 128, 128)))
+            painter.setBrush(colors.get(action_type, QColor(148, 163, 184)))
             painter.setPen(Qt.PenStyle.NoPen)
 
         painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
 
-        # 序号
+        # Card number
         painter.setPen(QColor(255, 255, 255))
         font = QFont()
         font.setBold(True)
-        font.setPointSize(11)
+        font.setPointSize(18)
         painter.setFont(font)
-        truncated_text = text[:12] + ".." if len(text) > 12 else text
-        painter.drawText(QRectF(4, 4, width - 8, 32),
-                         Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                         truncated_text)
+        num_text = f"#{index + 1}" if index is not None else ""
+        painter.drawText(QRectF(6, 5, width - 12, 26),
+                         Qt.AlignmentFlag.AlignLeft, num_text)
 
-        # 动作名（截断）
+        # Action name
         font.setPointSize(10)
         font.setBold(False)
         painter.setFont(font)
         truncated_text = text[:12] + ".." if len(text) > 12 else text
-        painter.drawText(QRectF(4, 34, width - 8, 28),
+        painter.drawText(QRectF(6, 32, width - 12, 22),
                          Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
                          truncated_text)
 
-        # 状态
+        # Status
         status_text = self._get_status_text(status)
         font.setPointSize(9)
         font.setBold(True)
@@ -299,73 +304,78 @@ class ControlPanel(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        # 竖屏适配：全竖向堆叠，无多余标签
         layout = QVBoxLayout()
-        layout.setSpacing(4)
-        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setSpacing(5)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # 序列编辑按钮（两行：上移/下移 + 删除/清空）
+        # Sequence edit row
         edit_row1 = QHBoxLayout()
         edit_row1.setSpacing(4)
-        self.up_btn = QPushButton("上移")
-        self.up_btn.setMinimumHeight(28)
-        self.up_btn.clicked.connect(self.move_up_clicked.emit)
-        self.down_btn = QPushButton("下移")
-        self.down_btn.setMinimumHeight(28)
-        self.down_btn.clicked.connect(self.move_down_clicked.emit)
-        self.edit_btn = QPushButton("修改")
-        self.edit_btn.setMinimumHeight(28)
-        self.edit_btn.clicked.connect(self.edit_clicked.emit)
-        self.repeat_btn = QPushButton("循环")
-        self.repeat_btn.setMinimumHeight(28)
-        self.repeat_btn.clicked.connect(self.repeat_clicked.emit)
-        self.delete_btn = QPushButton("删除")
-        self.delete_btn.setMinimumHeight(28)
-        self.delete_btn.clicked.connect(self.delete_clicked.emit)
-        self.clear_btn = QPushButton("清空")
-        self.clear_btn.setMinimumHeight(28)
-        self.clear_btn.clicked.connect(self.clear_clicked.emit)
-        edit_row1.addWidget(self.up_btn)
-        edit_row1.addWidget(self.down_btn)
-        edit_row1.addWidget(self.edit_btn)
-        edit_row1.addWidget(self.repeat_btn)
-        edit_row1.addWidget(self.delete_btn)
-        edit_row1.addWidget(self.clear_btn)
+        for label, slot in [("↑ 上移", self.move_up_clicked.emit),
+                            ("↓ 下移", self.move_down_clicked.emit),
+                            ("✏ 修改", self.edit_clicked.emit),
+                            ("🔁 循环", self.repeat_clicked.emit),
+                            ("🗑 删除", self.delete_clicked.emit),
+                            ("✕ 清空", self.clear_clicked.emit)]:
+            btn = QPushButton(label)
+            btn.setMinimumHeight(30)
+            btn.clicked.connect(slot)
+            edit_row1.addWidget(btn)
         layout.addLayout(edit_row1)
 
-        # 保存/载入按钮
+        # Save/Load row
         save_load_row = QHBoxLayout()
         save_load_row.setSpacing(4)
-        self.save_btn = QPushButton("保存序列")
-        self.save_btn.setMinimumHeight(28)
-        self.save_btn.setStyleSheet("background-color: #2196F3; color: white;")
+        self.save_btn = QPushButton("💾 保存序列")
+        self.save_btn.setMinimumHeight(30)
+        self.save_btn.setStyleSheet("""
+            QPushButton { background: #3b82f6; color: #fff; font-weight: 600; border: none; border-radius: 6px; }
+            QPushButton:hover { background: #2563eb; }
+            QPushButton:pressed { background: #1d4ed8; }
+        """)
         self.save_btn.clicked.connect(self.save_clicked.emit)
-        self.load_btn = QPushButton("载入序列")
-        self.load_btn.setMinimumHeight(28)
-        self.load_btn.setStyleSheet("background-color: #2196F3; color: white;")
+        self.load_btn = QPushButton("📂 载入序列")
+        self.load_btn.setMinimumHeight(30)
+        self.load_btn.setStyleSheet("""
+            QPushButton { background: #3b82f6; color: #fff; font-weight: 600; border: none; border-radius: 6px; }
+            QPushButton:hover { background: #2563eb; }
+            QPushButton:pressed { background: #1d4ed8; }
+        """)
         self.load_btn.clicked.connect(self.load_clicked.emit)
         save_load_row.addWidget(self.save_btn)
         save_load_row.addWidget(self.load_btn)
         layout.addLayout(save_load_row)
 
-        # 执行控制按钮（两行：开始/暂停 + 紧急停止）
+        # Execute row
         exec_row1 = QHBoxLayout()
         exec_row1.setSpacing(4)
-        self.start_btn = QPushButton("开始执行")
-        self.start_btn.setMinimumHeight(32)
-        self.start_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        self.start_btn = QPushButton("▶ 开始执行")
+        self.start_btn.setMinimumHeight(34)
+        self.start_btn.setStyleSheet("""
+            QPushButton { background: #22c55e; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #16a34a; }
+            QPushButton:pressed { background: #15803d; }
+        """)
         self.start_btn.clicked.connect(self.start_clicked.emit)
-        self.pause_btn = QPushButton("暂停")
-        self.pause_btn.setMinimumHeight(32)
-        self.pause_btn.setStyleSheet("background-color: #FFC107; color: black; font-weight: bold;")
+        self.pause_btn = QPushButton("⏸ 暂停")
+        self.pause_btn.setMinimumHeight(34)
+        self.pause_btn.setStyleSheet("""
+            QPushButton { background: #f59e0b; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #d97706; }
+            QPushButton:pressed { background: #b45309; }
+        """)
         self.pause_btn.clicked.connect(self.pause_clicked.emit)
         exec_row1.addWidget(self.start_btn)
         exec_row1.addWidget(self.pause_btn)
         layout.addLayout(exec_row1)
 
-        self.stop_btn = QPushButton("紧急停止")
-        self.stop_btn.setMinimumHeight(32)
-        self.stop_btn.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
+        self.stop_btn = QPushButton("⏹ 紧急停止")
+        self.stop_btn.setMinimumHeight(34)
+        self.stop_btn.setStyleSheet("""
+            QPushButton { background: #ef4444; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #dc2626; }
+            QPushButton:pressed { background: #b91c1c; }
+        """)
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
         layout.addWidget(self.stop_btn)
 
@@ -377,10 +387,20 @@ class LogWidget(QTextEdit):
         super().__init__(parent)
         self.setReadOnly(True)
         self.setMaximumHeight(120)
-        self.setStyleSheet("font-family: Consolas, Monaco, monospace; font-size: 12px;")
+        self.setStyleSheet("""
+            QTextEdit {
+                font-family: "Cascadia Code", "Consolas", "SF Mono", monospace;
+                font-size: 11px;
+                background: #1e293b;
+                color: #cbd5e1;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                padding: 6px 10px;
+            }
+        """)
 
     def append_log(self, message: str):
         from datetime import datetime
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self.append(f"[{timestamp}] {message}")
+        self.append(f'<span style="color:#64748b">[{timestamp}]</span> {message}')
         self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())

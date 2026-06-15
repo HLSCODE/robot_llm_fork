@@ -64,19 +64,25 @@ class TaskComposerListWidget(QListWidget):
         self.setIconSize(QSize(120, 80))
         self.setStyleSheet("""
             QListWidget {
-                background-color: #f5f5f5;
-                border: 1px solid #ddd;
-                border-radius: 5px;
+                background-color: #ffffff;
+                border: 2px dashed #e2e8f0;
+                border-radius: 10px;
             }
             QListWidget::item {
-                border: 2px solid #ddd;
-                border-radius: 8px;
+                border: 2px solid #e2e8f0;
+                border-radius: 10px;
                 padding: 2px;
                 font-size: 11px;
                 font-weight: bold;
+                background: #ffffff;
+            }
+            QListWidget::item:hover {
+                border-color: #3b82f6;
+                background: #eff6ff;
             }
             QListWidget::item:selected {
-                border: 2px solid #2196F3;
+                border: 2px solid #3b82f6;
+                background: #eff6ff;
             }
         """)
 
@@ -235,13 +241,16 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(540, 800)
         self.resize(540, 960)
 
+        # ── 全局 Modern Light 样式表 ──
+        self.setStyleSheet(self._make_global_stylesheet())
+
         self.create_menu()
 
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(2)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
         # 顶部：设备状态栏（加高，双行显示）
         self.status_bar = self.create_status_bar()
@@ -284,6 +293,157 @@ class MainWindow(QMainWindow):
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+
+    @staticmethod
+    def _make_global_stylesheet() -> str:
+        return """
+        /* ═══════════════════════════════════════════════════
+           Global Design System — Light Modern Theme
+           ═══════════════════════════════════════════════════ */
+        QMainWindow { background: #f1f5f9; }
+        QWidget { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; color: #1e293b; }
+
+        /* ── Buttons ── */
+        QPushButton {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 5px 12px;
+            color: #1e293b;
+            font-weight: 500;
+            min-height: 26px;
+        }
+        QPushButton:hover  { background: #f8fafc; border-color: #94a3b8; }
+        QPushButton:pressed { background: #f1f5f9; }
+        QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
+
+        /* ── Tabs ── */
+        QTabWidget::pane {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: #ffffff;
+            top: -1px;
+        }
+        QTabBar::tab {
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-bottom: none;
+            border-radius: 6px 6px 0 0;
+            padding: 6px 14px;
+            color: #64748b;
+            font-weight: 500;
+        }
+        QTabBar::tab:selected {
+            background: #ffffff;
+            color: #3b82f6;
+            font-weight: 700;
+            border-bottom: 2px solid #3b82f6;
+        }
+        QTabBar::tab:hover:!selected { background: #eff6ff; color: #3b82f6; }
+
+        /* ── GroupBox ── */
+        QGroupBox {
+            font-weight: 700;
+            color: #334155;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            margin-top: 14px;
+            padding: 14px 8px 8px;
+            background: #ffffff;
+        }
+        QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #3b82f6; }
+
+        /* ── Inputs ── */
+        QLineEdit, QSpinBox, QDoubleSpinBox {
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 5px 8px;
+            background: #ffffff;
+            color: #1e293b;
+        }
+        QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: #3b82f6; }
+        QComboBox {
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 5px 8px;
+            background: #ffffff;
+            color: #1e293b;
+        }
+        QComboBox:hover { border-color: #3b82f6; }
+        QComboBox::drop-down { border: none; width: 24px; }
+        QComboBox QAbstractItemView {
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            background: #ffffff;
+            selection-background-color: #eff6ff;
+            selection-color: #1e293b;
+        }
+
+        /* ── Lists ── */
+        QListWidget {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            outline: none;
+        }
+        QListWidget::item { padding: 6px 10px; border-radius: 4px; }
+        QListWidget::item:hover { background: #f8fafc; }
+        QListWidget::item:selected { background: #eff6ff; color: #1e293b; border: 1px solid #bfdbfe; }
+
+        /* ── Frames ── */
+        QFrame[frameShape="6"] {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: #ffffff;
+        }
+
+        /* ── CheckBox ── */
+        QCheckBox { spacing: 6px; color: #334155; }
+        QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #cbd5e1; background: #ffffff; }
+        QCheckBox::indicator:checked { background: #3b82f6; border-color: #3b82f6; }
+
+        /* ── ScrollBar ── */
+        QScrollBar:vertical { width: 6px; background: transparent; }
+        QScrollBar::handle:vertical { background: #cbd5e1; border-radius: 3px; min-height: 20px; }
+        QScrollBar::handle:vertical:hover { background: #94a3b8; }
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        QScrollBar:horizontal { height: 6px; background: transparent; }
+        QScrollBar::handle:horizontal { background: #cbd5e1; border-radius: 3px; min-width: 20px; }
+        QScrollBar::handle:horizontal:hover { background: #94a3b8; }
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+
+        /* ── Splitter ── */
+        QSplitter::handle { width: 3px; background: #e2e8f0; }
+        QSplitter::handle:hover { background: #3b82f6; }
+
+        /* ── Menu ── */
+        QMenuBar { background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 2px; }
+        QMenuBar::item { padding: 4px 10px; border-radius: 4px; }
+        QMenuBar::item:selected { background: #eff6ff; }
+        QMenu { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 4px; }
+        QMenu::item { padding: 6px 28px 6px 12px; border-radius: 4px; }
+        QMenu::item:selected { background: #eff6ff; color: #1e293b; }
+
+        /* ── TextEdit ── */
+        QTextEdit {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: #ffffff;
+            color: #1e293b;
+            font-family: "Cascadia Code", "Consolas", "SF Mono", monospace;
+            font-size: 12px;
+        }
+
+        /* ── Tooltips ── */
+        QToolTip {
+            background: #1e293b;
+            color: #f1f5f9;
+            border: none;
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+        """
 
     def create_left_panel(self) -> QWidget:
         """动作库面板：Tab横向标签 + 动作列表（受Splitter宽度控制）+ 按钮"""
@@ -345,9 +505,12 @@ class MainWindow(QMainWindow):
         btn_layout.addWidget(self.edit_btn)
         btn_layout.addWidget(self.delete_btn)
 
-        self.test_camera_btn = QPushButton("测试相机")
+        self.test_camera_btn = QPushButton("📷 测试相机")
         self.test_camera_btn.setMinimumHeight(32)
-        self.test_camera_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+        self.test_camera_btn.setStyleSheet("""
+            QPushButton { background: #10b981; color: #fff; font-weight: 700; border: none; border-radius: 6px; padding: 6px 12px; }
+            QPushButton:hover { background: #059669; }
+        """)
         self.test_camera_btn.clicked.connect(self.test_camera)
         btn_layout.addWidget(self.test_camera_btn)
         layout.addLayout(btn_layout)
@@ -413,7 +576,7 @@ class MainWindow(QMainWindow):
 
         composer_layout = QVBoxLayout()
         composer_title = QLabel("组合计划")
-        composer_title.setStyleSheet("font-size: 12px; font-weight: bold;")
+        composer_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
         self.task_composer_list = TaskComposerListWidget()
         self.task_composer_list.setMinimumHeight(140)
         self.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
@@ -423,51 +586,85 @@ class MainWindow(QMainWindow):
         composer_layout.addWidget(self.task_composer_list)
         layout.addLayout(composer_layout, stretch=1)
 
+        # Row 1: 编辑操作 — 与动作编排的控制面板顺序一致
         edit_row = QHBoxLayout()
         edit_row.setSpacing(4)
-        self.refresh_tasks_btn = QPushButton("刷新")
-        self.refresh_tasks_btn.setMinimumHeight(26)
-        self.refresh_tasks_btn.clicked.connect(self.refresh_task_library)
-        self.add_task_btn = QPushButton("添加")
-        self.add_task_btn.setMinimumHeight(26)
-        self.add_task_btn.clicked.connect(self.add_task_to_composer)
-        self.remove_task_btn = QPushButton("移除")
-        self.remove_task_btn.setMinimumHeight(26)
-        self.remove_task_btn.clicked.connect(self.remove_task_from_composer)
-        self.task_up_btn = QPushButton("上移")
-        self.task_up_btn.setMinimumHeight(26)
+        self.task_up_btn = QPushButton("↑ 上移")
+        self.task_up_btn.setMinimumHeight(28)
         self.task_up_btn.clicked.connect(self.move_composed_task_up)
-        self.task_down_btn = QPushButton("下移")
-        self.task_down_btn.setMinimumHeight(26)
+        self.task_down_btn = QPushButton("↓ 下移")
+        self.task_down_btn.setMinimumHeight(28)
         self.task_down_btn.clicked.connect(self.move_composed_task_down)
-        self.task_repeat_btn = QPushButton("循环")
-        self.task_repeat_btn.setMinimumHeight(26)
+        self.task_repeat_btn = QPushButton("🔁 循环")
+        self.task_repeat_btn.setMinimumHeight(28)
         self.task_repeat_btn.clicked.connect(self.repeat_composer_selection)
-        edit_row.addWidget(self.refresh_tasks_btn)
-        edit_row.addWidget(self.add_task_btn)
-        edit_row.addWidget(self.remove_task_btn)
+        self.remove_task_btn = QPushButton("🗑 移除")
+        self.remove_task_btn.setMinimumHeight(28)
+        self.remove_task_btn.clicked.connect(self.remove_task_from_composer)
+        self.clear_composer_btn = QPushButton("✕ 清空")
+        self.clear_composer_btn.setMinimumHeight(28)
+        self.clear_composer_btn.clicked.connect(self.clear_task_composer)
         edit_row.addWidget(self.task_up_btn)
         edit_row.addWidget(self.task_down_btn)
         edit_row.addWidget(self.task_repeat_btn)
+        edit_row.addWidget(self.remove_task_btn)
+        edit_row.addWidget(self.clear_composer_btn)
         layout.addLayout(edit_row)
 
-        action_row = QHBoxLayout()
-        action_row.setSpacing(4)
-        self.execute_composed_task_btn = QPushButton("执行当前组合")
-        self.execute_composed_task_btn.setMinimumHeight(28)
-        self.execute_composed_task_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        # Row 2: 文件操作 — 与保存/载入对应
+        file_row = QHBoxLayout()
+        file_row.setSpacing(4)
+        self.refresh_tasks_btn = QPushButton("🔄 刷新")
+        self.refresh_tasks_btn.setMinimumHeight(28)
+        self.refresh_tasks_btn.clicked.connect(self.refresh_task_library)
+        self.add_task_btn = QPushButton("＋ 添加")
+        self.add_task_btn.setMinimumHeight(28)
+        self.add_task_btn.clicked.connect(self.add_task_to_composer)
+        file_row.addWidget(self.refresh_tasks_btn)
+        file_row.addWidget(self.add_task_btn)
+        layout.addLayout(file_row)
+
+        # Row 3: 执行操作 — 与动作编排控制面板一致
+        exec_row = QHBoxLayout()
+        exec_row.setSpacing(4)
+        self.execute_composed_task_btn = QPushButton("▶ 执行当前组合")
+        self.execute_composed_task_btn.setMinimumHeight(32)
+        self.execute_composed_task_btn.setStyleSheet("""
+            QPushButton { background: #22c55e; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #16a34a; }
+        """)
         self.execute_composed_task_btn.clicked.connect(self.execute_composed_task)
-        self.save_combined_task_btn = QPushButton("保存组合")
-        self.save_combined_task_btn.setMinimumHeight(28)
-        self.save_combined_task_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
+        self.pause_composed_task_btn = QPushButton("⏸ 暂停")
+        self.pause_composed_task_btn.setMinimumHeight(32)
+        self.pause_composed_task_btn.setStyleSheet("""
+            QPushButton { background: #f59e0b; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #d97706; }
+        """)
+        self.pause_composed_task_btn.clicked.connect(self.toggle_pause)
+        exec_row.addWidget(self.execute_composed_task_btn)
+        exec_row.addWidget(self.pause_composed_task_btn)
+        layout.addLayout(exec_row)
+
+        # Row 4: 停止 + 保存
+        stop_row = QHBoxLayout()
+        stop_row.setSpacing(4)
+        self.stop_composed_task_btn = QPushButton("⏹ 紧急停止")
+        self.stop_composed_task_btn.setMinimumHeight(32)
+        self.stop_composed_task_btn.setStyleSheet("""
+            QPushButton { background: #ef4444; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #dc2626; }
+        """)
+        self.stop_composed_task_btn.clicked.connect(self.stop_execution)
+        self.save_combined_task_btn = QPushButton("💾 保存组合")
+        self.save_combined_task_btn.setMinimumHeight(32)
+        self.save_combined_task_btn.setStyleSheet("""
+            QPushButton { background: #3b82f6; color: #fff; font-weight: 700; border: none; border-radius: 6px; }
+            QPushButton:hover { background: #2563eb; }
+        """)
         self.save_combined_task_btn.clicked.connect(self.save_composed_task)
-        self.clear_composer_btn = QPushButton("清空")
-        self.clear_composer_btn.setMinimumHeight(28)
-        self.clear_composer_btn.clicked.connect(self.clear_task_composer)
-        action_row.addWidget(self.execute_composed_task_btn)
-        action_row.addWidget(self.save_combined_task_btn)
-        action_row.addWidget(self.clear_composer_btn)
-        layout.addLayout(action_row)
+        stop_row.addWidget(self.stop_composed_task_btn)
+        stop_row.addWidget(self.save_combined_task_btn)
+        layout.addLayout(stop_row)
 
         return panel
 
@@ -479,8 +676,8 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
 
         header_layout = QHBoxLayout()
-        title = QLabel("机械臂位姿")
-        title.setStyleSheet("font-size: 12px; font-weight: bold;")
+        title = QLabel("📍 机械臂位姿")
+        title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
         self.refresh_pose_btn = QPushButton("刷新")
         self.refresh_pose_btn.setFixedHeight(24)
         self.refresh_pose_btn.clicked.connect(self.refresh_arm_poses)
@@ -507,23 +704,35 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
 
-        title = QLabel("基础控制")
-        title.setStyleSheet("font-size: 12px; font-weight: bold;")
+        title = QLabel("🎮 基础控制")
+        title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
         layout.addWidget(title)
 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(6)
 
-        self.gripper_open_btn = QPushButton("夹爪打开")
+        self.gripper_open_btn = QPushButton("🔓 夹爪打开")
         self.gripper_open_btn.setMinimumHeight(28)
+        self.gripper_open_btn.setStyleSheet("""
+            QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
+            QPushButton:hover { background: #f0fdf4; border-color: #22c55e; color: #16a34a; }
+        """)
         self.gripper_open_btn.clicked.connect(self.on_gripper_open_clicked)
 
-        self.gripper_close_btn = QPushButton("夹爪关闭")
+        self.gripper_close_btn = QPushButton("🔒 夹爪关闭")
         self.gripper_close_btn.setMinimumHeight(28)
+        self.gripper_close_btn.setStyleSheet("""
+            QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
+            QPushButton:hover { background: #fef2f2; border-color: #ef4444; color: #dc2626; }
+        """)
         self.gripper_close_btn.clicked.connect(self.on_gripper_close_clicked)
 
-        self.init_pipette_btn = QPushButton("退枪头")
+        self.init_pipette_btn = QPushButton("💉 退枪头")
         self.init_pipette_btn.setMinimumHeight(28)
+        self.init_pipette_btn.setStyleSheet("""
+            QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
+            QPushButton:hover { background: #fffbeb; border-color: #f59e0b; color: #d97706; }
+        """)
         self.init_pipette_btn.clicked.connect(self.eject_pipette_tip)
 
         btn_layout.addWidget(self.gripper_open_btn)
@@ -532,29 +741,25 @@ class MainWindow(QMainWindow):
         layout.addLayout(btn_layout)
 
         relay_group = QGroupBox("继电器控制")
-        relay_group.setCheckable(True)
-        relay_group.setChecked(False)
         relay_layout = QVBoxLayout(relay_group)
         relay_layout.setContentsMargins(8, 6, 8, 6)
         relay_layout.setSpacing(6)
 
-        # relay_hint = QLabel("展开后可控制两个继电器通道")
-        # relay_hint.setStyleSheet("font-size: 11px; color: #666;")
-        # relay_layout.addWidget(relay_hint)
-
         relay_btn_row = QHBoxLayout()
         relay_btn_row.setSpacing(6)
-        self.relay_y1_on_btn = QPushButton("Y1 打开")
-        self.relay_y1_off_btn = QPushButton("Y1 关闭")
-        self.relay_y2_on_btn = QPushButton("Y2 打开")
-        self.relay_y2_off_btn = QPushButton("Y2 关闭")
+        self.relay_y1_on_btn = QPushButton("Y1 开")
+        self.relay_y1_off_btn = QPushButton("Y1 关")
+        self.relay_y2_on_btn = QPushButton("Y2 开")
+        self.relay_y2_off_btn = QPushButton("Y2 关")
         for btn in (
-            self.relay_y1_on_btn,
-            self.relay_y1_off_btn,
-            self.relay_y2_on_btn,
-            self.relay_y2_off_btn,
+            self.relay_y1_on_btn, self.relay_y1_off_btn,
+            self.relay_y2_on_btn, self.relay_y2_off_btn,
         ):
             btn.setMinimumHeight(28)
+            btn.setStyleSheet("""
+                QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
+                QPushButton:hover { background: #f8fafc; }
+            """)
             relay_btn_row.addWidget(btn)
 
         self.relay_y1_on_btn.clicked.connect(lambda: self._set_relay_state("Y1", True))
@@ -562,10 +767,8 @@ class MainWindow(QMainWindow):
         self.relay_y2_on_btn.clicked.connect(lambda: self._set_relay_state("Y2", True))
         self.relay_y2_off_btn.clicked.connect(lambda: self._set_relay_state("Y2", False))
         relay_layout.addLayout(relay_btn_row)
-        relay_group.toggled.connect(lambda checked: self._set_relay_content_visible(relay_group, checked))
         layout.addWidget(relay_group)
         self.relay_group = relay_group
-        self._set_relay_content_visible(relay_group, False)
 
         self.update_basic_control_buttons()
         return panel
@@ -580,10 +783,6 @@ class MainWindow(QMainWindow):
         for attr in ("relay_y1_on_btn", "relay_y1_off_btn", "relay_y2_on_btn", "relay_y2_off_btn"):
             if hasattr(self, attr):
                 getattr(self, attr).setEnabled(relay_ready)
-
-    def _set_relay_content_visible(self, relay_group: QGroupBox, visible: bool):
-        for child in relay_group.findChildren(QWidget):
-            child.setVisible(visible)
 
     def _get_relay_controller(self):
         if not RELAY_AVAILABLE or RelayController is None:
@@ -775,7 +974,7 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row_label = QLabel(f"{robot_label}:")
         row_label.setFixedWidth(28)
-        row_label.setStyleSheet("font-weight: bold;")
+        row_label.setStyleSheet("font-weight: 700; color: #334155;")
 
         pose_label = QLabel("--")
         pose_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -795,11 +994,11 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout()
         row_label = QLabel("底盘:")
         row_label.setFixedWidth(36)
-        row_label.setStyleSheet("font-weight: bold;")
+        row_label.setStyleSheet("font-weight: 700; color: #334155;")
 
         localization_label = QLabel("--")
         localization_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        localization_label.setStyleSheet("color: #555;")
+        localization_label.setStyleSheet("color: #64748b;")
 
         row.addWidget(row_label)
         row.addWidget(localization_label, stretch=1)
@@ -922,8 +1121,8 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(4)
 
-        title = QLabel("设备状态")
-        title.setStyleSheet("font-size: 12px; font-weight: bold;")
+        title = QLabel("🔌 设备状态")
+        title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
         layout.addWidget(title)
 
         status_layout = QHBoxLayout()
@@ -937,7 +1136,7 @@ class MainWindow(QMainWindow):
             item_layout.setSpacing(4)
             indicator = QLabel()
             indicator.setFixedSize(16, 16)
-            indicator.setStyleSheet("background-color: #555; border-radius: 8px;")
+            indicator.setStyleSheet("background-color: #94a3b8; border-radius: 8px;")
             indicator.setObjectName(indicator_name + "_indicator")
             text = QLabel(label_text)
             text.setObjectName(indicator_name + "_status_text")
@@ -1046,10 +1245,10 @@ class MainWindow(QMainWindow):
             status_text = self.robot2_status_text
 
         if connected:
-            indicator.setStyleSheet("background-color: #28a745; border-radius: 8px;")
+            indicator.setStyleSheet("background-color: #22c55e; border-radius: 8px;")
             status_text.setText("已连接")
         else:
-            indicator.setStyleSheet("background-color: #dc3545; border-radius: 8px;")
+            indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
             status_text.setText("未连接")
 
         self.update_basic_control_buttons()
@@ -1057,10 +1256,10 @@ class MainWindow(QMainWindow):
     def update_pipette_status(self, initialized: bool):
         """更新移液枪状态指示灯"""
         if initialized:
-            self.pipette_status_indicator.setStyleSheet("background-color: #28a745; border-radius: 8px;")
+            self.pipette_status_indicator.setStyleSheet("background-color: #22c55e; border-radius: 8px;")
             self.pipette_status_text.setText("已初始化")
         else:
-            self.pipette_status_indicator.setStyleSheet("background-color: #dc3545; border-radius: 8px;")
+            self.pipette_status_indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
             self.pipette_status_text.setText("未初始化")
 
     def initialize_pipette(self):
@@ -1149,11 +1348,19 @@ class MainWindow(QMainWindow):
     def update_body_status(self, connected: bool):
         """更新身体状态指示灯"""
         if connected:
-            self.body_status_indicator.setStyleSheet("background-color: #28a745; border-radius: 8px;")
+            self.body_status_indicator.setStyleSheet("background-color: #22c55e; border-radius: 8px;")
             self.body_status_text.setText("已连接")
         else:
-            self.body_status_indicator.setStyleSheet("background-color: #dc3545; border-radius: 8px;")
+            self.body_status_indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
             self.body_status_text.setText("未连接")
+
+    def _collect_action_names(self) -> set:
+        """收集当前所有动作的名称（用于去重校验）"""
+        names = set()
+        for actions in self.actions.values():
+            for a in actions:
+                names.add(a.name)
+        return names
 
     def create_action(self):
         current_tab = self.action_tabs.currentIndex()
@@ -1165,7 +1372,7 @@ class MainWindow(QMainWindow):
             self.create_trajectory_action()
             return
 
-        dialog = ActionConfigDialog(action_type)
+        dialog = ActionConfigDialog(action_type, existing_names=self._collect_action_names())
         if dialog.exec():
             action = dialog.get_action_definition()
             self.actions[action.type].append(action)
@@ -1310,7 +1517,7 @@ class MainWindow(QMainWindow):
             "name": action.name,
             "parameters": action.parameters
         }
-        dialog = ActionConfigDialog(action.type, action_data, self)
+        dialog = ActionConfigDialog(action.type, action_data, self, existing_names=self._collect_action_names())
         if not dialog.exec():
             return
 
@@ -1460,7 +1667,7 @@ class MainWindow(QMainWindow):
         pixmap = QPixmap(24, 24)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
-        painter.setBrush(QColor(76, 132, 180))
+        painter.setBrush(QColor(59, 130, 246))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(2, 2, 20, 20, 4, 4)
         painter.end()
@@ -1656,7 +1863,7 @@ class MainWindow(QMainWindow):
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(76, 132, 180) if title is None else QColor(96, 125, 139))
+        painter.setBrush(QColor(59, 130, 246) if title is None else QColor(100, 116, 139))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
 
@@ -1700,19 +1907,19 @@ class MainWindow(QMainWindow):
         pixmap.fill(Qt.GlobalColor.transparent)
 
         colors = {
-            ActionType.MOVE: QColor(100, 149, 237),
-            ActionType.BASE_MOVE: QColor(255, 99, 71),
-            ActionType.MANIPULATE: QColor(255, 140, 0),
-            ActionType.WAIT: QColor(255, 140, 0),
-            ActionType.INSPECT: QColor(60, 179, 113),
-            ActionType.CHANGE_GUN: QColor(147, 112, 219),
-            ActionType.VISION_CAPTURE: QColor(30, 144, 255),
-            ActionType.TRAJECTORY: QColor(0, 150, 136),
+            ActionType.MOVE: QColor(99, 102, 241),
+            ActionType.BASE_MOVE: QColor(239, 68, 68),
+            ActionType.MANIPULATE: QColor(249, 115, 22),
+            ActionType.WAIT: QColor(249, 115, 22),
+            ActionType.INSPECT: QColor(16, 185, 129),
+            ActionType.CHANGE_GUN: QColor(139, 92, 246),
+            ActionType.VISION_CAPTURE: QColor(14, 165, 233),
+            ActionType.TRAJECTORY: QColor(20, 184, 166),
         }
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(colors.get(action.type, QColor(128, 128, 128)))
+        painter.setBrush(colors.get(action.type, QColor(148, 163, 184)))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
 
@@ -1819,11 +2026,15 @@ class MainWindow(QMainWindow):
         if self.execution_thread and self.execution_thread.isRunning():
             if self.is_paused:
                 self.execution_thread.resume()
-                self.control_panel.pause_btn.setText("暂停")
+                self.control_panel.pause_btn.setText("⏸ 暂停")
+                if hasattr(self, 'pause_composed_task_btn'):
+                    self.pause_composed_task_btn.setText("⏸ 暂停")
                 self.log_widget.append_log("执行继续")
             else:
                 self.execution_thread.pause()
-                self.control_panel.pause_btn.setText("继续")
+                self.control_panel.pause_btn.setText("▶ 继续")
+                if hasattr(self, 'pause_composed_task_btn'):
+                    self.pause_composed_task_btn.setText("▶ 继续")
                 self.log_widget.append_log("执行暂停")
             self.is_paused = not self.is_paused
 
@@ -1835,7 +2046,9 @@ class MainWindow(QMainWindow):
     def on_execution_completed(self, success: bool):
         self.log_widget.append_log("AI 序列执行完成" if success else "AI 序列执行失败")
         self.is_paused = False
-        self.control_panel.pause_btn.setText("暂停")
+        self.control_panel.pause_btn.setText("⏸ 暂停")
+        if hasattr(self, 'pause_composed_task_btn'):
+            self.pause_composed_task_btn.setText("⏸ 暂停")
 
     def on_step_started(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.sequence_list)
@@ -1859,7 +2072,9 @@ class MainWindow(QMainWindow):
     def on_execution_finished(self):
         self.log_widget.append_log("序列执行完成")
         self.is_paused = False
-        self.control_panel.pause_btn.setText("暂停")
+        self.control_panel.pause_btn.setText("⏸ 暂停")
+        if hasattr(self, 'pause_composed_task_btn'):
+            self.pause_composed_task_btn.setText("⏸ 暂停")
         self._execution_display_list = self.sequence_list
         self._set_trajectory_buttons_enabled(True)
         self._resume_pose_refresh()
