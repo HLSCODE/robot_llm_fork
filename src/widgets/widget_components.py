@@ -10,14 +10,51 @@ from ..core.models import ActionDefinition, SequenceItem, ActionType, SequenceIt
 class ActionListWidget(QListWidget):
     action_selected = pyqtSignal(ActionDefinition)
 
+    # ── 动作类型 → (emoji, 颜色) 映射 ──
+    _TYPE_STYLE = {
+        ActionType.MOVE: ("🦾", QColor(99, 102, 241)),          # indigo
+        ActionType.BASE_MOVE: ("🚗", QColor(239, 68, 68)),      # red
+        ActionType.MANIPULATE: ("⚡", QColor(249, 115, 22)),     # orange
+        ActionType.WAIT: ("⏳", QColor(245, 158, 11)),           # amber
+        ActionType.INSPECT: ("🔍", QColor(16, 185, 129)),        # emerald
+        ActionType.CHANGE_GUN: ("🔧", QColor(139, 92, 246)),     # violet
+        ActionType.VISION_CAPTURE: ("👁", QColor(14, 165, 233)), # sky
+        ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),     # teal
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragEnabled(True)
-        # 竖屏适配：使用列表模式
         self.setViewMode(QListWidget.ViewMode.ListMode)
-        self.setIconSize(QSize(24, 24))
-        self.setSpacing(2)
+        self.setIconSize(QSize(44, 44))
+        self.setSpacing(3)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self.setStyleSheet("""
+            QListWidget {
+                background: #ffffff;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                outline: none;
+            }
+            QListWidget::item {
+                padding: 4px 8px;
+                margin: 1px 4px;
+                border-radius: 8px;
+                border: 1px solid transparent;
+                font-size: 12px;
+                font-weight: 500;
+                color: #1e293b;
+            }
+            QListWidget::item:hover {
+                background: #f8fafc;
+                border-color: #e2e8f0;
+            }
+            QListWidget::item:selected {
+                background: #eff6ff;
+                border-color: #bfdbfe;
+                color: #1e40af;
+            }
+        """)
 
     def startDrag(self, supportedActions):
         current_item = self.currentItem()
@@ -29,17 +66,27 @@ class ActionListWidget(QListWidget):
 
                 drag = QDrag(self)
                 drag.setMimeData(mime)
-                drag.setPixmap(self.currentItem().icon().pixmap(50, 50))
+                drag.setPixmap(self.currentItem().icon().pixmap(60, 60))
                 drag.exec(Qt.DropAction.CopyAction)
 
     def add_action(self, action: ActionDefinition):
         item = QListWidgetItem()
         item.setText(action.name)
         item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        item.setSizeHint(QSize(100, 36))  # 列表模式下的行高
+        item.setSizeHint(QSize(100, 50))
 
         icon = self._get_icon_for_type(action.type)
         item.setIcon(icon)
+
+        # 丰富 tooltip
+        params_preview = ", ".join(
+            f"{k}={v}" for k, v in list(action.parameters.items())[:4]
+        )
+        item.setToolTip(
+            f"📌 {action.name}\n"
+            f"📂 类型: {action.type.value}\n"
+            f"⚙ 参数: {params_preview or '无'}"
+        )
 
         item.setData(Qt.ItemDataRole.UserRole, action)
         self.addItem(item)
@@ -51,28 +98,47 @@ class ActionListWidget(QListWidget):
         return None
 
     def _get_icon_for_type(self, action_type: ActionType) -> QIcon:
-        colors = {
-            ActionType.MOVE: QColor(99, 102, 241),        # indigo
-            ActionType.BASE_MOVE: QColor(239, 68, 68),    # red
-            ActionType.MANIPULATE: QColor(249, 115, 22),  # orange
-            ActionType.WAIT: QColor(249, 115, 22),
-            ActionType.INSPECT: QColor(16, 185, 129),     # emerald
-            ActionType.CHANGE_GUN: QColor(139, 92, 246),  # violet
-            ActionType.VISION_CAPTURE: QColor(14, 165, 233),  # sky
-            ActionType.TRAJECTORY: QColor(20, 184, 166),  # teal
-        }
-        color = colors.get(action_type, QColor(148, 163, 184))
-        return self._create_colored_icon(color)
+        emoji, color = self._TYPE_STYLE.get(
+            action_type, ("📋", QColor(148, 163, 184))
+        )
+        return self._create_rich_icon(color, emoji)
 
-    def _create_colored_icon(self, color: QColor) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter
-        # 列表模式下使用更小的图标
-        pixmap = QPixmap(24, 24)
+    def _create_rich_icon(self, color: QColor, emoji: str) -> QIcon:
+        """绘制带 emoji + 渐变背景的圆角图标 (44×44)"""
+        from PyQt6.QtGui import QPixmap, QPainter, QFont, QLinearGradient
+
+        size = 44
+        pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
+
         painter = QPainter(pixmap)
-        painter.setBrush(color)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 微渐变背景
+        gradient = QLinearGradient(0, 0, size, size)
+        lighter = QColor(
+            min(255, color.red() + 40),
+            min(255, color.green() + 40),
+            min(255, color.blue() + 40),
+        )
+        gradient.setColorAt(0.0, lighter)
+        gradient.setColorAt(1.0, color)
+        painter.setBrush(gradient)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(2, 2, 20, 20, 4, 4)
+        painter.drawRoundedRect(2, 2, size - 4, size - 4, 10, 10)
+
+        # Emoji 居中
+        font = QFont()
+        font.setPointSize(18)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255))
+        from PyQt6.QtCore import QRectF
+        painter.drawText(
+            QRectF(0, 0, size, size),
+            Qt.AlignmentFlag.AlignCenter,
+            emoji,
+        )
+
         painter.end()
         return QIcon(pixmap)
 
@@ -88,28 +154,29 @@ class SequenceListWidget(QListWidget):
         self.setViewMode(QListWidget.ViewMode.IconMode)
         self.setFlow(QListWidget.Flow.LeftToRight)
         self.setSpacing(12)
-        self.setIconSize(QSize(120, 80))
+        self.setIconSize(QSize(130, 88))
         self.setStyleSheet("""
             QListWidget {
                 background-color: #f8fafc;
-                border: 2px dashed #e2e8f0;
-                border-radius: 10px;
+                border: 2px dashed #cbd5e1;
+                border-radius: 12px;
+                padding: 4px;
             }
             QListWidget::item {
-                border: 2px solid #e2e8f0;
+                border: 2px solid transparent;
                 border-radius: 10px;
-                padding: 2px;
+                padding: 1px;
                 font-size: 11px;
                 font-weight: bold;
-                background: #ffffff;
+                background: transparent;
             }
             QListWidget::item:hover {
-                border-color: #3b82f6;
-                background: #eff6ff;
+                border-color: #93c5fd;
+                background: rgba(59, 130, 246, 0.06);
             }
             QListWidget::item:selected {
                 border: 2px solid #3b82f6;
-                background: #eff6ff;
+                background: rgba(59, 130, 246, 0.10);
             }
         """)
 
@@ -207,70 +274,139 @@ class SequenceListWidget(QListWidget):
         painter.end()
         return QIcon(pixmap)
 
+    # ── 动作类型卡片风格 ──
+    _CARD_STYLE = {
+        ActionType.MOVE: ("🦾", QColor(99, 102, 241)),
+        ActionType.BASE_MOVE: ("🚗", QColor(239, 68, 68)),
+        ActionType.MANIPULATE: ("⚡", QColor(249, 115, 22)),
+        ActionType.WAIT: ("⏳", QColor(245, 158, 11)),
+        ActionType.INSPECT: ("🔍", QColor(16, 185, 129)),
+        ActionType.CHANGE_GUN: ("🔧", QColor(139, 92, 246)),
+        ActionType.VISION_CAPTURE: ("👁", QColor(14, 165, 233)),
+        ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),
+    }
+
     def _create_text_icon(self, text: str, action_type: ActionType, status: SequenceItemStatus, index: int | None = None) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor, QPen
+        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor, QPen, QLinearGradient
         from PyQt6.QtCore import QRectF
 
-        width, height = 120, 80
+        width, height = 130, 88
         pixmap = QPixmap(width, height)
         pixmap.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        colors = {
-            ActionType.MOVE: QColor(99, 102, 241),        # indigo-500
-            ActionType.BASE_MOVE: QColor(239, 68, 68),    # red-500
-            ActionType.MANIPULATE: QColor(249, 115, 22),  # orange-500
-            ActionType.WAIT: QColor(249, 115, 22),
-            ActionType.INSPECT: QColor(16, 185, 129),     # emerald-500
-            ActionType.CHANGE_GUN: QColor(139, 92, 246),  # violet-500
-            ActionType.VISION_CAPTURE: QColor(14, 165, 233),  # sky-500
-            ActionType.TRAJECTORY: QColor(20, 184, 166),  # teal-500
-        }
+        emoji, base_color = self._CARD_STYLE.get(
+            action_type, ("📋", QColor(148, 163, 184))
+        )
 
+        # ── 根据状态决定卡片颜色 ──
         if status == SequenceItemStatus.RUNNING:
-            painter.setBrush(QColor(251, 191, 36))  # amber-400
-            pen = QPen(QColor(34, 197, 94), 4)      # green-500
-            painter.setPen(pen)
+            fill_color = QColor(251, 191, 36)   # amber
+            border_color = QColor(34, 197, 94)  # green ring
+            emoji = "▶"
         elif status == SequenceItemStatus.SUCCESS:
-            painter.setBrush(QColor(148, 163, 184))  # slate-400
-            painter.setPen(Qt.PenStyle.NoPen)
+            fill_color = QColor(148, 163, 184)  # slate
+            border_color = None
         elif status == SequenceItemStatus.FAILED:
-            painter.setBrush(QColor(239, 68, 68))    # red-500
-            painter.setPen(Qt.PenStyle.NoPen)
+            fill_color = QColor(239, 68, 68)    # red
+            border_color = None
         else:
-            painter.setBrush(colors.get(action_type, QColor(148, 163, 184)))
+            fill_color = base_color
+            border_color = None
+
+        # ── 圆角矩形背景 + 顶部渐变高光 ──
+        card_rect = QRectF(3, 3, width - 6, height - 6)
+        painter.setBrush(fill_color)
+        if border_color:
+            pen = QPen(border_color, 3)
+            painter.setPen(pen)
+        else:
             painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(card_rect, 10, 10)
 
-        painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
+        # 顶部高光条
+        if status not in (SequenceItemStatus.SUCCESS,):
+            highlight = QColor(255, 255, 255, 45)
+            painter.setBrush(highlight)
+            painter.setPen(Qt.PenStyle.NoPen)
+            highlight_rect = QRectF(5, 5, width - 10, 16)
+            painter.drawRoundedRect(highlight_rect, 6, 6)
 
-        # Card number
         painter.setPen(QColor(255, 255, 255))
+
+        # ── 顶部：序号 + emoji ──
         font = QFont()
         font.setBold(True)
-        font.setPointSize(18)
+        font.setPointSize(11)
         painter.setFont(font)
-        num_text = f"#{index + 1}" if index is not None else ""
-        painter.drawText(QRectF(6, 5, width - 12, 26),
-                         Qt.AlignmentFlag.AlignLeft, num_text)
+        header_text = f"#{index + 1}" if index is not None else emoji
+        painter.drawText(QRectF(8, 2, width - 16, 28), Qt.AlignmentFlag.AlignLeft, header_text)
 
-        # Action name
-        font.setPointSize(10)
+        # 右上角 emoji
+        font.setPointSize(14)
+        painter.setFont(font)
+        painter.drawText(QRectF(0, 0, width - 8, 30), Qt.AlignmentFlag.AlignRight, emoji)
+
+        # ── 动作名称 ──
+        font.setPointSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        truncated = text[:14] + "…" if len(text) > 14 else text
+        painter.drawText(
+            QRectF(8, 30, width - 16, 24),
+            Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
+            truncated,
+        )
+
+        # ── 类型标签 ──
+        type_labels = {
+            ActionType.MOVE: "机械臂移动",
+            ActionType.BASE_MOVE: "底盘移动",
+            ActionType.MANIPULATE: "执行器",
+            ActionType.WAIT: "等待",
+            ActionType.INSPECT: "检测",
+            ActionType.CHANGE_GUN: "换枪",
+            ActionType.VISION_CAPTURE: "视觉抓取",
+            ActionType.TRAJECTORY: "轨迹",
+        }
+        type_label = type_labels.get(action_type, action_type.value)
+        font.setPointSize(8)
         font.setBold(False)
         painter.setFont(font)
-        truncated_text = text[:12] + ".." if len(text) > 12 else text
-        painter.drawText(QRectF(6, 32, width - 12, 22),
-                         Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
-                         truncated_text)
+        painter.setPen(QColor(255, 255, 255, 200))
+        painter.drawText(
+            QRectF(8, 50, width - 16, 16),
+            Qt.AlignmentFlag.AlignLeft,
+            type_label,
+        )
 
-        # Status
+        # ── 底部状态条 ──
         status_text = self._get_status_text(status)
+        # 半透明底条
+        status_bg = QColor(0, 0, 0, 40)
+        painter.setBrush(status_bg)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(5, height - 26, width - 10, 22), 6, 6)
+
         font.setPointSize(9)
         font.setBold(True)
         painter.setFont(font)
-        painter.drawText(QRectF(0, height - 22, width, 18),
-                         Qt.AlignmentFlag.AlignCenter, status_text)
+        # 根据状态选择文字颜色
+        if status == SequenceItemStatus.RUNNING:
+            painter.setPen(QColor(255, 255, 255))
+        elif status == SequenceItemStatus.SUCCESS:
+            painter.setPen(QColor(220, 220, 220))
+        elif status == SequenceItemStatus.FAILED:
+            painter.setPen(QColor(255, 220, 220))
+        else:
+            painter.setPen(QColor(255, 255, 255))
+        painter.drawText(
+            QRectF(0, height - 26, width, 22),
+            Qt.AlignmentFlag.AlignCenter,
+            status_text,
+        )
 
         painter.end()
         return QIcon(pixmap)

@@ -121,6 +121,7 @@ def get_localization_receiver() -> LocalizationReceiver:
     return _receiver
 
 
+
 def get_latest_position(max_age: float = 2.0, wait_timeout: float = 1.0) -> Optional[dict]:
     return get_localization_receiver().get_latest(max_age=max_age, wait_timeout=wait_timeout)
 

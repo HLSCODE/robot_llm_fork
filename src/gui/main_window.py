@@ -25,7 +25,7 @@ class TaskLibraryListWidget(QListWidget):
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setViewMode(QListWidget.ViewMode.ListMode)
-        self.setIconSize(QSize(24, 24))
+        self.setIconSize(QSize(28, 28))
         self.setSpacing(2)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
 
@@ -61,28 +61,29 @@ class TaskComposerListWidget(QListWidget):
         self.setViewMode(QListWidget.ViewMode.IconMode)
         self.setFlow(QListWidget.Flow.LeftToRight)
         self.setSpacing(12)
-        self.setIconSize(QSize(120, 80))
+        self.setIconSize(QSize(130, 88))
         self.setStyleSheet("""
             QListWidget {
-                background-color: #ffffff;
-                border: 2px dashed #e2e8f0;
-                border-radius: 10px;
+                background-color: #f8fafc;
+                border: 2px dashed #cbd5e1;
+                border-radius: 12px;
+                padding: 4px;
             }
             QListWidget::item {
-                border: 2px solid #e2e8f0;
+                border: 2px solid transparent;
                 border-radius: 10px;
-                padding: 2px;
+                padding: 1px;
                 font-size: 11px;
                 font-weight: bold;
-                background: #ffffff;
+                background: transparent;
             }
             QListWidget::item:hover {
-                border-color: #3b82f6;
-                background: #eff6ff;
+                border-color: #93c5fd;
+                background: rgba(59, 130, 246, 0.06);
             }
             QListWidget::item:selected {
                 border: 2px solid #3b82f6;
-                background: #eff6ff;
+                background: rgba(59, 130, 246, 0.10);
             }
         """)
 
@@ -1136,7 +1137,7 @@ class MainWindow(QMainWindow):
             item_layout.setSpacing(4)
             indicator = QLabel()
             indicator.setFixedSize(16, 16)
-            indicator.setStyleSheet("background-color: #94a3b8; border-radius: 8px;")
+            indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
             indicator.setObjectName(indicator_name + "_indicator")
             text = QLabel(label_text)
             text.setObjectName(indicator_name + "_status_text")
@@ -1150,21 +1151,21 @@ class MainWindow(QMainWindow):
         r1_text.setObjectName("robot1_status_text")
         r2_widget, self.robot2_status_indicator, r2_text = make_status_item("R2: 未连接", "robot2")
         r2_text.setObjectName("robot2_status_text")
-        body_widget, self.body_status_indicator, body_text = make_status_item("身体: 未连接", "body")
+        body_widget, self.body_status_indicator, body_text = make_status_item("body: 未连接", "body")
         body_text.setObjectName("body_status_text")
-        pip_widget, self.pipette_status_indicator, pip_text = make_status_item("移液枪: 未初始化", "pipette")
-        pip_text.setObjectName("pipette_status_text")
+        hand_widget, self.pipette_status_indicator, hand_text = make_status_item("hand: 未连接", "hand")
+        hand_text.setObjectName("hand_status_text")
 
         # 存储文本标签引用，供 update_* 方法直接使用
         self.robot1_status_text = r1_text
         self.robot2_status_text = r2_text
         self.body_status_text = body_text
-        self.pipette_status_text = pip_text
+        self.hand_status_text = hand_text
 
         status_layout.addWidget(r1_widget)
         status_layout.addWidget(r2_widget)
         status_layout.addWidget(body_widget)
-        status_layout.addWidget(pip_widget)
+        status_layout.addWidget(hand_widget)
         status_layout.addStretch()
 
         layout.addLayout(status_layout)
@@ -1253,14 +1254,14 @@ class MainWindow(QMainWindow):
 
         self.update_basic_control_buttons()
 
-    def update_pipette_status(self, initialized: bool):
-        """更新移液枪状态指示灯"""
-        if initialized:
+    def update_hand_status(self, connected: bool):
+        """更新末端工具状态指示灯"""
+        if connected:
             self.pipette_status_indicator.setStyleSheet("background-color: #22c55e; border-radius: 8px;")
-            self.pipette_status_text.setText("已初始化")
+            self.hand_status_text.setText("已连接")
         else:
             self.pipette_status_indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
-            self.pipette_status_text.setText("未初始化")
+            self.hand_status_text.setText("未连接")
 
     def initialize_pipette(self):
         """Initialize pipette by YIYEQIANG_INIT."""
@@ -1268,20 +1269,20 @@ class MainWindow(QMainWindow):
         if YIYEQIANG_INIT is None:
             self.log_widget.append_log("移液枪初始化模块不可用")
             QMessageBox.warning(self, "警告", "移液枪初始化模块不可用")
-            self.update_pipette_status(False)
+            self.update_hand_status(False)
             return
 
         self.init_pipette_btn.setEnabled(False)
         try:
             success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
-            self.update_pipette_status(bool(success))
+            self.update_hand_status(bool(success))
             if success:
                 self.log_widget.append_log("移液枪初始化成功")
             else:
                 self.log_widget.append_log("移液枪初始化失败")
                 QMessageBox.warning(self, "警告", "移液枪初始化失败，请检查串口或设备")
         except Exception as e:
-            self.update_pipette_status(False)
+            self.update_hand_status(False)
             self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
             QMessageBox.warning(self, "警告", f"移液枪初始化异常: {e}")
         finally:
@@ -1292,18 +1293,18 @@ class MainWindow(QMainWindow):
         self.log_widget.append_log("自动初始化移液枪...")
         if YIYEQIANG_INIT is None:
             self.log_widget.append_log("移液枪初始化模块不可用")
-            self.update_pipette_status(False)
+            self.update_hand_status(False)
             return
 
         try:
             success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
-            self.update_pipette_status(bool(success))
+            self.update_hand_status(bool(success))
             if success:
                 self.log_widget.append_log("移液枪初始化成功")
             else:
                 self.log_widget.append_log("移液枪初始化失败")
         except Exception as e:
-            self.update_pipette_status(False)
+            self.update_hand_status(False)
             self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
 
     def eject_pipette_tip(self):
@@ -1364,15 +1365,16 @@ class MainWindow(QMainWindow):
 
     def create_action(self):
         current_tab = self.action_tabs.currentIndex()
-        action_type = self._resolve_action_type_for_current_tab(current_tab)
-        if action_type is None:
+        resolved = self._resolve_action_type_for_current_tab(current_tab)
+        if resolved is None:
             return
+        action_type, move_target = resolved if isinstance(resolved, tuple) else (resolved, None)
 
         if action_type == ActionType.TRAJECTORY:
             self.create_trajectory_action()
             return
 
-        dialog = ActionConfigDialog(action_type, existing_names=self._collect_action_names())
+        dialog = ActionConfigDialog(action_type, existing_names=self._collect_action_names(), move_target=move_target)
         if dialog.exec():
             action = dialog.get_action_definition()
             self.actions[action.type].append(action)
@@ -1616,7 +1618,7 @@ class MainWindow(QMainWindow):
         
         # 移动类 Tab 需要选择具体类型
         if current_tab == 0:
-            options = ["机械臂/身体移动", "底盘移动"]
+            options = ["机械臂移动", "身体移动", "底盘移动"]
             selected, ok = QInputDialog.getItem(
                 self,
                 "选择移动类型",
@@ -1627,10 +1629,10 @@ class MainWindow(QMainWindow):
             )
             if not ok:
                 return None
-            if selected == "机械臂/身体移动":
-                return ActionType.MOVE
-            else:
+            if selected == "底盘移动":
                 return ActionType.BASE_MOVE
+            else:
+                return (ActionType.MOVE, selected)
 
         return action_type_map.get(current_tab)
 
@@ -1662,14 +1664,22 @@ class MainWindow(QMainWindow):
             self.task_library_list.addItem(item)
 
     def _create_task_list_icon(self) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter
+        from PyQt6.QtGui import QPixmap, QPainter, QFont
 
-        pixmap = QPixmap(24, 24)
+        pixmap = QPixmap(28, 28)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setBrush(QColor(59, 130, 246))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(2, 2, 20, 20, 4, 4)
+        painter.drawRoundedRect(2, 2, 24, 24, 6, 6)
+        # emoji 居中
+        font = QFont()
+        font.setPointSize(12)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255))
+        from PyQt6.QtCore import QRectF
+        painter.drawText(QRectF(0, 0, 28, 28), Qt.AlignmentFlag.AlignCenter, "📋")
         painter.end()
         return QIcon(pixmap)
 
@@ -1853,48 +1863,91 @@ class MainWindow(QMainWindow):
             item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
             item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖动可调整顺序")
 
+    # ── 动作类型卡片风格（与 widget_components 保持一致）──
+    _CARD_STYLE = {
+        ActionType.MOVE: ("🦾", QColor(99, 102, 241)),
+        ActionType.BASE_MOVE: ("🚗", QColor(239, 68, 68)),
+        ActionType.MANIPULATE: ("⚡", QColor(249, 115, 22)),
+        ActionType.WAIT: ("⏳", QColor(245, 158, 11)),
+        ActionType.INSPECT: ("🔍", QColor(16, 185, 129)),
+        ActionType.CHANGE_GUN: ("🔧", QColor(139, 92, 246)),
+        ActionType.VISION_CAPTURE: ("👁", QColor(14, 165, 233)),
+        ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),
+    }
+
+    _TYPE_LABELS = {
+        ActionType.MOVE: "机械臂移动",
+        ActionType.BASE_MOVE: "底盘移动",
+        ActionType.MANIPULATE: "执行器",
+        ActionType.WAIT: "等待",
+        ActionType.INSPECT: "检测",
+        ActionType.CHANGE_GUN: "换枪",
+        ActionType.VISION_CAPTURE: "视觉抓取",
+        ActionType.TRAJECTORY: "轨迹",
+    }
+
     def _create_task_card_icon(self, task_name: str, step_count: int, title: str | None = None):
         from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
         from PyQt6.QtCore import QRectF
 
-        width, height = 120, 80
+        width, height = 130, 88
         pixmap = QPixmap(width, height)
         pixmap.fill(Qt.GlobalColor.transparent)
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(59, 130, 246) if title is None else QColor(100, 116, 139))
+
+        # 任务用靛蓝色
+        task_color = QColor(59, 130, 246)
+        painter.setBrush(task_color)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
+        painter.drawRoundedRect(3, 3, width - 6, height - 6, 10, 10)
+
+        # 顶部高光
+        highlight = QColor(255, 255, 255, 45)
+        painter.setBrush(highlight)
+        painter.drawRoundedRect(QRectF(5, 5, width - 10, 16), 6, 6)
 
         painter.setPen(QColor(255, 255, 255))
         font = QFont()
         font.setBold(True)
-        font.setPointSize(16)
-        painter.setFont(font)
-        header_source = title[:-5] if title and title.endswith(".task") else (title or "TASK")
-        header = header_source[:12] + ".." if len(header_source) > 12 else header_source
-        painter.drawText(QRectF(6, 6, width - 12, 24), Qt.AlignmentFlag.AlignLeft, header)
 
-        font.setPointSize(10)
+        # 右上角 emoji
+        font.setPointSize(14)
+        painter.setFont(font)
+        painter.drawText(QRectF(0, 0, width - 8, 30), Qt.AlignmentFlag.AlignRight, "📋")
+
+        # 标题
+        font.setPointSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        display = task_name[:-5] if task_name.endswith(".task") else task_name
+        truncated = display[:14] + "…" if len(display) > 14 else display
+        painter.drawText(QRectF(8, 30, width - 16, 24), Qt.AlignmentFlag.AlignLeft, truncated)
+
+        # 类型标签
+        font.setPointSize(8)
         font.setBold(False)
         painter.setFont(font)
-        display_name = task_name[:-5] if task_name.endswith(".task") else task_name
-        truncated_name = display_name[:10] + ".." if len(display_name) > 10 else display_name
-        painter.drawText(
-            QRectF(6, 34, width - 12, 22),
-            Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
-            truncated_name,
-        )
+        painter.setPen(QColor(255, 255, 255, 200))
+        painter.drawText(QRectF(8, 50, width - 16, 16), Qt.AlignmentFlag.AlignLeft, "任务组合")
+
+        # 底部状态条
+        status_bg = QColor(0, 0, 0, 40)
+        painter.setBrush(status_bg)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(5, height - 26, width - 10, 22), 6, 6)
 
         font.setPointSize(9)
         font.setBold(True)
         painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255))
         painter.drawText(
-            QRectF(0, height - 22, width, 18),
+            QRectF(0, height - 26, width, 22),
             Qt.AlignmentFlag.AlignCenter,
-            f"{step_count} steps",
+            f"{step_count} 步",
         )
+
         painter.end()
         return QIcon(pixmap)
 
@@ -1902,53 +1955,71 @@ class MainWindow(QMainWindow):
         from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
         from PyQt6.QtCore import QRectF
 
-        width, height = 120, 80
+        width, height = 130, 88
         pixmap = QPixmap(width, height)
         pixmap.fill(Qt.GlobalColor.transparent)
 
-        colors = {
-            ActionType.MOVE: QColor(99, 102, 241),
-            ActionType.BASE_MOVE: QColor(239, 68, 68),
-            ActionType.MANIPULATE: QColor(249, 115, 22),
-            ActionType.WAIT: QColor(249, 115, 22),
-            ActionType.INSPECT: QColor(16, 185, 129),
-            ActionType.CHANGE_GUN: QColor(139, 92, 246),
-            ActionType.VISION_CAPTURE: QColor(14, 165, 233),
-            ActionType.TRAJECTORY: QColor(20, 184, 166),
-        }
+        emoji, base_color = self._CARD_STYLE.get(
+            action.type, ("📋", QColor(148, 163, 184))
+        )
 
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(colors.get(action.type, QColor(148, 163, 184)))
+
+        # 圆角矩形背景
+        painter.setBrush(base_color)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(4, 4, width - 8, height - 8, 8, 8)
+        painter.drawRoundedRect(3, 3, width - 6, height - 6, 10, 10)
+
+        # 顶部高光条
+        highlight = QColor(255, 255, 255, 45)
+        painter.setBrush(highlight)
+        painter.drawRoundedRect(QRectF(5, 5, width - 10, 16), 6, 6)
 
         painter.setPen(QColor(255, 255, 255))
         font = QFont()
         font.setBold(True)
-        font.setPointSize(16)
-        painter.setFont(font)
-        header = action.name[:12] + ".." if len(action.name) > 12 else action.name
-        painter.drawText(QRectF(6, 6, width - 12, 24), Qt.AlignmentFlag.AlignLeft, header)
 
-        font.setPointSize(10)
+        # 右上角 emoji
+        font.setPointSize(14)
+        painter.setFont(font)
+        painter.drawText(QRectF(0, 0, width - 8, 30), Qt.AlignmentFlag.AlignRight, emoji)
+
+        # 动作名称
+        font.setPointSize(11)
+        font.setBold(True)
+        painter.setFont(font)
+        truncated = action.name[:14] + "…" if len(action.name) > 14 else action.name
+        painter.drawText(
+            QRectF(8, 30, width - 16, 24),
+            Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
+            truncated,
+        )
+
+        # 类型标签
+        font.setPointSize(8)
         font.setBold(False)
         painter.setFont(font)
-        truncated_name = action.name[:10] + ".." if len(action.name) > 10 else action.name
-        painter.drawText(
-            QRectF(6, 34, width - 12, 22),
-            Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
-            truncated_name,
-        )
+        painter.setPen(QColor(255, 255, 255, 200))
+        type_label = self._TYPE_LABELS.get(action.type, action.type.value)
+        painter.drawText(QRectF(8, 50, width - 16, 16), Qt.AlignmentFlag.AlignLeft, type_label)
+
+        # 底部状态条
+        status_bg = QColor(0, 0, 0, 40)
+        painter.setBrush(status_bg)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(5, height - 26, width - 10, 22), 6, 6)
 
         font.setPointSize(9)
         font.setBold(True)
         painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255))
         painter.drawText(
-            QRectF(0, height - 22, width, 18),
+            QRectF(0, height - 26, width, 22),
             Qt.AlignmentFlag.AlignCenter,
-            "action",
+            "动作",
         )
+
         painter.end()
         return QIcon(pixmap)
 

@@ -134,11 +134,12 @@ class ActionPreviewDialog(QDialog):
 
 
 class ActionConfigDialog(QDialog):
-    def __init__(self, action_type: ActionType, action_data: dict = None, parent=None, existing_names: set = None):
+    def __init__(self, action_type: ActionType, action_data: dict = None, parent=None, existing_names: set = None, move_target: str = None):
         super().__init__(parent)
         self.action_type = action_type
         self.action_data = action_data or {}
         self._existing_names = existing_names or set()
+        self._move_target = move_target  # 新建时预设的移动目标（"机械臂移动" / "身体移动"）
         # 编辑模式下，排除自身的名称（允许不改名保存）
         if action_data and action_data.get('name'):
             self._existing_names.discard(action_data['name'])
@@ -233,13 +234,24 @@ class ActionConfigDialog(QDialog):
 
     def _init_move_ui(self, form_layout: QFormLayout):
         """初始化机械臂/身体移动 UI"""
+        # 预设目标：新建时从上级选择传入，编辑时从已有参数读取
+        if self._move_target == "身体移动":
+            preset_target = "身体"
+        elif self._move_target == "机械臂移动":
+            preset_target = "机械臂"
+        else:
+            preset_target = self.action_data.get('parameters', {}).get('目标', '机械臂')
+        self._preset_target = preset_target  # 保存供 _build_move_params 使用
+
         # 目标选择：机械臂 或 身体
         self.target_combo = QComboBox()
         self.target_combo.addItem("机械臂", "机械臂")
         self.target_combo.addItem("身体", "身体")
-        current_target = self.action_data.get('parameters', {}).get('目标', '机械臂')
-        self.target_combo.setCurrentText(current_target)
+        self.target_combo.setCurrentText(preset_target)
         self.target_combo.currentIndexChanged.connect(self._on_target_changed)
+        # 新建时锁定目标类型，不可切换；编辑时允许切换
+        if self._move_target:
+            self.target_combo.setEnabled(False)
 
         # 机械臂参数面板
         self.robot_widget = QWidget()
