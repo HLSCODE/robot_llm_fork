@@ -279,15 +279,23 @@ def detect_and_segment(
 
 
 # ---------------------------------------------------------------
-# 标定 / 运动参数（可外部注入）
+# 标定 / 运动参数（从 Config 读取，可外部注入覆盖）
 # ---------------------------------------------------------------
-DEFAULT_GRIPPER_OFFSET     = [3.146, 0.0, 3.128]
-DEFAULT_TRANSLATION_VECTOR = [-0.10273135, 0.03312807, -0.07214614]
-DEFAULT_ROTATION_MATRIX = [
-    [ 0.00215684,  0.97503835,  0.22202606],
-    [-0.99995231, -0.0000119,   0.00976617],
-    [ 0.00952503, -0.22203654,  0.97499182]
-]
+def _default_calibration() -> dict:
+    """从 Config 加载手眼标定默认值。"""
+    try:
+        from ..core.config_loader import Config
+        return Config.get_vision_calibration()
+    except Exception:
+        return {
+            "rotation_matrix": [
+                [0.00215684, 0.97503835, 0.22202606],
+                [-0.99995231, -0.0000119, 0.00976617],
+                [0.00952503, -0.22203654, 0.97499182],
+            ],
+            "translation_vector": [-0.10273135, 0.03312807, -0.07214614],
+            "gripper_offset": [3.146, 0.0, 3.128],
+        }
 
 
 def run_pingzi_capture(controller, robot, width: int = 640, height: int = 480) -> bool:
@@ -330,26 +338,30 @@ class VisionCaptureAction:
     def __init__(
         self,
         controller = None,          # RobotController | None
-        frame_source: Literal["auto", "controller", "socket"] = "auto",
+        frame_source: Literal["auto", "controller", "socket"] = "controller",
         frame_socket_host: str = None,
         frame_socket_port: int = None,
         yolo_model_path: str = None,
         sam_model_path: str = None,
         target_robot: Literal["robot1", "robot2"] = "robot1",
-        workflow: Literal["vertical", "bottle"] = "vertical",
+        workflow: Literal["vertical", "bottle"] = "bottle",
         gripper_offset: list = None,
         rotation_matrix: list = None,
         translation_vector: list = None,
-        gripper_length: float = 100,
-        confidence_threshold: float = 0.7,
-        move_velocity: int = 15,
+        gripper_length: float = None,
+        confidence_threshold: float = None,
+        move_velocity: int = None,
         image_width: int = 640,
         image_height: int = 480,
         save_debug_images: bool = True,
         debug_save_root: str = None,
         raise_on_error: bool = True
     ):
-        # 使用 config.env 中的配置作为默认值
+        # ── 从 Config 加载默认值 ──
+        from ..core.config_loader import Config
+        _cfg = Config.get_instance()
+        _cal = _default_calibration()
+
         self.frame_socket_host = frame_socket_host or _DEFAULT_FRAME_SOCKET_HOST
         self.frame_socket_port = frame_socket_port or _DEFAULT_FRAME_SOCKET_PORT
         self.yolo_model_path   = yolo_model_path or _DEFAULT_YOLO_MODEL_PATH
@@ -359,6 +371,7 @@ class VisionCaptureAction:
         self.target_robot      = target_robot
         self.workflow          = workflow
 
+        # 标定参数优先级：显式传入 > controller 属性 > Config > 内置兜底
         go = gripper_offset
         rm = rotation_matrix
         tv = translation_vector
@@ -370,12 +383,12 @@ class VisionCaptureAction:
             if tv is None and hasattr(controller, "translation_vector"):
                 tv = controller.translation_vector
 
-        self.gripper_offset     = list(go or DEFAULT_GRIPPER_OFFSET)
-        self.rotation_matrix    = rm or DEFAULT_ROTATION_MATRIX
-        self.translation_vector = tv or DEFAULT_TRANSLATION_VECTOR
-        self.gripper_length    = gripper_length
-        self.confidence_threshold = confidence_threshold
-        self.move_velocity     = move_velocity
+        self.gripper_offset     = list(go or _cal["gripper_offset"])
+        self.rotation_matrix    = rm or _cal["rotation_matrix"]
+        self.translation_vector = tv or _cal["translation_vector"]
+        self.gripper_length    = gripper_length if gripper_length is not None else _cfg.VISION_DEFAULT_GRIPPER_LENGTH
+        self.confidence_threshold = confidence_threshold if confidence_threshold is not None else _cfg.VISION_DEFAULT_CONFIDENCE
+        self.move_velocity     = move_velocity if move_velocity is not None else _cfg.VISION_DEFAULT_VELOCITY
         self.image_width       = image_width
         self.image_height      = image_height
         self.save_debug_images = save_debug_images
@@ -429,6 +442,9 @@ class VisionCaptureAction:
         return bool(ok)
 
     def _execute_vertical(self) -> bool:
+        from ..core.config_loader import Config
+        _cfg = Config.get_instance()
+
         self._ensure_models()
         robot = self._ensure_robot()
 
@@ -468,7 +484,7 @@ class VisionCaptureAction:
             self.translation_vector
         )
         prep_pose = above.copy()
-        prep_pose[0] -= 0.08
+        prep_pose[0] += _cfg.VISION_PREP_OFFSET_X
         self._movej(robot, prep_pose, "预备位置")
         time.sleep(1)
 
@@ -512,7 +528,7 @@ class VisionCaptureAction:
 
         # 6. Z 轴下降
         adj_final[1] -= 0.015
-        adj_final[2] = -0.24
+        adj_final[2] = _cfg.VISION_GRASP_Z
         self._movel(robot, adj_final, "抓取位姿")
 
         # 7. 夹取

@@ -78,8 +78,10 @@ class RealSenseManager:
         # 每路相机独立采集线程 + 独立编码线程
         self._cam_threads: list[threading.Thread] = []
         self._encode_thread: Optional[threading.Thread] = None
-        # 各相机最新原始帧: serial -> (name, ndarray)，由采集线程写入
-        self._raw_frames: dict[str, tuple[str, "np.ndarray"]] = {}
+        # 各相机最新原始帧: serial -> (name, color_bgr, depth_uint16, intrinsics)
+        # intrinsics 格式: {"fx": float, "fy": float, "ppx": float, "ppy": float}
+        self._raw_frames: dict[str, tuple[str, "np.ndarray", "np.ndarray", dict]] = {}
+        self._intrinsics_cache: dict[str, dict] = {}  # serial -> intrinsics dict
         self._raw_lock = threading.Lock()
         # 编码结果，由编码线程写入，外部只读
         self._lock = threading.Lock()
@@ -170,6 +172,12 @@ class RealSenseManager:
                 rs.format.bgr8,
                 self._fps,
             )
+            cfg.enable_stream(
+                rs.stream.depth,
+                self._width, self._height,
+                rs.format.z16,
+                self._fps,
+            )
             try:
                 pipeline.start(cfg)
                 self._pipelines.append((serial, name, pipeline))
@@ -182,6 +190,7 @@ class RealSenseManager:
         if self._pipelines:
             self._running = True
             self._raw_frames.clear()
+            self._intrinsics_cache.clear()
             for serial, name, pipeline in self._pipelines:
                 t = threading.Thread(
                     target=self._camera_capture_loop,
@@ -260,24 +269,55 @@ class RealSenseManager:
     # ------------------------------------------------------------------
 
     def _camera_capture_loop(self, serial: str, name: str, pipeline: "rs.pipeline") -> None:
-        """每路相机独立线程：持续采集原始帧，写入 _raw_frames。"""
+        """每路相机独立线程：持续采集彩色+深度帧及内参，写入 _raw_frames。"""
         while self._running:
             try:
                 frameset = pipeline.wait_for_frames(timeout_ms=200)
-                color = frameset.get_color_frame()
-                if color:
-                    arr = np.asanyarray(color.get_data())
+                color_frame = frameset.get_color_frame()
+                depth_frame = frameset.get_depth_frame()
+                if color_frame and depth_frame:
+                    color_arr = np.asanyarray(color_frame.get_data())
+                    depth_arr = np.asanyarray(depth_frame.get_data())
+                    # 内参首次获取后缓存（同一相机内参不变）
+                    if serial not in self._intrinsics_cache:
+                        profile = color_frame.get_profile()
+                        intr = profile.as_video_stream_profile().get_intrinsics()
+                        self._intrinsics_cache[serial] = {
+                            "fx": intr.fx, "fy": intr.fy,
+                            "ppx": intr.ppx, "ppy": intr.ppy,
+                        }
                     with self._raw_lock:
-                        self._raw_frames[serial] = (name, arr)
+                        self._raw_frames[serial] = (name, color_arr, depth_arr, self._intrinsics_cache[serial])
             except Exception as exc:
                 logger.debug("帧超时 %s (%s): %s", name, serial, exc)
+
+    def get_latest_raw_frames(self, camera_name: str | None = None) -> tuple | None:
+        """获取最新原始帧（线程安全）。
+
+        Args:
+            camera_name: 指定相机名称或序列号，为 None 时返回第一路在线相机的帧。
+
+        Returns:
+            (color_bgr: np.ndarray, depth_uint16: np.ndarray, intrinsics: dict) 或 None
+        """
+        with self._raw_lock:
+            if not self._raw_frames:
+                return None
+            if camera_name is not None:
+                for serial, (name, color, depth, intr) in self._raw_frames.items():
+                    if name == camera_name or serial == camera_name:
+                        return (color.copy(), depth.copy(), dict(intr))
+                return None
+            # 返回第一路
+            _, (_, color, depth, intr) = next(iter(self._raw_frames.items()))
+            return (color.copy(), depth.copy(), dict(intr))
 
     def _encode_loop(self) -> None:
         """编码线程：读取所有相机最新原始帧，编码为 JPEG 写入公开缓冲区。"""
         interval = 1.0 / max(self._fps, 1)
         while self._running:
             with self._raw_lock:
-                snapshot = [(serial, name, arr) for serial, (name, arr) in self._raw_frames.items()]
+                snapshot = [(serial, name, color) for serial, (name, color, _depth, _intr) in self._raw_frames.items()]
             if snapshot:
                 jpeg = self._encode_stitched(snapshot)
                 individual = self._encode_individual(snapshot)

@@ -40,6 +40,21 @@ class Config:
     YOLO_MODEL_PATH: str = "models/best.pt"
     SAM_MODEL_PATH: str = "models/sam2.1_l.pt"
     VISION_DEBUG_SAVE_DIR: str = "pictures"
+
+    # 手眼标定参数
+    VISION_ROTATION_MATRIX: list = None
+    VISION_TRANSLATION_VECTOR: list = None
+    VISION_GRIPPER_OFFSET: list = None
+
+    # 视觉抓取默认参数
+    VISION_DEFAULT_CONFIDENCE: float = 0.7
+    VISION_DEFAULT_VELOCITY: int = 15
+    VISION_DEFAULT_GRIPPER_LENGTH: float = 150.0
+    VISION_DEFAULT_WORKFLOW: str = "bottle"
+    VISION_CAMERA_NAME: str = ""
+    VISION_PREP_OFFSET_X: float = -0.07
+    VISION_GRASP_Z: float = -0.24
+    VISION_GMM_COMPONENTS: int = 1
     
     # 机械臂配置
     ROBOT1_IP: str = "192.168.3.19"
@@ -175,6 +190,26 @@ class Config:
         instance.YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/best.pt")
         instance.SAM_MODEL_PATH = os.getenv("SAM_MODEL_PATH", "models/sam2.1_l.pt")
         instance.VISION_DEBUG_SAVE_DIR = os.getenv("VISION_DEBUG_SAVE_DIR", "pictures")
+
+        # 手眼标定参数
+        instance.VISION_ROTATION_MATRIX = cls._parse_float_list(os.getenv(
+            "VISION_ROTATION_MATRIX",
+            "0.00215684,0.97503835,0.22202606,-0.99995231,-0.0000119,0.00976617,0.00952503,-0.22203654,0.97499182"
+        ))
+        instance.VISION_TRANSLATION_VECTOR = cls._parse_float_list(os.getenv(
+            "VISION_TRANSLATION_VECTOR", "-0.10273135,0.03312807,-0.07214614"
+        ))
+        instance.VISION_GRIPPER_OFFSET = cls._parse_float_list(os.getenv(
+            "VISION_GRIPPER_OFFSET", "3.146,0.0,3.128"
+        ))
+        instance.VISION_DEFAULT_CONFIDENCE = float(os.getenv("VISION_DEFAULT_CONFIDENCE", "0.7"))
+        instance.VISION_DEFAULT_VELOCITY = int(os.getenv("VISION_DEFAULT_VELOCITY", "15"))
+        instance.VISION_DEFAULT_GRIPPER_LENGTH = float(os.getenv("VISION_DEFAULT_GRIPPER_LENGTH", "150.0"))
+        instance.VISION_DEFAULT_WORKFLOW = os.getenv("VISION_DEFAULT_WORKFLOW", "bottle")
+        instance.VISION_CAMERA_NAME = os.getenv("VISION_CAMERA_NAME", "")
+        instance.VISION_PREP_OFFSET_X = float(os.getenv("VISION_PREP_OFFSET_X", "-0.07"))
+        instance.VISION_GRASP_Z = float(os.getenv("VISION_GRASP_Z", "-0.24"))
+        instance.VISION_GMM_COMPONENTS = int(os.getenv("VISION_GMM_COMPONENTS", "1"))
         
         # 机械臂配置
         instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.19")
@@ -441,6 +476,22 @@ class Config:
             "yolo_model_path": instance.YOLO_MODEL_PATH,
             "sam_model_path": instance.SAM_MODEL_PATH,
             "debug_save_dir": instance.VISION_DEBUG_SAVE_DIR
+        }
+
+    @classmethod
+    def get_vision_calibration(cls) -> dict:
+        """获取手眼标定参数（相机→末端变换）"""
+        instance = cls.get_instance()
+        mat_flat = instance.VISION_ROTATION_MATRIX or [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        rotation_matrix = [
+            mat_flat[0:3],
+            mat_flat[3:6],
+            mat_flat[6:9],
+        ]
+        return {
+            "rotation_matrix": rotation_matrix,
+            "translation_vector": instance.VISION_TRANSLATION_VECTOR or [0.0, 0.0, 0.0],
+            "gripper_offset": instance.VISION_GRIPPER_OFFSET or [3.146, 0.0, 3.128],
         }
 
     @classmethod

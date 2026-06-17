@@ -107,10 +107,10 @@ class RobotController:
             {"point_name": "huandian2", "pose": [-135.95 / 1000, 324.0 / 1000, -70 / 1000, -3.141, -0.0, -0.278]},  
             {"point_name": "huandian3", "pose": [-136.08 / 1000, 324.0 / 1000, -96.15 / 1000, -3.141, -0.026, -0.278]},   
         ]
-        self.gripper_offset = [3.146, 0, 3.128]  # 侧装的垂直姿态
+        self.gripper_offset = [3.146, 0, 3.128]  # 侧装的垂直姿态（兜底值，优先从 Config 读取）
         self.translation_vector = [-0.10273135, 0.03312807, -0.07214614]
 
-        # 按需帧注入槽（由 OnDemandFrameGrabber 填充）
+        # 按需帧注入槽（由 camera_factory 的 RealSenseManager 填充）
         self._injected_color = None
         self._injected_depth = None
         self._injected_intr = None
@@ -121,10 +121,15 @@ class RobotController:
         self.yolo_model = YOLO(self.config.YOLO_MODEL_PATH)
         self.sam_model = SAM(self.config.SAM_MODEL_PATH)
 
-        # 手眼标定参数
-        self.rotation_matrix = [[0.00215684,0.97503835,0.22202606], 
-                              [-0.99995231,-0.0000119, 0.00976617],
-                              [0.00952503, -0.22203654, 0.97499182]]
+        # 手眼标定参数（优先从 Config 读取，兜底用硬编码值）
+        cal = self.config.get_vision_calibration()
+        self.rotation_matrix = cal.get("rotation_matrix") or [
+            [0.00215684, 0.97503835, 0.22202606],
+            [-0.99995231, -0.0000119, 0.00976617],
+            [0.00952503, -0.22203654, 0.97499182],
+        ]
+        self.translation_vector = cal.get("translation_vector") or self.translation_vector
+        self.gripper_offset = cal.get("gripper_offset") or self.gripper_offset
 
     def process_mask_with_gmm(self, image, mask, n_components=1):
         """使用高斯混合模型(GMM)处理图像分割掩码"""

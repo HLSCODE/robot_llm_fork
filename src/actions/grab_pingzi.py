@@ -12,8 +12,14 @@ import numpy as np
 from ..vision.interface import vertical_catch
 from ..arm_sdk.controller import RobotController
 from ..arm_sdk.config import *
+from ..core.config_loader import Config
 
 PICTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vision", "pictures")
+
+_cfg = Config.get_instance()
+_GRIPPER_LENGTH = _cfg.VISION_DEFAULT_GRIPPER_LENGTH
+_GRASP_Z = _cfg.VISION_GRASP_Z
+_PREP_OFFSET_X = _cfg.VISION_PREP_OFFSET_X
 
 
 def detect_target(image, yolo_model, sam_model, process_mask_fn, width=640, height=480, conf_thresh=0.7):
@@ -49,7 +55,7 @@ def execute_pick(robot, target_pose, drop_height):
     """动作原语：到上方 -> 下降 -> 夹取 -> 抬升"""
 
     below = target_pose.copy()
-    below[2] = -408.5 / 1000
+    below[2] = _GRASP_Z
     ret = robot.rm_movel(below, v=MOVE_SPEED, r=0, connect=0, block=1)
     if ret != 0:
         raise Exception(f"下降到目标失败，错误码：{ret}")
@@ -163,16 +169,16 @@ def capture_and_move(controller, robot, width=640, height=480):
             depth_image,
             color_intr,
             pose,
-            150,
+            _GRIPPER_LENGTH,
             controller.gripper_offset,
             controller.rotation_matrix,
             controller.translation_vector
         )
 
         camera_above_pose = above_object_pose.copy()
-        camera_above_pose[0] -= 0.07
+        camera_above_pose[0] += _PREP_OFFSET_X
 
-        ret = robot.rm_movej_p(camera_above_pose, v=15, r=0, connect=0, block=1)
+        ret = robot.rm_movej_p(camera_above_pose, v=MOVE_VELOCITY, r=0, connect=0, block=1)
         if ret != 0:
             raise Exception(f"移动到预备位置失败，错误码：{ret}")
         time.sleep(1)
@@ -202,7 +208,7 @@ def capture_and_move(controller, robot, width=640, height=480):
             depth_image,
             color_intr,
             current_pose,
-            150,
+            _GRIPPER_LENGTH,
             controller.gripper_offset,
             controller.rotation_matrix,
             controller.translation_vector
@@ -218,13 +224,13 @@ def capture_and_move(controller, robot, width=640, height=480):
         above_target_pose[0] -= 0.025
         above_target_pose[1] += 0.015
 
-        ret = robot.rm_movel(above_target_pose, v=15, r=0, connect=0, block=1)
+        ret = robot.rm_movel(above_target_pose, v=MOVE_VELOCITY, r=0, connect=0, block=1)
         if ret != 0:
             raise Exception(f"移动到目标物体上方失败，错误码：{ret}")
 
-        execute_pick(robot, above_target_pose, drop_height=0.08)
+        execute_pick(robot, above_target_pose, drop_height=_cfg.PLACE_DROP_HEIGHT)
 
-        ret = robot.rm_movej_p(initial_pose, v=15, r=0, connect=0, block=1)
+        ret = robot.rm_movej_p(initial_pose, v=MOVE_VELOCITY, r=0, connect=0, block=1)
         if ret != 0:
             raise Exception(f"回到初始位姿失败，错误码：{ret}")
 

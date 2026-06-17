@@ -569,16 +569,60 @@ class ActionConfigDialog(QDialog):
         form_layout.addRow("取/放:", self.operation_combo)
 
     def _init_vision_capture_ui(self, form_layout: QFormLayout):
-        """初始化视觉抓取动作 UI"""
-        # 视觉抓取参数已固定：robot1 / bottle / 置信度 0.7 / 速度 15 / 夹爪 150mm
-        fixed_label = QLabel(
-            "固定配置：Robot1 (左臂) | 工作流：bottle | 置信度：0.7 | "
-            "速度：15mm/s | 夹爪：150mm | 调试图片：开"
-        )
-        fixed_label.setStyleSheet("color: #64748b; font-size: 12px; padding: 6px; background: #f8fafc; border-radius: 6px;")
-        fixed_label.setWordWrap(True)
+        """初始化视觉抓取动作 UI（可从 config.env 配置默认值）"""
+        from ..core.config_loader import Config
+        cfg = Config.get_instance()
 
-        form_layout.addRow("", fixed_label)
+        params = self.action_data.get('parameters', {})
+
+        self.vision_robot_combo = QComboBox()
+        self.vision_robot_combo.addItem("左臂 (Robot1)", "robot1")
+        self.vision_robot_combo.addItem("右臂 (Robot2)", "robot2")
+        self.vision_robot_combo.setCurrentText(
+            "左臂 (Robot1)" if params.get('目标机械臂', 'robot1') == 'robot1' else "右臂 (Robot2)"
+        )
+
+        self.vision_workflow_combo = QComboBox()
+        self.vision_workflow_combo.addItem("瓶子抓取 (bottle)", "bottle")
+        self.vision_workflow_combo.addItem("竖直抓取 (vertical)", "vertical")
+        default_wf = params.get('工作流', cfg.VISION_DEFAULT_WORKFLOW)
+        self.vision_workflow_combo.setCurrentText(
+            "瓶子抓取 (bottle)" if default_wf == 'bottle' else "竖直抓取 (vertical)"
+        )
+
+        self.vision_confidence_input = QDoubleSpinBox()
+        self.vision_confidence_input.setRange(0.1, 1.0)
+        self.vision_confidence_input.setSingleStep(0.05)
+        self.vision_confidence_input.setDecimals(2)
+        self.vision_confidence_input.setValue(
+            float(params.get('置信度', cfg.VISION_DEFAULT_CONFIDENCE))
+        )
+
+        self.vision_velocity_input = QSpinBox()
+        self.vision_velocity_input.setRange(1, 100)
+        self.vision_velocity_input.setSuffix(" mm/s")
+        self.vision_velocity_input.setValue(
+            int(params.get('移动速度', cfg.VISION_DEFAULT_VELOCITY))
+        )
+
+        self.vision_gripper_length_input = QDoubleSpinBox()
+        self.vision_gripper_length_input.setRange(10.0, 500.0)
+        self.vision_gripper_length_input.setSuffix(" mm")
+        self.vision_gripper_length_input.setValue(
+            float(params.get('夹爪长度', cfg.VISION_DEFAULT_GRIPPER_LENGTH))
+        )
+
+        self.vision_debug_checkbox = QCheckBox("保存调试图片")
+        self.vision_debug_checkbox.setChecked(
+            bool(params.get('调试图片', True))
+        )
+
+        form_layout.addRow("目标机械臂:", self.vision_robot_combo)
+        form_layout.addRow("工作流:", self.vision_workflow_combo)
+        form_layout.addRow("置信度:", self.vision_confidence_input)
+        form_layout.addRow("移动速度:", self.vision_velocity_input)
+        form_layout.addRow("夹爪长度:", self.vision_gripper_length_input)
+        form_layout.addRow("", self.vision_debug_checkbox)
 
     def _init_trajectory_ui(self, form_layout: QFormLayout):
         self.trajectory_robot_combo = QComboBox()
@@ -902,14 +946,14 @@ class ActionConfigDialog(QDialog):
         }
     
     def _build_vision_capture_params(self) -> dict:
-        """构建视觉抓取动作参数"""
+        """构建视觉抓取动作参数（从用户输入收集）"""
         return {
-            '目标机械臂': 'robot1',
-            '工作流': 'bottle',
-            '置信度': 0.7,
-            '调试图片': True,
-            '移动速度': 15,
-            '夹爪长度': 150.0
+            '目标机械臂': self.vision_robot_combo.currentData(),
+            '工作流': self.vision_workflow_combo.currentData(),
+            '置信度': self.vision_confidence_input.value(),
+            '调试图片': self.vision_debug_checkbox.isChecked(),
+            '移动速度': self.vision_velocity_input.value(),
+            '夹爪长度': self.vision_gripper_length_input.value(),
         }
     def _build_trajectory_params(self) -> dict:
         return {

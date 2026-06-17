@@ -56,13 +56,23 @@ class VisionCaptureGUIAction:
         # result = {"success": True/False, "error": None/"错误信息", "detail": "..."}
     """
 
-    # GUI 默认参数（可被外部覆盖）
-    DEFAULT_ROBOT       = "robot1"
-    DEFAULT_CONFIDENCE  = 0.7
-    DEFAULT_DEBUG        = True
-    DEFAULT_VELOCITY    = 15
-    DEFAULT_GRIP_LENGTH = 150.0
-    DEFAULT_WORKFLOW = "bottle"  # "vertical" | "bottle"（bottle 同 grab_pingzi_baizhuo）
+    # GUI 默认参数（从 Config 读取）
+    try:
+        from ..core.config_loader import Config
+        _cfg = Config.get_instance()
+        DEFAULT_ROBOT       = "robot1"
+        DEFAULT_CONFIDENCE  = _cfg.VISION_DEFAULT_CONFIDENCE
+        DEFAULT_DEBUG        = True
+        DEFAULT_VELOCITY    = _cfg.VISION_DEFAULT_VELOCITY
+        DEFAULT_GRIP_LENGTH = _cfg.VISION_DEFAULT_GRIPPER_LENGTH
+        DEFAULT_WORKFLOW    = _cfg.VISION_DEFAULT_WORKFLOW
+    except Exception:
+        DEFAULT_ROBOT       = "robot1"
+        DEFAULT_CONFIDENCE  = 0.7
+        DEFAULT_DEBUG        = True
+        DEFAULT_VELOCITY    = 15
+        DEFAULT_GRIP_LENGTH = 150.0
+        DEFAULT_WORKFLOW    = "bottle"
 
     def __init__(
         self,
