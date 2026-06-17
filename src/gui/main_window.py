@@ -19,7 +19,6 @@ from ..core.storage import StorageManager
 from .execution import ExecutionThread
 from ..core.config_loader import Config
 
-
 class TaskLibraryListWidget(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -231,7 +230,9 @@ class MainWindow(QMainWindow):
             self.initialize_robots()
 
         # 初始化底盘移动控制器
-        self.initialize_move_controller()
+        if self.config.BODY_DI_PAN:
+            self.initialize_move_controller()
+
         # 注释掉下面 2 行，防止启动时升降平台高度变化
         if MODBUS_AVAILABLE:
             self.initialize_body()

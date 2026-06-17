@@ -22,7 +22,8 @@ class Config:
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str = ""
     MODEL_PROVIDER: str = "openai"
-    
+
+
     # 系统配置
     LOG_LEVEL: str = "INFO"
     RUN_MODE: str = "server"  # gui / server
@@ -83,6 +84,7 @@ class Config:
     BODY_BAUDRATE: int = 115200
     BODY_SLAVE_ID: int = 1
     BODY_TIMEOUT: int = 1
+    BODY_DI_PAN: bool = False
     KUAIHUANSHOU_SERIAL_PORT: str = "/dev/ttyUSB2"
     KUAIHUANSHOU_BAUDRATE: int = 115200
     KUAIHUANSHOU_TIMEOUT: int = 3
@@ -253,6 +255,7 @@ class Config:
         instance.BODY_BAUDRATE = int(os.getenv("BODY_BAUDRATE", "115200"))
         instance.BODY_SLAVE_ID = int(os.getenv("BODY_SLAVE_ID", "1"))
         instance.BODY_TIMEOUT = int(os.getenv("BODY_TIMEOUT", "1"))
+        instance.BODY_DI_PAN = os.getenv("BODY_DI_PAN", "false").lower() in ("true", "1", "yes")
         instance.KUAIHUANSHOU_SERIAL_PORT = os.getenv("KUAIHUANSHOU_SERIAL_PORT", "/dev/ttyUSB2")
         instance.KUAIHUANSHOU_BAUDRATE = int(os.getenv("KUAIHUANSHOU_BAUDRATE", "115200"))
         instance.KUAIHUANSHOU_TIMEOUT = int(os.getenv("KUAIHUANSHOU_TIMEOUT", "3"))
