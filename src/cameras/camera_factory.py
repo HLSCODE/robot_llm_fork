@@ -64,7 +64,10 @@ def _get_realsense_manager(config) -> Optional[RealSenseManager]:
         {"serial": serial, "name": names[i] if i < len(names) else serial}
         for i, serial in enumerate(serials)
     ]
-    mgr = RealSenseManager.get_instance(cameras=cameras, fps=30, width=640, height=480, jpeg_quality=85)
+    # 多相机时降低 FPS 以避免 USB 带宽过载（3+ 路 → 15fps）
+    fps = 30 if len(cameras) <= 2 else 15
+    logger.info("RealSense 相机数=%d, FPS=%d", len(cameras), fps)
+    mgr = RealSenseManager.get_instance(cameras=cameras, fps=fps, width=640, height=480, jpeg_quality=85)
     if not mgr.is_running:
         result = mgr.start()
         logger.info("RealSense 相机管理器已启动: %d 路在线, %d 路失败", result["started"], result["failed"])

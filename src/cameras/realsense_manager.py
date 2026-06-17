@@ -11,6 +11,7 @@
 
 import logging
 import threading
+import traceback
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,17 @@ class RealSenseManager:
                 self._failed_cameras.append({"serial": serial, "name": name, "error": msg})
                 continue
 
+            # 打印设备诊断信息（产品名、固件版本）
+            try:
+                for d in ctx.query_devices():
+                    if d.get_info(rs.camera_info.serial_number) == serial:
+                        product = d.get_info(rs.camera_info.name)
+                        fw = d.get_info(rs.camera_info.firmware_version)
+                        logger.info("相机 %s (%s): 产品=%s 固件=%s", name, serial, product, fw)
+                        break
+            except Exception:
+                pass
+
             pipeline = rs.pipeline()
             cfg = rs.config()
             if serial:
@@ -178,13 +190,23 @@ class RealSenseManager:
                 rs.format.z16,
                 self._fps,
             )
+            # 显式禁用 IMU 流（D435if 内置 IMU，不关闭会额外占用 USB 带宽，
+            # 4 路相机时容易超出 USB 控制器带宽上限导致后两路启动失败）
+            try:
+                cfg.disable_stream(rs.stream.accel)
+            except Exception:
+                pass
+            try:
+                cfg.disable_stream(rs.stream.gyro)
+            except Exception:
+                pass
             try:
                 pipeline.start(cfg)
                 self._pipelines.append((serial, name, pipeline))
                 logger.info("RealSense 相机已启动: name=%s serial=%s", name, serial)
             except Exception as exc:
                 msg = str(exc)
-                logger.warning("无法开启相机 %s (%s): %s", name, serial, msg)
+                logger.warning("无法开启相机 %s (%s): %s\n%s", name, serial, msg, traceback.format_exc())
                 self._failed_cameras.append({"serial": serial, "name": name, "error": msg})
 
         if self._pipelines:
