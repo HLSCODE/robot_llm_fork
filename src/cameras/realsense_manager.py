@@ -152,6 +152,22 @@ class RealSenseManager:
         except Exception:
             connected_serials = set()
 
+        import time as _time
+
+        # 预扫描所有设备的传感器信息（用于精准判断 IMU 是否存在）
+        device_sensors: dict[str, list[str]] = {}
+        try:
+            for d in ctx.query_devices():
+                sn = d.get_info(rs.camera_info.serial_number)
+                try:
+                    device_sensors[sn] = [
+                        s.get_info(rs.camera_info.name) for s in d.query_sensors()
+                    ]
+                except Exception:
+                    device_sensors[sn] = []
+        except Exception:
+            pass
+
         for cam in self._cameras:
             serial: str = cam["serial"]
             name: str = cam["name"]
@@ -163,51 +179,68 @@ class RealSenseManager:
                 self._failed_cameras.append({"serial": serial, "name": name, "error": msg})
                 continue
 
-            # 打印设备诊断信息（产品名、固件版本）
+            # 打印设备诊断信息（产品名、固件版本、传感器列表）
             try:
                 for d in ctx.query_devices():
                     if d.get_info(rs.camera_info.serial_number) == serial:
                         product = d.get_info(rs.camera_info.name)
                         fw = d.get_info(rs.camera_info.firmware_version)
-                        logger.info("相机 %s (%s): 产品=%s 固件=%s", name, serial, product, fw)
+                        usb = d.get_info(rs.camera_info.usb_type_descriptor)
+                        sensors = device_sensors.get(serial, [])
+                        logger.info("相机 %s (%s): 产品=%s 固件=%s USB=%s 传感器=%s",
+                                    name, serial, product, fw, usb, sensors)
                         break
             except Exception:
                 pass
 
-            pipeline = rs.pipeline()
-            cfg = rs.config()
-            if serial:
-                cfg.enable_device(serial)
-            cfg.enable_stream(
-                rs.stream.color,
-                self._width, self._height,
-                rs.format.bgr8,
-                self._fps,
-            )
-            cfg.enable_stream(
-                rs.stream.depth,
-                self._width, self._height,
-                rs.format.z16,
-                self._fps,
-            )
-            # 显式禁用 IMU 流（D435if 内置 IMU，不关闭会额外占用 USB 带宽，
-            # 4 路相机时容易超出 USB 控制器带宽上限导致后两路启动失败）
-            try:
-                cfg.disable_stream(rs.stream.accel)
-            except Exception:
-                pass
-            try:
-                cfg.disable_stream(rs.stream.gyro)
-            except Exception:
-                pass
-            try:
-                pipeline.start(cfg)
-                self._pipelines.append((serial, name, pipeline))
-                logger.info("RealSense 相机已启动: name=%s serial=%s", name, serial)
-            except Exception as exc:
-                msg = str(exc)
-                logger.warning("无法开启相机 %s (%s): %s\n%s", name, serial, msg, traceback.format_exc())
-                self._failed_cameras.append({"serial": serial, "name": name, "error": msg})
+            # 构建 pipeline 配置
+            def _build_config():
+                _pipeline = rs.pipeline(ctx)
+                _cfg = rs.config()
+                # 先清空所有默认流（D435if 默认会带 IMU），再只启用需要的
+                try:
+                    _cfg.disable_all_streams()
+                except Exception:
+                    pass
+                if serial:
+                    _cfg.enable_device(serial)
+                _cfg.enable_stream(rs.stream.color, self._width, self._height,
+                                   rs.format.bgr8, self._fps)
+                _cfg.enable_stream(rs.stream.depth, self._width, self._height,
+                                   rs.format.z16, self._fps)
+                return _pipeline, _cfg
+
+            # 带重试的启动（USB 带宽协商偶尔需要多次尝试）
+            started = False
+            last_error = ""
+            for attempt in range(3):
+                pipeline, cfg = _build_config()
+                try:
+                    pipeline.start(cfg)
+                    self._pipelines.append((serial, name, pipeline))
+                    logger.info("RealSense 相机已启动: name=%s serial=%s (attempt %d)",
+                                name, serial, attempt + 1)
+                    started = True
+                    break
+                except Exception as exc:
+                    last_error = str(exc)
+                    logger.warning("相机 %s (%s) 启动失败 (attempt %d/%d): %s",
+                                   name, serial, attempt + 1, 3, last_error)
+                    # 清理失败的 pipeline
+                    try:
+                        pipeline.stop()
+                    except Exception:
+                        pass
+                    if attempt < 2:
+                        _time.sleep(1.0)  # 等 USB 带宽释放再重试
+
+            if not started:
+                logger.warning("相机 %s (%s) 三次尝试均失败: %s\n%s",
+                               name, serial, last_error, traceback.format_exc())
+                self._failed_cameras.append({"serial": serial, "name": name, "error": last_error})
+
+            # 相机之间错开启动，避免 USB 带宽协商碰撞
+            _time.sleep(0.5)
 
         if self._pipelines:
             self._running = True
@@ -292,12 +325,20 @@ class RealSenseManager:
 
     def _camera_capture_loop(self, serial: str, name: str, pipeline: "rs.pipeline") -> None:
         """每路相机独立线程：持续采集彩色+深度帧及内参，写入 _raw_frames。"""
+        # 给相机自动曝光/白平衡留出初始化时间
+        import time as _time
+        _time.sleep(1.0)
+
+        fail_count = 0
         while self._running:
             try:
-                frameset = pipeline.wait_for_frames(timeout_ms=200)
+                frameset = pipeline.wait_for_frames(timeout_ms=1000)
                 color_frame = frameset.get_color_frame()
                 depth_frame = frameset.get_depth_frame()
                 if color_frame and depth_frame:
+                    if fail_count > 0:
+                        logger.info("相机 %s (%s) 帧恢复，之前连续失败 %d 次", name, serial, fail_count)
+                    fail_count = 0
                     color_arr = np.asanyarray(color_frame.get_data())
                     depth_arr = np.asanyarray(depth_frame.get_data())
                     # 内参首次获取后缓存（同一相机内参不变）
@@ -308,10 +349,21 @@ class RealSenseManager:
                             "fx": intr.fx, "fy": intr.fy,
                             "ppx": intr.ppx, "ppy": intr.ppy,
                         }
+                        logger.info("相机 %s (%s) 内参已缓存: fx=%.1f fy=%.1f", name, serial, intr.fx, intr.fy)
                     with self._raw_lock:
                         self._raw_frames[serial] = (name, color_arr, depth_arr, self._intrinsics_cache[serial])
+                else:
+                    fail_count += 1
+                    if fail_count <= 3:
+                        logger.warning("相机 %s (%s) 帧不完整: color=%s depth=%s",
+                                       name, serial,
+                                       color_frame is not None, depth_frame is not None)
             except Exception as exc:
-                logger.debug("帧超时 %s (%s): %s", name, serial, exc)
+                fail_count += 1
+                if fail_count <= 3:
+                    logger.warning("相机 %s (%s) 取帧异常: %s", name, serial, exc)
+                elif fail_count == 4:
+                    logger.warning("相机 %s (%s) 连续取帧失败已达 %d 次，后续静默", name, serial, fail_count)
 
     def get_latest_raw_frames(self, camera_name: str | None = None) -> tuple | None:
         """获取最新原始帧（线程安全）。

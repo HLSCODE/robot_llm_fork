@@ -64,9 +64,21 @@ def execute_vision_capture(
             return False
 
         camera_name = Config.get_instance().VISION_CAMERA_NAME or None
-        raw = mgr.get_latest_raw_frames(camera_name)
+
+        # 等待采集线程产出第一帧（D435 自动曝光/白平衡需 1~3 秒）
+        import time
+        deadline = time.time() + 10
+        raw = None
+        while time.time() < deadline:
+            raw = mgr.get_latest_raw_frames(camera_name)
+            if raw is not None:
+                break
+            time.sleep(0.2)
+
         if raw is None:
-            log_fn("相机取帧失败：未获取到有效帧")
+            info = mgr.get_cameras_info()
+            online = [c["name"] for c in info if c.get("online")]
+            log_fn(f"相机取帧失败：{camera_name or '(auto)'} 未获取到有效帧，在线相机: {online or '无'}")
             return False
 
         color, depth, intr = raw
