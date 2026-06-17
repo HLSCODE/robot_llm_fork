@@ -2321,8 +2321,8 @@ class MainWindow(QMainWindow):
 
     def test_camera(self):
         """
-        在独立 QThread 中测试 RealSense pipeline。
-        QThread 有自己的 Qt 事件循环，能正确处理 RealSense SDK 的 USB urb 回调。
+        通过 camera_factory 统一入口测试相机（与视觉抓取使用同一路径）。
+        在独立 QThread 中运行，避免阻塞 UI。
         """
         self.test_camera_btn.setEnabled(False)
         self.test_camera_btn.setText("测试中...")
@@ -2331,49 +2331,83 @@ class MainWindow(QMainWindow):
             result = pyqtSignal(bool, str)
 
             def run(self):
-                import pyrealsense2 as rs
+                import time
+                from src.cameras.camera_factory import get_camera_manager
+                from src.cameras.realsense_manager import RealSenseManager
                 from src.core.config_loader import Config
 
-                sn = Config.get_instance().REALSENSE_DEVICE_SN
+                config = Config.get_instance()
+                camera_name = config.VISION_CAMERA_NAME or None
 
                 try:
-                    ctx = rs.context()
-                    devices = list(ctx.devices)
-                    if not devices:
-                        self.result.emit(False, "未检测到 RealSense 设备")
+                    # ── 通过 camera_factory 获取管理器（与视觉抓取同一路径）──
+                    mgr = get_camera_manager()
+                    if mgr is None:
+                        self.result.emit(False, "相机管理器未启动（请检查 CAMERA_PROVIDER 和设备配置）")
                         return
 
-                    pipeline = rs.pipeline()
-                    cfg = rs.config()
-                    cfg.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-                    cfg.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-                    if sn:
-                        cfg.enable_device(sn)
-                    profile = pipeline.start(cfg)
+                    # 等待至少一路相机上线
+                    deadline = time.time() + 10
+                    online = []
+                    while time.time() < deadline:
+                        info = mgr.get_cameras_info()
+                        online = [c for c in info if c.get("online")]
+                        if online:
+                            break
+                        time.sleep(0.3)
+                    else:
+                        all_info = mgr.get_cameras_info()
+                        errors = []
+                        for c in all_info:
+                            if not c.get("online"):
+                                errors.append(f"{c.get('name', '?')}: {c.get('error', '未知')}")
+                        if errors:
+                            self.result.emit(False, f"相机启动失败: {'; '.join(errors)}")
+                        else:
+                            self.result.emit(False, "未检测到在线相机")
+                        return
 
-                    time.sleep(1)
-
+                    # 尝试取帧
                     deadline = time.time() + 10
                     while time.time() < deadline:
-                        try:
-                            frames = pipeline.wait_for_frames(200)
-                            color = frames.get_color_frame()
-                            depth = frames.get_depth_frame()
-                            if color and depth:
-                                msg = (f"成功: 彩色={color.width}x{color.height}  "
-                                       f"深度={depth.get_distance(320, 240):.3f}m  "
-                                       f"(序列号={sn or '自动选择'})")
-                                pipeline.stop()
-                                self.result.emit(True, msg)
-                                return
-                        except Exception:
-                            pass
+                        if isinstance(mgr, RealSenseManager):
+                            # RealSense：取原始帧（与视觉抓取 executor.py 一致）
+                            raw = mgr.get_latest_raw_frames(camera_name)
+                            if raw is not None:
+                                color, depth, intr = raw
+                                if color is not None and depth is not None:
+                                    h, w = color.shape[:2]
+                                    center_dist = float(depth[h // 2, w // 2])
+                                    actual_name = camera_name or online[0]["name"]
+                                    sn = ""
+                                    for c in online:
+                                        if c["name"] == actual_name:
+                                            sn = f" SN={c['serial']}"
+                                            break
+                                    msg = (f"成功: 彩色={w}x{h}  "
+                                           f"深度(中心)={center_dist / 1000:.3f}m  "
+                                           f"(相机={actual_name}{sn})")
+                                    self.result.emit(True, msg)
+                                    return
+                        else:
+                            # OpenCV / Webcam：取 JPEG 帧
+                            jpegs = mgr.get_latest_jpegs()
+                            if jpegs:
+                                if camera_name:
+                                    matched = [(n, len(b)) for s, n, b in jpegs if n == camera_name]
+                                    if matched:
+                                        self.result.emit(True, f"成功: webcam 已取到帧 (相机={matched[0][0]}, {matched[0][1]} bytes)")
+                                        return
+                                else:
+                                    name = jpegs[0][1]
+                                    self.result.emit(True, f"成功: webcam 已取到帧 (相机={name})")
+                                    return
+                        time.sleep(0.2)
 
-                    pipeline.stop()
                     self.result.emit(False, "取帧超时（10 秒内未获得有效帧）")
 
                 except Exception as e:
-                    self.result.emit(False, str(e))
+                    self.result.emit(False, f"测试异常: {str(e)}")
 
         def on_result(success, msg):
             self.log_widget.append_log(f"[相机测试] {msg}")

@@ -1588,83 +1588,104 @@ class RobotWebSocketServer:
 
     async def _handle_test_camera(self, websocket, data: dict) -> None:
         """
-        测试 RealSense 相机
+        通过 camera_factory 统一入口测试相机（与视觉抓取使用同一路径）。
         请求: {"action": "test_camera"}
         """
         def _do_test():
             try:
                 import time
+                from ..cameras.camera_factory import get_camera_manager
+                from ..cameras.realsense_manager import RealSenseManager
 
                 config = Config.get_instance()
-                provider = getattr(config, "CAMERA_PROVIDER", "auto").lower()
-                if provider in ("webcam", "opencv"):
-                    import cv2
+                camera_name = config.VISION_CAMERA_NAME or None
 
-                    raw_indexes = getattr(config, "WEBCAM_DEVICE_INDEXES", "0")
-                    indexes = [int(x.strip()) for x in raw_indexes.split(",") if x.strip()]
-                    index = indexes[0] if indexes else 0
-                    cap = cv2.VideoCapture(index, getattr(cv2, "CAP_DSHOW", 0))
-                    try:
-                        if not cap.isOpened():
-                            raise RuntimeError(f"本地摄像头无法打开: index={index}")
-                        ok, frame = cap.read()
-                        if not ok or frame is None:
-                            raise RuntimeError(f"本地摄像头无法读取画面: index={index}")
-                        height, width = frame.shape[:2]
-                        self._broadcast_threadsafe({
-                            "event": "camera_test_result",
-                            "success": True,
-                            "message": f"本地摄像头测试成功: index={index} size={width}x{height}",
-                        })
-                    finally:
-                        cap.release()
-                    return
-
-                import pyrealsense2 as rs
-                sn = config.REALSENSE_DEVICE_SN
-
-                ctx = rs.context()
-                devices = list(ctx.devices)
-                if not devices:
+                # ── 通过 camera_factory 获取管理器（与视觉抓取同一路径）──
+                mgr = get_camera_manager()
+                if mgr is None:
                     self._broadcast_threadsafe({
                         "event": "camera_test_result",
                         "success": False,
-                        "message": "未检测到 RealSense 设备",
+                        "message": "相机管理器未启动（请检查 CAMERA_PROVIDER 和设备配置）",
                     })
                     return
 
-                pipeline = rs.pipeline()
-                cfg = rs.config()
-                cfg.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-                cfg.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-                if sn:
-                    cfg.enable_device(sn)
-                pipeline.start(cfg)
+                # 等待至少一路相机上线
+                deadline = time.time() + 10
+                online = []
+                while time.time() < deadline:
+                    info = mgr.get_cameras_info()
+                    online = [c for c in info if c.get("online")]
+                    if online:
+                        break
+                    time.sleep(0.3)
+                else:
+                    all_info = mgr.get_cameras_info()
+                    errors = []
+                    for c in all_info:
+                        if not c.get("online"):
+                            errors.append(f"{c.get('name', '?')}: {c.get('error', '未知')}")
+                    if errors:
+                        self._broadcast_threadsafe({
+                            "event": "camera_test_result",
+                            "success": False,
+                            "message": f"相机启动失败: {'; '.join(errors)}",
+                        })
+                    else:
+                        self._broadcast_threadsafe({
+                            "event": "camera_test_result",
+                            "success": False,
+                            "message": "未检测到在线相机",
+                        })
+                    return
 
-                time.sleep(1)
+                # 尝试取帧
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    if isinstance(mgr, RealSenseManager):
+                        raw = mgr.get_latest_raw_frames(camera_name)
+                        if raw is not None:
+                            color, depth, intr = raw
+                            if color is not None and depth is not None:
+                                h, w = color.shape[:2]
+                                center_dist = float(depth[h // 2, w // 2])
+                                actual_name = camera_name or online[0]["name"]
+                                sn = ""
+                                for c in online:
+                                    if c["name"] == actual_name:
+                                        sn = f" SN={c['serial']}"
+                                        break
+                                msg = (f"相机测试成功: color={w}x{h}  "
+                                       f"depth(center)={center_dist / 1000:.3f}m  "
+                                       f"(camera={actual_name}{sn})")
+                                self._broadcast_threadsafe({
+                                    "event": "camera_test_result",
+                                    "success": True,
+                                    "message": msg,
+                                })
+                                return
+                    else:
+                        jpegs = mgr.get_latest_jpegs()
+                        if jpegs:
+                            if camera_name:
+                                matched = [(n, len(b)) for s, n, b in jpegs if n == camera_name]
+                                if matched:
+                                    self._broadcast_threadsafe({
+                                        "event": "camera_test_result",
+                                        "success": True,
+                                        "message": f"本地摄像头测试成功: camera={matched[0][0]}",
+                                    })
+                                    return
+                            else:
+                                name = jpegs[0][1]
+                                self._broadcast_threadsafe({
+                                    "event": "camera_test_result",
+                                    "success": True,
+                                    "message": f"本地摄像头测试成功: camera={name}",
+                                })
+                                return
+                    time.sleep(0.2)
 
-                import time as _time
-                deadline = _time.time() + 10
-                while _time.time() < deadline:
-                    try:
-                        frames = pipeline.wait_for_frames(200)
-                        color = frames.get_color_frame()
-                        depth = frames.get_depth_frame()
-                        if color and depth:
-                            msg = (f"相机测试成功: color={color.width}x{color.height}  "
-                                   f"depth={depth.get_distance(320, 240):.3f}m  "
-                                   f"(SN={sn or 'auto-select'})")
-                            pipeline.stop()
-                            self._broadcast_threadsafe({
-                                "event": "camera_test_result",
-                                "success": True,
-                                "message": msg,
-                            })
-                            return
-                    except Exception:
-                        pass
-
-                pipeline.stop()
                 self._broadcast_threadsafe({
                     "event": "camera_test_result",
                     "success": False,
@@ -1675,7 +1696,7 @@ class RobotWebSocketServer:
                 self._broadcast_threadsafe({
                     "event": "camera_test_result",
                     "success": False,
-                    "message": str(e),
+                    "message": f"测试异常: {str(e)}",
                 })
 
         threading.Thread(target=_do_test, daemon=True, name="TestCamera").start()
