@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from ..vision.interface import vertical_catch
+from ..vision.capture import load_yolo_model, load_sam_model
 from ..arm_sdk.controller import RobotController
 from ..arm_sdk.config import *
 from ..core.config_loader import Config
@@ -129,6 +130,10 @@ def place_at_fixed_position(robot):
 def capture_and_move(controller, robot, width=640, height=480):
     """获取一帧图像并执行抓取、放置"""
     try:
+        # 按需加载视觉模型（不再依赖 RobotController 预加载）
+        yolo_model = load_yolo_model(_cfg.YOLO_MODEL_PATH)
+        sam_model = load_sam_model(_cfg.SAM_MODEL_PATH)
+
         controller.openclaw(robot)
 
         ret, initial_state = robot.rm_get_current_arm_state()
@@ -146,8 +151,8 @@ def capture_and_move(controller, robot, width=640, height=480):
 
         mask, bbox, detected = detect_target(
             color_image,
-            controller.yolo_model,
-            controller.sam_model,
+            yolo_model,
+            sam_model,
             controller.process_mask_with_gmm,
             width,
             height
@@ -189,8 +194,8 @@ def capture_and_move(controller, robot, width=640, height=480):
 
         mask, bbox, detected = detect_target(
             color_image,
-            controller.yolo_model,
-            controller.sam_model,
+            yolo_model,
+            sam_model,
             controller.process_mask_with_gmm,
             width,
             height

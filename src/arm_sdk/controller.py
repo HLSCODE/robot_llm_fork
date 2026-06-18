@@ -1,7 +1,6 @@
 import cv2
 import time
 import numpy as np
-from ultralytics import YOLO, SAM
 import os
 import threading
 from sklearn.mixture import GaussianMixture
@@ -115,16 +114,6 @@ class RobotController:
         self._injected_intr = None
 
         self.config = Config.get_instance()
-
-        # 加载模型（启动阶段校验权重文件是否存在）
-        _yolo_path = self.config.YOLO_MODEL_PATH
-        _sam_path = self.config.SAM_MODEL_PATH
-        if not os.path.exists(_yolo_path):
-            raise FileNotFoundError(f"YOLO 模型权重文件不存在: {_yolo_path}")
-        if not os.path.exists(_sam_path):
-            raise FileNotFoundError(f"SAM 模型权重文件不存在: {_sam_path}")
-        self.yolo_model = YOLO(_yolo_path)
-        self.sam_model = SAM(_sam_path)
 
         # 手眼标定参数（优先从 Config 读取，兜底用硬编码值）
         cal = self.config.get_vision_calibration()

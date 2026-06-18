@@ -103,7 +103,7 @@ _model_cache: dict[str, Any] = {}
 _cache_lock  = threading.Lock()
 
 
-def _load_yolo(path: str) -> YOLO:
+def load_yolo_model(path: str) -> YOLO:
     if not os.path.exists(path):
         raise FileNotFoundError(f"YOLO 模型权重文件不存在: {path}")
     with _cache_lock:
@@ -112,7 +112,7 @@ def _load_yolo(path: str) -> YOLO:
         return _model_cache["yolo"]
 
 
-def _load_sam(path: str) -> SAM:
+def load_sam_model(path: str) -> SAM:
     if not os.path.exists(path):
         raise FileNotFoundError(f"SAM 模型权重文件不存在: {path}")
     with _cache_lock:
@@ -565,16 +565,10 @@ class VisionCaptureAction:
     # ---- 内部方法 ----
 
     def _ensure_models(self) -> None:
-        ctrl = self.controller
-        if ctrl is not None:
-            if self._yolo_model is None and getattr(ctrl, "yolo_model", None) is not None:
-                self._yolo_model = ctrl.yolo_model
-            if self._sam_model is None and getattr(ctrl, "sam_model", None) is not None:
-                self._sam_model = ctrl.sam_model
         if self._yolo_model is None:
-            self._yolo_model = _load_yolo(self.yolo_model_path)
+            self._yolo_model = load_yolo_model(self.yolo_model_path)
         if self._sam_model is None:
-            self._sam_model = _load_sam(self.sam_model_path)
+            self._sam_model = load_sam_model(self.sam_model_path)
 
     def _ensure_robot(self):
         """获取 robot 实例（优先复用 controller，否则自建连接）。"""
