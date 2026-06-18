@@ -2,7 +2,6 @@ import cv2
 import time
 import numpy as np
 from ultralytics import YOLO, SAM
-from ..vision.interface import vertical_catch
 import os
 import threading
 from sklearn.mixture import GaussianMixture
@@ -117,9 +116,15 @@ class RobotController:
 
         self.config = Config.get_instance()
 
-        # 加载模型
-        self.yolo_model = YOLO(self.config.YOLO_MODEL_PATH)
-        self.sam_model = SAM(self.config.SAM_MODEL_PATH)
+        # 加载模型（启动阶段校验权重文件是否存在）
+        _yolo_path = self.config.YOLO_MODEL_PATH
+        _sam_path = self.config.SAM_MODEL_PATH
+        if not os.path.exists(_yolo_path):
+            raise FileNotFoundError(f"YOLO 模型权重文件不存在: {_yolo_path}")
+        if not os.path.exists(_sam_path):
+            raise FileNotFoundError(f"SAM 模型权重文件不存在: {_sam_path}")
+        self.yolo_model = YOLO(_yolo_path)
+        self.sam_model = SAM(_sam_path)
 
         # 手眼标定参数（优先从 Config 读取，兜底用硬编码值）
         cal = self.config.get_vision_calibration()
@@ -211,246 +216,6 @@ class RobotController:
         
         print("达到最大重试次数，无法获取帧")
         return None, None, None
-
-    def capture_and_move(self, robot, width=640, height=480, fps=60):
-        """捕获图像并执行移动"""
-        try:
-            ret = robot.rm_set_gripper_release(speed=100, block=True, timeout=3)
-            ret, initial_state = robot.rm_get_current_arm_state()
-            if ret != 0:
-                raise Exception(f"获取初始位姿失败，错误码：{ret}")
-            
-            initial_pose = initial_state['pose']
-            print("/n==== 初始位姿 ====")
-            print("初始位姿:", initial_pose)
-
-            # 获取图像数据并处理
-            color_image, depth_image, color_intr = self.get_frames_from_gui()
-            if color_image is None or depth_image is None or color_intr is None:
-                raise Exception("无法获取图像或相机内参")
-            
-            # 保存原始图像
-            cv2.imwrite('/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/pictures/original_image.jpg', 
-                        cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
-            
-            # YOLO检测获取边界框
-            yolo_results = self.yolo_model(color_image, verbose=False)
-            
-            # 创建掩码图像
-            mask = np.zeros((height, width), dtype=np.uint8)
-
-            #print(yolo_results)
-            
-            # 处理检测结果
-            detected = False
-            for result in yolo_results:
-                boxes = result.boxes
-                for box in boxes:
-                    print(box)
-                    confidence = float(box.conf)
-                    if confidence < 0.7:
-                        continue
-
-                    detected = True
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    bbox = [int(x1), int(y1), int(x2), int(y2)]
-                    
-                    # 使用SAM进行初始分割
-                    sam_results = self.sam_model(color_image, bboxes=[bbox])
-                    
-                    if sam_results and len(sam_results) > 0:
-                        sam_mask = sam_results[0].masks.data[0].cpu().numpy()
-                        sam_mask = (sam_mask * 255).astype(np.uint8)
-                        
-                        # 使用GMM改进分割结果
-                        improved_mask = self.process_mask_with_gmm(color_image, sam_mask)
-                        
-                        # 更新掩码
-                        mask = cv2.bitwise_or(mask, improved_mask)
-                        
-                        # 保存改进后的掩码用于调试
-                        cv2.imwrite('/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/pictures/improved_mask.jpg', 
-                                  improved_mask)
-                    
-                    # 在原图上显示检测框和轮廓
-                    cv2.rectangle(color_image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-
-            if not detected:
-                cv2.imwrite('/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/pictures/failed_detection.jpg', 
-                           cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
-                raise Exception("未检测到目标")
-
-            # 保存结果图像
-            cv2.imwrite('/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/pictures/mask_result.jpg', mask)
-
-            # 获取机械臂当前状态
-            ret, state_dict = robot.rm_get_current_arm_state()
-            if ret != 0:
-                raise Exception(f"获取机械臂状态失败，错误码：{ret}")
-            
-            pose = state_dict['pose']
-            print("/n==== 当前状态 ====")
-            print("当前位姿:", pose)
-
-            # 1. 第一次计算目标位姿
-            above_object_pose, correct_angle_pose, finally_pose  = vertical_catch(
-                mask, 
-                depth_image, 
-                color_intr, 
-                pose,  
-                100,   
-                self.gripper_offset,
-                self.rotation_matrix, 
-                self.translation_vector
-            )
-
-            # 2. 移动到预备位置（让相机对准物体上方）
-            print("移动到预备位置...")
-            camera_above_pose = above_object_pose.copy()
-            camera_above_pose[0] -= 0.08
-            # camera_above_pose[1] -= 0.05
-            
-            print("/n==== 移动详细信息 ====")
-            print(f"目标位姿: {camera_above_pose}")
-            print(f"位置变化: dx={camera_above_pose[0]-pose[0]:.3f}, "
-                  f"dy={camera_above_pose[1]-pose[1]:.3f}, "
-                  f"dz={camera_above_pose[2]-pose[2]:.3f}")
-
-            ret = robot.rm_movej_p(camera_above_pose, v=15, r=0, connect=0, block=1)
-            if ret != 0:
-                raise Exception(f"移动到预备位置失败，错误码：{ret}")
-            time.sleep(1)
-
-             # 3. 在相机正对物体时进行二次检测
-            print("/n==== 二次检测 ====")
-            color_image, depth_image, color_intr = self.get_frames_from_gui()
-            if color_image is None or depth_image is None or color_intr is None:
-                raise Exception("二次检测：无法获取图像或相机内参")
-            
-            # 二次YOLO检测和SAM分割
-            yolo_results = self.yolo_model(color_image, verbose=False)
-            mask = np.zeros((height, width), dtype=np.uint8)
-            
-            detected = False
-            for result in yolo_results:
-                boxes = result.boxes
-                for box in boxes:
-                    confidence = float(box.conf)
-                    if confidence < 0.7:
-                        continue
-                    detected = True
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    bbox = [int(x1), int(y1), int(x2), int(y2)]
-                    
-                    sam_results = self.sam_model(color_image, bboxes=[bbox])
-                    if sam_results and len(sam_results) > 0:
-                        sam_mask = sam_results[0].masks.data[0].cpu().numpy()
-                        sam_mask = (sam_mask * 255).astype(np.uint8)
-                        
-                        # 使用GMM改进二次检测的分割结果
-                        improved_mask = self.process_mask_with_gmm(color_image, sam_mask)
-                        
-                        # 更新掩码
-                        mask = cv2.bitwise_or(mask, improved_mask)
-                        
-                        # 保存二次检测改进后的掩码用于调试
-                        cv2.imwrite('/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/pictures/second_improved_mask.jpg', improved_mask)
-
-            if not detected:
-                raise Exception("二次检测：未检测到目标")
-
-            # 获取当前机械臂位姿
-            ret, current_state = robot.rm_get_current_arm_state()
-            if ret != 0:
-                raise Exception(f"获取当前状态失败，错误码：{ret}")
-            current_pose = current_state['pose']
-
-            # 4. 基于二次检测结果计算新的位姿和下降距离
-            _, adjusted_angle_pose, adjusted_final_pose = vertical_catch(
-                mask, 
-                depth_image,  
-                color_intr, 
-                current_pose,
-                100,
-                self.gripper_offset,
-                self.rotation_matrix, 
-                self.translation_vector
-            )
-
-            # 5. 执行抓取动作序列
-            print("/n==== 开始移动 ====")
-            
-            adjusted_final_pose[3] = self.gripper_offset[0]
-            adjusted_final_pose[4] = self.gripper_offset[1]
-            adjusted_final_pose[5] = self.gripper_offset[2]
-
-            # 先移动到目标物体正上方（保持当前Z高度）
-            print("移动到目标物体正上方...")
-            above_target_pose = adjusted_final_pose.copy()
-            above_target_pose[2] = current_pose[2]  # 保持当前Z高度
-            above_target_pose[1] -= 0.015#0.015  # 稍微向左移动一点
-
-            print("/n==== XY平面移动详细信息 ====")
-            print(f"当前位姿: {current_pose}")
-            print(f"目标上方位姿: {above_target_pose}")
-            ret = robot.rm_movel(above_target_pose, v=15, r=0, connect=0, block=1)
-            if ret != 0:
-                raise Exception(f"移动到目标物体上方失败，错误码：{ret}")
-            
-            # 垂直下降到抓取位置
-            print("垂直下降到抓取位置...")
-            print("/n==== Z轴下降详细信息 ====")
-            print(f"目标位姿: {adjusted_final_pose}")
-            adjusted_final_pose[1] -= 0.015
-            adjusted_final_pose[2] = -0.24
-            ret = robot.rm_movel(adjusted_final_pose, v=15, r=0, connect=0, block=1)  # 降低速度进行精确抓取
-            if ret != 0:
-                raise Exception(f"垂直下降失败，错误码：{ret}")
-
-            # 定义最大尝试次数
-            max_attempts = 5
-            attempts = 0
-
-            while attempts < max_attempts:
-                print("夹取物体...")
-                ret = robot.rm_set_gripper_pick_on(
-                    speed=100,    # 夹取速度
-                    block=True,   # 阻塞模式
-                    timeout=3,    # 超时时间3秒
-                    force=300     # 力度100
-                )
-
-                if ret == 0:
-                    print("夹取成功")
-                    break
-                else:
-                    print(f"夹取失败，错误码：{ret}")
-                    attempts += 1
-                    time.sleep(1)  
-
-            if attempts == max_attempts:
-                print("达到最大尝试次数，夹取操作仍未成功")
-
-            # 回到初始位姿
-            print("回到初始位姿...")
-            ret = robot.rm_movej_p(initial_pose, v=15, r=0, connect=0, block=1)
-            if ret != 0:
-                raise Exception(f"回到初始位姿失败，错误码：{ret}")
-
-            if ret != 0:
-                raise Exception(f"释放物体失败，错误码：{ret}")
-
-            # 获取最终状态
-            ret, final_state = robot.rm_get_current_arm_state()
-            if ret == 0:
-                print("/n==== 移动完成 ====")
-                print("最终位姿:", final_state['pose'])
-            
-            return True
-
-        except Exception as e:
-            print(f"错误: {str(e)}")
-            return False
 
     def init_robot1(self):
         """初始化第一个机械臂"""

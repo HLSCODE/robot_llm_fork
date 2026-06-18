@@ -104,6 +104,8 @@ _cache_lock  = threading.Lock()
 
 
 def _load_yolo(path: str) -> YOLO:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"YOLO 模型权重文件不存在: {path}")
     with _cache_lock:
         if "yolo" not in _model_cache:
             _model_cache["yolo"] = YOLO(path)
@@ -111,6 +113,8 @@ def _load_yolo(path: str) -> YOLO:
 
 
 def _load_sam(path: str) -> SAM:
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"SAM 模型权重文件不存在: {path}")
     with _cache_lock:
         if "sam" not in _model_cache:
             _model_cache["sam"] = SAM(path)
