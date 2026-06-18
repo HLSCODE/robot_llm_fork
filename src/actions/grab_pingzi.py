@@ -146,8 +146,7 @@ def capture_and_move(controller, robot, width=640, height=480):
             raise Exception("无法获取图像或相机内参")
 
         os.makedirs(PICTURE_DIR, exist_ok=True)
-        cv2.imwrite(os.path.join(PICTURE_DIR, 'original_image.jpg'),
-                    cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(PICTURE_DIR, 'original_image.jpg'), color_image)
 
         mask, bbox, detected = detect_target(
             color_image,
@@ -158,8 +157,7 @@ def capture_and_move(controller, robot, width=640, height=480):
             height
         )
         if not detected:
-            cv2.imwrite(os.path.join(PICTURE_DIR, 'failed_detection.jpg'),
-                        cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(os.path.join(PICTURE_DIR, 'failed_detection.jpg'), color_image)
             raise Exception("未检测到目标")
 
         cv2.imwrite(os.path.join(PICTURE_DIR, 'mask_result.jpg'), mask)

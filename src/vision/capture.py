@@ -6,7 +6,7 @@
 
 深度相机（如 Intel RealSense D435i）：
   - 建议在 GUI 侧做「深度对齐到彩色」(align depth to color)，使 depth 与 color 同分辨率；
-  - 通过 socket 或 RobotController.get_frames_from_gui() 传入 RGB、对齐后的 depth、
+  - 通过 socket 或 RobotController.get_frames_from_gui() 传入 BGR、对齐后的 depth、
     以及彩色相机内参（与 YOLO/SAM 使用的图像一致），与 grab_pingzi_baizhuo.py 用法一致。
 
 支持两种调用模式：
@@ -233,7 +233,7 @@ def detect_and_segment(
     对单帧图像执行 YOLO 检测 + SAM 分割，返回合并掩码。
 
     Args:
-        color_image:       RGB 图像
+        color_image:       BGR 图像
         yolo_model:        YOLO 模型实例
         sam_model:         SAM 模型实例
         width/height:      图像分辨率（用于初始化掩码画布）
@@ -675,7 +675,7 @@ class VisionCaptureAction:
         if not self.save_debug_images or img is None:
             return
         d = self._debug_dir("failed")
-        cv2.imwrite(os.path.join(d, name), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        cv2.imwrite(os.path.join(d, name), img)
 
 
 # ---------------------------------------------------------------
