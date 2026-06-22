@@ -301,13 +301,13 @@ class RobotController:
     def openclaw(self, robot):
         """打开夹爪"""
         attempts = 0
-        max_attempts = 5
+        max_attempts = MAX_ATTEMPTS
         while attempts < max_attempts:
             print("打开夹爪...")
             ret = robot.rm_set_gripper_release(
-                        speed=100,
+                        speed=GRIPPER_CONFIG["release"]["speed"],
                         block=True,
-                        timeout=3)
+                        timeout=GRIPPER_CONFIG["release"]["timeout"])
             if ret == 0:
                 print("释放成功")
                 break
@@ -323,15 +323,15 @@ class RobotController:
 
     def closeclaw(self, robot):
         """关闭夹爪"""
-        max_attempts = 5
+        max_attempts = MAX_ATTEMPTS
         attempts = 0
         while attempts < max_attempts:
             print("夹取物体...")
             ret = robot.rm_set_gripper_pick_on(
-                    speed=800,    # 夹取速度
-                    block=True,   # 阻塞模式
-                    timeout=3,    # 超时时间3秒
-                    force=300     # 力度100
+                    speed=GRIPPER_CONFIG["pick"]["speed"],
+                    block=True,
+                    timeout=GRIPPER_CONFIG["pick"]["timeout"],
+                    force=GRIPPER_CONFIG["pick"]["force"]
                 )
             if ret == 0:
                 print("夹取成功")
@@ -617,9 +617,9 @@ class RobotController:
     def execute_robot_task_unlock(self, robot):
         """执行机械臂解锁任务"""
         try:
-            ret = robot.rm_movej_p(self.TOOL_POINTS[0]["pose"], v=10, r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=10, r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[2]["pose"], v=5, r=0, connect=0, block=1)
+            ret = robot.rm_movej_p(self.TOOL_POINTS[0]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[2]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
 
             self.relay_controller.turn_off_relay_Y2()
             time.sleep(2)
@@ -647,8 +647,8 @@ class RobotController:
                 print("上锁未成功，等待后重试...")
                 time.sleep(1)
             
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=10, r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[0]["pose"], v=10, r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[0]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
 
             print("任务执行完成")
             return True
@@ -662,8 +662,8 @@ class RobotController:
     def execute_robot_task_lock(self, robot):
         """执行机械臂锁定任务"""
         try:
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=10, r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[2]["pose"], v=10, r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[2]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
 
             print("执行锁定操作")
             res = self.khs.send_command('open')
@@ -675,8 +675,8 @@ class RobotController:
             self.relay_controller.turn_on_relay_Y2()
             time.sleep(2)
 
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=10, r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[0]["pose"], v=10, r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
+            ret = robot.rm_movel(self.TOOL_POINTS[0]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
 
             print("快换手锁定任务执行完成")
             
@@ -860,18 +860,18 @@ if __name__ == "__main__":
             
             current_pos = current_state['pose']
             current_pos[4] = 0
-            robot2.rm_movel(current_pos, v=10, r=0, connect=0, block=1)
+            robot2.rm_movel(current_pos, v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
 
             print("\n4. 下降到取液高度...")
             current_pos[2] -= 0.12
-            robot2.rm_movel(current_pos, v=10, r=0, connect=0, block=1)
+            robot2.rm_movel(current_pos, v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
 
             print("\n5. 开始取液...")
             adp.absorb(800)
 
             print("\n6. 上升")
             current_pos[2] += 0.12
-            robot2.rm_movel(current_pos, v=10, r=0, connect=0, block=1)
+            robot2.rm_movel(current_pos, v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
 
             success = controller.execute_trajectory(robot2, "/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/code/Path/trajectory_3.txt")
             if success:

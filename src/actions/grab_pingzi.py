@@ -21,6 +21,7 @@ _cfg = Config.get_instance()
 _GRIPPER_LENGTH = _cfg.VISION_DEFAULT_GRIPPER_LENGTH
 _GRASP_Z = _cfg.VISION_GRASP_Z
 _PREP_OFFSET_X = _cfg.VISION_PREP_OFFSET_X
+_VISION_VELOCITY = _cfg.VISION_DEFAULT_VELOCITY
 
 
 def detect_target(image, yolo_model, sam_model, process_mask_fn, width=640, height=480, conf_thresh=0.7):
@@ -57,7 +58,7 @@ def execute_pick(robot, target_pose, drop_height):
 
     below = target_pose.copy()
     below[2] = _GRASP_Z
-    ret = robot.rm_movel(below, v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movel(below, v=_VISION_VELOCITY, r=0, connect=0, block=1)
     if ret != 0:
         raise Exception(f"下降到目标失败，错误码：{ret}")
 
@@ -76,7 +77,7 @@ def execute_pick(robot, target_pose, drop_height):
     if attempts == MAX_ATTEMPTS:
         raise Exception("达到最大尝试次数，夹取仍未成功")
 
-    ret = robot.rm_movel(target_pose, v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movel(target_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
     if ret != 0:
         raise Exception(f"抬升失败，错误码：{ret}")
 
@@ -85,14 +86,14 @@ def execute_place(robot, target_pose, drop_height):
     """动作原语：到上方 -> 下降 -> 松开 -> 抬升"""
     above = target_pose.copy()
     tem_pos = [424 / 1000, -92 / 1000, -439 / 1000, 3.15, 0, 1.618]
-    ret = robot.rm_movej_p(tem_pos, v=MOVE_SPEED, r=0, connect=0, block=1)
-    ret = robot.rm_movel(above, v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movej_p(tem_pos, v=_VISION_VELOCITY, r=0, connect=0, block=1)
+    ret = robot.rm_movel(above, v=_VISION_VELOCITY, r=0, connect=0, block=1)
     if ret != 0:
         raise Exception(f"移动到放置上方失败，错误码：{ret}")
 
     below = above.copy()
     below[2] -= drop_height
-    ret = robot.rm_movel(below, v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movel(below, v=_VISION_VELOCITY, r=0, connect=0, block=1)
     if ret != 0:
         raise Exception(f"下降到放置高度失败，错误码：{ret}")
 
@@ -110,19 +111,19 @@ def execute_place(robot, target_pose, drop_height):
     if attempts == MAX_ATTEMPTS:
         raise Exception("达到最大尝试次数，释放仍未成功")
 
-    ret = robot.rm_movel(above, v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movel(above, v=_VISION_VELOCITY, r=0, connect=0, block=1)
     if ret != 0:
         raise Exception(f"抬升失败，错误码：{ret}")
 
-    ret = robot.rm_movel(tem_pos, v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movel(tem_pos, v=_VISION_VELOCITY, r=0, connect=0, block=1)
 
-    ret = robot.rm_movej_p(PLACE_POSITION['pos2'].copy(), v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movej_p(PLACE_POSITION['pos2'].copy(), v=_VISION_VELOCITY, r=0, connect=0, block=1)
 
 
 def place_at_fixed_position(robot):
     """使用动作原语完成放置"""
     execute_place(robot, PLACE_POSITION['above'].copy(), PLACE_POSITION['drop_height'])
-    ret = robot.rm_movej_p(INITIAL_POSE, v=MOVE_SPEED, r=0, connect=0, block=1)
+    ret = robot.rm_movej_p(INITIAL_POSE, v=_VISION_VELOCITY, r=0, connect=0, block=1)
     if ret != 0:
         raise Exception(f"回到初始位姿失败，错误码：{ret}")
 
@@ -181,7 +182,7 @@ def capture_and_move(controller, robot, width=640, height=480):
         camera_above_pose = above_object_pose.copy()
         camera_above_pose[0] += _PREP_OFFSET_X
 
-        ret = robot.rm_movej_p(camera_above_pose, v=MOVE_VELOCITY, r=0, connect=0, block=1)
+        ret = robot.rm_movej_p(camera_above_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
         if ret != 0:
             raise Exception(f"移动到预备位置失败，错误码：{ret}")
         time.sleep(1)
@@ -227,13 +228,13 @@ def capture_and_move(controller, robot, width=640, height=480):
         above_target_pose[0] -= 0.025
         above_target_pose[1] += 0.015
 
-        ret = robot.rm_movel(above_target_pose, v=MOVE_VELOCITY, r=0, connect=0, block=1)
+        ret = robot.rm_movel(above_target_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
         if ret != 0:
             raise Exception(f"移动到目标物体上方失败，错误码：{ret}")
 
         execute_pick(robot, above_target_pose, drop_height=_cfg.PLACE_DROP_HEIGHT)
 
-        ret = robot.rm_movej_p(initial_pose, v=MOVE_VELOCITY, r=0, connect=0, block=1)
+        ret = robot.rm_movej_p(initial_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
         if ret != 0:
             raise Exception(f"回到初始位姿失败，错误码：{ret}")
 
