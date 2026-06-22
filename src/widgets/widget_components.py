@@ -1,10 +1,11 @@
 from PyQt6.QtWidgets import (QWidget, QListWidget, QListWidgetItem, QLabel,
                             QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit,
-                            QTabWidget)
+                            QTabWidget, QTreeWidget, QTreeWidgetItem, QMenu, QInputDialog)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QMimeData
-from PyQt6.QtGui import QIcon, QColor, QDrag
+from PyQt6.QtGui import QIcon, QColor, QDrag, QAction
 import json
-from ..core.models import ActionDefinition, SequenceItem, ActionType, SequenceItemStatus
+from uuid import uuid4
+from ..core.models import ActionDefinition, SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
 
 
 class ActionListWidget(QListWidget):
@@ -143,42 +144,82 @@ class ActionListWidget(QListWidget):
         return QIcon(pixmap)
 
 
-class SequenceListWidget(QListWidget):
+class SequenceListWidget(QTreeWidget):
+    """序列编辑器 — 基于 QTreeWidget，支持循环块嵌套显示。
+
+    - 顶层节点: SequenceItem（普通动作）或 LoopBlock（循环容器）
+    - 循环容器子节点: SequenceItem（循环体内的动作）
+    - 通过 UUID 映射实现 O(1) 的树节点查找
+    """
+
+    loop_modified = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
-        self.setDragDropMode(QListWidget.DragDropMode.DropOnly)
+        self.setDragDropMode(QTreeWidget.DragDropMode.DropOnly)
         self.setDragEnabled(False)
-        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        # 横向流动：图标模式，每项较大卡片
-        self.setViewMode(QListWidget.ViewMode.IconMode)
-        self.setFlow(QListWidget.Flow.LeftToRight)
-        self.setSpacing(12)
+        self.setSelectionMode(QTreeWidget.SelectionMode.ExtendedSelection)
+        self.setHeaderHidden(True)
+        self.setIndentation(24)
+        self.setAnimated(True)
+        self.setExpandsOnDoubleClick(True)
         self.setIconSize(QSize(130, 88))
         self.setStyleSheet("""
-            QListWidget {
+            QTreeWidget {
                 background-color: #f8fafc;
                 border: 2px dashed #cbd5e1;
                 border-radius: 12px;
                 padding: 4px;
             }
-            QListWidget::item {
+            QTreeWidget::item {
                 border: 2px solid transparent;
                 border-radius: 10px;
-                padding: 1px;
+                padding: 4px 6px;
                 font-size: 11px;
                 font-weight: bold;
                 background: transparent;
+                min-height: 44px;
             }
-            QListWidget::item:hover {
+            QTreeWidget::item:hover {
                 border-color: #93c5fd;
                 background: rgba(59, 130, 246, 0.06);
             }
-            QListWidget::item:selected {
+            QTreeWidget::item:selected {
                 border: 2px solid #3b82f6;
                 background: rgba(59, 130, 246, 0.10);
             }
+            QTreeWidget::branch:has-children:!has-siblings:closed,
+            QTreeWidget::branch:closed:has-children:has-siblings,
+            QTreeWidget::branch:open:has-children:!has-siblings,
+            QTreeWidget::branch:open:has-children:has-siblings {
+                border: none;
+                background: transparent;
+            }
         """)
+
+        # UUID → QTreeWidgetItem 映射（用于 O(1) 状态更新查找）
+        self._item_map: dict[str, QTreeWidgetItem] = {}
+
+        # 右键菜单
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
+
+    # ────────────────── ID mapping helpers ──────────────────
+
+    def _register_item(self, tree_item: QTreeWidgetItem, entry: SequenceEntry):
+        """将树节点注册到 UUID 映射表中"""
+        self._item_map[entry.uuid] = tree_item
+
+    def _unregister_item(self, entry: SequenceEntry):
+        """从 UUID 映射表中移除"""
+        self._item_map.pop(entry.uuid, None)
+
+    def _find_item_by_entry(self, entry: SequenceEntry) -> QTreeWidgetItem | None:
+        """通过 SequenceItem 或 LoopBlock 的 UUID 查找对应的树节点"""
+        return self._item_map.get(entry.uuid)
+
+    # ────────────────── Drag & Drop ──────────────────
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat("application/x-action"):
@@ -198,41 +239,254 @@ class SequenceListWidget(QListWidget):
             action_dict = json.loads(data.data().decode('utf-8'))
             action = ActionDefinition.from_dict(action_dict)
             sequence_item = SequenceItem.from_definition(action)
-            self.add_sequence_item(sequence_item)
+
+            # 判断 drop 目标：如果是循环块内，添加到循环块中
+            target = self.itemAt(event.position().toPoint())
+            target_entry = target.data(0, Qt.ItemDataRole.UserRole) if target else None
+            if target_entry and isinstance(target_entry, LoopBlock):
+                self._add_child_item(target, sequence_item, target_entry)
+            else:
+                self.add_sequence_item(sequence_item)
             event.accept()
         else:
-            super().dropEvent(event)
+            event.ignore()
 
-    def add_sequence_item(self, item: SequenceItem):
-        list_item = QListWidgetItem()
-        current_index = self.count()  # 添加前已有数量，即新项的序号
-        self._update_item_display(list_item, item, current_index)
-        list_item.setData(Qt.ItemDataRole.UserRole, item)
-        self.addItem(list_item)
+    # ────────────────── Adding items ──────────────────
 
-    def update_item_status(self, index: int, item: SequenceItem):
-        if 0 <= index < self.count():
-            list_item = self.item(index)
-            self._update_item_display(list_item, item, index)
-            list_item.setData(Qt.ItemDataRole.UserRole, item)
+    def add_sequence_item(self, item: SequenceItem, parent: QTreeWidgetItem | None = None):
+        """添加一个 SequenceItem 到序列末尾（或指定父节点下）"""
+        tree_item = QTreeWidgetItem()
+        current_index = self.topLevelItemCount() if parent is None else parent.childCount()
+        self._update_item_display(tree_item, item, current_index)
+        tree_item.setData(0, Qt.ItemDataRole.UserRole, item)
+        self._register_item(tree_item, item)
 
-    def _update_item_display(self, list_item: QListWidgetItem, item: SequenceItem, index: int):
+        if parent is not None:
+            parent.addChild(tree_item)
+            parent.setExpanded(True)
+            # 更新父循环块的摘要
+            loop_entry = parent.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(loop_entry, LoopBlock):
+                self._update_loop_display(parent, loop_entry)
+        else:
+            self.addTopLevelItem(tree_item)
+
+    def add_loop_block(self, loop: LoopBlock):
+        """添加一个循环块到序列末尾"""
+        tree_item = QTreeWidgetItem()
+        self._update_loop_display(tree_item, loop)
+        tree_item.setData(0, Qt.ItemDataRole.UserRole, loop)
+        tree_item.setFlags(tree_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        self._register_item(tree_item, loop)
+
+        # 添加子项
+        for i, child_item in enumerate(loop.items):
+            child_tree_item = QTreeWidgetItem()
+            self._update_item_display(child_tree_item, child_item, i)
+            child_tree_item.setData(0, Qt.ItemDataRole.UserRole, child_item)
+            self._register_item(child_tree_item, child_item)
+            tree_item.addChild(child_tree_item)
+
+        tree_item.setExpanded(True)
+        self.addTopLevelItem(tree_item)
+
+    def _add_child_item(self, parent_tree: QTreeWidgetItem, item: SequenceItem, loop_entry: LoopBlock):
+        """向已有循环块内添加子动作"""
+        loop_entry.items.append(item)
+        child_tree = QTreeWidgetItem()
+        idx = parent_tree.childCount()
+        self._update_item_display(child_tree, item, idx)
+        child_tree.setData(0, Qt.ItemDataRole.UserRole, item)
+        self._register_item(child_tree, item)
+        parent_tree.addChild(child_tree)
+        parent_tree.setExpanded(True)
+        self._update_loop_display(parent_tree, loop_entry)
+
+    # ────────────────── Wrapping / Unwrapping loops ──────────────────
+
+    def wrap_in_loop(self, items: list[SequenceItem], repeat_count: int) -> LoopBlock:
+        """将一组 SequenceItem 包裹为 LoopBlock（内部会克隆子项）"""
+        loop = LoopBlock.from_sequence_items(items, repeat_count)
+        self.add_loop_block(loop)
+        self.loop_modified.emit()
+        return loop
+
+    def unwrap_loop(self, loop_tree_item: QTreeWidgetItem) -> list[SequenceItem]:
+        """展开循环块 — 移除循环容器，将子动作升为顶层"""
+        loop_entry = loop_tree_item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(loop_entry, LoopBlock):
+            return []
+
+        idx = self.indexOfTopLevelItem(loop_tree_item)
+        if idx < 0:
+            return []
+
+        # 克隆子项
+        children = [SequenceItem.from_dict(s.to_dict()) for s in loop_entry.items]
+
+        # 移除循环块（这会删除子节点）
+        self._unregister_item(loop_entry)
+        for child in loop_entry.items:
+            self._unregister_item(child)
+        self.takeTopLevelItem(idx)
+
+        # 在相同位置插入展开的子动作
+        for offset, child in enumerate(children):
+            child_tree = QTreeWidgetItem()
+            self._update_item_display(child_tree, child, idx + offset)
+            child_tree.setData(0, Qt.ItemDataRole.UserRole, child)
+            self._register_item(child_tree, child)
+            self.insertTopLevelItem(idx + offset, child_tree)
+
+        self.loop_modified.emit()
+        return children
+
+    def edit_loop_count(self, loop_tree_item: QTreeWidgetItem, new_count: int):
+        """修改循环块的重复次数"""
+        loop_entry = loop_tree_item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(loop_entry, LoopBlock):
+            return
+        loop_entry.repeat_count = max(1, new_count)
+        loop_entry.current_iteration = 0
+        self._update_loop_display(loop_tree_item, loop_entry)
+        self.loop_modified.emit()
+
+    # ────────────────── Context menu ──────────────────
+
+    def _on_context_menu(self, pos):
+        item = self.itemAt(pos)
+        if item is None:
+            return
+
+        entry = item.data(0, Qt.ItemDataRole.UserRole)
+        menu = QMenu(self)
+
+        if isinstance(entry, LoopBlock):
+            edit_action = menu.addAction("✏ 修改循环次数")
+            unwrap_action = menu.addAction("📤 展开循环（取消循环）")
+            delete_action = menu.addAction("🗑 删除循环块")
+            menu.addSeparator()
+            collapse_action = menu.addAction(
+                "▶ 折叠" if item.isExpanded() else "▼ 展开"
+            )
+
+            action = menu.exec(self.viewport().mapToGlobal(pos))
+            if action == edit_action:
+                new_count, ok = QInputDialog.getInt(
+                    self, "修改循环次数", "循环次数:",
+                    entry.repeat_count, 1, 999, 1
+                )
+                if ok:
+                    self.edit_loop_count(item, new_count)
+            elif action == unwrap_action:
+                self.unwrap_loop(item)
+            elif action == delete_action:
+                self._remove_loop_block(item)
+            elif action == collapse_action:
+                item.setExpanded(not item.isExpanded())
+        elif isinstance(entry, SequenceItem):
+            # 判断是在循环内还是顶层
+            parent_item = item.parent()
+            if parent_item is not None:
+                parent_entry = parent_item.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(parent_entry, LoopBlock):
+                    remove_action = menu.addAction("🗑 从循环中移除")
+                    action = menu.exec(self.viewport().mapToGlobal(pos))
+                    if action == remove_action:
+                        self._remove_child_from_loop(parent_item, item, entry, parent_entry)
+            else:
+                # 顶层动作 - 可以包装为循环
+                loop_action = menu.addAction("🔁 包装为循环")
+                delete_action = menu.addAction("🗑 删除")
+                action = menu.exec(self.viewport().mapToGlobal(pos))
+                if action == loop_action:
+                    repeat_count, ok = QInputDialog.getInt(
+                        self, "包装为循环", "循环次数:", 2, 1, 999, 1
+                    )
+                    if ok:
+                        # 需要从 main_window 协调……这里仅发出信号
+                        pass
+                elif action == delete_action:
+                    self._remove_top_level_item(item, entry)
+
+    def _remove_top_level_item(self, tree_item: QTreeWidgetItem, entry: SequenceEntry):
+        idx = self.indexOfTopLevelItem(tree_item)
+        if idx >= 0:
+            self._unregister_item(entry)
+            self.takeTopLevelItem(idx)
+
+    def _remove_loop_block(self, loop_tree_item: QTreeWidgetItem):
+        loop_entry = loop_tree_item.data(0, Qt.ItemDataRole.UserRole)
+        idx = self.indexOfTopLevelItem(loop_tree_item)
+        if idx >= 0:
+            self._unregister_item(loop_entry)
+            for child in loop_entry.items:
+                self._unregister_item(child)
+            self.takeTopLevelItem(idx)
+            self.loop_modified.emit()
+
+    def _remove_child_from_loop(self, parent_tree: QTreeWidgetItem,
+                                  child_tree: QTreeWidgetItem,
+                                  child_entry: SequenceItem,
+                                  loop_entry: LoopBlock):
+        idx = parent_tree.indexOfChild(child_tree)
+        if idx >= 0:
+            self._unregister_item(child_entry)
+            parent_tree.takeChild(idx)
+            loop_entry.items = [s for s in loop_entry.items if s.uuid != child_entry.uuid]
+            self._update_loop_display(parent_tree, loop_entry)
+            self.loop_modified.emit()
+
+    # ────────────────── Display updates ──────────────────
+
+    def update_item_status(self, item: SequenceItem):
+        """通过 SequenceItem 的 UUID 查找树节点并更新显示"""
+        tree_item = self._find_item_by_entry(item)
+        if tree_item is None:
+            return
+        parent = tree_item.parent()
+        if parent is not None:
+            idx = parent.indexOfChild(tree_item)
+        else:
+            idx = self.indexOfTopLevelItem(tree_item)
+        if idx < 0:
+            idx = 0
+        self._update_item_display(tree_item, item, idx)
+
+    def update_loop_status(self, loop: LoopBlock):
+        """更新循环块父节点显示（如执行进度）"""
+        tree_item = self._find_item_by_entry(loop)
+        if tree_item is None:
+            return
+        self._update_loop_display(tree_item, loop)
+
+    def _update_item_display(self, tree_item: QTreeWidgetItem, item: SequenceItem, index: int):
         status_text = self._get_status_text(item.status)
-        # 图标模式：序号 + 动作名 + 状态
-        display_text = f"{index + 1}. {item.definition.name} [{status_text}]"
-        display_text = f"{item.definition.name} [{status_text}]"
-        list_item.setText(display_text)
-        list_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        list_item.setToolTip(f"{item.definition.name}\n状态: {status_text}\n参数: {item.definition.parameters}")
-
-        # 透明背景
-        list_item.setBackground(Qt.GlobalColor.transparent)
-
-        # 大卡片图标
+        tree_item.setText(0, f"{item.definition.name}  [{status_text}]")
+        tree_item.setToolTip(0, f"{item.definition.name}\n状态: {status_text}\n参数: {item.definition.parameters}")
+        tree_item.setBackground(0, Qt.GlobalColor.transparent)
         icon = self._create_text_icon(item.definition.name, item.definition.type, item.status, index)
-        list_item.setIcon(icon)
+        tree_item.setIcon(0, icon)
+        # 存储 item 引用以确保 UUID 映射一致
+        tree_item.setData(0, Qt.ItemDataRole.UserRole, item)
 
-    def _get_status_text(self, status: SequenceItemStatus) -> str:
+    def _update_loop_display(self, tree_item: QTreeWidgetItem, loop: LoopBlock):
+        """更新循环块父节点的显示文本"""
+        child_count = len(loop.items)
+        total = child_count * loop.repeat_count
+        if loop.current_iteration > 0:
+            progress = f" 第{loop.current_iteration}/{loop.repeat_count}轮"
+        else:
+            progress = ""
+        tree_item.setText(0, f"🔁 循环 ×{loop.repeat_count}  ({child_count}个动作 × {loop.repeat_count}次 = {total}步){progress}")
+        tree_item.setToolTip(0, f"循环块\n子动作: {child_count} 个\n循环次数: {loop.repeat_count}\n总步数: {total}")
+        # 循环块使用特殊的紫色图标
+        icon = self._create_loop_icon(child_count, loop.repeat_count, loop.current_iteration)
+        tree_item.setIcon(0, icon)
+        tree_item.setData(0, Qt.ItemDataRole.UserRole, loop)
+
+    @staticmethod
+    def _get_status_text(status: SequenceItemStatus) -> str:
         text_map = {
             SequenceItemStatus.PENDING: "⏳ 等待中",
             SequenceItemStatus.RUNNING: "▶ 执行中",
@@ -241,40 +495,8 @@ class SequenceListWidget(QListWidget):
         }
         return text_map.get(status, "未知")
 
-    def _create_small_icon(self, action_type: ActionType, status: SequenceItemStatus) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter
-        pixmap = QPixmap(20, 20)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    # ────────────────── Card icons ──────────────────
 
-        colors = {
-            ActionType.MOVE: QColor(100, 149, 237),  # 机械臂移动 - 蓝色
-            ActionType.BASE_MOVE: QColor(255, 99, 71),  # 底盘移动 - 红色
-            ActionType.MANIPULATE: QColor(255, 140, 0),
-            ActionType.WAIT: QColor(255, 140, 0),
-            ActionType.INSPECT: QColor(60, 179, 113),
-            ActionType.CHANGE_GUN: QColor(147, 112, 219),
-            ActionType.VISION_CAPTURE: QColor(30, 144, 255),
-            ActionType.TRAJECTORY: QColor(0, 150, 136),
-        }
-
-        if status == SequenceItemStatus.RUNNING:
-            color = QColor(255, 165, 0)
-        elif status == SequenceItemStatus.SUCCESS:
-            color = QColor(180, 180, 180)
-        elif status == SequenceItemStatus.FAILED:
-            color = QColor(244, 67, 54)
-        else:
-            color = colors.get(action_type, QColor(128, 128, 128))
-
-        painter.setBrush(color)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(1, 1, 18, 18, 4, 4)
-        painter.end()
-        return QIcon(pixmap)
-
-    # ── 动作类型卡片风格 ──
     _CARD_STYLE = {
         ActionType.MOVE: ("🦾", QColor(99, 102, 241)),
         ActionType.BASE_MOVE: ("🚗", QColor(239, 68, 68)),
@@ -286,8 +508,19 @@ class SequenceListWidget(QListWidget):
         ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),
     }
 
+    _TYPE_LABELS = {
+        ActionType.MOVE: "机械臂移动",
+        ActionType.BASE_MOVE: "底盘移动",
+        ActionType.MANIPULATE: "执行器",
+        ActionType.WAIT: "等待",
+        ActionType.INSPECT: "检测",
+        ActionType.CHANGE_GUN: "换枪",
+        ActionType.VISION_CAPTURE: "视觉抓取",
+        ActionType.TRAJECTORY: "轨迹",
+    }
+
     def _create_text_icon(self, text: str, action_type: ActionType, status: SequenceItemStatus, index: int | None = None) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor, QPen, QLinearGradient
+        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor, QPen
         from PyQt6.QtCore import QRectF
 
         width, height = 130, 88
@@ -301,42 +534,35 @@ class SequenceListWidget(QListWidget):
             action_type, ("📋", QColor(148, 163, 184))
         )
 
-        # ── 根据状态决定卡片颜色 ──
         if status == SequenceItemStatus.RUNNING:
-            fill_color = QColor(251, 191, 36)   # amber
-            border_color = QColor(34, 197, 94)  # green ring
+            fill_color = QColor(251, 191, 36)
+            border_color = QColor(34, 197, 94)
             emoji = "▶"
         elif status == SequenceItemStatus.SUCCESS:
-            fill_color = QColor(148, 163, 184)  # slate
+            fill_color = QColor(148, 163, 184)
             border_color = None
         elif status == SequenceItemStatus.FAILED:
-            fill_color = QColor(239, 68, 68)    # red
+            fill_color = QColor(239, 68, 68)
             border_color = None
         else:
             fill_color = base_color
             border_color = None
 
-        # ── 圆角矩形背景 + 顶部渐变高光 ──
         card_rect = QRectF(3, 3, width - 6, height - 6)
         painter.setBrush(fill_color)
         if border_color:
-            pen = QPen(border_color, 3)
-            painter.setPen(pen)
+            painter.setPen(QPen(border_color, 3))
         else:
             painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(card_rect, 10, 10)
 
-        # 顶部高光条
         if status not in (SequenceItemStatus.SUCCESS,):
             highlight = QColor(255, 255, 255, 45)
             painter.setBrush(highlight)
             painter.setPen(Qt.PenStyle.NoPen)
-            highlight_rect = QRectF(5, 5, width - 10, 16)
-            painter.drawRoundedRect(highlight_rect, 6, 6)
+            painter.drawRoundedRect(QRectF(5, 5, width - 10, 16), 6, 6)
 
         painter.setPen(QColor(255, 255, 255))
-
-        # ── 顶部：序号 + emoji ──
         font = QFont()
         font.setBold(True)
         font.setPointSize(11)
@@ -344,12 +570,10 @@ class SequenceListWidget(QListWidget):
         header_text = f"#{index + 1}" if index is not None else emoji
         painter.drawText(QRectF(8, 2, width - 16, 28), Qt.AlignmentFlag.AlignLeft, header_text)
 
-        # 右上角 emoji
         font.setPointSize(14)
         painter.setFont(font)
         painter.drawText(QRectF(0, 0, width - 8, 30), Qt.AlignmentFlag.AlignRight, emoji)
 
-        # ── 动作名称 ──
         font.setPointSize(11)
         font.setBold(True)
         painter.setFont(font)
@@ -360,31 +584,14 @@ class SequenceListWidget(QListWidget):
             truncated,
         )
 
-        # ── 类型标签 ──
-        type_labels = {
-            ActionType.MOVE: "机械臂移动",
-            ActionType.BASE_MOVE: "底盘移动",
-            ActionType.MANIPULATE: "执行器",
-            ActionType.WAIT: "等待",
-            ActionType.INSPECT: "检测",
-            ActionType.CHANGE_GUN: "换枪",
-            ActionType.VISION_CAPTURE: "视觉抓取",
-            ActionType.TRAJECTORY: "轨迹",
-        }
-        type_label = type_labels.get(action_type, action_type.value)
+        type_label = self._TYPE_LABELS.get(action_type, action_type.value)
         font.setPointSize(8)
         font.setBold(False)
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255, 200))
-        painter.drawText(
-            QRectF(8, 50, width - 16, 16),
-            Qt.AlignmentFlag.AlignLeft,
-            type_label,
-        )
+        painter.drawText(QRectF(8, 50, width - 16, 16), Qt.AlignmentFlag.AlignLeft, type_label)
 
-        # ── 底部状态条 ──
         status_text = self._get_status_text(status)
-        # 半透明底条
         status_bg = QColor(0, 0, 0, 40)
         painter.setBrush(status_bg)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -393,7 +600,6 @@ class SequenceListWidget(QListWidget):
         font.setPointSize(9)
         font.setBold(True)
         painter.setFont(font)
-        # 根据状态选择文字颜色
         if status == SequenceItemStatus.RUNNING:
             painter.setPen(QColor(255, 255, 255))
         elif status == SequenceItemStatus.SUCCESS:
@@ -402,24 +608,184 @@ class SequenceListWidget(QListWidget):
             painter.setPen(QColor(255, 220, 220))
         else:
             painter.setPen(QColor(255, 255, 255))
-        painter.drawText(
-            QRectF(0, height - 26, width, 22),
-            Qt.AlignmentFlag.AlignCenter,
-            status_text,
-        )
+        painter.drawText(QRectF(0, height - 26, width, 22), Qt.AlignmentFlag.AlignCenter, status_text)
 
         painter.end()
         return QIcon(pixmap)
 
+    def _create_loop_icon(self, child_count: int, repeat_count: int, current_iteration: int = 0) -> QIcon:
+        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
+        from PyQt6.QtCore import QRectF
+
+        width, height = 130, 88
+        pixmap = QPixmap(width, height)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # 循环块用紫色渐变
+        loop_color = QColor(139, 92, 246)
+        painter.setBrush(loop_color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(3, 3, width - 6, height - 6, 10, 10)
+
+        # 顶部高光
+        highlight = QColor(255, 255, 255, 45)
+        painter.setBrush(highlight)
+        painter.drawRoundedRect(QRectF(5, 5, width - 10, 16), 6, 6)
+
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont()
+        font.setBold(True)
+
+        # 右上角 emoji
+        font.setPointSize(14)
+        painter.setFont(font)
+        painter.drawText(QRectF(0, 0, width - 8, 30), Qt.AlignmentFlag.AlignRight, "🔁")
+
+        # 循环次数
+        font.setPointSize(13)
+        painter.setFont(font)
+        painter.drawText(QRectF(8, 16, width - 16, 30), Qt.AlignmentFlag.AlignLeft, f"×{repeat_count}")
+
+        # 信息
+        font.setPointSize(8)
+        font.setBold(False)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255, 200))
+        painter.drawText(
+            QRectF(8, 44, width - 16, 16),
+            Qt.AlignmentFlag.AlignLeft,
+            f"{child_count}个动作",
+        )
+
+        total = child_count * repeat_count
+        painter.drawText(
+            QRectF(8, 58, width - 16, 16),
+            Qt.AlignmentFlag.AlignLeft,
+            f"共{total}步",
+        )
+
+        # 底部状态
+        status_bg = QColor(0, 0, 0, 40)
+        painter.setBrush(status_bg)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(QRectF(5, height - 26, width - 10, 22), 6, 6)
+
+        font.setPointSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(QColor(255, 255, 255))
+        status_text = f"第{current_iteration}/{repeat_count}轮" if current_iteration > 0 else "循环容器"
+        painter.drawText(QRectF(0, height - 26, width, 22), Qt.AlignmentFlag.AlignCenter, status_text)
+
+        painter.end()
+        return QIcon(pixmap)
+
+    # ────────────────── Data access ──────────────────
+
     def get_sequence(self) -> list[SequenceItem]:
-        sequence = []
-        for i in range(self.count()):
-            item = self.item(i).data(Qt.ItemDataRole.UserRole)
-            sequence.append(item)
+        """返回扁平化序列（LoopBlock 展开为重复的 SequenceItem，用于执行）"""
+        sequence: list[SequenceItem] = []
+        for i in range(self.topLevelItemCount()):
+            entry = self.topLevelItem(i).data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(entry, LoopBlock):
+                for _ in range(entry.repeat_count):
+                    for child in entry.items:
+                        sequence.append(SequenceItem.from_dict(child.to_dict()))
+            elif isinstance(entry, SequenceItem):
+                sequence.append(entry)
         return sequence
 
+    def get_entries(self) -> list[SequenceEntry]:
+        """返回混合列表（含 LoopBlock，用于序列化保存）"""
+        entries: list[SequenceEntry] = []
+        for i in range(self.topLevelItemCount()):
+            tree_item = self.topLevelItem(i)
+            entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(entry, LoopBlock):
+                # 同步子项数据
+                entry.items = []
+                for j in range(tree_item.childCount()):
+                    child_entry = tree_item.child(j).data(0, Qt.ItemDataRole.UserRole)
+                    if isinstance(child_entry, SequenceItem):
+                        entry.items.append(child_entry)
+                entries.append(entry)
+            elif isinstance(entry, SequenceItem):
+                entries.append(entry)
+        return entries
+
     def clear_sequence(self):
+        self._item_map.clear()
         self.clear()
+
+    # ────────────────── Backward-compatible flat-index API ──────────────────
+    # 这些方法模拟 QListWidget 的 API，以最小化 main_window.py 的改动
+
+    def count(self) -> int:
+        return self.topLevelItemCount()
+
+    def currentRow(self) -> int:
+        current = self.currentItem()
+        if current is None:
+            return -1
+        # 如果在某个父节点下，返回父节点索引
+        parent = current.parent()
+        if parent is not None:
+            return self.indexOfTopLevelItem(parent)
+        return self.indexOfTopLevelItem(current)
+
+    def item(self, index: int) -> QTreeWidgetItem:
+        return self.topLevelItem(index)
+
+    def takeItem(self, index: int) -> QTreeWidgetItem:
+        item = self.takeTopLevelItem(index)
+        if item is not None:
+            entry = item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(entry, LoopBlock):
+                self._unregister_item(entry)
+                for j in range(item.childCount()):
+                    child = item.child(j)
+                    child_entry = child.data(0, Qt.ItemDataRole.UserRole)
+                    if isinstance(child_entry, SequenceItem):
+                        self._unregister_item(child_entry)
+            elif isinstance(entry, SequenceItem):
+                self._unregister_item(entry)
+        return item
+
+    def insertItem(self, index: int, tree_item: QTreeWidgetItem):
+        self.insertTopLevelItem(index, tree_item)
+        # 重新注册移动后带回的项
+        entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
+        if isinstance(entry, LoopBlock):
+            self._register_item(tree_item, entry)
+            for j in range(tree_item.childCount()):
+                child = tree_item.child(j)
+                child_entry = child.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(child_entry, SequenceItem):
+                    self._register_item(child, child_entry)
+        elif isinstance(entry, SequenceItem):
+            self._register_item(tree_item, entry)
+
+    def setCurrentRow(self, index: int):
+        item = self.topLevelItem(index)
+        if item:
+            self.setCurrentItem(item)
+
+    def selectedIndexes(self):
+        """返回选中顶层项的索引列表（模拟 QListWidget API）"""
+        indexes = []
+        for i in range(self.topLevelItemCount()):
+            if self.topLevelItem(i).isSelected():
+                from PyQt6.QtCore import QModelIndex
+                indexes.append(self.model().index(i, 0))
+        return indexes
+
+    def scrollToItem(self, tree_item: QTreeWidgetItem):
+        """滚动到指定树节点"""
+        if tree_item is not None:
+            super().scrollToItem(tree_item)
 
 
 class ControlPanel(QWidget):

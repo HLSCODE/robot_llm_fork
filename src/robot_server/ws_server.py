@@ -106,7 +106,7 @@ from .action_executor import ActionExecutor
 from .minicpm_proxy import MiniCPMProxyConfig, _extract_user_text
 from .interceptor import OutgoingInjector
 from .ask_service import classify_instruction
-from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus
+from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
 from ..core.storage import StorageManager
 from ..core.config_loader import Config
 from ..arm_sdk import RobotController
@@ -158,7 +158,7 @@ class RobotWebSocketServer:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         # 当前编排的序列（对应 GUI 右侧的序列列表）
-        self._current_sequence: List[SequenceItem] = []
+        self._current_sequence: List[SequenceEntry] = []
 
         # AI 相关状态
         self._ai_preview_sequence: List[SequenceItem] = []
@@ -219,6 +219,7 @@ class RobotWebSocketServer:
             on_step_started=self._on_step_started,
             on_step_completed=self._on_step_completed,
             on_step_failed=self._on_step_failed,
+            on_loop_progress=self._on_loop_progress,
             on_log=self._on_log,
             on_finished=self._on_finished,
         )
@@ -436,13 +437,21 @@ class RobotWebSocketServer:
             return
 
         # 重置状态
-        for item in sequence:
-            item.status = SequenceItemStatus.PENDING
+        total_steps = 0
+        for entry in sequence:
+            if isinstance(entry, LoopBlock):
+                entry.current_iteration = 0
+                for child in entry.items:
+                    child.status = SequenceItemStatus.PENDING
+                total_steps += len(entry.items) * entry.repeat_count
+            elif isinstance(entry, SequenceItem):
+                entry.status = SequenceItemStatus.PENDING
+                total_steps += 1
 
         await self._broadcast({
             "event": "accepted",
             "message": "开始执行",
-            "steps": len(sequence),
+            "steps": total_steps,
         })
         self._executor.execute(sequence)
 
@@ -464,22 +473,32 @@ class RobotWebSocketServer:
             ))
             return
 
-        sequence = StorageManager.load_sequence(task_name)
-        if not sequence:
+        entries = StorageManager.load_entries(task_name)
+        if not entries:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务 '{task_name}' 不存在或为空"}
             ))
             return
 
-        for item in sequence:
-            item.status = SequenceItemStatus.PENDING
+        for entry in entries:
+            if isinstance(entry, LoopBlock):
+                entry.current_iteration = 0
+                for child in entry.items:
+                    child.status = SequenceItemStatus.PENDING
+            elif isinstance(entry, SequenceItem):
+                entry.status = SequenceItemStatus.PENDING
+
+        total_steps = sum(
+            len(e.items) * e.repeat_count if isinstance(e, LoopBlock) else 1
+            for e in entries
+        )
 
         await self._broadcast({
             "event": "accepted",
             "message": f"加载任务 '{task_name}'，开始执行",
-            "steps": len(sequence),
+            "steps": total_steps,
         })
-        self._executor.execute(sequence)
+        self._executor.execute(entries)
 
     async def _handle_stop(self, websocket, data: dict) -> None:
         """停止执行"""
@@ -942,7 +961,7 @@ class RobotWebSocketServer:
             ))
             return
 
-        StorageManager.save_sequence(self._current_sequence, task_name)
+        StorageManager.save_entries(self._current_sequence, task_name)
         await websocket.send(self._json_msg({
             "event": "task_saved",
             "name": task_name,
@@ -962,22 +981,27 @@ class RobotWebSocketServer:
             ))
             return
 
-        sequence = StorageManager.load_sequence(task_name)
-        if not sequence:
+        entries = StorageManager.load_entries(task_name)
+        if not entries:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务 '{task_name}' 不存在或为空"}
             ))
             return
 
         # 加载到当前序列（替换）
-        self._current_sequence = sequence
-        for item in self._current_sequence:
-            item.status = SequenceItemStatus.PENDING
+        self._current_sequence = entries
+        for entry in self._current_sequence:
+            if isinstance(entry, LoopBlock):
+                entry.current_iteration = 0
+                for child in entry.items:
+                    child.status = SequenceItemStatus.PENDING
+            elif isinstance(entry, SequenceItem):
+                entry.status = SequenceItemStatus.PENDING
 
         await websocket.send(self._json_msg({
             "event": "task_loaded",
             "name": task_name,
-            "sequence": [item.to_dict() for item in self._current_sequence],
+            "sequence": [entry.to_dict() for entry in self._current_sequence],
         }))
         logger.info("任务已加载: %s", task_name)
 
@@ -1025,20 +1049,24 @@ class RobotWebSocketServer:
             ))
             return
 
-        sequence = StorageManager.load_sequence(task_name)
-        if not sequence:
+        entries = StorageManager.load_entries(task_name)
+        if not entries:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务 '{task_name}' 不存在或为空"}
             ))
             return
 
-        for item in sequence:
-            item.status = SequenceItemStatus.PENDING
+        for entry in entries:
+            if isinstance(entry, LoopBlock):
+                for child in entry.items:
+                    child.status = SequenceItemStatus.PENDING
+            elif isinstance(entry, SequenceItem):
+                entry.status = SequenceItemStatus.PENDING
 
         await websocket.send(self._json_msg({
             "event": "task_detail",
             "name": Path(task_name).with_suffix(".task").name,
-            "sequence": [item.to_dict() for item in sequence],
+            "sequence": [entry.to_dict() for entry in entries],
         }))
 
     async def _handle_rename_task(self, websocket, data: dict) -> None:
@@ -1139,11 +1167,11 @@ class RobotWebSocketServer:
             for offset, item in enumerate(insert_items):
                 sequence.insert(index + offset, item)
 
-        StorageManager.save_sequence(sequence, task_name)
+        StorageManager.save_entries(sequence, task_name)
         await websocket.send(self._json_msg({
             "event": "task_updated",
             "name": self._resolve_task_path(task_name).name,
-            "sequence": [item.to_dict() for item in sequence],
+            "sequence": [entry.to_dict() for entry in sequence],
         }))
 
     async def _handle_remove_from_task(self, websocket, data: dict) -> None:
@@ -1174,12 +1202,12 @@ class RobotWebSocketServer:
             return
 
         removed = sequence.pop(index)
-        StorageManager.save_sequence(sequence, task_name)
+        StorageManager.save_entries(sequence, task_name)
         await websocket.send(self._json_msg({
             "event": "task_updated",
             "name": self._resolve_task_path(task_name).name,
             "removed": removed.to_dict(),
-            "sequence": [item.to_dict() for item in sequence],
+            "sequence": [entry.to_dict() for entry in sequence],
         }))
 
     async def _handle_move_in_task(self, websocket, data: dict) -> None:
@@ -1224,11 +1252,11 @@ class RobotWebSocketServer:
 
         item = sequence.pop(from_idx)
         sequence.insert(to_idx, item)
-        StorageManager.save_sequence(sequence, task_name)
+        StorageManager.save_entries(sequence, task_name)
         await websocket.send(self._json_msg({
             "event": "task_updated",
             "name": self._resolve_task_path(task_name).name,
-            "sequence": [item.to_dict() for item in sequence],
+            "sequence": [entry.to_dict() for entry in sequence],
         }))
 
     def _resolve_task_path(self, task_name: str) -> Path:
@@ -1242,10 +1270,14 @@ class RobotWebSocketServer:
         filepath = self._resolve_task_path(task_name)
         if not filepath.is_file():
             return None
-        sequence = StorageManager.load_sequence(filepath.name)
-        for item in sequence:
-            item.status = SequenceItemStatus.PENDING
-        return sequence
+        entries = StorageManager.load_entries(filepath.name)
+        for entry in entries:
+            if isinstance(entry, LoopBlock):
+                for child in entry.items:
+                    child.status = SequenceItemStatus.PENDING
+            elif isinstance(entry, SequenceItem):
+                entry.status = SequenceItemStatus.PENDING
+        return entries
 
     # ==================================================================
     # AI 助手
@@ -2064,16 +2096,24 @@ class RobotWebSocketServer:
 
     def _parse_sequence(self, raw: list) -> list:
         """
-        将前端传来的 JSON 数组转换为 SequenceItem 列表
+        将前端传来的 JSON 数组转换为 SequenceEntry 列表（含 LoopBlock）
 
-        支持两种格式:
-        1. 完整格式（含 uuid）: {"uuid": "...", "definition": {...}, "status": "PENDING"}
-        2. 简化格式:           {"name": "移动到A点", "type": "MOVE_TO_POINT", "parameters": {...}}
+        支持三种格式:
+        1. 循环块:  {"kind": "loop", "uuid": "...", "items": [...], "repeat_count": N}
+        2. 完整格式: {"uuid": "...", "definition": {...}, "status": "PENDING"}
+        3. 简化格式: {"name": "...", "type": "MOVE_TO_POINT", "parameters": {...}}
         """
         sequence = []
         for item_data in raw:
-            if "definition" in item_data:
+            if item_data.get("kind") == "loop":
+                loop = LoopBlock.from_dict(item_data)
+                for child in loop.items:
+                    child.status = SequenceItemStatus.PENDING
+                sequence.append(loop)
+            elif "definition" in item_data:
                 seq_item = SequenceItem.from_dict(item_data)
+                seq_item.status = SequenceItemStatus.PENDING
+                sequence.append(seq_item)
             else:
                 action_def = ActionDefinition.from_dict({
                     "id": item_data.get("id", ""),
@@ -2082,9 +2122,8 @@ class RobotWebSocketServer:
                     "parameters": item_data.get("parameters", {}),
                 })
                 seq_item = SequenceItem.from_definition(action_def)
-
-            seq_item.status = SequenceItemStatus.PENDING
-            sequence.append(seq_item)
+                seq_item.status = SequenceItemStatus.PENDING
+                sequence.append(seq_item)
 
         return sequence
 
@@ -2114,6 +2153,14 @@ class RobotWebSocketServer:
             "index": index,
             "name": item.definition.name,
             "error": error,
+        })
+
+    def _on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int) -> None:
+        self._broadcast_threadsafe({
+            "event": "loop_progress",
+            "loop_uuid": loop_uuid,
+            "current_iteration": current_iteration,
+            "total_iterations": total_iterations,
         })
 
     def _on_log(self, message: str, level: str = "info") -> None:

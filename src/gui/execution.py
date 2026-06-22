@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from ..core.models import SequenceItem, SequenceItemStatus, ActionType
+from ..core.models import SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
 from ..arm_sdk.controller import RobotController
 from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
 from ..base_move.move_controller import RobotMoveController
@@ -15,9 +15,10 @@ class ExecutionThread(QThread):
     step_started = pyqtSignal(int, SequenceItem)
     step_completed = pyqtSignal(int, SequenceItem)
     step_failed = pyqtSignal(int, SequenceItem, str)
+    loop_progress = pyqtSignal(str, int, int)  # (loop_uuid, current_iteration, total_iterations)
     log_message = pyqtSignal(str)
 
-    def __init__(self, sequence: list[SequenceItem], robot_controller: RobotController | None = None, body_controller: ModbusMotor | None = None,
+    def __init__(self, sequence: list[SequenceEntry], robot_controller: RobotController | None = None, body_controller: ModbusMotor | None = None,
     move_controller: RobotMoveController | None = None):
         super().__init__()
         self.sequence = sequence
@@ -28,7 +29,7 @@ class ExecutionThread(QThread):
         self._move_controller = move_controller
 
         self.config = Config.get_instance()
-        
+
         self.execute_methods = {
             ActionType.MOVE: self._execute_move,
             ActionType.BASE_MOVE: self._execute_base_move,
@@ -52,9 +53,25 @@ class ExecutionThread(QThread):
 
     def run(self):
         self.started.emit()
-     
-        
-        for index, item in enumerate(self.sequence):
+
+        # 构建扁平执行列表：(SequenceItem, parent_loop_or_None)
+        flat_sequence: list[tuple[SequenceItem, LoopBlock | None]] = []
+        for entry in self.sequence:
+            if isinstance(entry, LoopBlock):
+                for iter_idx in range(entry.repeat_count):
+                    for child in entry.items:
+                        # 每次迭代克隆子项，保留原始 UUID 以匹配树节点
+                        clone = SequenceItem.from_dict(child.to_dict())
+                        clone.uuid = child.uuid  # 保持 UUID 一致以便 UI 更新
+                        flat_sequence.append((clone, entry))
+            elif isinstance(entry, SequenceItem):
+                flat_sequence.append((entry, None))
+
+        # 追踪循环迭代
+        loop_iteration: dict[str, int] = {}  # loop_uuid -> current_iteration
+        loop_item_counter: dict[str, int] = {}  # loop_uuid -> items executed in current iter
+
+        for index, (item, loop) in enumerate(flat_sequence):
             if self._stop_requested:
                 self.log_message.emit("执行已停止")
                 break
@@ -67,6 +84,18 @@ class ExecutionThread(QThread):
 
             if self._stop_requested:
                 break
+
+            # 检测新的一轮循环开始
+            if loop is not None:
+                counter = loop_item_counter.get(loop.uuid, 0)
+                iter_size = len(loop.items)
+                if counter == 0:
+                    # 新一轮开始
+                    current_iter = loop_iteration.get(loop.uuid, 0) + 1
+                    loop_iteration[loop.uuid] = current_iter
+                    self.log_message.emit(f"🔁 循环块 第 {current_iter}/{loop.repeat_count} 轮开始")
+                    self.loop_progress.emit(loop.uuid, current_iter, loop.repeat_count)
+                loop_item_counter[loop.uuid] = (counter + 1) % iter_size
 
             item.status = SequenceItemStatus.RUNNING
             self.step_started.emit(index, item)
@@ -87,8 +116,8 @@ class ExecutionThread(QThread):
                 error_msg = f"执行异常: {str(e)}"
                 self.step_failed.emit(index, item, error_msg)
                 break
-        
-            self.finished.emit()
+
+        self.finished.emit()
       
 
     def _execute_action(self, item: SequenceItem) -> bool:
@@ -162,7 +191,7 @@ class ExecutionThread(QThread):
                 elif mode == 'move_l':
                     method = self._robot_controller.move_robot1l
                 else:
-                    self.log_message.emit("moshiyichang")
+                    self.log_message.emit("模式异常")
                     return False
             else:
                 if mode == 'move_j':
@@ -170,7 +199,7 @@ class ExecutionThread(QThread):
                 elif mode == 'move_l':
                     method = self._robot_controller.move_robot2l
                 else:
-                    self.log_message.emit("moshiyichang")
+                    self.log_message.emit("模式异常")
                     return False
 
             # 重试机制：处理通信抖动（-1 发送失败，-2 接收失败，-3 解析失败）
@@ -286,7 +315,6 @@ class ExecutionThread(QThread):
         executor = params.get('执行器', '快换手')
         number = params.get('编号', 1)
         operation = params.get('操作', '开')
-
         if executor == '快换手':
 
             kuaihuanshou = Kuaihuanshou(port=self.config.KUAIHUANSHOU_SERIAL_PORT)

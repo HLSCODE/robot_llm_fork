@@ -7,11 +7,12 @@ from uuid import uuid4
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                             QSplitter, QMessageBox, QFileDialog, QMenu,
                             QTabWidget, QPushButton, QLabel, QFrame, QApplication,
-                            QInputDialog, QGroupBox, QListWidget, QListWidgetItem)
+                            QInputDialog, QGroupBox, QListWidget, QListWidgetItem,
+                            QTreeWidget, QTreeWidgetItem)
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer, QMimeData
 from PyQt6.QtGui import QAction, QPalette, QColor, QDrag, QIcon
 
-from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus
+from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
 from ..widgets import ActionListWidget, SequenceListWidget, ControlPanel, LogWidget
 from ..widgets.ai_assistant import AIAssistantWidget
 from .dialogs import ActionConfigDialog
@@ -2025,8 +2026,8 @@ class MainWindow(QMainWindow):
         return QIcon(pixmap)
 
     def save_task(self):
-        sequence = self.sequence_list.get_sequence()
-        if not sequence:
+        entries = self.sequence_list.get_entries()
+        if not entries:
             QMessageBox.warning(self, "警告", "序列为空,无需保存")
             return
 
@@ -2035,7 +2036,7 @@ class MainWindow(QMainWindow):
         )
         if filename:
             task_name = Path(filename).name
-            StorageManager.save_sequence(sequence, task_name)
+            StorageManager.save_entries(entries, task_name)
             self.refresh_task_library()
             self.log_widget.append_log(f"任务已保存: {task_name}")
 
@@ -2045,10 +2046,13 @@ class MainWindow(QMainWindow):
         )
         if filename:
             task_name = Path(filename).name
-            sequence = StorageManager.load_sequence(task_name)
-            self.sequence_list.clear()
-            for item in sequence:
-                self.sequence_list.add_sequence_item(item)
+            entries = StorageManager.load_entries(task_name)
+            self.sequence_list.clear_sequence()
+            for entry in entries:
+                if isinstance(entry, LoopBlock):
+                    self.sequence_list.add_loop_block(entry)
+                elif isinstance(entry, SequenceItem):
+                    self.sequence_list.add_sequence_item(entry)
             self.refresh_task_library()
             self.log_widget.append_log(f"任务已加载: {task_name}")
 
@@ -2078,18 +2082,46 @@ class MainWindow(QMainWindow):
         self._set_trajectory_buttons_enabled(False)
         self._pause_pose_refresh()
 
-        for item in sequence:
-            item.status = SequenceItemStatus.PENDING
-      
+        # 获取执行条目：如果有 display_list（即从序列列表执行），使用树中的 entries
+        # 否则（如组合任务执行），使用传入的扁平 sequence
         if display_list is not None:
-            for i, item in enumerate(sequence):
-                display_list.update_item_status(i, item)
+            entries = self.sequence_list.get_entries()
+        else:
+            entries = list(sequence)  # 扁平列表，无 LoopBlock
 
-        self.execution_thread = ExecutionThread(sequence, self.robot_controller, self.body_controller, self.move_controller)
+        # 重置所有条目的状态
+        def _reset_entry(entry):
+            if isinstance(entry, LoopBlock):
+                entry.current_iteration = 0
+                for child in entry.items:
+                    child.status = SequenceItemStatus.PENDING
+            elif isinstance(entry, SequenceItem):
+                entry.status = SequenceItemStatus.PENDING
+
+        for entry in entries:
+            _reset_entry(entry)
+
+        # 刷新 UI（仅当有 display_list 时）
+        if display_list is not None:
+            for i in range(self.sequence_list.topLevelItemCount()):
+                tree_item = self.sequence_list.topLevelItem(i)
+                entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
+                if isinstance(entry, LoopBlock):
+                    self.sequence_list._update_loop_display(tree_item, entry)
+                    for j in range(tree_item.childCount()):
+                        child_tree = tree_item.child(j)
+                        child_entry = child_tree.data(0, Qt.ItemDataRole.UserRole)
+                        if isinstance(child_entry, SequenceItem):
+                            self.sequence_list._update_item_display(child_tree, child_entry, j)
+                elif isinstance(entry, SequenceItem):
+                    self.sequence_list._update_item_display(tree_item, entry, i)
+
+        self.execution_thread = ExecutionThread(entries, self.robot_controller, self.body_controller, self.move_controller)
         self.execution_thread.step_started.connect(self.on_step_started)
         self.execution_thread.step_completed.connect(self.on_step_completed)
         self.execution_thread.step_failed.connect(self.on_step_failed)
         self.execution_thread.log_message.connect(self.log_widget.append_log)
+        self.execution_thread.loop_progress.connect(self.on_loop_progress)
         self.execution_thread.finished.connect(self.on_execution_finished)
 
         self.execution_thread.start()
@@ -2125,21 +2157,30 @@ class MainWindow(QMainWindow):
     def on_step_started(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.sequence_list)
         if display_list is not None:
-            display_list.update_item_status(index, item)
-            list_item = display_list.item(index)
-            if list_item is not None:
-                display_list.scrollToItem(list_item)
+            display_list.update_item_status(item)
+            tree_item = display_list._find_item_by_entry(item)
+            if tree_item is not None:
+                display_list.scrollToItem(tree_item)
 
     def on_step_completed(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.sequence_list)
         if display_list is not None:
-            display_list.update_item_status(index, item)
+            display_list.update_item_status(item)
 
     def on_step_failed(self, index: int, item: SequenceItem, error_msg: str):
         display_list = getattr(self, "_execution_display_list", self.sequence_list)
         if display_list is not None:
-            display_list.update_item_status(index, item)
+            display_list.update_item_status(item)
         QMessageBox.critical(self, "执行失败", f"步骤 {index + 1} 失败:\n{error_msg}")
+
+    def on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int):
+        """更新循环块执行进度显示"""
+        tree_item = self.sequence_list._item_map.get(loop_uuid)
+        if tree_item is not None:
+            entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(entry, LoopBlock):
+                entry.current_iteration = current_iteration
+                self.sequence_list._update_loop_display(tree_item, entry)
 
     def on_execution_finished(self):
         self.log_widget.append_log("序列执行完成")
@@ -2174,6 +2215,7 @@ class MainWindow(QMainWindow):
             self.refresh_sequence_numbers(selected_row=next_row)
 
     def repeat_sequence_selection(self):
+        """将选中的连续动作包裹为 LoopBlock 循环容器"""
         rows = self._selected_contiguous_rows(self.sequence_list, "请选择要循环的连续动作")
         if rows is None:
             return
@@ -2190,23 +2232,47 @@ class MainWindow(QMainWindow):
         if not ok or repeat_count <= 1:
             return
 
-        sequence = self.sequence_list.get_sequence()
-        start_row = rows[0]
-        end_row = rows[-1]
-        block = [self._clone_sequence_item(sequence[row]) for row in rows]
-        insert_at = end_row + 1
+        # 收集选中的 SequenceItem（从树节点中取出，展开 LoopBlock 的子项）
+        selected_items: list[SequenceItem] = []
+        for row in rows:
+            tree_item = self.sequence_list.topLevelItem(row)
+            entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(entry, SequenceItem):
+                selected_items.append(entry)
+            elif isinstance(entry, LoopBlock):
+                # 把循环块内的子动作展开收集（保持内容不丢失）
+                for child in entry.items:
+                    selected_items.append(SequenceItem.from_dict(child.to_dict()))
 
-        expanded = sequence[:insert_at]
-        for _ in range(repeat_count - 1):
-            expanded.extend(self._clone_sequence_item(item) for item in block)
-        expanded.extend(sequence[insert_at:])
+        if not selected_items:
+            QMessageBox.warning(self, "警告", "未找到可循环的动作")
+            return
 
-        self.sequence_list.clear_sequence()
-        for item in expanded:
-            self.sequence_list.add_sequence_item(item)
-        for row in range(start_row, start_row + len(block) * repeat_count):
-            self.sequence_list.item(row).setSelected(True)
-        self.log_widget.append_log(f"动作块已设置为循环 {repeat_count} 次")
+        # 从后往前移除（避免索引偏移）
+        for row in reversed(rows):
+            self.sequence_list.takeItem(row)
+
+        # 创建 LoopBlock 并插入
+        loop = LoopBlock.from_sequence_items(selected_items, repeat_count)
+        insert_at = rows[0]
+        tree_item = QTreeWidgetItem()
+        self.sequence_list._update_loop_display(tree_item, loop)
+        tree_item.setData(0, Qt.ItemDataRole.UserRole, loop)
+        self.sequence_list._register_item(tree_item, loop)
+        for i, child_item in enumerate(loop.items):
+            child_tree = QTreeWidgetItem()
+            self.sequence_list._update_item_display(child_tree, child_item, i)
+            child_tree.setData(0, Qt.ItemDataRole.UserRole, child_item)
+            self.sequence_list._register_item(child_tree, child_item)
+            tree_item.addChild(child_tree)
+        tree_item.setExpanded(True)
+        self.sequence_list.insertTopLevelItem(insert_at, tree_item)
+        self.sequence_list.setCurrentItem(tree_item)
+
+        total_steps = len(selected_items) * repeat_count
+        self.log_widget.append_log(
+            f"已创建循环块: {len(selected_items)}个动作 × {repeat_count}次 = {total_steps}步"
+        )
 
     def _selected_contiguous_rows(self, list_widget: QListWidget, empty_message: str) -> list[int] | None:
         rows = sorted(index.row() for index in list_widget.selectedIndexes())
@@ -2226,19 +2292,14 @@ class MainWindow(QMainWindow):
         )
 
     def edit_sequence_item(self):
-        current_row = self.sequence_list.currentRow()
-        if current_row < 0:
+        current_tree_item = self.sequence_list.currentItem()
+        if current_tree_item is None:
             QMessageBox.warning(self, "警告", "请先选择要修改的序列项")
             return
 
-        list_item = self.sequence_list.item(current_row)
-        if list_item is None:
-            QMessageBox.warning(self, "警告", "无法读取选中的序列项")
-            return
-
-        seq_item = list_item.data(Qt.ItemDataRole.UserRole)
-        if seq_item is None:
-            QMessageBox.warning(self, "警告", "无法读取选中的序列项")
+        seq_item = current_tree_item.data(0, Qt.ItemDataRole.UserRole)
+        if not isinstance(seq_item, SequenceItem):
+            QMessageBox.warning(self, "警告", "请选择一个动作项（不能修改循环块本身）")
             return
 
         action_def = seq_item.definition
@@ -2253,8 +2314,7 @@ class MainWindow(QMainWindow):
 
         updated_definition = dialog.get_action_definition()
         seq_item.definition = updated_definition
-        self.sequence_list.update_item_status(current_row, seq_item)
-        self.sequence_list.setCurrentRow(current_row)
+        self.sequence_list.update_item_status(seq_item)
         self.log_widget.append_log(f"已更新序列动作: {updated_definition.name}")
 
     def add_ai_sequence(
@@ -2278,9 +2338,8 @@ class MainWindow(QMainWindow):
         if stagger_interval_ms <= 0:
             for item in normalized:
                 self.sequence_list.add_sequence_item(item)
-            for i, item in enumerate(normalized):
                 item.status = SequenceItemStatus.PENDING
-                self.sequence_list.update_item_status(i, item)
+                self.sequence_list.update_item_status(item)
             self.log_widget.append_log(f"已同步执行序列到右侧，共 {len(normalized)} 个动作")
             return
 
@@ -2293,14 +2352,14 @@ class MainWindow(QMainWindow):
         for i, item in enumerate(normalized):
             item.status = SequenceItemStatus.PENDING
 
-            def make_add(idx: int, seq_item: SequenceItem):
+            def make_add(seq_item: SequenceItem):
                 def _add():
                     self.sequence_list.add_sequence_item(seq_item)
-                    self.sequence_list.update_item_status(idx, seq_item)
+                    self.sequence_list.update_item_status(seq_item)
 
                 return _add
 
-            QTimer.singleShot(stagger_interval_ms * i, make_add(i, item))
+            QTimer.singleShot(stagger_interval_ms * i, make_add(item))
 
     def clear_sequence(self):
         reply = QMessageBox.question(
@@ -2312,11 +2371,20 @@ class MainWindow(QMainWindow):
             self.log_widget.append_log("序列已清空")
 
     def refresh_sequence_numbers(self, selected_row: int | None = None):
-        sequence = self.sequence_list.get_sequence()
-        self.sequence_list.clear()
-        for item in sequence:
-            self.sequence_list.add_sequence_item(item)
-        if selected_row is not None and 0 <= selected_row < self.sequence_list.count():
+        """刷新树中所有顶层项的显示序号"""
+        for i in range(self.sequence_list.topLevelItemCount()):
+            tree_item = self.sequence_list.topLevelItem(i)
+            entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(entry, SequenceItem):
+                self.sequence_list._update_item_display(tree_item, entry, i)
+            elif isinstance(entry, LoopBlock):
+                self.sequence_list._update_loop_display(tree_item, entry)
+                for j in range(tree_item.childCount()):
+                    child_tree = tree_item.child(j)
+                    child_entry = child_tree.data(0, Qt.ItemDataRole.UserRole)
+                    if isinstance(child_entry, SequenceItem):
+                        self.sequence_list._update_item_display(child_tree, child_entry, j)
+        if selected_row is not None and 0 <= selected_row < self.sequence_list.topLevelItemCount():
             self.sequence_list.setCurrentRow(selected_row)
 
     def test_camera(self):

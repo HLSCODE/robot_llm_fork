@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable, Optional, List
 
 from ..arm_sdk.controller import RobotController
-from ..core.models import SequenceItem, SequenceItemStatus, ActionType
+from ..core.models import SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
 from ..devices.modbus_motor import ModbusMotor
 from ..devices.pwm_neck import PWMNeckController
 from ..base_move.move_controller import RobotMoveController
@@ -27,6 +27,7 @@ class ActionExecutor:
         on_step_started(index: int, item: SequenceItem)
         on_step_completed(index: int, item: SequenceItem)
         on_step_failed(index: int, item: SequenceItem, error: str)
+        on_loop_progress(loop_uuid: str, current_iteration: int, total_iterations: int)
         on_log(message: str)
         on_finished()
     """
@@ -40,6 +41,7 @@ class ActionExecutor:
         on_step_started: Optional[Callable] = None,
         on_step_completed: Optional[Callable] = None,
         on_step_failed: Optional[Callable] = None,
+        on_loop_progress: Optional[Callable] = None,
         on_log: Optional[Callable] = None,
         on_finished: Optional[Callable] = None,
     ):
@@ -53,6 +55,7 @@ class ActionExecutor:
         self._on_step_started = on_step_started or (lambda *a: None)
         self._on_step_completed = on_step_completed or (lambda *a: None)
         self._on_step_failed = on_step_failed or (lambda *a: None)
+        self._on_loop_progress = on_loop_progress or (lambda *a: None)
         self._on_log = on_log or (lambda msg, level="info": logger.info(msg))
         self._on_finished = on_finished or (lambda: None)
 
@@ -61,7 +64,7 @@ class ActionExecutor:
         self._paused = False
         self._running = False
         self._thread: Optional[threading.Thread] = None
-        
+
         # 动作类型与执行方法的映射
         self._execute_methods = {
             ActionType.MOVE: self._execute_move,
@@ -86,8 +89,8 @@ class ActionExecutor:
     def is_paused(self) -> bool:
         return self._paused
 
-    def execute(self, sequence: List[SequenceItem]) -> None:
-        """在后台线程中执行动作序列"""
+    def execute(self, sequence: List[SequenceEntry]) -> None:
+        """在后台线程中执行动作序列（含 LoopBlock）"""
         if self._running:
             self._on_log("已有序列正在执行，请先停止")
             return
@@ -118,15 +121,29 @@ class ActionExecutor:
     # 执行主循环
     # ------------------------------------------------------------------
 
-    def _run(self, sequence: List[SequenceItem]) -> None:
-        """执行主循环（运行在后台线程）"""
+    def _run(self, sequence: List[SequenceEntry]) -> None:
+        """执行主循环（运行在后台线程），支持 LoopBlock"""
         try:
-            for index, item in enumerate(sequence):
+            # 构建扁平执行列表
+            flat_sequence: list[tuple[SequenceItem, LoopBlock | None]] = []
+            for entry in sequence:
+                if isinstance(entry, LoopBlock):
+                    for _ in range(entry.repeat_count):
+                        for child in entry.items:
+                            clone = SequenceItem.from_dict(child.to_dict())
+                            clone.uuid = child.uuid
+                            flat_sequence.append((clone, entry))
+                elif isinstance(entry, SequenceItem):
+                    flat_sequence.append((entry, None))
+
+            loop_iteration: dict[str, int] = {}
+            loop_item_counter: dict[str, int] = {}
+
+            for index, (item, loop) in enumerate(flat_sequence):
                 if self._stop_requested:
                     self._on_log("执行已停止")
                     break
 
-                # 暂停等待
                 while self._paused:
                     time.sleep(0.1)
                     if self._stop_requested:
@@ -134,6 +151,16 @@ class ActionExecutor:
                         break
                 if self._stop_requested:
                     break
+
+                if loop is not None:
+                    counter = loop_item_counter.get(loop.uuid, 0)
+                    iter_size = len(loop.items)
+                    if counter == 0:
+                        current_iter = loop_iteration.get(loop.uuid, 0) + 1
+                        loop_iteration[loop.uuid] = current_iter
+                        self._on_log(f"🔁 循环块 第 {current_iter}/{loop.repeat_count} 轮开始")
+                        self._on_loop_progress(loop.uuid, current_iter, loop.repeat_count)
+                    loop_item_counter[loop.uuid] = (counter + 1) % iter_size
 
                 item.status = SequenceItemStatus.RUNNING
                 self._on_step_started(index, item)

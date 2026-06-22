@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Union
 from uuid import uuid4
 
-from .models import ActionDefinition, SequenceItem
+from .models import ActionDefinition, SequenceItem, LoopBlock, SequenceEntry
 
 # 项目根目录：src/core/storage.py -> parent 为 core，再 parent 为 src，再 parent 为仓库根
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -45,20 +45,28 @@ class StorageManager:
 
         return [ActionDefinition.from_dict(item) for item in data]
 
+    # ────────────────── Entry-based save/load (supports LoopBlock) ──────────────────
+
     @classmethod
-    def save_sequence(cls, items: List[SequenceItem], filename: str):
+    def save_entries(cls, entries: List[SequenceEntry], filename: str):
+        """保存序列条目（含 LoopBlock）到 .task 文件"""
         cls.ensure_directories()
-        # 仅使用文件名，避免路径穿越
         name = Path(filename).name
         filepath = cls.TASKS_DIR / name
         if filepath.suffix != ".task":
             filepath = filepath.with_suffix(".task")
-        data = [item.to_dict() for item in items]
+        data = []
+        for entry in entries:
+            if isinstance(entry, LoopBlock):
+                data.append(entry.to_dict())
+            elif isinstance(entry, SequenceItem):
+                data.append(entry.to_dict())
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def load_sequence(cls, filename: str) -> List[SequenceItem]:
+    def load_entries(cls, filename: str) -> List[SequenceEntry]:
+        """加载 .task 文件，自动识别 LoopBlock 和 SequenceItem"""
         name = Path(filename).name
         filepath = cls.TASKS_DIR / name
         if filepath.suffix != ".task":
@@ -67,7 +75,34 @@ class StorageManager:
             return []
         with open(filepath, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return [SequenceItem.from_dict(item) for item in data]
+        entries: List[SequenceEntry] = []
+        for item in data:
+            if item.get("kind") == "loop":
+                entries.append(LoopBlock.from_dict(item))
+            else:
+                entries.append(SequenceItem.from_dict(item))
+        return entries
+
+    # ────────────────── Legacy flat-sequence API (backward compatible) ──────────────────
+
+    @classmethod
+    def save_sequence(cls, items: List[SequenceItem], filename: str):
+        """保存扁平 SequenceItem 列表（旧格式，不含 LoopBlock）"""
+        cls.save_entries(items, filename)
+
+    @classmethod
+    def load_sequence(cls, filename: str) -> List[SequenceItem]:
+        """加载 .task 文件，展开所有 LoopBlock 为扁平 SequenceItem 列表"""
+        entries = cls.load_entries(filename)
+        flat: List[SequenceItem] = []
+        for entry in entries:
+            if isinstance(entry, LoopBlock):
+                for _ in range(entry.repeat_count):
+                    for child in entry.items:
+                        flat.append(SequenceItem.from_dict(child.to_dict()))
+            elif isinstance(entry, SequenceItem):
+                flat.append(entry)
+        return flat
 
     @classmethod
     def list_tasks(cls) -> List[str]:

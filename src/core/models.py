@@ -1,6 +1,6 @@
 from enum import Enum
-from dataclasses import dataclass, asdict
-from typing import Any, Dict
+from dataclasses import dataclass, asdict, field
+from typing import Any, Dict, List, Union
 from uuid import uuid4
 import json
 
@@ -76,3 +76,47 @@ class SequenceItem:
             uuid=str(uuid4()),
             definition=definition
         )
+
+
+@dataclass
+class LoopBlock:
+    """循环块容器 — 将一组动作包裹起来循环执行 N 次"""
+    uuid: str
+    items: List[SequenceItem]
+    repeat_count: int
+    current_iteration: int = 0  # 执行时追踪当前轮次
+
+    @property
+    def total_steps(self) -> int:
+        """循环展开后的总步数"""
+        return len(self.items) * self.repeat_count
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "kind": "loop",
+            "uuid": self.uuid,
+            "items": [item.to_dict() for item in self.items],
+            "repeat_count": self.repeat_count,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'LoopBlock':
+        return cls(
+            uuid=data.get("uuid", str(uuid4())),
+            items=[SequenceItem.from_dict(item) for item in data.get("items", [])],
+            repeat_count=data.get("repeat_count", 2),
+        )
+
+    @classmethod
+    def from_sequence_items(cls, items: List[SequenceItem], repeat_count: int) -> 'LoopBlock':
+        """从已有 SequenceItem 列表创建循环块（深拷贝子项）"""
+        cloned = [SequenceItem.from_dict(item.to_dict()) for item in items]
+        return cls(
+            uuid=str(uuid4()),
+            items=cloned,
+            repeat_count=repeat_count,
+        )
+
+
+# 序列条目的联合类型：普通动作 或 循环块
+SequenceEntry = Union[SequenceItem, LoopBlock]
