@@ -199,6 +199,10 @@ class RobotWebSocketServer:
         self._ai_execution_pending = False
         self._execution_had_failure = False
 
+        # 遥操作状态
+        self._teleop_mode = False
+        self._teleop_arm = None
+
     # ------------------------------------------------------------------
     # 启动服务
     # ------------------------------------------------------------------
@@ -390,6 +394,10 @@ class RobotWebSocketServer:
             "chat":                      self._handle_chat_send,
             # MiniCPM 代理配置查询
             "minicpm_status": self._handle_minicpm_status,
+            # 遥操作控制
+            "teleop_start":    self._handle_teleop_start,
+            "teleop_joint":    self._handle_teleop_joint,
+            "teleop_stop":     self._handle_teleop_stop,
         }
 
         handler = handlers.get(action)
@@ -2211,6 +2219,102 @@ class RobotWebSocketServer:
                 disconnected.append(client)
         for client in disconnected:
             self._clients.discard(client)
+
+    # ==================================================================
+    # 遥操作控制
+    # ==================================================================
+
+    async def _handle_teleop_start(self, websocket, data: dict) -> None:
+        """
+        启动遥操作模式
+        请求: {"action": "teleop_start", "arm": "左"}
+        响应: {"event": "teleop_started", "arm": "左", "message": "遥操作模式已启动"}
+        """
+        arm = data.get("arm", "左")
+        
+        # 检查是否正在执行其他任务
+        if self._executor.is_running:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "message": "有任务正在执行，无法启动遥操作"
+            }))
+            return
+        
+        # 检查机械臂是否已连接
+        if self._robot_controller is None:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "message": "机械臂控制器未初始化"
+            }))
+            return
+        
+        # 设置遥操作状态
+        self._teleop_mode = True
+        self._teleop_arm = arm
+        
+        logger.info("遥操作模式已启动: %s臂", arm)
+        await websocket.send(self._json_msg({
+            "event": "teleop_started",
+            "arm": arm,
+            "message": "遥操作模式已启动"
+        }))
+
+    async def _handle_teleop_joint(self, websocket, data: dict) -> None:
+        """
+        处理遥操作关节指令（50Hz）
+        请求: {"action": "teleop_joint", "arm": "左", "joints": [j1,j2,j3,j4,j5,j6], "follow": true, "trajectory_mode": 0}
+        响应: 仅在执行失败时返回 {"event": "teleop_error", "message": "..."}
+        """
+        if not self._teleop_mode:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "message": "未启动遥操作模式，请先发送 teleop_start"
+            }))
+            return
+        
+        arm = data.get("arm", self._teleop_arm)
+        joints = data.get("joints", [])
+        follow = data.get("follow", True)
+        trajectory_mode = data.get("trajectory_mode", 0)
+        
+        # 验证数据
+        if len(joints) != 6:
+            await websocket.send(self._json_msg({
+                "event": "teleop_error",
+                "message": f"关节角度数量错误：需要6个，实际{len(joints)}个"
+            }))
+            return
+        
+        # 立即发送到机械臂
+        if self._robot_controller:
+            try:
+                success = self._robot_controller.teleop_movej_canfd(arm, joints, follow, trajectory_mode)
+                if not success:
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_error",
+                        "message": "关节指令执行失败"
+                    }))
+            except Exception as e:
+                logger.error("遥操作执行异常: %s", str(e))
+                await websocket.send(self._json_msg({
+                    "event": "teleop_error",
+                    "message": f"执行异常: {str(e)}"
+                }))
+
+    async def _handle_teleop_stop(self, websocket, data: dict) -> None:
+        """
+        停止遥操作模式
+        请求: {"action": "teleop_stop"}
+        响应: {"event": "teleop_stopped", "message": "遥操作模式已停止"}
+        """
+        self._teleop_mode = False
+        self._teleop_arm = None
+        
+        logger.info("遥操作模式已停止")
+        await websocket.send(self._json_msg({
+            "event": "teleop_stopped",
+            "message": "遥操作模式已停止"
+        }))
 
     @staticmethod
     def _json_msg(data: dict) -> str:

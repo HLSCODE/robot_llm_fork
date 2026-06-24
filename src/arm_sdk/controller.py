@@ -799,6 +799,60 @@ class RobotController:
             print("达到最大查询次数,退出")
             return False
 
+    # ------------------------------------------------------------------
+    # 遥操作控制方法
+    # ------------------------------------------------------------------
+
+    def teleop_movej_canfd(self, arm: str, joints: list, follow: bool = True, trajectory_mode: int = 0) -> bool:
+        """
+        遥操作关节透传控制
+        
+        参数:
+            arm: 机械臂选择，"左" 或 "右"
+            joints: [j1, j2, j3, j4, j5, j6] 关节角度（度）
+            follow: True=高跟随模式，False=普通跟随模式
+            trajectory_mode: 0=完全透传，1=平滑轨迹
+        
+        返回:
+            bool: 执行成功返回 True，失败返回 False
+        """
+        # 选择机械臂
+        robot_ctrl = self.robot1_ctrl if arm == "左" else self.robot2_ctrl
+        if robot_ctrl is None or robot_ctrl.robot is None:
+            print(f"{arm}臂未连接")
+            return False
+        
+        robot = robot_ctrl.robot
+        
+        # 验证关节角度数量
+        if len(joints) != 6:
+            print(f"关节角度数量错误：需要6个，实际{len(joints)}个")
+            return False
+        
+        try:
+            # 转换为 ctypes 数组
+            from ctypes import c_float
+            joints_array = (c_float * 6)(*joints)
+            
+            # 调用 SDK 函数
+            with robot_ctrl.sdk_lock:
+                ret = robot.rm_movej_canfd(
+                    robot.handle,
+                    joints_array,
+                    follow,
+                    trajectory_mode
+                )
+            
+            if ret == 0:
+                return True
+            else:
+                print(f"遥操作指令执行失败，错误码: {ret}")
+                return False
+                
+        except Exception as e:
+            print(f"遥操作执行异常: {str(e)}")
+            return False
+
     def shutdown(self):
         """断开与机械臂的连接"""
         if hasattr(self, "robot1_ctrl") and self.robot1_ctrl is not None:
