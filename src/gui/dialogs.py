@@ -530,14 +530,28 @@ class ActionConfigDialog(QDialog):
         # 距离移动参数面板
         self.distance_widget = QWidget()
         distance_layout = QFormLayout()
-        
-        self.valueY_input = QDoubleSpinBox()
-        self.valueY_input.setRange(-1000.0, 1000.0)
-        self.valueY_input.setDecimals(3)
-        self.valueY_input.setSuffix(" cm")
-        self.valueY_input.setValue(self.action_data.get('parameters', {}).get('valueY', 0.0))
-        
-        distance_layout.addRow("移动距离:", self.valueY_input)
+
+        self.distance_x_input = QDoubleSpinBox()
+        self.distance_x_input.setRange(-1000.0, 1000.0)
+        self.distance_x_input.setDecimals(3)
+        self.distance_x_input.setSuffix(" cm")
+        self.distance_x_input.setValue(self.action_data.get('parameters', {}).get('x', 0.0))
+
+        self.distance_y_input = QDoubleSpinBox()
+        self.distance_y_input.setRange(-1000.0, 1000.0)
+        self.distance_y_input.setDecimals(3)
+        self.distance_y_input.setSuffix(" cm")
+        self.distance_y_input.setValue(self.action_data.get('parameters', {}).get('y', 0.0))
+
+        self.distance_angle_input = QDoubleSpinBox()
+        self.distance_angle_input.setRange(-360.0, 360.0)
+        self.distance_angle_input.setDecimals(3)
+        self.distance_angle_input.setSuffix(" °")
+        self.distance_angle_input.setValue(self.action_data.get('parameters', {}).get('angle', 0.0))
+
+        distance_layout.addRow("X 距离:", self.distance_x_input)
+        distance_layout.addRow("Y 距离:", self.distance_y_input)
+        distance_layout.addRow("角度:", self.distance_angle_input)
         self.distance_widget.setLayout(distance_layout)
         
         # 使用堆叠布局根据移动方式显示不同面板
@@ -921,7 +935,9 @@ class ActionConfigDialog(QDialog):
         else:
             return {
                 'move_mode': 'distance',
-                'valueY': self.valueY_input.value()
+                'x': self.distance_x_input.value(),
+                'y': self.distance_y_input.value(),
+                'angle': self.distance_angle_input.value()
             }
     
     def _build_inspect_params(self) -> dict:

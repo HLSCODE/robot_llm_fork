@@ -579,23 +579,23 @@ def baseF0ToW1():
         # 使用全局的 controller 实例移动到底盘0位
         baseCtl.move_to_position(1, 0)
         time.sleep(1)
-        baseCtl.move_slowly(0.2)
+        baseCtl.move_slowly(0, 0.2, 0)
     # 启动新线程运行机器人控制逻辑
     thread = threading.Thread(target=run_in_thread)
     thread.start()
     print("Started thread for moving to position (0, 0)")
-     
+
 def baseFW1ToW2():
     def run_in_thread():
         global baseCtl
         if baseCtl is None:
             print("RobotController instance is not initialized.")
-            return  
+            return
         # 使用全局的 controller 实例移动到底盘0位
-        baseCtl.move_slowly(0)
+        baseCtl.move_slowly(0, 0, 0)
         baseCtl.move_to_position(3, 1)
         time.sleep(1)
-        baseCtl.move_slowly(0.22)
+        baseCtl.move_slowly(0, 0.22, 0)
     # 启动新线程运行机器人控制逻辑
     thread = threading.Thread(target=run_in_thread)
     thread.start()
@@ -608,7 +608,7 @@ def baseFW2To0():
             print("RobotController instance is not initialized.")
             return  
         # 使用全局的 controller 实例移动到底盘0位
-        baseCtl.move_slowly(0.07)
+        baseCtl.move_slowly(0, 0.07, 0)
         baseCtl.move_to_position(0, 0)
     # 启动新线程运行机器人控制逻辑
     thread = threading.Thread(target=run_in_thread)

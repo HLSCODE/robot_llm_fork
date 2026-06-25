@@ -257,22 +257,24 @@ class ExecutionThread(QThread):
 
     def _execute_base_move_distance(self, params: dict) -> bool:
         """执行底盘距离移动"""
-        valueY = params.get('valueY', 0.0)
-        
-        self.log_message.emit(f"底盘距离移动：距离={valueY}cm")
-        
+        x = params.get('x', 0.0)
+        y = params.get('y', 0.0)
+        angle = params.get('angle', 0.0)
+
+        self.log_message.emit(f"底盘距离移动：x={x}cm, y={y}cm, angle={angle}°")
+
         if self._move_controller is None:
             self.log_message.emit("底盘移动控制器未初始化")
             return False
-        
+
         try:
-            success = self._move_controller.move_slowly(valueY)
-            
+            success = self._move_controller.move_slowly(x, y, angle)
+
             if success:
-                self.log_message.emit(f"底盘距离移动完成：距离={valueY}cm")
+                self.log_message.emit(f"底盘距离移动完成：x={x}cm, y={y}cm, angle={angle}°")
             else:
-                self.log_message.emit(f"底盘距离移动失败：距离={valueY}cm")
-            
+                self.log_message.emit(f"底盘距离移动失败：x={x}cm, y={y}cm, angle={angle}°")
+
             return success
         except Exception as e:
             self.log_message.emit(f"执行底盘距离移动出错：{str(e)}")

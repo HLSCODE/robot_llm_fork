@@ -357,22 +357,24 @@ class ActionExecutor:
 
     def _execute_base_move_distance(self, params: dict) -> bool:
         """执行底盘距离移动"""
-        valueY = params.get('valueY', 0.0)
-        
-        self._on_log(f"底盘距离移动：距离={valueY}cm")
-        
+        x = params.get('x', 0.0)
+        y = params.get('y', 0.0)
+        angle = params.get('angle', 0.0)
+
+        self._on_log(f"底盘距离移动：x={x}cm, y={y}cm, angle={angle}°")
+
         if self._move_controller is None:
             self._on_log("底盘移动控制器未初始化", "error")
             return False
-        
+
         try:
-            success = self._move_controller.move_slowly(valueY)
-            
+            success = self._move_controller.move_slowly(x, y, angle)
+
             if success:
-                self._on_log(f"底盘距离移动完成：距离={valueY}cm")
+                self._on_log(f"底盘距离移动完成：x={x}cm, y={y}cm, angle={angle}°")
             else:
-                self._on_log(f"底盘距离移动失败：距离={valueY}cm", "error")
-            
+                self._on_log(f"底盘距离移动失败：x={x}cm, y={y}cm, angle={angle}°", "error")
+
             return success
         except Exception as e:
             self._on_log(f"执行底盘距离移动出错：{str(e)}", "error")

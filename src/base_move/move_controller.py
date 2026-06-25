@@ -131,10 +131,12 @@ class RobotMoveController:
             print(f"Error in move_to_position: {e}")
             return False
 
-    def move_slowly(self, valueY):
+    def move_slowly(self, x, y, angle):
         """
-        缓慢移动底盘。
-        :param valueY: 移动的目标值，单位 cm
+        缓慢移动底盘（按相对距离和角度）。
+        :param x: X 方向移动距离，单位 cm
+        :param y: Y 方向移动距离，单位 cm
+        :param angle: 旋转角度，单位 度
         :return: True 如果移动成功，False 如果失败
         """
         try:
@@ -142,17 +144,17 @@ class RobotMoveController:
                 self.connect()  # 如果未连接，则先连接
 
             # 发送命令
-            command = {"cmd": 2, "id": valueY, "cid": 0}
+            command = {"cmd": 2, "x": x, "y": y, "angle": angle}
             self.send_command(command)
 
             # 监听响应并解析
             response = self.listen_for_responses()
             if isinstance(response, dict) and response.get("cmd") == 2 and "result" in response:
                 if response["result"]:
-                    print(f"Slow move to position ({valueY}, 0) succeeded.")
+                    print(f"Slow move (x={x}, y={y}, angle={angle}) succeeded.")
                     return True
                 else:
-                    print(f"Slow move to position ({valueY}, 0) failed.")
+                    print(f"Slow move (x={x}, y={y}, angle={angle}) failed.")
                     return False
             else:
                 print("Invalid response format.")
@@ -171,7 +173,7 @@ if __name__ == "__main__":
     print(f"Move to position result: {success}")
 
     # 测试缓慢移动底盘
-    success = controller.move_slowly(10)
+    success = controller.move_slowly(0, 10, 0)
     print(f"Slow move result: {success}")
 
     # 关闭连接（在所有操作完成后手动关闭）
