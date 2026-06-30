@@ -847,7 +847,7 @@ class RobotController:
             print(f"遥操作执行异常: {str(e)}")
             return False
     
-    def teleop_init_movej(self, arm: str, joints: list, velocity: int = 5, radius: int = 0, connect: int = 0, block: int = 1) -> bool:
+    def teleop_init_movej(self, arm: str, joints: list, velocity: int = 10, radius: int = 0, connect: int = 0, block: int = 1) -> bool:
         """
         遥操作初始化：移动机械臂到指定关节姿态
         

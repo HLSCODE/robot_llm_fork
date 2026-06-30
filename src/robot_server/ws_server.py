@@ -110,6 +110,8 @@ from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceIt
 from ..core.storage import StorageManager
 from ..core.config_loader import Config
 from ..arm_sdk import RobotController
+from ..data_collection import RLBenchRecorder
+from ..data_collection.config import DataCollectionConfig
 
 
 
@@ -202,6 +204,15 @@ class RobotWebSocketServer:
         # 遥操作状态（双臂独立）
         self._teleop_modes = {"左": False, "右": False}  # 双臂遥操作状态字典
         self._teleop_msg_counts = {"左": 0, "右": 0}  # 双臂消息计数器字典
+        
+        # 数据采集状态
+        self._demo_recorder: Optional[RLBenchRecorder] = None  # 数据采集器（延迟初始化）
+        self._demo_session = {
+            "active": False,
+            "task": None,
+            "description": None,
+            "next_episode_id": 0,
+        }
 
     # ------------------------------------------------------------------
     # 启动服务
@@ -402,6 +413,11 @@ class RobotWebSocketServer:
             "teleop_start":    self._handle_teleop_start,
             "teleop_joint":    self._handle_teleop_joint,
             "teleop_stop":     self._handle_teleop_stop,
+            # 数据采集控制
+            "demo_session_start": self._handle_demo_session_start,
+            "demo_record_start":  self._handle_demo_record_start,
+            "demo_record_stop":   self._handle_demo_record_stop,
+            "demo_session_end":   self._handle_demo_session_end,
         }
 
         handler = handlers.get(action)
@@ -2577,6 +2593,155 @@ class RobotWebSocketServer:
             "arms": arms_to_stop,
             "total_counts": total_counts,
             "message": "遥操作模式已停止"
+        }))
+
+    # ==================================================================
+    # 数据采集控制
+    # ==================================================================
+
+    async def _handle_demo_session_start(self, websocket, data: dict) -> None:
+        """
+        开始数据采集会话
+        请求: {"action": "demo_session_start", "task": "pick_bottle", "description": "抓取瓶子"}
+        响应: {"event": "demo_session_started", "task": "pick_bottle", "next_episode_id": 0}
+        """
+        task = data.get("task")
+        description = data.get("description", "")
+        
+        if not task:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "缺少task参数"
+            }))
+            return
+        
+        # 初始化数据采集器（延迟初始化）
+        if self._demo_recorder is None:
+            config = DataCollectionConfig()
+            self._demo_recorder = RLBenchRecorder(
+                robot_controller=self._robot_controller,
+                camera_manager=self._camera_manager,
+                config=config,
+            )
+        
+        # 开始会话
+        result = self._demo_recorder.start_session(task, description)
+        
+        if result.get("success"):
+            # 更新会话状态
+            self._demo_session["active"] = True
+            self._demo_session["task"] = task
+            self._demo_session["description"] = description
+            self._demo_session["next_episode_id"] = result["next_episode_id"]
+            
+            logger.info(f"数据采集会话已启动: task={task}, next_episode_id={result['next_episode_id']}")
+            
+            await websocket.send(self._json_msg({
+                "event": "demo_session_started",
+                "task": task,
+                "next_episode_id": result["next_episode_id"],
+                "message": result["message"]
+            }))
+        else:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": result.get("message", "会话启动失败")
+            }))
+
+    async def _handle_demo_record_start(self, websocket, data: dict) -> None:
+        """
+        开始记录单条episode
+        请求: {"action": "demo_record_start"}
+        响应: {"event": "demo_record_started", "episode_id": 0}
+        """
+        if not self._demo_session["active"]:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "会话未启动，请先发送demo_session_start"
+            }))
+            return
+        
+        # 开始记录
+        result = self._demo_recorder.start_recording()
+        
+        if result.get("success"):
+            episode_id = result["episode_id"]
+            
+            logger.info(f"episode {episode_id} 开始记录")
+            
+            await websocket.send(self._json_msg({
+                "event": "demo_record_started",
+                "episode_id": episode_id,
+                "message": result["message"]
+            }))
+        else:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": result.get("message", "记录启动失败")
+            }))
+
+    async def _handle_demo_record_stop(self, websocket, data: dict) -> None:
+        """
+        结束记录单条episode并保存
+        请求: {"action": "demo_record_stop"}
+        响应: {"event": "demo_record_stopped", "episode_id": 0, "frames": 1500}
+        """
+        if not self._demo_session["active"]:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "会话未启动"
+            }))
+            return
+        
+        # 结束记录并保存
+        result = self._demo_recorder.stop_recording()
+        
+        if result.get("success"):
+            episode_id = result["episode_id"]
+            frames = result["frames"]
+            
+            logger.info(f"episode {episode_id} 已保存，共{frames}帧")
+            
+            await websocket.send(self._json_msg({
+                "event": "demo_record_stopped",
+                "episode_id": episode_id,
+                "frames": frames,
+                "message": result["message"]
+            }))
+        else:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "episode_id": result.get("episode_id"),
+                "frames": result.get("frames", 0),
+                "message": result.get("message", "保存失败")
+            }))
+
+    async def _handle_demo_session_end(self, websocket, data: dict) -> None:
+        """
+        结束数据采集会话
+        请求: {"action": "demo_session_end"}
+        响应: {"event": "demo_session_ended", "message": "会话已结束"}
+        """
+        if not self._demo_session["active"]:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "会话未启动"
+            }))
+            return
+        
+        # 结束会话
+        result = self._demo_recorder.end_session()
+        
+        # 清空会话状态
+        self._demo_session["active"] = False
+        self._demo_session["task"] = None
+        self._demo_session["description"] = None
+        
+        logger.info("数据采集会话已结束")
+        
+        await websocket.send(self._json_msg({
+            "event": "demo_session_ended",
+            "message": result["message"]
         }))
 
     @staticmethod
