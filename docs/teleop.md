@@ -26,7 +26,40 @@
 
 ## WebSocket 协议
 
-### 1. 启动遥操作模式
+### 1. 遥操作初始化（可选）
+
+在启动遥操作前，可以将机械臂移动到指定的初始关节姿态。通常用于将从臂移动到与主臂相同的起始位置。
+
+**请求**
+```json
+{
+  "action": "teleop_init",
+  "arm": "左",
+  "joints": [45.23, -30.15, 60.78, 0.0, 90.5, -45.3]
+}
+```
+
+**参数说明**
+- `arm`: 机械臂选择，"左" 或 "右"
+- `joints`: 6个关节角度（度），[j1, j2, j3, j4, j5, j6]
+
+**响应**
+```json
+{
+  "event": "teleop_init_completed",
+  "arm": "左",
+  "message": "初始化完成"
+}
+```
+
+**使用场景**
+- 遥操作开始前，将从臂移动到与主臂相同的初始位置
+- 避免遥操作启动时机械臂突然大幅度移动
+- 确保主从臂起始姿态一致
+
+---
+
+### 2. 启动遥操作模式
 
 **请求**
 ```json
@@ -48,7 +81,9 @@
 }
 ```
 
-### 2. 发送关节指令
+---
+
+### 3. 发送关节指令
 
 **请求**
 ```json
@@ -82,7 +117,9 @@
 ```
 仅在执行失败时返回错误消息。
 
-### 3. 停止遥操作
+---
+
+### 4. 停止遥操作
 
 **请求**
 ```json
@@ -117,6 +154,24 @@ class TeleopClient:
     async def connect(self):
         self.ws = await websockets.connect(self.uri)
     
+    async def init_teleop(self, arm="左", joints=None):
+        """遥操作初始化：移动到指定关节姿态"""
+        if joints is None:
+            # 如果没有提供关节角度，可以跳过初始化
+            return
+        
+        await self.ws.send(json.dumps({
+            "action": "teleop_init",
+            "arm": arm,
+            "joints": joints
+        }))
+        response = await self.ws.recv()
+        data = json.loads(response)
+        if data.get("event") == "teleop_init_completed":
+            print("初始化完成")
+        else:
+            print("初始化失败:", data)
+    
     async def start_teleop(self, arm="左"):
         """启动遥操作模式"""
         await self.ws.send(json.dumps({
@@ -144,21 +199,31 @@ class TeleopClient:
         response = await self.ws.recv()
         print(json.loads(response))
     
-    async def run_teleop_loop(self, joint_stream, arm="左", frequency=50):
+    async def run_teleop_loop(self, joint_stream, arm="左", frequency=50, init_joints=None):
         """运行遥操作循环"""
+        # 1. 初始化（可选）：移动到指定关节姿态
+        if init_joints:
+            await self.init_teleop(arm, init_joints)
+        
+        # 2. 启动遥操作模式
         await self.start_teleop(arm)
         
+        # 3. 发送关节指令流
         dt = 1.0 / frequency
         for joints in joint_stream:
             await self.send_joint_command(joints, arm)
             await asyncio.sleep(dt)
         
+        # 4. 停止遥操作
         await self.stop_teleop()
 
 # 使用示例
 async def main():
     client = TeleopClient()
     await client.connect()
+    
+    # 主臂初始关节角度（从主臂采集）
+    init_joints = [45.0, -30.0, 60.0, 0.0, 90.0, -45.0]
     
     # 模拟关节角度流（从主臂采集）
     joint_stream = [
@@ -167,7 +232,13 @@ async def main():
         # ... 更多关节角度
     ]
     
-    await client.run_teleop_loop(joint_stream, arm="左", frequency=50)
+    # 运行遥操作（包含初始化）
+    await client.run_teleop_loop(
+        joint_stream, 
+        arm="左", 
+        frequency=50,
+        init_joints=init_joints  # 先移动到初始位置
+    )
 
 asyncio.run(main())
 ```
@@ -187,6 +258,14 @@ class TeleopClient {
       const data = JSON.parse(event.data);
       console.log('Received:', data);
     };
+  }
+  
+  initTeleop(arm = '左', joints) {
+    this.ws.send(JSON.stringify({
+      action: 'teleop_init',
+      arm: arm,
+      joints: joints
+    }));
   }
   
   startTeleop(arm = '左') {
@@ -212,9 +291,16 @@ class TeleopClient {
     }));
   }
   
-  runTeleopLoop(jointStream, arm = '左', frequency = 50) {
+  runTeleopLoop(jointStream, arm = '左', frequency = 50, initJoints = null) {
+    // 1. 初始化（可选）
+    if (initJoints) {
+      this.initTeleop(arm, initJoints);
+    }
+    
+    // 2. 启动遥操作模式
     this.startTeleop(arm);
     
+    // 3. 发送关节指令流
     const dt = 1000 / frequency; // 毫秒
     let index = 0;
     

@@ -199,9 +199,9 @@ class RobotWebSocketServer:
         self._ai_execution_pending = False
         self._execution_had_failure = False
 
-        # 遥操作状态
-        self._teleop_mode = False
-        self._teleop_arm = None
+        # 遥操作状态（双臂独立）
+        self._teleop_modes = {"左": False, "右": False}  # 双臂遥操作状态字典
+        self._teleop_msg_counts = {"左": 0, "右": 0}  # 双臂消息计数器字典
 
     # ------------------------------------------------------------------
     # 启动服务
@@ -314,6 +314,9 @@ class RobotWebSocketServer:
 
         try:
             async for raw in websocket:
+                # 调试日志：记录接收的消息（前100字符）
+                logger.debug("收到消息: %s", raw[:100] if len(raw) > 100 else raw)
+                
                 try:
                     data = json.loads(raw)
                 except json.JSONDecodeError:
@@ -395,6 +398,7 @@ class RobotWebSocketServer:
             # MiniCPM 代理配置查询
             "minicpm_status": self._handle_minicpm_status,
             # 遥操作控制
+            "teleop_init":     self._handle_teleop_init,
             "teleop_start":    self._handle_teleop_start,
             "teleop_joint":    self._handle_teleop_joint,
             "teleop_stop":     self._handle_teleop_stop,
@@ -2224,13 +2228,131 @@ class RobotWebSocketServer:
     # 遥操作控制
     # ==================================================================
 
+    async def _handle_teleop_init(self, websocket, data: dict) -> None:
+        """
+        遥操作初始化：移动机械臂到指定关节姿态
+        支持单臂和双臂两种方式：
+        - 单臂: {"action": "teleop_init", "arm": "左", "joints": [j1,j2,j3,j4,j5,j6]}
+        - 双臂: {"action": "teleop_init", "joints": {"左": [j1,j2,j3,j4,j5,j6], "右": [j1,j2,j3,j4,j5,j6]}}
+        响应: {"event": "teleop_init_completed", "arm": "左", "message": "初始化完成"}
+        """
+        arm = data.get("arm")
+        joints_data = data.get("joints")
+        
+        # 检查机械臂是否已连接
+        if self._robot_controller is None:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "message": "机械臂控制器未初始化"
+            }))
+            return
+        
+        # 判断单臂还是双臂
+        if arm:
+            # 单臂模式：joints是列表
+            if not isinstance(joints_data, list):
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "message": "单臂模式需要joints为列表"
+                }))
+                return
+            
+            joints = joints_data
+            if len(joints) != 6:
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "message": f"关节角度数量错误：需要6个，实际{len(joints)}个"
+                }))
+                return
+            
+            logger.info("遥操作初始化: %s臂移动到 %s", arm, joints)
+            
+            try:
+                success = self._robot_controller.teleop_init_movej(arm, joints)
+                if success:
+                    logger.info("遥操作初始化完成: %s臂", arm)
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_init_completed",
+                        "arm": arm,
+                        "message": "初始化完成"
+                    }))
+                else:
+                    await websocket.send(self._json_msg({
+                        "event": "error",
+                        "message": "初始化移动失败"
+                    }))
+            except Exception as e:
+                logger.error("遥操作初始化异常: %s", str(e))
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "message": f"初始化异常: {str(e)}"
+                }))
+        
+        else:
+            # 双臂模式：joints是字典
+            if not isinstance(joints_data, dict):
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "message": "双臂模式需要joints为字典"
+                }))
+                return
+            
+            # 验证每个臂的关节角度
+            for arm_name, joints in joints_data.items():
+                if arm_name not in ["左", "右"]:
+                    await websocket.send(self._json_msg({
+                        "event": "error",
+                        "message": f"未知的臂名称: {arm_name}"
+                    }))
+                    return
+                
+                if len(joints) != 6:
+                    await websocket.send(self._json_msg({
+                        "event": "error",
+                        "message": f"{arm_name}臂关节角度数量错误：需要6个，实际{len(joints)}个"
+                    }))
+                    return
+            
+            logger.info("双臂遥操作初始化: 左=%s, 右=%s", 
+                       joints_data.get("左"), joints_data.get("右"))
+            
+            # 并行执行双臂初始化
+            success_results = {}
+            try:
+                for arm_name, joints in joints_data.items():
+                    success = self._robot_controller.teleop_init_movej(arm_name, joints)
+                    success_results[arm_name] = success
+                
+                if all(success_results.values()):
+                    logger.info("双臂遥操作初始化完成")
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_init_completed_dual",
+                        "message": "双臂初始化完成"
+                    }))
+                else:
+                    failed_arms = [arm for arm, success in success_results.items() if not success]
+                    await websocket.send(self._json_msg({
+                        "event": "error",
+                        "message": f"部分臂初始化失败: {failed_arms}"
+                    }))
+            except Exception as e:
+                logger.error("双臂遥操作初始化异常: %s", str(e))
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "message": f"初始化异常: {str(e)}"
+                }))
+
     async def _handle_teleop_start(self, websocket, data: dict) -> None:
         """
         启动遥操作模式
-        请求: {"action": "teleop_start", "arm": "左"}
-        响应: {"event": "teleop_started", "arm": "左", "message": "遥操作模式已启动"}
+        支持单臂和双臂两种方式：
+        - 单臂: {"action": "teleop_start", "arm": "左"}
+        - 多臂: {"action": "teleop_start", "arms": ["左", "右"]}
+        - 双臂: {"action": "teleop_start"} (无参数，默认启动所有臂)
+        响应: {"event": "teleop_started", "arms": ["左"], "message": "遥操作模式已启动"}
         """
-        arm = data.get("arm", "左")
+        arm = data.get("arm")
+        arms_list = data.get("arms")
         
         # 检查是否正在执行其他任务
         if self._executor.is_running:
@@ -2248,71 +2370,212 @@ class RobotWebSocketServer:
             }))
             return
         
-        # 设置遥操作状态
-        self._teleop_mode = True
-        self._teleop_arm = arm
+        # 确定要启动的臂
+        if arm:
+            # 单臂模式
+            arms_to_start = [arm]
+        elif arms_list:
+            # 多臂模式
+            arms_to_start = arms_list
+        else:
+            # 默认启动所有臂（双臂）
+            arms_to_start = ["左", "右"]
         
-        logger.info("遥操作模式已启动: %s臂", arm)
+        # 验证臂名称
+        for arm_name in arms_to_start:
+            if arm_name not in ["左", "右"]:
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "message": f"未知的臂名称: {arm_name}"
+                }))
+                return
+        
+        # 启动指定臂的遥操作模式
+        for arm_name in arms_to_start:
+            self._teleop_modes[arm_name] = True
+            self._teleop_msg_counts[arm_name] = 0
+        
+        logger.info("遥操作模式已启动: %s", arms_to_start)
         await websocket.send(self._json_msg({
             "event": "teleop_started",
-            "arm": arm,
+            "arms": arms_to_start,
             "message": "遥操作模式已启动"
         }))
 
     async def _handle_teleop_joint(self, websocket, data: dict) -> None:
         """
         处理遥操作关节指令（50Hz）
-        请求: {"action": "teleop_joint", "arm": "左", "joints": [j1,j2,j3,j4,j5,j6], "follow": true, "trajectory_mode": 0}
+        支持单臂和双臂两种方式：
+        - 单臂: {"action": "teleop_joint", "arm": "左", "joints": [j1,j2,j3,j4,j5,j6], "follow": true}
+        - 双臂: {"action": "teleop_joint", "joints": {"左": [j1,j2,j3,j4,j5,j6], "右": [j1,j2,j3,j4,j5,j6]}, "follow": false}
         响应: 仅在执行失败时返回 {"event": "teleop_error", "message": "..."}
         """
-        if not self._teleop_mode:
-            await websocket.send(self._json_msg({
-                "event": "error",
-                "message": "未启动遥操作模式，请先发送 teleop_start"
-            }))
-            return
-        
-        arm = data.get("arm", self._teleop_arm)
-        joints = data.get("joints", [])
-        follow = data.get("follow", True)
+        arm = data.get("arm")
+        joints_data = data.get("joints")
+        follow = data.get("follow", False)  # 默认False（平滑模式）
         trajectory_mode = data.get("trajectory_mode", 0)
         
-        # 验证数据
-        if len(joints) != 6:
-            await websocket.send(self._json_msg({
-                "event": "teleop_error",
-                "message": f"关节角度数量错误：需要6个，实际{len(joints)}个"
-            }))
-            return
-        
-        # 立即发送到机械臂
-        if self._robot_controller:
-            try:
-                success = self._robot_controller.teleop_movej_canfd(arm, joints, follow, trajectory_mode)
-                if not success:
-                    await websocket.send(self._json_msg({
-                        "event": "teleop_error",
-                        "message": "关节指令执行失败"
-                    }))
-            except Exception as e:
-                logger.error("遥操作执行异常: %s", str(e))
+        # 判断单臂还是双臂
+        if arm:
+            # 单臂模式
+            if not isinstance(joints_data, list):
                 await websocket.send(self._json_msg({
                     "event": "teleop_error",
-                    "message": f"执行异常: {str(e)}"
+                    "message": "单臂模式需要joints为列表"
                 }))
+                return
+            
+            joints = joints_data
+            if len(joints) != 6:
+                await websocket.send(self._json_msg({
+                    "event": "teleop_error",
+                    "message": f"关节角度数量错误：需要6个，实际{len(joints)}个"
+                }))
+                return
+            
+            # 检查该臂是否已启动遥操作
+            if not self._teleop_modes.get(arm):
+                await websocket.send(self._json_msg({
+                    "event": "teleop_error",
+                    "message": f"{arm}臂未启动遥操作模式"
+                }))
+                return
+            
+            # 采样日志：每10条记录一次
+            self._teleop_msg_counts[arm] += 1
+            if self._teleop_msg_counts[arm] % 10 == 0:
+                logger.debug("遥操作指令 #%d: arm=%s, joints=%s", 
+                            self._teleop_msg_counts[arm], arm, joints)
+            
+            # 立即发送到机械臂
+            if self._robot_controller:
+                try:
+                    success = self._robot_controller.teleop_movej_canfd(arm, joints, follow, trajectory_mode)
+                    if not success:
+                        logger.warning("遥操作指令 #%d 执行失败", self._teleop_msg_counts[arm])
+                        await websocket.send(self._json_msg({
+                            "event": "teleop_error",
+                            "message": "关节指令执行失败"
+                        }))
+                except Exception as e:
+                    logger.error("遥操作执行异常 #%d: %s", self._teleop_msg_counts[arm], str(e))
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_error",
+                        "message": f"执行异常: {str(e)}"
+                    }))
+        
+        else:
+            # 双臂模式
+            if not isinstance(joints_data, dict):
+                await websocket.send(self._json_msg({
+                    "event": "teleop_error",
+                    "message": "双臂模式需要joints为字典"
+                }))
+                return
+            
+            # 验证每个臂的关节角度
+            for arm_name, joints in joints_data.items():
+                if arm_name not in ["左", "右"]:
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_error",
+                        "message": f"未知的臂名称: {arm_name}"
+                    }))
+                    return
+                
+                if len(joints) != 6:
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_error",
+                        "message": f"{arm_name}臂关节角度数量错误：需要6个，实际{len(joints)}个"
+                    }))
+                    return
+                
+                # 检查该臂是否已启动遥操作
+                if not self._teleop_modes.get(arm_name):
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_error",
+                        "message": f"{arm_name}臂未启动遥操作模式"
+                    }))
+                    return
+            
+            # 采样日志：每10条记录一次（使用左臂计数）
+            self._teleop_msg_counts["左"] += 1
+            self._teleop_msg_counts["右"] += 1
+            if self._teleop_msg_counts["左"] % 10 == 0:
+                logger.debug("双臂遥操作指令 #%d: 左=%s, 右=%s",
+                            self._teleop_msg_counts["左"],
+                            joints_data.get("左"),
+                            joints_data.get("右"))
+            
+            # 并行执行双臂指令
+            if self._robot_controller:
+                try:
+                    success_results = {}
+                    for arm_name, joints in joints_data.items():
+                        success = self._robot_controller.teleop_movej_canfd(arm_name, joints, follow, trajectory_mode)
+                        success_results[arm_name] = success
+                    
+                    if not all(success_results.values()):
+                        failed_arms = [arm for arm, success in success_results.items() if not success]
+                        logger.warning("双臂遥操作指令 #%d 部分执行失败: %s",
+                                      self._teleop_msg_counts["左"], failed_arms)
+                        await websocket.send(self._json_msg({
+                            "event": "teleop_error",
+                            "message": f"部分臂执行失败: {failed_arms}"
+                        }))
+                except Exception as e:
+                    logger.error("双臂遥操作执行异常 #%d: %s", self._teleop_msg_counts["左"], str(e))
+                    await websocket.send(self._json_msg({
+                        "event": "teleop_error",
+                        "message": f"执行异常: {str(e)}"
+                    }))
 
     async def _handle_teleop_stop(self, websocket, data: dict) -> None:
         """
         停止遥操作模式
-        请求: {"action": "teleop_stop"}
-        响应: {"event": "teleop_stopped", "message": "遥操作模式已停止"}
+        支持单臂和双臂两种方式：
+        - 单臂: {"action": "teleop_stop", "arm": "左"}
+        - 多臂: {"action": "teleop_stop", "arms": ["左", "右"]}
+        - 双臂: {"action": "teleop_stop"} (无参数，停止所有臂)
+        响应: {"event": "teleop_stopped", "arms": ["左"], "total_counts": {"左": 100}, "message": "遥操作模式已停止"}
         """
-        self._teleop_mode = False
-        self._teleop_arm = None
+        arm = data.get("arm")
+        arms_list = data.get("arms")
         
-        logger.info("遥操作模式已停止")
+        # 确定要停止的臂
+        if arm:
+            # 单臂模式
+            arms_to_stop = [arm]
+        elif arms_list:
+            # 多臂模式
+            arms_to_stop = arms_list
+        else:
+            # 默认停止所有臂（双臂）
+            arms_to_stop = ["左", "右"]
+        
+        # 验证臂名称
+        for arm_name in arms_to_stop:
+            if arm_name not in ["左", "右"]:
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "message": f"未知的臂名称: {arm_name}"
+                }))
+                return
+        
+        # 记录停止前的总计数
+        total_counts = {}
+        for arm_name in arms_to_stop:
+            total_counts[arm_name] = self._teleop_msg_counts[arm_name]
+        
+        # 停止指定臂的遥操作模式
+        for arm_name in arms_to_stop:
+            self._teleop_modes[arm_name] = False
+            self._teleop_msg_counts[arm_name] = 0
+        
+        logger.info("遥操作模式已停止: %s，共执行指令 %s", arms_to_stop, total_counts)
         await websocket.send(self._json_msg({
             "event": "teleop_stopped",
+            "arms": arms_to_stop,
+            "total_counts": total_counts,
             "message": "遥操作模式已停止"
         }))
 

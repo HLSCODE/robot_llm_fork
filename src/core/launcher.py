@@ -18,11 +18,26 @@ from ..core.config_loader import Config
 
 
 def setup_logging(level: str = "INFO") -> None:
-    """配置日志"""
+    """配置日志（控制台 + 文件）"""
+    import os
+    from datetime import datetime
+    
+    # 创建 log 文件夹
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "log")
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # 日志文件名：按日期
+    log_file = os.path.join(log_dir, f"server_{datetime.now().strftime('%Y%m%d')}.log")
+    
+    # 配置日志
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(),  # 控制台输出
+            logging.FileHandler(log_file, encoding='utf-8'),  # 文件输出
+        ]
     )
 
 

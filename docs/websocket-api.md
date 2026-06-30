@@ -2669,7 +2669,76 @@ function executeDemo() {
 
 详细说明请参考：[遥操作说明文档](teleop.md)
 
-### 13.1 teleop_start - 启动遥操作模式
+### 13.1 teleop_init - 遥操作初始化
+
+在启动遥操作前，将机械臂移动到指定的初始关节姿态。通常用于将从臂移动到与主臂相同的起始位置。
+
+**请求**
+
+```json
+{
+  "action": "teleop_init",
+  "arm": "左",
+  "joints": [45.23, -30.15, 60.78, 0.0, 90.5, -45.3]
+}
+```
+
+**参数说明**
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `arm` | string | 是 | 机械臂选择，"左" 或 "右" |
+| `joints` | array | 是 | 6个关节角度（度），[j1, j2, j3, j4, j5, j6] |
+
+**响应**
+
+```json
+{
+  "event": "teleop_init_completed",
+  "arm": "左",
+  "message": "初始化完成"
+}
+```
+
+**错误响应**
+
+```json
+{
+  "event": "error",
+  "message": "关节角度数量错误：需要6个，实际5个"
+}
+```
+
+**使用示例**
+
+```javascript
+// 从主臂采集当前关节角度
+const masterJoints = [45.23, -30.15, 60.78, 0.0, 90.5, -45.3];
+
+// 发送初始化指令，将从臂移动到主臂位置
+ws.send(JSON.stringify({
+  action: 'teleop_init',
+  arm: '左',
+  joints: masterJoints
+}));
+
+// 等待初始化完成
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.event === 'teleop_init_completed') {
+    console.log('初始化完成，可以启动遥操作');
+    // 启动遥操作模式
+    ws.send(JSON.stringify({
+      action: 'teleop_start',
+      arm: '左'
+    }));
+  }
+};
+```
+
+---
+
+### 13.2 teleop_start - 启动遥操作模式
 
 启动遥操作模式，准备接收实时关节指令。
 
@@ -2693,7 +2762,36 @@ function executeDemo() {
 ```json
 {
   "event": "teleop_started",
-  "arm": "左",
+  "arms": ["左"],
+  "message": "遥操作模式已启动"
+}
+```
+
+**双臂启动**
+
+启动双臂遥操作（一次启动两个臂）：
+
+```json
+{
+  "action": "teleop_start"
+}
+```
+
+或指定臂列表：
+
+```json
+{
+  "action": "teleop_start",
+  "arms": ["左", "右"]
+}
+```
+
+响应：
+
+```json
+{
+  "event": "teleop_started",
+  "arms": ["左", "右"],
   "message": "遥操作模式已启动"
 }
 ```
@@ -2719,21 +2817,38 @@ function executeDemo() {
 - 遥操作模式与任务执行模式互斥
 - 启动前需要确保机械臂已连接
 - 启动后需要持续发送 `teleop_joint` 指令
+- 支持单臂启动、多臂启动、双臂启动
 
 ---
 
-### 13.2 teleop_joint - 发送关节指令
+### 13.3 teleop_joint - 发送关节指令
 
 发送关节角度指令，立即执行。支持 50Hz 高频发送。
 
-**请求**
+**单臂请求**
 
 ```json
 {
   "action": "teleop_joint",
   "arm": "左",
   "joints": [45.23, -30.15, 60.78, 0.0, 90.5, -45.3],
-  "follow": true,
+  "follow": false,
+  "trajectory_mode": 0
+}
+```
+
+**双臂请求**
+
+一次发送双臂关节角度（推荐）：
+
+```json
+{
+  "action": "teleop_joint",
+  "joints": {
+    "左": [45.23, -30.15, 60.78, 0.0, 90.5, -45.3],
+    "右": [45.23, -30.15, 60.78, 0.0, 90.5, -45.3]
+  },
+  "follow": false,
   "trajectory_mode": 0
 }
 ```
@@ -2742,8 +2857,8 @@ function executeDemo() {
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `arm` | string | 否 | 机械臂选择，默认使用启动时的臂 |
-| `joints` | array[float] | 是 | 6个关节角度（单位：度），精度 0.001° |
+| `arm` | string | 单臂时必填 | 机械臂选择，"左" 或 "右" |
+| `joints` | array[float] 或 dict | 是 | 单臂时为6个关节角度数组，双臂时为字典 `{"左": [...], "右": [...]}` |
 | `follow` | boolean | 否 | 跟随模式，默认 `true`（高跟随） |
 | `trajectory_mode` | int | 否 | 轨迹模式，默认 `0`（完全透传） |
 
@@ -2759,8 +2874,8 @@ joints: [j1, j2, j3, j4, j5, j6]
 
 **follow 模式说明**
 
-- `true`: 高跟随模式，机械臂快速响应指令变化（推荐）
-- `false`: 普通跟随模式，机械臂平滑过渡
+- `false`: 普通跟随模式，机械臂平滑过渡（推荐，减少顿挫感）
+- `true`: 高跟随模式，机械臂快速响应指令变化
 
 **trajectory_mode 说明**
 
@@ -2776,6 +2891,25 @@ joints: [j1, j2, j3, j4, j5, j6]
   "event": "teleop_error",
   "message": "关节角度数量错误：需要6个，实际5个"
 }
+```
+
+```json
+{
+  "event": "teleop_error",
+  "message": "左臂未启动遥操作模式"
+}
+```
+
+**双臂响应**
+
+双臂模式下的错误响应：
+
+```json
+{
+  "event": "teleop_error",
+  "message": "部分臂执行失败: ['左']"
+}
+```
 ```
 
 ```json
@@ -2835,11 +2969,22 @@ setTimeout(() => {
 
 ---
 
-### 13.3 teleop_stop - 停止遥操作
+### 13.4 teleop_stop - 停止遥操作
 
 停止遥操作模式，机械臂停止响应关节指令。
 
-**请求**
+**单臂停止**
+
+```json
+{
+  "action": "teleop_stop",
+  "arm": "左"
+}
+```
+
+**双臂停止**
+
+停止所有臂（默认）：
 
 ```json
 {
@@ -2847,11 +2992,35 @@ setTimeout(() => {
 }
 ```
 
+或指定臂列表：
+
+```json
+{
+  "action": "teleop_stop",
+  "arms": ["左", "右"]
+}
+```
+
 **响应**
+
+单臂停止响应：
 
 ```json
 {
   "event": "teleop_stopped",
+  "arms": ["左"],
+  "total_counts": {"左": 100},
+  "message": "遥操作模式已停止"
+}
+```
+
+双臂停止响应：
+
+```json
+{
+  "event": "teleop_stopped",
+  "arms": ["左", "右"],
+  "total_counts": {"左": 100, "右": 100},
   "message": "遥操作模式已停止"
 }
 ```
@@ -2861,10 +3030,11 @@ setTimeout(() => {
 - 停止后机械臂保持当前姿态
 - 可以重新启动遥操作模式
 - 建议在停止前先发送最后一个稳定姿态指令
+- 支持单臂停止、多臂停止、双臂停止
 
 ---
 
-### 13.4 遥操作完整流程示例
+### 13.5 遥操作完整流程示例
 
 ```javascript
 class TeleopClient {

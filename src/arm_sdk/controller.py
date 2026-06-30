@@ -830,17 +830,11 @@ class RobotController:
             return False
         
         try:
-            # 转换为 ctypes 数组
-            from ctypes import c_float
-            joints_array = (c_float * 6)(*joints)
-            
-            # 调用 SDK 函数
             with robot_ctrl.sdk_lock:
                 ret = robot.rm_movej_canfd(
-                    robot.handle,
-                    joints_array,
+                    joints,
                     follow,
-                    trajectory_mode
+                    trajectory_mode=trajectory_mode
                 )
             
             if ret == 0:
@@ -851,6 +845,55 @@ class RobotController:
                 
         except Exception as e:
             print(f"遥操作执行异常: {str(e)}")
+            return False
+    
+    def teleop_init_movej(self, arm: str, joints: list, velocity: int = 5, radius: int = 0, connect: int = 0, block: int = 1) -> bool:
+        """
+        遥操作初始化：移动机械臂到指定关节姿态
+        
+        参数:
+            arm: 机械臂选择，"左" 或 "右"
+            joints: [j1, j2, j3, j4, j5, j6] 关节角度（度）
+            velocity: 速度（默认5）
+            radius: 半径（默认0）
+            connect: 连接（默认0）
+            block: 阻塞（默认1，等待执行完成）
+        
+        返回:
+            bool: 执行成功返回 True，失败返回 False
+        """
+        # 选择机械臂
+        robot_ctrl = self.robot1_ctrl if arm == "左" else self.robot2_ctrl
+        if robot_ctrl is None or robot_ctrl.robot is None:
+            print(f"{arm}臂未连接")
+            return False
+        
+        robot = robot_ctrl.robot
+        
+        # 验证关节角度数量
+        if len(joints) != 6:
+            print(f"关节角度数量错误：需要6个，实际{len(joints)}个")
+            return False
+        
+        try:
+            with robot_ctrl.sdk_lock:
+                ret = robot.rm_movej(
+                    joints,
+                    velocity,
+                    radius,
+                    connect,
+                    block
+                )
+            
+            if ret == 0:
+                print(f"{arm}臂初始化移动成功")
+                return True
+            else:
+                print(f"{arm}臂初始化移动失败，错误码: {ret}")
+                return False
+                
+        except Exception as e:
+            print(f"遥操作初始化执行异常: {str(e)}")
             return False
 
     def shutdown(self):
