@@ -96,6 +96,27 @@ class Config:
     RELAY_BAUDRATE: int = 38400
     RELAY_TIMEOUT: int = 1
 
+    # 表情屏 T5L DGUSII 配置（可选，按需初始化串口）
+    EXPRESSION_DISPLAY_ENABLED: bool = False
+    EXPRESSION_DISPLAY_PROVIDER: str = "t5l_dgusii"
+    EXPRESSION_DISPLAY_CONFIG: str = ""
+    EXPRESSION_DISPLAY_SERIAL_PORT: str = "COM4"
+    EXPRESSION_DISPLAY_BAUDRATE: int = 115200
+    EXPRESSION_DISPLAY_TIMEOUT: float = 0.5
+    EXPRESSION_DISPLAY_WRITE_TIMEOUT: float = 1.0
+    EXPRESSION_DISPLAY_VP_ADDR: str = "0x5602"
+    EXPRESSION_DISPLAY_SP_ADDR: str = "0x8000"
+    EXPRESSION_DISPLAY_START_VALUE: str = "0x0000"
+    EXPRESSION_DISPLAY_STOP_VALUE: str = "0x0001"
+    EXPRESSION_DISPLAY_HIDE_VALUE: str = "0x0002"
+    EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH: str = "stop"
+    EXPRESSION_DISPLAY_SWITCH_DELAY: float = 0.1
+    EXPRESSION_DISPLAY_UPDATE_ICON_RANGE: bool = True
+    EXPRESSION_DISPLAY_EXPRESSIONS: str = "happy:24:0:63,sad:27:0:63,angry:30:0:63,speechless:33:0:63,default_1:36:0:63,default_2:39:0:63"
+    EXPRESSION_DISPLAY_CLEAR_VPS: str = ""
+    EXPRESSION_DISPLAY_TEST_INTERVAL: float = 1.5
+    EXPRESSION_DISPLAY_TX_DELAY: float = 0.05
+
     # PWM 颈部舵机配置
     PWM_NECK_SERIAL_PORT: str = "/dev/neck"
     PWM_NECK_BAUDRATE: int = 9600
@@ -266,6 +287,30 @@ class Config:
         instance.RELAY_SERIAL_PORT = os.getenv("RELAY_SERIAL_PORT", "/dev/ttyUSB0")
         instance.RELAY_BAUDRATE = int(os.getenv("RELAY_BAUDRATE", "38400"))
         instance.RELAY_TIMEOUT = int(os.getenv("RELAY_TIMEOUT", "1"))
+
+        # 表情屏 T5L DGUSII（可选，实际调用时才打开串口）
+        instance.EXPRESSION_DISPLAY_ENABLED = os.getenv("EXPRESSION_DISPLAY_ENABLED", "false").lower() in ("true", "1", "yes")
+        instance.EXPRESSION_DISPLAY_PROVIDER = os.getenv("EXPRESSION_DISPLAY_PROVIDER", "t5l_dgusii")
+        instance.EXPRESSION_DISPLAY_CONFIG = os.getenv("EXPRESSION_DISPLAY_CONFIG", "")
+        instance.EXPRESSION_DISPLAY_SERIAL_PORT = os.getenv("EXPRESSION_DISPLAY_SERIAL_PORT", "COM4")
+        instance.EXPRESSION_DISPLAY_BAUDRATE = int(os.getenv("EXPRESSION_DISPLAY_BAUDRATE", "115200"))
+        instance.EXPRESSION_DISPLAY_TIMEOUT = float(os.getenv("EXPRESSION_DISPLAY_TIMEOUT", "0.5"))
+        instance.EXPRESSION_DISPLAY_WRITE_TIMEOUT = float(os.getenv("EXPRESSION_DISPLAY_WRITE_TIMEOUT", "1.0"))
+        instance.EXPRESSION_DISPLAY_VP_ADDR = os.getenv("EXPRESSION_DISPLAY_VP_ADDR", "0x5602")
+        instance.EXPRESSION_DISPLAY_SP_ADDR = os.getenv("EXPRESSION_DISPLAY_SP_ADDR", "0x8000")
+        instance.EXPRESSION_DISPLAY_START_VALUE = os.getenv("EXPRESSION_DISPLAY_START_VALUE", "0x0000")
+        instance.EXPRESSION_DISPLAY_STOP_VALUE = os.getenv("EXPRESSION_DISPLAY_STOP_VALUE", "0x0001")
+        instance.EXPRESSION_DISPLAY_HIDE_VALUE = os.getenv("EXPRESSION_DISPLAY_HIDE_VALUE", "0x0002")
+        instance.EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH = os.getenv("EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH", "stop")
+        instance.EXPRESSION_DISPLAY_SWITCH_DELAY = float(os.getenv("EXPRESSION_DISPLAY_SWITCH_DELAY", "0.1"))
+        instance.EXPRESSION_DISPLAY_UPDATE_ICON_RANGE = os.getenv("EXPRESSION_DISPLAY_UPDATE_ICON_RANGE", "true").lower() in ("true", "1", "yes")
+        instance.EXPRESSION_DISPLAY_EXPRESSIONS = os.getenv(
+            "EXPRESSION_DISPLAY_EXPRESSIONS",
+            "happy:24:0:63,sad:27:0:63,angry:30:0:63,speechless:33:0:63,default_1:36:0:63,default_2:39:0:63",
+        )
+        instance.EXPRESSION_DISPLAY_CLEAR_VPS = os.getenv("EXPRESSION_DISPLAY_CLEAR_VPS", "")
+        instance.EXPRESSION_DISPLAY_TEST_INTERVAL = float(os.getenv("EXPRESSION_DISPLAY_TEST_INTERVAL", "1.5"))
+        instance.EXPRESSION_DISPLAY_TX_DELAY = float(os.getenv("EXPRESSION_DISPLAY_TX_DELAY", "0.05"))
         
         # WebSocket 服务器配置
         instance.WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
@@ -441,6 +486,38 @@ class Config:
             "port": instance.RELAY_SERIAL_PORT,
             "baudrate": instance.RELAY_BAUDRATE,
             "timeout": instance.RELAY_TIMEOUT
+        }
+
+    @classmethod
+    def get_expression_display_config(cls) -> dict:
+        """获取表情屏配置（不会初始化串口）。"""
+        instance = cls.get_instance()
+        config_path = instance.EXPRESSION_DISPLAY_CONFIG
+        if config_path:
+            path = Path(config_path)
+            if not path.is_absolute():
+                path = Path(__file__).parent.parent.parent / path
+            config_path = str(path)
+        return {
+            "enabled": instance.EXPRESSION_DISPLAY_ENABLED,
+            "provider": instance.EXPRESSION_DISPLAY_PROVIDER,
+            "config_path": config_path,
+            "port": instance.EXPRESSION_DISPLAY_SERIAL_PORT,
+            "baudrate": instance.EXPRESSION_DISPLAY_BAUDRATE,
+            "timeout": instance.EXPRESSION_DISPLAY_TIMEOUT,
+            "write_timeout": instance.EXPRESSION_DISPLAY_WRITE_TIMEOUT,
+            "vp_addr": instance.EXPRESSION_DISPLAY_VP_ADDR,
+            "sp_addr": instance.EXPRESSION_DISPLAY_SP_ADDR,
+            "start_value": instance.EXPRESSION_DISPLAY_START_VALUE,
+            "stop_value": instance.EXPRESSION_DISPLAY_STOP_VALUE,
+            "hide_value": instance.EXPRESSION_DISPLAY_HIDE_VALUE,
+            "clear_before_switch": instance.EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH,
+            "switch_delay": instance.EXPRESSION_DISPLAY_SWITCH_DELAY,
+            "update_icon_range": instance.EXPRESSION_DISPLAY_UPDATE_ICON_RANGE,
+            "expressions": instance.EXPRESSION_DISPLAY_EXPRESSIONS,
+            "clear_vps": instance.EXPRESSION_DISPLAY_CLEAR_VPS,
+            "test_interval": instance.EXPRESSION_DISPLAY_TEST_INTERVAL,
+            "tx_delay": instance.EXPRESSION_DISPLAY_TX_DELAY,
         }
 
     @classmethod
