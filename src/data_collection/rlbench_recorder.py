@@ -313,27 +313,44 @@ class RLBenchRecorder:
         try:
             # 1. 获取相机数据
             if self._camera_manager and self._camera_manager.is_available:
-                # 使用第一个相机（或配置指定的相机）
-                raw_frames = self._camera_manager.get_latest_raw_frames()
+                # 使用配置指定的相机索引
+                # 先尝试从get_cameras_info()获取相机列表
+                cameras_info = self._camera_manager.get_cameras_info()
                 
-                if raw_frames:
-                    # raw_frames格式: (serial, name, color_bgr, depth_uint16, intrinsics_dict)
-                    serial, name, color_bgr, depth_uint16, intrinsics_dict = raw_frames
+                if cameras_info and len(cameras_info) > 0:
+                    # 确定使用的相机索引（默认第一个）
+                    camera_index = min(self._config.CAMERA_INDEX, len(cameras_info) - 1)
                     
-                    frame_data.front_rgb = color_bgr
-                    frame_data.front_depth = depth_uint16
+                    # 获取相机名称或序列号
+                    target_camera = cameras_info[camera_index]
+                    camera_name = target_camera.get("name")
+                    camera_serial = target_camera.get("serial")
                     
-                    # 内参矩阵
-                    if intrinsics_dict:
-                        fx = intrinsics_dict.get('fx', 0)
-                        fy = intrinsics_dict.get('fy', 0)
-                        ppx = intrinsics_dict.get('ppx', 0)
-                        ppy = intrinsics_dict.get('ppy', 0)
-                        frame_data.camera_intrinsics = np.array([
-                            [fx, 0, ppx],
-                            [0, fy, ppy],
-                            [0, 0, 1]
-                        ])
+                    # 尝试使用名称或序列号获取数据
+                    raw_frames = self._camera_manager.get_latest_raw_frames(camera_name or camera_serial)
+                    
+                    if raw_frames:
+                        # raw_frames格式: (color_bgr, depth_uint16, intrinsics_dict)
+                        color_bgr, depth_uint16, intrinsics_dict = raw_frames
+                        
+                        frame_data.front_rgb = color_bgr
+                        frame_data.front_depth = depth_uint16
+                        
+                        # 内参矩阵
+                        if intrinsics_dict:
+                            fx = intrinsics_dict.get('fx', 0)
+                            fy = intrinsics_dict.get('fy', 0)
+                            ppx = intrinsics_dict.get('ppx', 0)
+                            ppy = intrinsics_dict.get('ppy', 0)
+                            frame_data.camera_intrinsics = np.array([
+                                [fx, 0, ppx],
+                                [0, fy, ppy],
+                                [0, 0, 1]
+                            ])
+                    else:
+                        logger.warning(f"无法获取相机 {camera_name} ({camera_serial}) 的数据")
+                else:
+                    logger.warning("相机管理器中没有在线相机")
             
             # 2. 获取机械臂状态（简化版）
             if self._robot_controller:

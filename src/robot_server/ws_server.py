@@ -2650,7 +2650,7 @@ class RobotWebSocketServer:
 
     async def _handle_demo_record_start(self, websocket, data: dict) -> None:
         """
-        开始记录单条episode
+        开始记录单条episode（自动启动遥操作模式）
         请求: {"action": "demo_record_start"}
         响应: {"event": "demo_record_started", "episode_id": 0}
         """
@@ -2667,12 +2667,21 @@ class RobotWebSocketServer:
         if result.get("success"):
             episode_id = result["episode_id"]
             
-            logger.info(f"episode {episode_id} 开始记录")
+            # 自动启动遥操作模式（双臂）
+            if self._robot_controller:
+                # 启动双臂遥操作模式
+                for arm_name in ["左", "右"]:
+                    self._teleop_modes[arm_name] = True
+                    self._teleop_msg_counts[arm_name] = 0
+                
+                logger.info("数据采集已自动启动遥操作模式: 双臂")
+            
+            logger.info(f"episode {episode_id} 开始记录（已自动启动遥操作）")
             
             await websocket.send(self._json_msg({
                 "event": "demo_record_started",
                 "episode_id": episode_id,
-                "message": result["message"]
+                "message": result["message"] + "（已自动启动遥操作模式）"
             }))
         else:
             await websocket.send(self._json_msg({
@@ -2718,7 +2727,7 @@ class RobotWebSocketServer:
 
     async def _handle_demo_session_end(self, websocket, data: dict) -> None:
         """
-        结束数据采集会话
+        结束数据采集会话（自动停止遥操作模式）
         请求: {"action": "demo_session_end"}
         响应: {"event": "demo_session_ended", "message": "会话已结束"}
         """
@@ -2732,16 +2741,25 @@ class RobotWebSocketServer:
         # 结束会话
         result = self._demo_recorder.end_session()
         
+        # 自动停止遥操作模式（双臂）
+        if self._robot_controller:
+            # 停止双臂遥操作模式
+            for arm_name in ["左", "右"]:
+                self._teleop_modes[arm_name] = False
+                self._teleop_msg_counts[arm_name] = 0
+            
+            logger.info("数据采集会话已自动停止遥操作模式: 双臂")
+        
         # 清空会话状态
         self._demo_session["active"] = False
         self._demo_session["task"] = None
         self._demo_session["description"] = None
         
-        logger.info("数据采集会话已结束")
+        logger.info("数据采集会话已结束（已自动停止遥操作）")
         
         await websocket.send(self._json_msg({
             "event": "demo_session_ended",
-            "message": result["message"]
+            "message": result["message"] + "（已自动停止遥操作模式）"
         }))
 
     @staticmethod
