@@ -436,6 +436,8 @@ class ActionExecutor:
             return self._execute_gripper(operation)
         elif executor == '吸液枪':
             return self._execute_pipette(params)
+        elif executor in ('表情屏', '表情', 'expression_display', 'expression'):
+            return self._execute_expression_display(params)
         elif executor == '右臂转圈注液':
             return execute_right_arm_circle_dispense(
                 robot_controller=self._robot_controller,
@@ -451,6 +453,36 @@ class ActionExecutor:
 
         self._on_log(f"执行器: {executor}, 编号: {number}, 操作: {operation}")
         return True
+
+    def _execute_expression_display(self, params: dict) -> bool:
+        operation = str(params.get('操作', '切换')).lower()
+        if operation in ('关闭', 'close'):
+            from ..expression_display import close_expression_display
+
+            close_expression_display()
+            self._on_log("表情屏连接已关闭")
+            return True
+
+        expression = (
+            params.get('表情')
+            or params.get('表情名称')
+            or params.get('expression')
+            or params.get('name')
+        )
+        if expression is None or str(expression).strip() == "":
+            self._on_log("表情屏动作缺少表情名称", "error")
+            return False
+
+        self._on_log(f"表情屏切换: {expression}")
+        try:
+            from ..expression_display import switch_expression
+
+            switched = switch_expression(str(expression))
+            self._on_log(f"表情屏切换完成: {switched.name}")
+            return True
+        except Exception as e:
+            self._on_log(f"表情屏切换失败: {str(e)}", "error")
+            return False
 
     def _execute_gripper(self, operation: str) -> bool:
         """执行夹爪动作"""
