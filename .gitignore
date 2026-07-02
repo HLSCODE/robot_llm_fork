@@ -36,3 +36,4 @@ Thumbs.db
 # --- ��־�ļ� ---
 *.log
 logs/
+src/device_control_sdk/
