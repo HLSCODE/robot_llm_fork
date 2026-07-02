@@ -28,5 +28,10 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["src*"]
 
+[[tool.uv.index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
 [dependency-groups]
 dev = []
