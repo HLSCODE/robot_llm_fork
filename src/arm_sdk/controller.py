@@ -370,6 +370,30 @@ class RobotController:
             raise Exception("Robot2未连接")
         return self.closeclaw(self.robot2_ctrl.robot)
 
+    def gripper_move_robot1(self, position: int) -> bool:
+        """设置Robot1夹爪位置（0~1000）"""
+        if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
+            raise Exception("Robot1未连接")
+        position = max(0, min(1000, position))
+        ret = self.robot1_ctrl.robot.rm_set_gripper_position(
+            position,
+            block=True,
+            timeout=GRIPPER_CONFIG["release"]["timeout"]
+        )
+        return ret == 0
+
+    def gripper_move_robot2(self, position: int) -> bool:
+        """设置Robot2夹爪位置（0~1000）"""
+        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
+            raise Exception("Robot2未连接")
+        position = max(0, min(1000, position))
+        ret = self.robot2_ctrl.robot.rm_set_gripper_position(
+            position,
+            block=True,
+            timeout=GRIPPER_CONFIG["release"]["timeout"]
+        )
+        return ret == 0
+
     def move_robot1(self, target_pose):
         """移动Robot1到指定点位（使用已连接的实例）"""
         if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:

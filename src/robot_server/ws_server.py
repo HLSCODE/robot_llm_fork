@@ -2419,22 +2419,16 @@ class RobotWebSocketServer:
             "message": "遥操作模式已启动"
         }))
 
-    async def _execute_grip_async(self, arm: str, grip_val: int) -> None:
-        """在线程池中异步执行夹爪动作，不阻塞关节指令流"""
+    async def _execute_grip_async(self, arm: str, position: int) -> None:
+        """在线程池中异步执行夹爪位置指令，不阻塞关节指令流"""
         if self._robot_controller is None:
             return
+        position = max(0, min(1000, int(position)))
         try:
             loop = asyncio.get_event_loop()
-            if grip_val == 1:
-                await loop.run_in_executor(
-                    None, self._robot_controller.gripper_open_robot1 if arm == "左" else self._robot_controller.gripper_open_robot2
-                )
-                logger.info("遥操作夹爪张开: %s臂", arm)
-            elif grip_val == 0:
-                await loop.run_in_executor(
-                    None, self._robot_controller.gripper_close_robot1 if arm == "左" else self._robot_controller.gripper_close_robot2
-                )
-                logger.info("遥操作夹爪闭合: %s臂", arm)
+            method = self._robot_controller.gripper_move_robot1 if arm == "左" else self._robot_controller.gripper_move_robot2
+            await loop.run_in_executor(None, method, position)
+            logger.info("遥操作夹爪位置: %s臂 %d", arm, position)
         except Exception as e:
             logger.error("遥操作夹爪执行异常: arm=%s, error=%s", arm, str(e))
 
@@ -2450,7 +2444,7 @@ class RobotWebSocketServer:
         joints_data = data.get("joints")
         follow = data.get("follow", False)  # 默认False（平滑模式）
         trajectory_mode = data.get("trajectory_mode", 0)
-        grip = data.get("grip")  # 夹爪：0=闭合，1=张开（仅在变化时执行）
+        grip = data.get("grip")  # 夹爪位置原始值（0=闭合，1000=完全张开），仅在值变化时执行
         
         # 判断单臂还是双臂
         if arm:
@@ -2501,7 +2495,7 @@ class RobotWebSocketServer:
                         "message": f"执行异常: {str(e)}"
                     }))
             
-            # 处理夹爪指令（仅在值变化时执行，不阻塞关节流）
+            # 处理夹爪指令（直接传原始位置值，仅在值变化时触发）
             if grip is not None and grip != self._last_grip.get(arm):
                 self._last_grip[arm] = grip
                 asyncio.ensure_future(self._execute_grip_async(arm, grip))
