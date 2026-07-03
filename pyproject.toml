@@ -17,5 +17,21 @@ dependencies = [
     "websockets>=12.0",
 ]
 
+[project.scripts]
+t5l-dgus = "src.expression_display.t5l_dgusii.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[[tool.uv.index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
 [dependency-groups]
 dev = []
