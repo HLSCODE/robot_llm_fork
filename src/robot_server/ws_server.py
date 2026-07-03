@@ -204,6 +204,7 @@ class RobotWebSocketServer:
         # 遥操作状态（双臂独立）
         self._teleop_modes = {"左": False, "右": False}  # 双臂遥操作状态字典
         self._teleop_msg_counts = {"左": 0, "右": 0}  # 双臂消息计数器字典
+        self._last_grip = {"左": None, "右": None}  # 夹爪状态跟踪（避免重复执行）
         
         # 数据采集状态
         self._demo_recorder: Optional[RLBenchRecorder] = None  # 数据采集器（延迟初始化）
@@ -2418,6 +2419,25 @@ class RobotWebSocketServer:
             "message": "遥操作模式已启动"
         }))
 
+    async def _execute_grip_async(self, arm: str, grip_val: int) -> None:
+        """在线程池中异步执行夹爪动作，不阻塞关节指令流"""
+        if self._robot_controller is None:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            if grip_val == 1:
+                await loop.run_in_executor(
+                    None, self._robot_controller.gripper_open_robot1 if arm == "左" else self._robot_controller.gripper_open_robot2
+                )
+                logger.info("遥操作夹爪张开: %s臂", arm)
+            elif grip_val == 0:
+                await loop.run_in_executor(
+                    None, self._robot_controller.gripper_close_robot1 if arm == "左" else self._robot_controller.gripper_close_robot2
+                )
+                logger.info("遥操作夹爪闭合: %s臂", arm)
+        except Exception as e:
+            logger.error("遥操作夹爪执行异常: arm=%s, error=%s", arm, str(e))
+
     async def _handle_teleop_joint(self, websocket, data: dict) -> None:
         """
         处理遥操作关节指令（50Hz）
@@ -2430,6 +2450,7 @@ class RobotWebSocketServer:
         joints_data = data.get("joints")
         follow = data.get("follow", False)  # 默认False（平滑模式）
         trajectory_mode = data.get("trajectory_mode", 0)
+        grip = data.get("grip")  # 夹爪：0=闭合，1=张开（仅在变化时执行）
         
         # 判断单臂还是双臂
         if arm:
@@ -2479,6 +2500,11 @@ class RobotWebSocketServer:
                         "event": "teleop_error",
                         "message": f"执行异常: {str(e)}"
                     }))
+            
+            # 处理夹爪指令（仅在值变化时执行，不阻塞关节流）
+            if grip is not None and grip != self._last_grip.get(arm):
+                self._last_grip[arm] = grip
+                asyncio.ensure_future(self._execute_grip_async(arm, grip))
         
         else:
             # 双臂模式
@@ -2544,6 +2570,13 @@ class RobotWebSocketServer:
                         "event": "teleop_error",
                         "message": f"执行异常: {str(e)}"
                     }))
+            
+            # 处理双臂夹爪指令
+            if isinstance(grip, dict):
+                for arm_name, grip_val in grip.items():
+                    if arm_name in self._last_grip and grip_val is not None and grip_val != self._last_grip.get(arm_name):
+                        self._last_grip[arm_name] = grip_val
+                        asyncio.ensure_future(self._execute_grip_async(arm_name, grip_val))
 
     async def _handle_teleop_stop(self, websocket, data: dict) -> None:
         """
@@ -2586,6 +2619,7 @@ class RobotWebSocketServer:
         for arm_name in arms_to_stop:
             self._teleop_modes[arm_name] = False
             self._teleop_msg_counts[arm_name] = 0
+            self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
         
         logger.info("遥操作模式已停止: %s，共执行指令 %s", arms_to_stop, total_counts)
         await websocket.send(self._json_msg({
@@ -2673,6 +2707,7 @@ class RobotWebSocketServer:
                 for arm_name in ["左", "右"]:
                     self._teleop_modes[arm_name] = True
                     self._teleop_msg_counts[arm_name] = 0
+                    self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
                 
                 logger.info("数据采集已自动启动遥操作模式: 双臂")
             
@@ -2747,6 +2782,7 @@ class RobotWebSocketServer:
             for arm_name in ["左", "右"]:
                 self._teleop_modes[arm_name] = False
                 self._teleop_msg_counts[arm_name] = 0
+                self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
             
             logger.info("数据采集会话已自动停止遥操作模式: 双臂")
         

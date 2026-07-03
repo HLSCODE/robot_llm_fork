@@ -358,6 +358,18 @@ class RobotController:
             raise Exception("Robot1未连接")
         return self.closeclaw(self.robot1_ctrl.robot)
 
+    def gripper_open_robot2(self):
+        """直接打开Robot2夹爪（使用已连接的实例）"""
+        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
+            raise Exception("Robot2未连接")
+        return self.openclaw(self.robot2_ctrl.robot)
+
+    def gripper_close_robot2(self):
+        """直接关闭Robot2夹爪（使用已连接的实例）"""
+        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
+            raise Exception("Robot2未连接")
+        return self.closeclaw(self.robot2_ctrl.robot)
+
     def move_robot1(self, target_pose):
         """移动Robot1到指定点位（使用已连接的实例）"""
         if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
