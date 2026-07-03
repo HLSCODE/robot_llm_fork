@@ -14,8 +14,8 @@ LOCALIZATION_ANGLE_SIGN = -1.0  # UDP angle is clockwise-positive; math yaw is c
 # Arm calibration from scripts/calibrate_pose_compensation.py.
 # Coordinates are in the localization/body frame: +x forward, +y left.
 LEFT_ARM_LOCATOR_TO_BASE_CM = {
-    "x": 50.206008,
-    "y": -24.282551,
+    "x": 34.453067,
+    "y": -8.812920,
     "z": 0.0,
 }
 
@@ -118,9 +118,9 @@ def corrected_arm_base_from_tcp_matrix(
         vector_add(arm_base_body, taught_tcp_body),
     )
     locator_delta_body = [
-        (_offset_value(current_offset, "x") - _offset_value(teach_offset, "x"))
-        * POSE_LINEAR_UNITS_PER_UDP_CM,
         (_offset_value(current_offset, "y") - _offset_value(teach_offset, "y"))
+        * POSE_LINEAR_UNITS_PER_UDP_CM,
+        -(_offset_value(current_offset, "x") - _offset_value(teach_offset, "x"))
         * POSE_LINEAR_UNITS_PER_UDP_CM,
         0.0,
     ]

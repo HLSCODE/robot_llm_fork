@@ -516,7 +516,7 @@ class ActionConfigDialog(QDialog):
         position_layout = QFormLayout()
         
         self.id_input = QSpinBox()
-        self.id_input.setRange(0, 100)
+        self.id_input.setRange(-100, 100)
         self.id_input.setValue(self.action_data.get('parameters', {}).get('id', 0))
         
         self.cid_input = QSpinBox()
