@@ -443,6 +443,8 @@ class ActionExecutor:
                 stop_requested=lambda: self._stop_requested,
                 paused=lambda: self._paused,
             )
+        elif executor == '加粉装置':
+            return self._execute_tapping(params)
         else:
             self._on_log(f"未知的执行器: {executor}", "error")
             return False
@@ -478,6 +480,29 @@ class ActionExecutor:
 
         self._on_log("夹爪重试次数耗尽", "error")
         return False
+
+    def _execute_tapping(self, params: dict) -> bool:
+        """执行加粉装置动作（夹爪/针升降/针旋转）。"""
+        from ..devices.tapping_controller import TappingController, OPERATIONS
+
+        operation = params.get('操作', '')
+        self._on_log(f"加粉装置动作: {operation}")
+
+        if operation not in OPERATIONS:
+            self._on_log(f"未知的加粉装置操作: {operation}", "error")
+            return False
+
+        ctrl = TappingController.from_config()
+        try:
+            ctrl.enable_all()
+            OPERATIONS[operation](ctrl, **params)
+            self._on_log(f"加粉装置 {operation} 执行完成")
+            return True
+        except Exception as e:
+            self._on_log(f"加粉装置 {operation} 执行失败: {e}", "error")
+            return False
+        finally:
+            ctrl.close()
 
     def _execute_pipette(self, params: dict) -> bool:
         """执行吸液枪动作（吸/吐）"""

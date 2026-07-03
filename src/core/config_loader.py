@@ -96,6 +96,14 @@ class Config:
     RELAY_BAUDRATE: int = 38400
     RELAY_TIMEOUT: int = 1
 
+    # 加粉装置配置
+    TAPPING_SERIAL_PORT: str = "/dev/ttyACM0"
+    TAPPING_BAUDRATE: int = 115200
+    TAPPING_TIMEOUT: float = 0.5
+    TAPPING_GRIPPER_ADDRESS: int = 9
+    TAPPING_LIFT_ADDRESS: int = 7
+    TAPPING_ROTATION_ADDRESS: int = 6
+
     # PWM 颈部舵机配置
     PWM_NECK_SERIAL_PORT: str = "/dev/neck"
     PWM_NECK_BAUDRATE: int = 9600
@@ -266,6 +274,14 @@ class Config:
         instance.RELAY_SERIAL_PORT = os.getenv("RELAY_SERIAL_PORT", "/dev/ttyUSB0")
         instance.RELAY_BAUDRATE = int(os.getenv("RELAY_BAUDRATE", "38400"))
         instance.RELAY_TIMEOUT = int(os.getenv("RELAY_TIMEOUT", "1"))
+
+        # 加粉装置
+        instance.TAPPING_SERIAL_PORT = os.getenv("TAPPING_SERIAL_PORT", "/dev/ttyACM0")
+        instance.TAPPING_BAUDRATE = int(os.getenv("TAPPING_BAUDRATE", "115200"))
+        instance.TAPPING_TIMEOUT = float(os.getenv("TAPPING_TIMEOUT", "0.5"))
+        instance.TAPPING_GRIPPER_ADDRESS = int(os.getenv("TAPPING_GRIPPER_ADDRESS", "9"))
+        instance.TAPPING_LIFT_ADDRESS = int(os.getenv("TAPPING_LIFT_ADDRESS", "7"))
+        instance.TAPPING_ROTATION_ADDRESS = int(os.getenv("TAPPING_ROTATION_ADDRESS", "6"))
         
         # WebSocket 服务器配置
         instance.WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
@@ -441,6 +457,19 @@ class Config:
             "port": instance.RELAY_SERIAL_PORT,
             "baudrate": instance.RELAY_BAUDRATE,
             "timeout": instance.RELAY_TIMEOUT
+        }
+
+    @classmethod
+    def get_tapping_config(cls) -> dict:
+        """获取加粉装置控制器配置"""
+        instance = cls.get_instance()
+        return {
+            "port": instance.TAPPING_SERIAL_PORT,
+            "baudrate": instance.TAPPING_BAUDRATE,
+            "timeout": instance.TAPPING_TIMEOUT,
+            "gripper_address": instance.TAPPING_GRIPPER_ADDRESS,
+            "lift_address": instance.TAPPING_LIFT_ADDRESS,
+            "rotation_address": instance.TAPPING_ROTATION_ADDRESS,
         }
 
     @classmethod

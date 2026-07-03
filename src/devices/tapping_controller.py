@@ -1,0 +1,146 @@
+"""
+加粉装置控制器
+===============
+封装同一条 RS-485 总线上的三个设备：
+  - 加粉夹爪 (Electric Gripper, move_to 替代 grip/release)
+  - 针升降电机 (Stepper Motor)
+  - 针旋转电机 (Stepper Motor)
+
+被 action_executor.py 通过 `执行器: "加粉装置"` 调用，
+不修改任何已有代码。
+"""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+
+from ..device_control_sdk import (
+    SerialTransport,
+    StepperBus,
+    ElectricGripper,
+)
+from ..device_control_sdk.devices.stepper_motor import MSeriesRegister
+from ..core.config_loader import Config
+
+logger = logging.getLogger(__name__)
+
+# 运动默认参数
+DEFAULT_STEPS = 5000
+DEFAULT_SPEED_RPM = 60
+DEFAULT_ACCEL_MS = 200
+
+
+@dataclass
+class TappingController:
+    """加粉装置控制器，管理串口生命周期。"""
+
+    transport: SerialTransport
+    gripper: ElectricGripper
+    bus: StepperBus
+    lift_address: int
+    rotation_address: int
+
+    @classmethod
+    def from_config(cls) -> "TappingController":
+        """从全局配置创建控制器实例。"""
+        cfg = Config.get_tapping_config()
+        transport = SerialTransport(
+            cfg["port"],
+            baudrate=cfg["baudrate"],
+            timeout=cfg["timeout"],
+        )
+        gripper = ElectricGripper(transport, address=cfg["gripper_address"])
+        bus = StepperBus(transport)
+        return cls(
+            transport=transport,
+            gripper=gripper,
+            bus=bus,
+            lift_address=cfg["lift_address"],
+            rotation_address=cfg["rotation_address"],
+        )
+
+    def close(self) -> None:
+        """关闭串口连接。"""
+        self.transport.close()
+
+    # ---- 夹爪 ----
+    def gripper_move_to(self, percent: int) -> None:
+        """设置夹爪开度 (0=全开, 100=全闭)。"""
+        self.gripper.move_to(percent)
+
+    def gripper_grip(self) -> None:
+        """夹紧 (完全闭合)。"""
+        self.gripper_move_to(100)
+
+    def gripper_release(self) -> None:
+        """释放 (完全张开)。"""
+        self.gripper_move_to(0)
+
+    # ---- 针升降 ----
+    def lift_move_to(self, steps: int) -> None:
+        """升降电机运动到绝对位置。"""
+        motor = self.bus.motor(self.lift_address)
+        motor.move_to(steps, rpm=DEFAULT_SPEED_RPM, acceleration_ms=DEFAULT_ACCEL_MS)
+
+    def lift_up(self, steps: int = DEFAULT_STEPS) -> None:
+        """针上升。"""
+        self.lift_move_to(steps)
+
+    def lift_down(self, steps: int = DEFAULT_STEPS) -> None:
+        """针下降。"""
+        self.lift_move_to(0)
+
+    def lift_stop(self) -> None:
+        """停止升降电机。"""
+        self.bus.motor(self.lift_address).stop()
+
+    def lift_enable(self) -> None:
+        """使能升降电机。"""
+        self.bus.motor(self.lift_address).write_register(MSeriesRegister.ENABLE, 0x0001)
+
+    # ---- 针旋转 ----
+    def rotation_move_to(self, steps: int) -> None:
+        """旋转电机运动到绝对位置。"""
+        motor = self.bus.motor(self.rotation_address)
+        motor.move_to(steps, rpm=DEFAULT_SPEED_RPM, acceleration_ms=DEFAULT_ACCEL_MS)
+
+    def rotation_cw(self, steps: int = DEFAULT_STEPS) -> None:
+        """正转。"""
+        self.rotation_move_to(steps)
+
+    def rotation_ccw(self, steps: int = DEFAULT_STEPS) -> None:
+        """反转。"""
+        self.rotation_move_to(0)
+
+    def rotation_stop(self) -> None:
+        """停止旋转电机。"""
+        self.bus.motor(self.rotation_address).stop()
+
+    def rotation_enable(self) -> None:
+        """使能旋转电机。"""
+        self.bus.motor(self.rotation_address).write_register(MSeriesRegister.ENABLE, 0x0001)
+
+    def enable_all(self) -> None:
+        """使能两个电机。"""
+        self.lift_enable()
+        self.rotation_enable()
+
+
+# 操作名称 -> 方法映射 (供 action_executor 使用)
+OPERATIONS = {
+    # 夹爪
+    "夹爪闭合":     lambda ctrl, **kw: ctrl.gripper_grip(),
+    "夹爪张开":     lambda ctrl, **kw: ctrl.gripper_release(),
+    "夹爪移动到":   lambda ctrl, **kw: ctrl.gripper_move_to(int(kw.get("开度", 50))),
+    # 针升降
+    "针上升":       lambda ctrl, **kw: ctrl.lift_up(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针下降":       lambda ctrl, **kw: ctrl.lift_down(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针停止":       lambda ctrl, **kw: ctrl.lift_stop(),
+    # 针旋转
+    "针正转":       lambda ctrl, **kw: ctrl.rotation_cw(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针反转":       lambda ctrl, **kw: ctrl.rotation_ccw(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针旋转停止":   lambda ctrl, **kw: ctrl.rotation_stop(),
+    # 通用
+    "使能":         lambda ctrl, **kw: ctrl.enable_all(),
+}
