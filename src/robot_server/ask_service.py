@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from ..llm.classifier import InstructionClassifier
+from ..llm import InstructionClassifier
 from ..llm.registry import LLMRegistry
 
 logger = logging.getLogger(__name__)
@@ -23,11 +23,11 @@ async def classify_instruction(
 ) -> dict:
     """对用户输入进行指令分类。"""
     if not enabled:
-        return {"Instruction": user_input, "is_Instruction": False}
+        return _fallback_result(user_input)
 
     if not api_key:
         logger.info("Ask 分类未配置 API Key，跳过指令分类")
-        return {"Instruction": user_input, "is_Instruction": False}
+        return _fallback_result(user_input)
 
     client = LLMRegistry.create_openai_compatible(
         provider_name="ask",
@@ -37,3 +37,14 @@ async def classify_instruction(
         default_model="gpt-4o-mini",
     )
     return await InstructionClassifier(client).classify(user_input, enabled=enabled)
+
+
+def _fallback_result(user_input: str) -> dict:
+    return {
+        "intent": "chat",
+        "is_addressed_to_robot": True,
+        "should_end_session": False,
+        "session_action": "none",
+        "Instruction": user_input,
+        "is_Instruction": False,
+    }

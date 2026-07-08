@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from ..base import LLMClient, LLMPlanResult
 from ..errors import LLMConfigError, LLMProviderError
-from ..planner import SkillPlanner
+from ..tasks import SkillPlanner
 from ..types import (
     LLMCapability,
     LLMChatResult,

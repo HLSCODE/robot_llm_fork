@@ -17,7 +17,7 @@ except ImportError:
 
 from ..base import LLMClient, LLMPlanResult
 from ..errors import LLMProviderError
-from ..planner import SkillPlanner
+from ..tasks import SkillPlanner
 from ..types import (
     LLMCapability,
     LLMChatResult,
