@@ -9,8 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from PyQt6.QtCore import QObject, pyqtSignal, QThread, QTimer
 
 from ..core.config_loader import Config
-from ..llm import OpenAIClient, DeepSeekClient
-from ..llm.base import LLMPlanResult
+from ..llm import BaseLLMClient, LLMPlanResult, LLMRegistry, SkillPlanner
 from ..skill_system import SkillEngine
 from ..skill_system.models import SkillMatchResult, Skill
 from ..core.models import SequenceItem
@@ -65,7 +64,10 @@ class AIController(QObject):
         super().__init__()
 
         self._config = Config.get_instance()
-        self._llm_client: Optional[OpenAIClient] = None
+        self._llm_registry: Optional[LLMRegistry] = None
+        self._llm_client: Optional[BaseLLMClient] = None
+        self._planner_client: Optional[BaseLLMClient] = None
+        self._skill_planner: Optional[SkillPlanner] = None
         self._skill_engine: Optional[SkillEngine] = None
         self._execution_bridge = execution_bridge
 
@@ -86,45 +88,19 @@ class AIController(QObject):
 
     def _initialize(self) -> None:
         """初始化 LLM 和 Skill 引擎"""
-        # 初始化 LLM（根据配置的提供商选择）
-        if self._config.OPENAI_API_KEY:
-            provider = self._config.MODEL_PROVIDER.lower()
-            base_url = getattr(self._config, 'OPENAI_BASE_URL', '')
-
-            if provider == "deepseek":
-                self._llm_client = DeepSeekClient(
-                    api_key=self._config.OPENAI_API_KEY,
-                    model=self._config.OPENAI_MODEL or "deepseek-reasoner",
-                    base_url=base_url,
-                )
-                if self._llm_client.is_available():
-                    logger.info(f"DeepSeek 客户端就绪，使用模型: {self._llm_client.get_model_name()}")
-                else:
-                    logger.warning("DeepSeek 客户端不可用，请检查 API Key")
-            elif provider == "dashscope":
-                # 阿里云百炼，兼容 OpenAI 协议
-                self._llm_client = OpenAIClient(
-                    api_key=self._config.OPENAI_API_KEY,
-                    model=self._config.OPENAI_MODEL or "qwen-plus",
-                    base_url=base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                )
-                if self._llm_client.is_available():
-                    logger.info(f"百炼客户端就绪，使用模型: {self._llm_client.get_model_name()}")
-                else:
-                    logger.warning("百炼客户端不可用，请检查 API Key")
-            else:
-                # OpenAI 或其他兼容服务
-                self._llm_client = OpenAIClient(
-                    api_key=self._config.OPENAI_API_KEY,
-                    model=self._config.OPENAI_MODEL or "gpt-4o",
-                    base_url=base_url,
-                )
-                if self._llm_client.is_available():
-                    logger.info(f"LLM 客户端就绪，使用模型: {self._llm_client.get_model_name()}")
-                else:
-                    logger.warning("LLM 客户端不可用，请检查 API Key")
+        # 初始化 LLM 能力层
+        self._llm_registry = LLMRegistry.from_config(self._config)
+        self._llm_client = self._llm_registry.get_chat_client()
+        self._planner_client = self._llm_registry.get_planner_client()
+        self._skill_planner = self._llm_registry.skill_planner
+        if self._llm_client.is_available():
+            logger.info(
+                "LLM 客户端就绪: %s/%s",
+                self._llm_client.get_provider_name(),
+                self._llm_client.get_model_name(),
+            )
         else:
-            logger.warning("未配置 API Key")
+            logger.warning("LLM 客户端不可用，请检查模型配置")
 
         # 初始化 Skill 引擎
         self._skill_engine = SkillEngine()
@@ -163,13 +139,18 @@ class AIController(QObject):
                     self._emit_status("模拟模式")
                     return
 
-                if self._llm_client is None or not self._llm_client.is_available():
-                    self._emit_error("LLM 不可用，请检查 API Key 配置")
+                if (
+                    self._llm_client is None
+                    or self._planner_client is None
+                    or self._skill_planner is None
+                    or not self._planner_client.is_available()
+                ):
+                    self._emit_error("LLM 不可用，请检查模型配置")
                     self._emit_status("错误")
                     return
 
                 skill_summaries = self._skill_engine.list_all_skills()
-                llm_result = self._llm_client.plan(self._current_user_text, skill_summaries)
+                llm_result = self._skill_planner.plan_sync(self._current_user_text, skill_summaries)
 
                 self._current_llm_result = llm_result
                 self.understanding_finished.emit(llm_result.__dict__)
@@ -340,18 +321,20 @@ class AIController(QObject):
 
     def is_llm_available(self) -> bool:
         """LLM 是否可用"""
-        return self._llm_client is not None and self._llm_client.is_available()
+        return self._planner_client is not None and self._planner_client.is_available()
 
     def get_llm_model_name(self) -> str:
         """获取 LLM 模型名称"""
-        if self._llm_client:
-            return self._llm_client.get_model_name()
+        if self._planner_client:
+            return self._planner_client.get_model_name()
         return "未配置"
 
     def get_model_provider(self) -> str:
         """获取模型提供商名称"""
+        if self._planner_client:
+            return self._planner_client.get_provider_name().upper()
         return self._config.MODEL_PROVIDER.upper()
 
     def is_api_key_set(self) -> bool:
-        """API Key 是否已配置"""
-        return bool(self._config.OPENAI_API_KEY)
+        """模型配置是否已配置"""
+        return Config.is_api_key_set()

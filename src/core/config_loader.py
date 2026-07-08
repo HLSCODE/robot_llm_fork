@@ -22,7 +22,12 @@ class Config:
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str = ""
     MODEL_PROVIDER: str = "openai"
-
+    LLM_CHAT_PROVIDER: str = ""
+    LLM_PLANNER_PROVIDER: str = ""
+    LLM_VISION_PROVIDER: str = ""
+    LLM_DEFAULT_TEMPERATURE: float = 0.3
+    LLM_DEFAULT_MAX_TOKENS: int = 512
+    LLM_REQUEST_TIMEOUT_S: float = 60.0
 
     # 系统配置
     LOG_LEVEL: str = "INFO"
@@ -135,11 +140,13 @@ class Config:
     WEBSOCKET_HOST: str = "0.0.0.0"
     WEBSOCKET_PORT: int = 8765
 
-    # MiniCPM 聊天代理配置
+    # MiniCPM Realtime / 聊天配置
     MINICPM_GATEWAY_HOST: str = "localhost"
     MINICPM_GATEWAY_PORT: int = 8006
-    MINICPM_GATEWAY_SCHEME: str = "https"
+    MINICPM_WS_SCHEME: str = "wss"
     MINICPM_GATEWAY_PATH_PREFIX: str = ""
+    MINICPM_REALTIME_PATH: str = "/v1/realtime"
+    MINICPM_MODEL: str = "minicpm-o"
     MINICPM_ASK_ENABLED: bool = True
     MINICPM_ASK_API_KEY: str = ""
     MINICPM_ASK_BASE_URL: str = ""
@@ -197,6 +204,12 @@ class Config:
         instance.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
         instance.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
         instance.MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai")
+        instance.LLM_CHAT_PROVIDER = os.getenv("LLM_CHAT_PROVIDER", "")
+        instance.LLM_PLANNER_PROVIDER = os.getenv("LLM_PLANNER_PROVIDER", "")
+        instance.LLM_VISION_PROVIDER = os.getenv("LLM_VISION_PROVIDER", "")
+        instance.LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.3"))
+        instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
+        instance.LLM_REQUEST_TIMEOUT_S = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "60"))
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         instance.RUN_MODE = os.getenv("RUN_MODE", "server")
         instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
@@ -316,11 +329,13 @@ class Config:
         instance.WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
         instance.WEBSOCKET_PORT = int(os.getenv("WEBSOCKET_PORT", "8765"))
 
-        # MiniCPM 聊天代理配置
+        # MiniCPM Realtime / 聊天配置
         instance.MINICPM_GATEWAY_HOST = os.getenv("MINICPM_GATEWAY_HOST", "localhost")
         instance.MINICPM_GATEWAY_PORT = int(os.getenv("MINICPM_GATEWAY_PORT", "8006"))
-        instance.MINICPM_GATEWAY_SCHEME = os.getenv("MINICPM_GATEWAY_SCHEME", "https")
+        instance.MINICPM_WS_SCHEME = os.getenv("MINICPM_WS_SCHEME", "wss")
         instance.MINICPM_GATEWAY_PATH_PREFIX = os.getenv("MINICPM_GATEWAY_PATH_PREFIX", "")
+        instance.MINICPM_REALTIME_PATH = os.getenv("MINICPM_REALTIME_PATH", "/v1/realtime")
+        instance.MINICPM_MODEL = os.getenv("MINICPM_MODEL", "minicpm-o")
         instance.MINICPM_ASK_ENABLED = os.getenv(
             "MINICPM_ASK_ENABLED", "true").lower() in ("true", "1", "yes")
         instance.MINICPM_ASK_API_KEY = os.getenv("MINICPM_ASK_API_KEY", "")
@@ -361,8 +376,17 @@ class Config:
 
     @classmethod
     def is_api_key_set(cls) -> bool:
-        """检查 OpenAI API Key 是否已配置"""
-        key = cls.get_instance().OPENAI_API_KEY
+        """检查当前规划模型 provider 是否已配置。"""
+        instance = cls.get_instance()
+        provider = (
+            instance.LLM_PLANNER_PROVIDER
+            or instance.LLM_CHAT_PROVIDER
+            or instance.MODEL_PROVIDER
+            or "openai"
+        ).lower()
+        if provider == "minicpm":
+            return bool(instance.MINICPM_GATEWAY_HOST)
+        key = instance.OPENAI_API_KEY
         return bool(key and key != "your_openai_key_here")
 
     @classmethod
@@ -584,18 +608,36 @@ class Config:
         }
 
     @classmethod
-    def get_minicpm_proxy_config(cls) -> dict:
-        """获取 MiniCPM 聊天代理配置"""
+    def get_minicpm_config(cls) -> dict:
+        """获取 MiniCPM Realtime / 聊天配置"""
         instance = cls.get_instance()
         return {
             "gateway_host": instance.MINICPM_GATEWAY_HOST,
             "gateway_port": instance.MINICPM_GATEWAY_PORT,
-            "gateway_scheme": instance.MINICPM_GATEWAY_SCHEME,
+            "ws_scheme": instance.MINICPM_WS_SCHEME,
             "gateway_path_prefix": instance.MINICPM_GATEWAY_PATH_PREFIX,
+            "realtime_path": instance.MINICPM_REALTIME_PATH,
             "ask_enabled": instance.MINICPM_ASK_ENABLED,
             "ask_api_key": instance.MINICPM_ASK_API_KEY or instance.OPENAI_API_KEY,
             "ask_base_url": instance.MINICPM_ASK_BASE_URL or instance.OPENAI_BASE_URL,
             "ask_model": instance.MINICPM_ASK_MODEL,
+        }
+
+    @classmethod
+    def get_llm_config(cls) -> dict:
+        """获取 LLM 能力层配置摘要。"""
+        instance = cls.get_instance()
+        return {
+            "model_provider": instance.MODEL_PROVIDER,
+            "chat_provider": instance.LLM_CHAT_PROVIDER or instance.MODEL_PROVIDER,
+            "planner_provider": instance.LLM_PLANNER_PROVIDER or instance.LLM_CHAT_PROVIDER or instance.MODEL_PROVIDER,
+            "vision_provider": instance.LLM_VISION_PROVIDER or instance.LLM_CHAT_PROVIDER or instance.MODEL_PROVIDER,
+            "openai_model": instance.OPENAI_MODEL,
+            "openai_base_url": instance.OPENAI_BASE_URL,
+            "minicpm_model": instance.MINICPM_MODEL,
+            "minicpm_ws_scheme": instance.MINICPM_WS_SCHEME,
+            "minicpm_realtime_path": instance.MINICPM_REALTIME_PATH,
+            "timeout_s": instance.LLM_REQUEST_TIMEOUT_S,
         }
     
     @classmethod

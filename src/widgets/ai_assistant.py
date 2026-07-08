@@ -291,7 +291,7 @@ class AIAssistantWidget(QWidget):
 
         # 检查API Key
         if not self._ai_controller.is_api_key_set():
-            self._add_system_message("请先配置 OpenAI API Key！\n请在项目根目录创建 config.env 文件，设置 OPENAI_API_KEY。")
+            self._add_system_message("请先配置 LLM 模型！\n请在项目根目录创建 config.env 文件，设置 MODEL_PROVIDER 及对应模型配置。")
             return
 
         # 添加用户消息

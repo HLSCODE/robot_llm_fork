@@ -1,0 +1,1067 @@
+# LLM 能力层重构与 MiniCPM Realtime Chat 接入方案
+
+## 1. 背景
+
+当前 `src/llm/` 的职责较窄，主要服务于 AI 技能规划：
+
+- `LLMClient.plan(user_text, skill_summaries) -> LLMPlanResult`
+- `OpenAIClient` 和 `DeepSeekClient` 都在客户端内部完成模型调用、规划 prompt 构造和 JSON 解析
+- `ai_controller.py` 与 `robot_server/ws_server.py` 直接按配置选择具体客户端
+
+随着项目需要接入更多模型能力，尤其是 MiniCPM-o Realtime Chat 这类 WebSocket 协议模型，继续把 `src/llm/` 定义为“规划后端”会变得不够自然。
+
+本方案建议将 `src/llm/` 重构为统一的“大模型能力层”，收敛项目内所有模型相关调用，并通过策略模式接入不同 provider。业务层只关心“当前使用什么模型”和“该模型提供哪些能力”，不关心底层是 HTTP、OpenAI-compatible API、WebSocket Realtime API，还是未来的本地推理服务。
+
+## 2. 目标
+
+1. 统一模型能力入口，收敛 OpenAI、DeepSeek、DashScope、MiniCPM 等调用。
+2. 将“模型调用”和“机器人规划业务”解耦。
+3. 支持同步/异步文本对话、流式对话、规划、图文理解和后续音频能力扩展。
+4. MiniCPM Realtime Chat 的上游 WebSocket 由 MiniCPM provider 内部维护。
+5. 外部 WebSocket 服务仍由 `robot_server/ws_server.py` 维护，只负责客户端连接、鉴权、事件转发和业务编排。
+6. 保持现有 `ai_chat`、`ai_status` 和聊天 action 等功能可平滑迁移。
+
+## 3. 非目标
+
+1. `src/llm/` 不负责前端 WebSocket 会话管理。
+2. `src/llm/` 不负责机器人动作执行、技能展开、状态广播。
+3. `src/llm/` 不直接依赖 `websocket` 客户端对象。
+4. `src/llm/` 不吞并 `skill_system`、`robot_server`、`ai_integration` 的业务职责。
+5. 本重构不要求一次性删除旧 `OpenAIClient.plan()` 接口，可用兼容层逐步迁移。
+
+## 4. 新职责边界
+
+### 4.1 `src/llm/`
+
+负责模型能力：
+
+- 模型 provider 创建与选择
+- 普通文本对话
+- 流式文本对话
+- 图文输入
+- 语音/音频扩展
+- MiniCPM Realtime 协议封装
+- 统一返回类型、错误类型、流式事件类型
+- `SkillPlanner` 这类“使用模型能力完成规划”的上层模型应用
+
+### 4.2 `robot_server/ws_server.py`
+
+负责服务端 WebSocket：
+
+- 维护前端连接
+- 接收前端 action
+- 调用 `src/llm/` 能力
+- 将 `LLMStreamEvent` 翻译成前端 `chat_data`、`ai_preview_ready` 等事件
+- 调用技能系统和机器人执行器
+
+### 4.3 `skill_system`
+
+负责技能：
+
+- 技能注册
+- 技能查询
+- 技能参数校验
+- 技能展开为动作序列
+
+### 4.4 `ai_integration`
+
+负责 GUI 或控制器层编排：
+
+- 收集用户输入
+- 调用 `SkillPlanner`
+- 发出 UI 信号
+- 不直接关心具体模型 provider
+
+## 5. 总体架构
+
+```text
+Frontend / GUI
+    |
+    | WebSocket / Qt Signal
+    v
+robot_server / ai_integration
+    |
+    | calls
+    v
+src/llm
+    |
+    | LLMRegistry.from_config()
+    v
+provider strategy
+    |----------------------------------|
+    | OpenAI-compatible HTTP           |
+    | DeepSeek OpenAI-compatible HTTP  |
+    | DashScope OpenAI-compatible HTTP |
+    | MiniCPM Realtime WebSocket       |
+    |----------------------------------|
+```
+
+关键原则：
+
+```text
+前端 WebSocket 由 ws_server.py 维护
+模型上游 WebSocket 由 provider 内部维护
+业务层只消费 chat / stream_chat / plan 等能力
+```
+
+## 6. 目标目录结构
+
+建议逐步调整为：
+
+```text
+src/llm/
+  __init__.py
+  base.py
+  types.py
+  errors.py
+  registry.py
+  planner.py
+  providers/
+    __init__.py
+    openai_compatible.py
+    openai_client.py
+    deepseek_client.py
+    dashscope_client.py
+    minicpm_realtime.py
+```
+
+说明：
+
+- `types.py`：统一消息、结果、流式事件、能力枚举。
+- `base.py`：抽象接口或 Protocol。
+- `registry.py`：根据配置创建 provider。
+- `planner.py`：机器人技能规划 prompt 和 `LLMPlanResult` 解析。
+- `providers/`：具体 provider 策略实现。
+- `openai_compatible.py`：复用 OpenAI-compatible 的通用实现，OpenAI、DeepSeek、DashScope 只传配置差异。
+- `minicpm_realtime.py`：封装 MiniCPM-o Realtime Chat 协议。
+
+## 7. 核心类型设计
+
+### 7.1 消息类型
+
+```python
+from dataclasses import dataclass
+from typing import Any, Literal, Optional
+
+MessageRole = Literal["system", "user", "assistant"]
+ContentType = Literal["text", "image", "audio"]
+
+@dataclass
+class LLMContentPart:
+    type: ContentType
+    text: Optional[str] = None
+    data: Optional[str] = None
+    mime_type: Optional[str] = None
+
+@dataclass
+class LLMMessage:
+    role: MessageRole
+    content: str | list[LLMContentPart]
+```
+
+说明：
+
+- 普通文本消息用 `content: str`。
+- 多模态消息用 `content: list[LLMContentPart]`。
+- MiniCPM Realtime Chat 支持字符串或多模态列表，可以直接映射。
+
+### 7.2 对话结果
+
+```python
+@dataclass
+class LLMChatResult:
+    text: str
+    model: str
+    provider: str
+    raw: Any = None
+    usage: Optional[dict[str, Any]] = None
+    metrics: Optional[dict[str, Any]] = None
+```
+
+### 7.3 流式事件
+
+```python
+from typing import Literal
+
+StreamEventType = Literal[
+    "session_started",
+    "text_delta",
+    "audio_delta",
+    "done",
+    "error",
+    "metrics",
+]
+
+@dataclass
+class LLMStreamEvent:
+    type: StreamEventType
+    text_delta: str = ""
+    audio_data: Optional[str] = None
+    text: str = ""
+    error: Optional[str] = None
+    metrics: Optional[dict[str, Any]] = None
+    raw: Any = None
+```
+
+### 7.4 能力声明
+
+```python
+from enum import Enum
+
+class LLMCapability(str, Enum):
+    CHAT = "chat"
+    STREAM_CHAT = "stream_chat"
+    VISION_CHAT = "vision_chat"
+    AUDIO_CHAT = "audio_chat"
+    TTS = "tts"
+    PLANNING = "planning"
+```
+
+Provider 可以通过 `capabilities()` 返回自己支持的能力。
+
+## 8. 抽象接口设计
+
+### 8.1 基础模型接口
+
+```python
+from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
+
+class BaseLLMClient(ABC):
+    @abstractmethod
+    def is_available(self) -> bool:
+        pass
+
+    @abstractmethod
+    def get_model_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def get_provider_name(self) -> str:
+        pass
+
+    @abstractmethod
+    def capabilities(self) -> set[LLMCapability]:
+        pass
+
+    async def chat(
+        self,
+        messages: list[LLMMessage],
+        **options,
+    ) -> LLMChatResult:
+        raise NotImplementedError
+
+    async def stream_chat(
+        self,
+        messages: list[LLMMessage],
+        **options,
+    ) -> AsyncIterator[LLMStreamEvent]:
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        pass
+```
+
+### 8.2 兼容旧同步 `plan()` 的过渡方案
+
+当前代码大量同步调用：
+
+```python
+llm_result = self._llm_client.plan(text, skill_summaries)
+```
+
+可以保留短期兼容接口：
+
+```python
+class LegacyPlanningMixin:
+    def plan(self, user_text: str, skill_summaries: list[dict]) -> LLMPlanResult:
+        planner = SkillPlanner(self)
+        return run_async_blocking(planner.plan(user_text, skill_summaries))
+```
+
+但长期建议把调用点迁移到异步：
+
+```python
+planner = SkillPlanner(llm)
+result = await planner.plan(user_text, skill_summaries)
+```
+
+## 9. SkillPlanner 设计
+
+`SkillPlanner` 是“使用模型完成机器人技能规划”的模型应用，不应该和具体 provider 绑定。
+
+```python
+class SkillPlanner:
+    def __init__(self, llm: BaseLLMClient) -> None:
+        self._llm = llm
+
+    async def plan(
+        self,
+        user_text: str,
+        skill_summaries: list[dict[str, Any]],
+    ) -> LLMPlanResult:
+        messages = [
+            LLMMessage(role="system", content=self._build_system_prompt(skill_summaries)),
+            LLMMessage(role="user", content=self._build_user_prompt(user_text)),
+        ]
+        result = await self._llm.chat(
+            messages,
+            temperature=0.3,
+            max_tokens=500,
+            response_format="json",
+        )
+        return self._parse_response(result.text)
+```
+
+迁移后：
+
+- OpenAI、DeepSeek、DashScope、MiniCPM 都只需要实现 `chat()`。
+- 技能规划 prompt 和 JSON 解析只存在一份。
+- 后续修改规划格式不会重复改多个 provider。
+
+## 10. Provider 策略模式
+
+### 10.1 OpenAI-compatible Provider
+
+OpenAI、DeepSeek、DashScope 都可复用同一个底层类：
+
+```python
+class OpenAICompatibleClient(BaseLLMClient):
+    def __init__(
+        self,
+        provider_name: str,
+        api_key: str,
+        model: str,
+        base_url: str = "",
+    ) -> None:
+        ...
+
+    async def chat(self, messages: list[LLMMessage], **options) -> LLMChatResult:
+        ...
+
+    async def stream_chat(
+        self,
+        messages: list[LLMMessage],
+        **options,
+    ) -> AsyncIterator[LLMStreamEvent]:
+        ...
+```
+
+Provider 差异通过配置表达：
+
+```python
+OpenAICompatibleClient(
+    provider_name="deepseek",
+    api_key=config.OPENAI_API_KEY,
+    model=config.OPENAI_MODEL or "deepseek-reasoner",
+    base_url=config.OPENAI_BASE_URL or "https://api.deepseek.com/v1",
+)
+```
+
+### 10.2 MiniCPM Realtime Provider
+
+MiniCPM-o Realtime Chat 不是 OpenAI-compatible HTTP 接口，而是 WebSocket 协议。它应该独立实现：
+
+```python
+class MiniCPMRealtimeClient(BaseLLMClient):
+    def __init__(
+        self,
+        gateway_host: str,
+        gateway_port: int,
+        ws_scheme: str = "wss",
+        gateway_path_prefix: str = "",
+        model: str = "minicpm-o",
+        timeout_s: float = 60.0,
+    ) -> None:
+        ...
+
+    async def chat(self, messages: list[LLMMessage], **options) -> LLMChatResult:
+        ...
+
+    async def stream_chat(
+        self,
+        messages: list[LLMMessage],
+        **options,
+    ) -> AsyncIterator[LLMStreamEvent]:
+        ...
+```
+
+注意：
+
+- 这里维护的是 MiniCPM 上游 WebSocket。
+- 不接收 `ws_server.py` 的前端 WebSocket。
+- `ws_server.py` 只消费 `stream_chat()` 产出的事件。
+
+## 11. MiniCPM Realtime Chat 协议接入
+
+根据 MiniCPM-o Realtime API 文档，Chat 模式入口为：
+
+```text
+wss://host/v1/realtime?mode=chat
+```
+
+基本生命周期：
+
+```text
+connect
+  <- session.queued / session.queue_update optional
+  <- session.queue_done
+  -> session.init
+  <- session.created
+  -> input.append
+  <- response.output.delta
+  <- response.done
+  -> session.close
+  <- session.closed or websocket close
+```
+
+### 11.1 请求构造
+
+`chat()` 使用 non-streaming：
+
+```json
+{
+  "type": "input.append",
+  "input": {
+    "messages": [
+      { "role": "user", "content": "请只回答：测试" }
+    ],
+    "streaming": false,
+    "generation": {
+      "max_new_tokens": 512,
+      "length_penalty": 1.1
+    },
+    "tts": {
+      "enabled": false
+    },
+    "omni_mode": false,
+    "use_tts_template": false,
+    "enable_thinking": false
+  }
+}
+```
+
+`stream_chat()` 使用 streaming：
+
+```json
+{
+  "type": "input.append",
+  "input": {
+    "messages": [
+      { "role": "user", "content": "你好" }
+    ],
+    "streaming": true,
+    "generation": {
+      "max_new_tokens": 512,
+      "length_penalty": 1.1
+    },
+    "tts": {
+      "enabled": false
+    }
+  }
+}
+```
+
+### 11.2 响应映射
+
+MiniCPM 事件映射到统一事件：
+
+| MiniCPM event | 条件 | LLM event |
+| --- | --- | --- |
+| `session.created` | 会话创建成功 | `session_started` |
+| `response.output.delta` | `kind == "text"` | `text_delta` |
+| `response.output.delta` | `kind == "audio"` | `audio_delta` |
+| `response.done` | turn 完成 | `done` |
+| `error` | 服务端错误 | `error` |
+| `session.closed` | 会话关闭 | 可忽略或作为结束状态 |
+
+### 11.3 `chat()` 处理方式
+
+`chat()` 可以复用 `stream_chat()`：
+
+```python
+async def chat(self, messages: list[LLMMessage], **options) -> LLMChatResult:
+    text_parts = []
+    final_text = ""
+    raw_done = None
+
+    async for event in self.stream_chat(messages, streaming=False, **options):
+        if event.type == "text_delta":
+            text_parts.append(event.text_delta)
+        elif event.type == "done":
+            final_text = event.text or "".join(text_parts)
+            raw_done = event.raw
+        elif event.type == "error":
+            raise LLMProviderError(event.error or "MiniCPM realtime error")
+
+    return LLMChatResult(
+        text=final_text or "".join(text_parts),
+        model=self._model,
+        provider="minicpm_realtime",
+        raw=raw_done,
+    )
+```
+
+### 11.4 连接关闭
+
+每次 turn 可以使用短连接，流程简单、状态隔离好：
+
+```text
+one chat call -> one upstream websocket -> close
+```
+
+未来如果需要多轮低延迟会话，可以扩展 `MiniCPMRealtimeSession`：
+
+```python
+async with llm.open_realtime_session() as session:
+    async for event in session.stream_chat(messages):
+        ...
+```
+
+第一阶段不建议引入长连接会话池，避免生命周期和并发复杂度过早上升。
+
+## 12. 外部 WebSocket 如何使用 `src/llm`
+
+`ws_server.py` 继续维护前端 WebSocket：
+
+```python
+async def _handle_chat_send(self, websocket, data: dict) -> None:
+    messages = parse_frontend_messages(data)
+    llm = self._llm_registry.get_chat_client()
+
+    async for event in llm.stream_chat(messages):
+        await websocket.send(self._json_msg(map_llm_event_to_frontend(event)))
+```
+
+映射函数示例：
+
+```python
+def map_llm_event_to_frontend(event: LLMStreamEvent) -> dict:
+    if event.type == "text_delta":
+        return {
+            "event": "chat_data",
+            "type": "chunk",
+            "text_delta": event.text_delta,
+            "packet": event.raw,
+        }
+    if event.type == "audio_delta":
+        return {
+            "event": "chat_data",
+            "type": "chunk",
+            "audio_data": event.audio_data,
+            "packet": event.raw,
+        }
+    if event.type == "done":
+        return {
+            "event": "chat_data",
+            "type": "done",
+            "text": event.text,
+            "packet": event.raw,
+        }
+    if event.type == "error":
+        return {
+            "event": "error",
+            "message": event.error or "LLM 调用失败",
+        }
+    return {
+        "event": "chat_data",
+        "type": event.type,
+        "packet": event.raw,
+    }
+```
+
+这样前端 WebSocket 与 MiniCPM 上游 WebSocket 完全解耦。
+
+## 13. Registry 设计
+
+`LLMRegistry` 负责根据配置创建 provider：
+
+```python
+class LLMRegistry:
+    @classmethod
+    def from_config(cls, config) -> "LLMRegistry":
+        registry = cls()
+        provider = config.MODEL_PROVIDER.lower()
+
+        if provider == "minicpm":
+            registry.default_chat = MiniCPMRealtimeClient(
+                gateway_host=config.MINICPM_GATEWAY_HOST,
+                gateway_port=config.MINICPM_GATEWAY_PORT,
+                ws_scheme=config.MINICPM_WS_SCHEME,
+                gateway_path_prefix=config.MINICPM_GATEWAY_PATH_PREFIX,
+            )
+        elif provider == "deepseek":
+            registry.default_chat = OpenAICompatibleClient(
+                provider_name="deepseek",
+                api_key=config.OPENAI_API_KEY,
+                model=config.OPENAI_MODEL or "deepseek-reasoner",
+                base_url=config.OPENAI_BASE_URL or "https://api.deepseek.com/v1",
+            )
+        elif provider == "dashscope":
+            registry.default_chat = OpenAICompatibleClient(
+                provider_name="dashscope",
+                api_key=config.OPENAI_API_KEY,
+                model=config.OPENAI_MODEL or "qwen-plus",
+                base_url=config.OPENAI_BASE_URL or "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            )
+        else:
+            registry.default_chat = OpenAICompatibleClient(
+                provider_name="openai",
+                api_key=config.OPENAI_API_KEY,
+                model=config.OPENAI_MODEL or "gpt-4o",
+                base_url=config.OPENAI_BASE_URL,
+            )
+
+        registry.skill_planner = SkillPlanner(registry.default_chat)
+        return registry
+```
+
+后续可以支持按能力选择不同模型：
+
+```env
+LLM_CHAT_PROVIDER=minicpm
+LLM_PLANNER_PROVIDER=dashscope
+LLM_VISION_PROVIDER=minicpm
+```
+
+第一阶段可以继续复用 `MODEL_PROVIDER`，降低配置迁移成本。
+
+## 14. 配置建议
+
+### 14.1 第一阶段：兼容现有配置
+
+继续支持：
+
+```env
+OPENAI_API_KEY=
+OPENAI_BASE_URL=
+OPENAI_MODEL=
+MODEL_PROVIDER=dashscope
+
+MINICPM_GATEWAY_HOST=10.10.17.15
+MINICPM_GATEWAY_PORT=8006
+MINICPM_WS_SCHEME=wss
+MINICPM_GATEWAY_PATH_PREFIX=
+MINICPM_REALTIME_PATH=/v1/realtime
+```
+
+新增 provider 值：
+
+```env
+MODEL_PROVIDER=minicpm
+```
+
+语义：
+
+- `openai` / `deepseek` / `dashscope`：OpenAI-compatible HTTP provider
+- `minicpm`：MiniCPM Realtime WebSocket provider
+
+### 14.2 第二阶段：能力级配置
+
+当业务需要“聊天用 MiniCPM，规划用 DashScope”时，再引入：
+
+```env
+LLM_CHAT_PROVIDER=minicpm
+LLM_PLANNER_PROVIDER=dashscope
+LLM_VISION_PROVIDER=minicpm
+
+LLM_DEFAULT_TEMPERATURE=0.3
+LLM_DEFAULT_MAX_TOKENS=512
+LLM_REQUEST_TIMEOUT_S=60
+```
+
+此时 `MODEL_PROVIDER` 可以保留为旧配置别名。
+
+## 15. 迁移计划
+
+### 阶段 1：建立统一类型和接口
+
+新增：
+
+- `src/llm/types.py`
+- `src/llm/errors.py`
+- 扩展 `src/llm/base.py`
+
+保留旧：
+
+- `LLMPlanResult`
+- `LLMClient.plan()`
+
+目标：
+
+- 不改变现有行为
+- 允许新 provider 实现 `chat()` 和 `stream_chat()`
+
+### 阶段 2：提取 SkillPlanner
+
+新增：
+
+- `src/llm/planner.py`
+
+迁移：
+
+- 从 `OpenAIClient` 和 `DeepSeekClient` 中提取 `_build_system_prompt`
+- 提取 `_build_user_prompt`
+- 提取 `_parse_response`
+
+目标：
+
+- 规划 prompt 只有一份
+- 旧客户端可以通过 `SkillPlanner` 实现 `plan()`
+
+### 阶段 3：重构 OpenAI/DeepSeek/DashScope
+
+新增：
+
+- `src/llm/providers/openai_compatible.py`
+
+调整：
+
+- `OpenAIClient` 变成 `OpenAICompatibleClient(provider_name="openai")` 的薄包装
+- `DeepSeekClient` 变成薄包装或直接由 registry 创建
+- DashScope 不再特殊散落在 `ai_controller.py` / `ws_server.py`
+
+目标：
+
+- OpenAI-compatible 逻辑只维护一份
+
+### 阶段 4：引入 LLMRegistry
+
+新增：
+
+- `src/llm/registry.py`
+
+替换：
+
+- `ai_controller.py` 中手写的 provider 分支
+- `ws_server.py` 中手写的 provider 分支
+
+目标：
+
+- 模型选择逻辑集中在 `src/llm/registry.py`
+
+### 阶段 5：接入 MiniCPM Realtime Chat
+
+新增：
+
+- `src/llm/providers/minicpm_realtime.py`
+
+实现：
+
+- `_build_realtime_url()`
+- `_connect()`
+- `_wait_queue_done()`
+- `_send_session_init()`
+- `_send_input_append()`
+- `_read_stream_events()`
+- `chat()`
+- `stream_chat()`
+
+目标：
+
+- `MODEL_PROVIDER=minicpm` 时，规划和聊天可以走 MiniCPM Realtime Chat
+- MiniCPM 上游 WebSocket 只存在于 provider 内部
+
+### 阶段 6：迁移 `ws_server.py` 的聊天 action
+
+旧实现中 MiniCPM 聊天代理直接连接 MiniCPM 网关并规范化响应。
+
+迁移后：
+
+- `chat_connect` 仍由 `ws_server.py` 维护前端会话标记
+- `chat` 调用 `llm.stream_chat()`
+- `chat_data` 事件由统一 `LLMStreamEvent` 映射得到
+- 删除旧 MiniCPM `/ws/chat` 代理模块，不保留兼容分支
+- 新 Realtime provider 仅处理 `/v1/realtime?mode=chat`
+
+### 阶段 7：清理旧接口
+
+在所有调用点迁移后：
+
+- 弱化或删除 `LLMClient.plan()`
+- 统一改用 `SkillPlanner.plan()`
+- README 和 `docs/websocket-api.md` 更新配置说明
+
+## 16. 调用示例
+
+### 16.1 普通聊天
+
+```python
+registry = LLMRegistry.from_config(config)
+llm = registry.default_chat
+
+result = await llm.chat([
+    LLMMessage(role="system", content="你是一个有用的助手"),
+    LLMMessage(role="user", content="你好"),
+])
+
+print(result.text)
+```
+
+### 16.2 流式聊天
+
+```python
+async for event in llm.stream_chat(messages):
+    if event.type == "text_delta":
+        print(event.text_delta, end="")
+    elif event.type == "done":
+        print(event.text)
+```
+
+### 16.3 技能规划
+
+```python
+registry = LLMRegistry.from_config(config)
+planner = registry.skill_planner
+
+result = await planner.plan(user_text, skill_summaries)
+
+if result.is_valid():
+    sequence = skill_engine.plan_skill_execution(
+        skill_id=result.skill_id,
+        skill_name=result.skill_name,
+        confidence=result.confidence,
+        extracted_params=result.parameters,
+        reasoning=result.reasoning,
+    )
+```
+
+### 16.4 `ws_server.py` 中转发流式事件
+
+```python
+async def _handle_chat_send(self, websocket, data: dict) -> None:
+    messages = parse_frontend_messages(data)
+    llm = self._llm_registry.default_chat
+
+    async for event in llm.stream_chat(messages):
+        frontend_event = map_llm_event_to_frontend(event)
+        await websocket.send(self._json_msg(frontend_event))
+```
+
+## 17. 错误处理
+
+建议统一错误类型：
+
+```python
+class LLMError(Exception):
+    pass
+
+class LLMConfigError(LLMError):
+    pass
+
+class LLMProviderError(LLMError):
+    pass
+
+class LLMTimeoutError(LLMError):
+    pass
+
+class LLMResponseParseError(LLMError):
+    pass
+```
+
+MiniCPM provider 应处理：
+
+- 连接失败
+- 排队超时
+- `session.created` 未返回
+- `response.done` 超时
+- 上游 `error` 事件
+- WebSocket 异常关闭
+- 非法 JSON 包
+
+业务层映射：
+
+```python
+try:
+    result = await planner.plan(text, skill_summaries)
+except LLMConfigError:
+    await websocket.send(error_event("LLM 配置不可用"))
+except LLMTimeoutError:
+    await websocket.send(error_event("LLM 响应超时"))
+except LLMError as exc:
+    await websocket.send(error_event(f"LLM 调用失败: {exc}"))
+```
+
+## 18. 超时与并发
+
+建议默认：
+
+- WebSocket 建连超时：`30s`
+- 等待 `session.queue_done`：`60s`
+- 等待首个输出：`60s`
+- 单 turn 总超时：`120s`
+- 最大消息大小沿用当前 `100 MB`
+
+并发策略：
+
+- 第一阶段每次 `chat()` 创建独立上游连接。
+- 不共享 MiniCPM 上游 WebSocket。
+- 不在 provider 内持有前端连接引用。
+- 如果业务层取消任务，应关闭上游连接。
+
+## 19. 测试方案
+
+### 19.1 单元测试
+
+覆盖：
+
+- `SkillPlanner._parse_response()`
+- markdown code block JSON 解析
+- 无效 JSON 错误返回
+- OpenAI message 转换
+- MiniCPM message 转换
+- MiniCPM event 到 `LLMStreamEvent` 的映射
+
+### 19.2 Fake Transport 测试
+
+MiniCPM provider 可以把底层连接抽象成内部 transport factory，便于测试：
+
+```python
+class MiniCPMRealtimeClient:
+    def __init__(..., transport_factory=None):
+        self._transport_factory = transport_factory or self._default_transport_factory
+```
+
+测试时注入 fake transport：
+
+```python
+fake = FakeRealtimeTransport([
+    {"type": "session.queue_done"},
+    {"type": "session.created", "session_id": "sess_test"},
+    {"type": "response.output.delta", "kind": "text", "text": "测试"},
+    {"type": "response.done", "text": "测试", "reason": "turn_end"},
+])
+```
+
+注意：
+
+- 这是 provider 内部测试用抽象。
+- 不要求业务层传入 WebSocket。
+
+### 19.3 集成测试
+
+覆盖：
+
+- `MODEL_PROVIDER=openai`
+- `MODEL_PROVIDER=deepseek`
+- `MODEL_PROVIDER=dashscope`
+- `MODEL_PROVIDER=minicpm`
+- `ai_status` 显示当前 provider、model、可用能力
+- `ai_chat` 能正常生成规划预览
+- MiniCPM `chat` 能返回 `chat_data` chunk/done
+
+## 20. 向后兼容策略
+
+短期保留：
+
+- `OpenAIClient`
+- `DeepSeekClient`
+- `LLMClient`
+- `LLMPlanResult`
+- `plan()`
+
+但内部实现可委托：
+
+```python
+class OpenAIClient(OpenAICompatibleClient):
+    def plan(self, user_text, skill_summaries):
+        return run_async_blocking(SkillPlanner(self).plan(user_text, skill_summaries))
+```
+
+迁移完成后再逐步把调用点替换为：
+
+```python
+planner = SkillPlanner(llm)
+result = await planner.plan(...)
+```
+
+## 21. 文档与状态接口更新
+
+`ai_status` 建议扩展：
+
+```json
+{
+  "event": "ai_status",
+  "llm_available": true,
+  "provider": "minicpm",
+  "model": "minicpm-o",
+  "capabilities": ["chat", "stream_chat", "vision_chat"],
+  "api_key_set": true,
+  "processing": false,
+  "has_preview": false
+}
+```
+
+README 建议更新：
+
+- `src/llm/` 描述为“大模型能力层”
+- `MODEL_PROVIDER=minicpm` 的说明
+- MiniCPM Realtime Chat 和旧 MiniCPM 代理的区别
+
+`docs/websocket-api.md` 建议更新：
+
+- MiniCPM 聊天链路不再直接描述为服务端代理旧网关
+- 说明前端仍通过主控 WebSocket 的 `chat` action 使用
+- 服务端内部使用 `src/llm/providers/minicpm_realtime.py`
+
+## 22. 推荐落地顺序
+
+推荐顺序：
+
+1. 新增统一类型和 `BaseLLMClient`，不动业务。
+2. 新增 `SkillPlanner`，让 OpenAI/DeepSeek 复用同一套规划逻辑。
+3. 新增 `OpenAICompatibleClient`，减少重复代码。
+4. 新增 `LLMRegistry`，替换 `ai_controller.py` 和 `ws_server.py` 中重复 provider 选择逻辑。
+5. 新增 `MiniCPMRealtimeClient.chat()`。
+6. 新增 `MiniCPMRealtimeClient.stream_chat()`。
+7. 将 `chat` action 切换为消费 `llm.stream_chat()`。
+8. 更新配置示例和 WebSocket API 文档。
+9. 删除旧 MiniCPM 代理路径。
+
+## 23. 最终形态
+
+业务侧只需要这样使用：
+
+```python
+registry = LLMRegistry.from_config(config)
+
+chat_model = registry.default_chat
+planner = registry.skill_planner
+
+reply = await chat_model.chat(messages)
+plan = await planner.plan(user_text, skill_summaries)
+```
+
+MiniCPM provider 内部自行处理：
+
+```text
+Realtime URL
+WebSocket connect
+session.queue_done
+session.init
+input.append
+response.output.delta
+response.done
+session.close
+```
+
+`ws_server.py` 只处理：
+
+```text
+frontend websocket receive
+call llm capability
+map LLM event to frontend event
+send frontend websocket
+```
+
+这能让 `src/llm/` 成为清晰的模型能力层：能力统一、provider 可替换、业务边界稳定，同时为 MiniCPM Realtime、多模态、语音等能力留下扩展空间。
+
+## 24. 参考资料
+
+- MiniCPM-o Realtime API 概览：https://minicpmo45.modelbest.cn/docs/zh/realtime-api/overview/
+- MiniCPM-o Realtime Chat 模式：https://minicpmo45.modelbest.cn/docs/zh/realtime-api/chat/
+- 当前 LLM 抽象：`src/llm/base.py`
+- 当前 OpenAI provider：`src/llm/openai_client.py`
+- 当前 DeepSeek provider：`src/llm/deepseek_client.py`
+- 当前服务端 LLM 初始化：`src/robot_server/ws_server.py`
+- 当前 WebSocket API 文档：`docs/websocket-api.md`

@@ -50,10 +50,10 @@ WebSocket 服务端
     === 相机流媒体 ===
         {"action": "camera_status"}                        查询相机管理器状态
 
-    === MiniCPM 聊天代理 ===
-        {"action": "minicpm_status"}                       查询 MiniCPM 网关配置与代理状态
+    === LLM 聊天 / MiniCPM 状态 ===
+        {"action": "minicpm_status"}                       查询 MiniCPM 网关配置与状态
         {"action": "chat_connect"}                         建立聊天会话（标记当前连接进入聊天模式）
-        {"action": "chat",         "messages": [...]}      发送聊天消息（每次临时连接网关，收完响应后关闭）
+        {"action": "chat",         "messages": [...]}      发送聊天消息（底层由 LLM provider 处理）
         {"action": "chat_disconnect"}                      断开聊天会话
 
 WebSocket 路径:
@@ -72,7 +72,7 @@ WebSocket 路径:
         {"event": "ai_execution_finished", "success": true, "message": "..."}
         {"event": "chat_connected"}                                    # 聊天会话已建立
         {"event": "chat_disconnected"}                                 # 聊天会话已断开
-        {"event": "chat_data",          "type": "chunk", ...}          # MiniCPM 聊天响应（规范化字段 + 完整 packet）
+        {"event": "chat_data",          "type": "chunk", ...}          # LLM 聊天响应（规范化字段 + 完整 packet）
         {"event": "minicpm_instruction","instruction": "..."}          # 检测到可执行机器人指令
 
     log 事件 level 取值:
@@ -103,17 +103,84 @@ except ImportError:
 from src.cameras import get_camera_manager
 from src.cameras.camera_factory import CameraManager
 from .action_executor import ActionExecutor
-from .minicpm_proxy import MiniCPMProxyConfig, _extract_user_text
-from .interceptor import OutgoingInjector
 from .ask_service import classify_instruction
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
 from ..core.storage import StorageManager
 from ..core.config_loader import Config
+from ..llm import LLMCapability, LLMContentPart, LLMMessage, LLMRegistry, LLMStreamEvent
 from ..arm_sdk import RobotController
 
 
 
 logger = logging.getLogger(__name__)
+
+
+class MiniCPMChatConfig:
+    """MiniCPM 相关配置，仅用于状态展示和指令分类。"""
+
+    def __init__(
+        self,
+        gateway_host: str = "localhost",
+        gateway_port: int = 8006,
+        ws_scheme: str = "wss",
+        gateway_path_prefix: str = "",
+        realtime_path: str = "/v1/realtime",
+        ask_enabled: bool = True,
+        ask_api_key: str = "",
+        ask_base_url: str = "",
+        ask_model: str = "gpt-4o-mini",
+    ) -> None:
+        self.gateway_host = gateway_host
+        self.gateway_port = gateway_port
+        self.ws_scheme = self._normalize_ws_scheme(ws_scheme)
+        self.gateway_path_prefix = gateway_path_prefix.rstrip("/")
+        self.realtime_path = realtime_path
+        self.ask_enabled = ask_enabled
+        self.ask_api_key = ask_api_key
+        self.ask_base_url = ask_base_url
+        self.ask_model = ask_model
+
+    @property
+    def _port_suffix(self) -> str:
+        default = 443 if self.ws_scheme == "wss" else 80
+        return "" if self.gateway_port == default else f":{self.gateway_port}"
+
+    @staticmethod
+    def _normalize_ws_scheme(scheme: str) -> str:
+        scheme = (scheme or "wss").strip().lower()
+        if scheme in ("https", "wss"):
+            return "wss"
+        if scheme in ("http", "ws"):
+            return "ws"
+        return "wss"
+
+
+def _extract_user_text(data: dict) -> Optional[str]:
+    """从聊天消息体中提取最后一条用户文本。"""
+    def _text_from_content(content) -> Optional[str]:
+        if isinstance(content, str):
+            return content.strip() or None
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text = part.get("text", "").strip()
+                    if text:
+                        return text
+        return None
+
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        for msg in reversed(messages):
+            if not isinstance(msg, dict) or msg.get("role") != "user":
+                continue
+            result = _text_from_content(msg.get("content", ""))
+            if result:
+                return result
+
+    if data.get("role") == "user":
+        return _text_from_content(data.get("content", ""))
+
+    return None
 
 
 class RobotWebSocketServer:
@@ -167,7 +234,10 @@ class RobotWebSocketServer:
         self._ai_thread_pool = ThreadPoolExecutor(max_workers=1)
 
         # LLM 客户端和技能引擎（延迟初始化，避免未安装 AI 依赖时报错）
+        self._llm_registry: Optional[LLMRegistry] = None
         self._llm_client = None
+        self._planner_client = None
+        self._skill_planner = None
         self._skill_engine = None
 
         # 设备连接状态
@@ -190,9 +260,9 @@ class RobotWebSocketServer:
         self._camera_push_task: Optional[asyncio.Task] = None
 
         # MiniCPM 代理配置（延迟初始化）
-        self._minicpm_cfg: Optional[MiniCPMProxyConfig] = None
+        self._minicpm_cfg: Optional[MiniCPMChatConfig] = None
 
-        # MiniCPM 聊天会话：id(websocket) -> {"gw_ws": ws, "injector": OutgoingInjector}
+        # LLM 聊天会话：id(websocket) -> {"active": True}
         self._minicpm_sessions: Dict[int, Dict] = {}
 
         # AI 执行跟踪（用于发送 ai_execution_finished 事件）
@@ -254,41 +324,20 @@ class RobotWebSocketServer:
             skill_count = self._skill_engine.load_skills()
             logger.info("技能引擎加载了 %d 个技能", skill_count)
 
-            # 初始化 LLM 客户端
-            if config.OPENAI_API_KEY:
-                provider = config.MODEL_PROVIDER.lower()
-                base_url = config.OPENAI_BASE_URL
+            # 初始化 LLM 能力层
+            self._llm_registry = LLMRegistry.from_config(config)
+            self._llm_client = self._llm_registry.get_chat_client()
+            self._planner_client = self._llm_registry.get_planner_client()
+            self._skill_planner = self._llm_registry.skill_planner
 
-                if provider == "deepseek":
-                    from ..llm import DeepSeekClient
-                    self._llm_client = DeepSeekClient(
-                        api_key=config.OPENAI_API_KEY,
-                        model=config.OPENAI_MODEL or "deepseek-reasoner",
-                        base_url=base_url,
-                    )
-                elif provider == "dashscope":
-                    # 阿里云百炼，兼容 OpenAI 协议
-                    from ..llm import OpenAIClient
-                    self._llm_client = OpenAIClient(
-                        api_key=config.OPENAI_API_KEY,
-                        model=config.OPENAI_MODEL or "qwen-plus",
-                        base_url=base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    )
-                else:
-                    # OpenAI 或其他兼容服务
-                    from ..llm import OpenAIClient
-                    self._llm_client = OpenAIClient(
-                        api_key=config.OPENAI_API_KEY,
-                        model=config.OPENAI_MODEL or "gpt-4o",
-                        base_url=base_url,
-                    )
-
-                if self._llm_client.is_available():
-                    logger.info("LLM 客户端就绪: %s", self._llm_client.get_model_name())
-                else:
-                    logger.warning("LLM 客户端不可用")
+            if self._llm_client.is_available():
+                logger.info(
+                    "LLM 客户端就绪: %s/%s",
+                    self._llm_client.get_provider_name(),
+                    self._llm_client.get_model_name(),
+                )
             else:
-                logger.warning("未配置 API Key，AI 功能不可用")
+                logger.warning("LLM 客户端不可用，请检查模型配置")
 
         except Exception as e:
             logger.warning("AI 组件初始化失败: %s", e)
@@ -384,7 +433,7 @@ class RobotWebSocketServer:
             # 相机帧订阅（替代独立 /camera/frames 连接）
             "subscribe_camera_frames":   self._handle_subscribe_camera_frames,
             "unsubscribe_camera_frames": self._handle_unsubscribe_camera_frames,
-            # MiniCPM 聊天代理（替代独立 /ws/chat 连接）
+            # LLM 聊天（底层 provider 可使用 HTTP / WebSocket / 本地模型）
             "chat_connect":              self._handle_chat_connect,
             "chat_disconnect":           self._handle_chat_disconnect,
             "chat":                      self._handle_chat_send,
@@ -1302,9 +1351,14 @@ class RobotWebSocketServer:
             ))
             return
 
-        if self._llm_client is None or not self._llm_client.is_available():
+        if (
+            self._llm_client is None
+            or self._planner_client is None
+            or self._skill_planner is None
+            or not self._planner_client.is_available()
+        ):
             await websocket.send(self._json_msg(
-                {"event": "error", "message": "LLM 不可用，请检查 config.env 中的 API Key 配置"}
+                {"event": "error", "message": "LLM 不可用，请检查 config.env 中的模型配置"}
             ))
             return
 
@@ -1366,13 +1420,19 @@ class RobotWebSocketServer:
 
     async def _handle_ai_status(self, websocket, data: dict) -> None:
         """查询 AI/LLM 状态"""
-        llm_available = self._llm_client is not None and self._llm_client.is_available()
-        model_name = self._llm_client.get_model_name() if self._llm_client else "未配置"
+        planner_available = self._planner_client is not None and self._planner_client.is_available()
+        chat_available = self._llm_client is not None and self._llm_client.is_available()
+        llm_available = planner_available
+        model_name = self._planner_client.get_model_name() if self._planner_client else "未配置"
+        capabilities = (
+            [cap.value for cap in self._llm_client.capabilities()]
+            if self._llm_client else []
+        )
 
         try:
             config = Config.get_instance()
-            provider = config.MODEL_PROVIDER.upper()
-            api_key_set = bool(config.OPENAI_API_KEY)
+            provider = self._planner_client.get_provider_name().upper() if self._planner_client else config.MODEL_PROVIDER.upper()
+            api_key_set = Config.is_api_key_set()
         except Exception:
             provider = "未知"
             api_key_set = False
@@ -1383,6 +1443,13 @@ class RobotWebSocketServer:
             "api_key_set": api_key_set,
             "model": model_name,
             "provider": provider,
+            "capabilities": capabilities,
+            "chat_available": chat_available,
+            "chat_provider": self._llm_client.get_provider_name() if self._llm_client else "未配置",
+            "chat_model": self._llm_client.get_model_name() if self._llm_client else "未配置",
+            "planner_available": planner_available,
+            "planner_provider": self._planner_client.get_provider_name() if self._planner_client else "未配置",
+            "planner_model": self._planner_client.get_model_name() if self._planner_client else "未配置",
             "processing": self._ai_processing,
             "has_preview": bool(self._ai_preview_sequence),
         }))
@@ -1410,7 +1477,12 @@ class RobotWebSocketServer:
         """
         if self._ai_processing:
             return False
-        if self._llm_client is None or not self._llm_client.is_available():
+        if (
+            self._llm_client is None
+            or self._planner_client is None
+            or self._skill_planner is None
+            or not self._planner_client.is_available()
+        ):
             return False
         if self._skill_engine is None:
             return False
@@ -1423,7 +1495,7 @@ class RobotWebSocketServer:
                 from ..skill_system.models import SkillMatchResult
 
                 skill_summaries = self._skill_engine.list_all_skills()
-                llm_result = self._llm_client.plan(text, skill_summaries)
+                llm_result = self._skill_planner.plan_sync(text, skill_summaries)
                 if not llm_result.is_valid():
                     error_msg = llm_result.error or f"无法理解您的意图（置信度: {llm_result.confidence:.0%}）"
                     self._broadcast_threadsafe({"event": "ai_skill_not_matched", "error": error_msg})
@@ -1499,7 +1571,7 @@ class RobotWebSocketServer:
             "minicpm": {
                 "configured": self._minicpm_cfg is not None,
                 "gateway": (
-                    f"{self._minicpm_cfg.gateway_scheme}://"
+                    f"{self._minicpm_cfg.ws_scheme}://"
                     f"{self._minicpm_cfg.gateway_host}"
                     f"{self._minicpm_cfg._port_suffix}"
                     f"{self._minicpm_cfg.gateway_path_prefix}"
@@ -1735,28 +1807,28 @@ class RobotWebSocketServer:
         await websocket.send(self._json_msg({"event": "log", "level": "info", "message": "正在测试相机..."}))
 
     # ==================================================================
-    # MiniCPM 代理
+    # MiniCPM / LLM 聊天配置
     # ==================================================================
 
     def _init_minicpm_config(self) -> None:
-        """从 Config 加载 MiniCPM 代理配置。"""
+        """从 Config 加载 MiniCPM 相关配置。"""
         try:
-            cfg_dict = Config.get_minicpm_proxy_config()
-            self._minicpm_cfg = MiniCPMProxyConfig(**cfg_dict)
+            cfg_dict = Config.get_minicpm_config()
+            self._minicpm_cfg = MiniCPMChatConfig(**cfg_dict)
             logger.info(
-                "MiniCPM 代理已配置: %s://%s%s%s",
-                self._minicpm_cfg.gateway_scheme,
+                "MiniCPM 配置已加载: %s://%s%s%s",
+                self._minicpm_cfg.ws_scheme,
                 self._minicpm_cfg.gateway_host,
                 self._minicpm_cfg._port_suffix,
                 self._minicpm_cfg.gateway_path_prefix,
             )
         except Exception as exc:
-            logger.warning("MiniCPM 代理配置加载失败: %s", exc)
+            logger.warning("MiniCPM 配置加载失败: %s", exc)
             self._minicpm_cfg = None
 
     async def _handle_minicpm_status(self, websocket, data: dict) -> None:
         """
-        查询 MiniCPM 网关配置与代理状态
+        查询 MiniCPM 网关配置与聊天状态
         请求: {"action": "minicpm_status"}
         响应: {"event": "minicpm_status", "configured": bool,
                "gateway": "https://host:port",
@@ -1773,7 +1845,8 @@ class RobotWebSocketServer:
         await websocket.send(self._json_msg({
             "event": "minicpm_status",
             "configured": True,
-            "gateway": f"{cfg.gateway_scheme}://{cfg.gateway_host}{cfg._port_suffix}{cfg.gateway_path_prefix}",
+            "gateway": f"{cfg.ws_scheme}://{cfg.gateway_host}{cfg._port_suffix}{cfg.gateway_path_prefix}",
+            "realtime_path": cfg.realtime_path,
             "ask_enabled": cfg.ask_enabled,
             "chat_action": "chat_connect / chat / chat_disconnect",
         }))
@@ -1894,20 +1967,22 @@ class RobotWebSocketServer:
         self._camera_push_task = None
 
     # ==================================================================
-    # MiniCPM 聊天代理（dispatch 模式）
+    # LLM 聊天（dispatch 模式）
     # ==================================================================
 
     async def _handle_chat_connect(self, websocket, data: dict) -> None:
         """标记聊天会话激活（不预先连接网关）。
         请求: {"action": "chat_connect"}
         成功: {"event": "chat_connected"}
-
-        MiniCPM /ws/chat 是一次性连接（一问一答后网关自动关闭），
-        因此每次发消息时才临时连接网关，会话标记独立于网关连接状态。
         """
-        if self._minicpm_cfg is None:
+        if self._llm_client is None or not self._llm_client.is_available():
             await websocket.send(self._json_msg({
-                "event": "error", "message": "MiniCPM 代理未配置"
+                "event": "error", "message": "LLM 聊天模型不可用，请检查模型配置"
+            }))
+            return
+        if LLMCapability.STREAM_CHAT not in self._llm_client.capabilities():
+            await websocket.send(self._json_msg({
+                "event": "error", "message": "当前 LLM 不支持流式聊天"
             }))
             return
         if id(websocket) in self._minicpm_sessions:
@@ -1917,20 +1992,24 @@ class RobotWebSocketServer:
             return
 
         self._minicpm_sessions[id(websocket)] = {"active": True}
-        await websocket.send(self._json_msg({"event": "chat_connected"}))
-        logger.info("MiniCPM 聊天会话已就绪: %s", websocket.remote_address)
+        await websocket.send(self._json_msg({
+            "event": "chat_connected",
+            "provider": self._llm_client.get_provider_name(),
+            "model": self._llm_client.get_model_name(),
+        }))
+        logger.info("LLM 聊天会话已就绪: %s", websocket.remote_address)
 
     async def _handle_chat_disconnect(self, websocket, data: dict) -> None:
-        """断开 MiniCPM 聊天会话。
+        """断开 LLM 聊天会话。
         请求: {"action": "chat_disconnect"}
         """
         self._minicpm_sessions.pop(id(websocket), None)
         await websocket.send(self._json_msg({"event": "chat_disconnected"}))
 
     async def _handle_chat_send(self, websocket, data: dict) -> None:
-        """发送聊天消息：每次临时连接网关、收完响应后关闭，不影响会话状态。
+        """发送聊天消息。
         请求: {"action": "chat", "messages": [...], "streaming": true, ...}
-        服务端持续推送规范化的 chat_data 事件。
+        服务端持续推送规范化的 chat_data 事件。上游模型连接由 LLM provider 维护。
         """
         if id(websocket) not in self._minicpm_sessions:
             await websocket.send(self._json_msg({
@@ -1938,135 +2017,161 @@ class RobotWebSocketServer:
             }))
             return
 
-        cfg = self._minicpm_cfg
-        gw_url = f"{cfg.gateway_ws_base}/ws/chat"
-        try:
-            gw_ws = await websockets.connect(
-                gw_url,
-                ssl=cfg.ssl_ctx(),
-                max_size=100 * 1024 * 1024,
-                open_timeout=30,
-            )
-        except Exception as exc:
+        if self._llm_client is None or not self._llm_client.is_available():
             await websocket.send(self._json_msg({
-                "event": "error", "message": f"连接 MiniCPM 网关失败: {exc}"
+                "event": "error", "message": "LLM 聊天模型不可用，请检查模型配置"
             }))
             return
 
-        # 每条消息用独立注入器（网关连接是全新的，需重新注入系统提示）
-        injector = OutgoingInjector("chat")
         payload = {k: v for k, v in data.items() if k != "action"}
-        processed = injector.process(json.dumps(payload, ensure_ascii=False))
         try:
-            await gw_ws.send(processed)
+            messages = self._parse_llm_messages(payload)
         except Exception as exc:
-            await gw_ws.close()
             await websocket.send(self._json_msg({
-                "event": "error", "message": f"发送消息失败: {exc}"
+                "event": "error", "message": f"聊天消息解析失败: {exc}"
             }))
             return
 
-        # 后台接收响应，网关关闭后不影响客户端会话状态
-        asyncio.ensure_future(self._minicpm_recv_once(websocket, gw_ws))
+        if not messages:
+            await websocket.send(self._json_msg({
+                "event": "error", "message": "messages 不能为空"
+            }))
+            return
 
         # 指令分类
         try:
             user_text = _extract_user_text(payload)
             if user_text:
-                await self._on_chat_user_text(user_text)
+                asyncio.ensure_future(self._on_chat_user_text(user_text))
         except Exception:
             pass
 
-    @staticmethod
-    def _normalize_chat_data(raw) -> dict:
-        """将 MiniCPM 上游原始消息转换为稳定字段 + 完整 packet 的 chat_data 结构。"""
-        text = raw if isinstance(raw, str) else raw.decode("utf-8", errors="replace")
-        base_event = {"event": "chat_data"}
+        options = self._extract_llm_options(payload)
         try:
-            packet = json.loads(text)
-        except (TypeError, json.JSONDecodeError):
-            return {
-                **base_event,
-                "type": "unknown",
-                "text": text,
-                # 仅在无法解析或无法识别时保留 raw，避免正常音频包重复放大体积。
-                "raw": text,
-            }
+            async for event in self._llm_client.stream_chat(messages, **options):
+                await websocket.send(
+                    self._json_msg(self._llm_stream_event_to_chat_data(event))
+                )
+                if event.type == "error":
+                    break
+        except Exception as exc:
+            await websocket.send(self._json_msg({
+                "event": "error", "message": f"LLM 聊天失败: {exc}"
+            }))
 
-        # 将上游原始 JSON 整包挂到 packet，前端如需兼容新增字段可直接读取。
-        base_event = {
-            **base_event,
-            "packet": packet,
+    @staticmethod
+    def _parse_llm_messages(payload: dict) -> List[LLMMessage]:
+        """将前端 chat payload 转换为统一 LLMMessage。"""
+        raw_messages = payload.get("messages")
+        if raw_messages is None and payload.get("role"):
+            raw_messages = [{
+                "role": payload.get("role"),
+                "content": payload.get("content", ""),
+            }]
+
+        if not isinstance(raw_messages, list):
+            return []
+
+        messages: List[LLMMessage] = []
+        for raw in raw_messages:
+            if not isinstance(raw, dict):
+                continue
+            role = raw.get("role", "user")
+            if role not in ("system", "user", "assistant"):
+                role = "user"
+            content = raw.get("content", "")
+            messages.append(LLMMessage(role=role, content=RobotWebSocketServer._parse_llm_content(content)))
+        return messages
+
+    @staticmethod
+    def _parse_llm_content(content) -> str | List[LLMContentPart]:
+        if isinstance(content, str):
+            return content
+        if not isinstance(content, list):
+            return str(content)
+
+        parts: List[LLMContentPart] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = part.get("type", "text")
+            if part_type == "text":
+                parts.append(LLMContentPart(type="text", text=part.get("text", "")))
+            elif part_type == "image":
+                parts.append(LLMContentPart(
+                    type="image",
+                    data=part.get("data") or part.get("image") or part.get("url"),
+                    mime_type=part.get("mime_type"),
+                ))
+            elif part_type == "audio":
+                parts.append(LLMContentPart(
+                    type="audio",
+                    data=part.get("data") or part.get("audio"),
+                    mime_type=part.get("mime_type"),
+                ))
+        return parts
+
+    @staticmethod
+    def _extract_llm_options(payload: dict) -> dict:
+        options = {
+            "streaming": payload.get("streaming", True),
         }
+        for src, dest in (
+            ("temperature", "temperature"),
+            ("max_tokens", "max_tokens"),
+            ("max_new_tokens", "max_new_tokens"),
+            ("length_penalty", "length_penalty"),
+            ("image_max_slice_nums", "image_max_slice_nums"),
+            ("omni_mode", "omni_mode"),
+            ("tts_enabled", "tts_enabled"),
+            ("tts", "tts"),
+            ("use_tts_template", "use_tts_template"),
+            ("enable_thinking", "enable_thinking"),
+        ):
+            if src in payload:
+                options[dest] = payload[src]
+        return options
 
-        if not isinstance(packet, dict):
-            return {
-                **base_event,
-                "type": "unknown",
-                "text": text,
-                "raw": text,
-            }
-
-        packet_type = packet.get("type")
-        if packet_type == "prefill_done":
-            return {
-                **base_event,
-                "type": "prefill_done",
-                "input_tokens": packet.get("input_tokens"),
-            }
-        if packet_type == "chunk":
+    @staticmethod
+    def _llm_stream_event_to_chat_data(event: LLMStreamEvent) -> dict:
+        base_event = {"event": "chat_data", "packet": event.raw}
+        if event.type == "session_started":
+            return {**base_event, "type": "session_started"}
+        if event.type == "text_delta":
             return {
                 **base_event,
                 "type": "chunk",
-                "text_delta": packet.get("text_delta", ""),
-                "audio_data": packet.get("audio_data"),
+                "text_delta": event.text_delta,
             }
-        if packet_type == "done":
+        if event.type == "audio_delta":
+            return {
+                **base_event,
+                "type": "chunk",
+                "audio_data": event.audio_data,
+            }
+        if event.type == "done":
             return {
                 **base_event,
                 "type": "done",
-                "text": packet.get("text", ""),
-                "generated_tokens": packet.get("generated_tokens"),
-                "input_tokens": packet.get("input_tokens"),
-                "audio_data": packet.get("audio_data"),
-                "recording_session_id": packet.get("recording_session_id"),
+                "text": event.text,
+                "audio_data": event.audio_data,
+                "metrics": event.metrics,
             }
-        if packet_type == "error":
+        if event.type == "error":
             return {
-                **base_event,
-                "type": "error",
-                "error": packet.get("error", ""),
-                "raw": text,
+                "event": "error",
+                "message": event.error or "LLM 聊天失败",
+                "packet": event.raw,
             }
-
         return {
             **base_event,
-            "type": "unknown",
-            "text": text,
-            "raw": text,
+            "type": event.type,
+            "text": event.text,
+            "metrics": event.metrics,
         }
 
-    async def _minicpm_recv_once(self, client_ws, gw_ws) -> None:
-        """接收单次 MiniCPM 响应并转发，网关关闭后不改变客户端会话状态。"""
-        try:
-            async for raw in gw_ws:
-                try:
-                    await client_ws.send(
-                        self._json_msg(self._normalize_chat_data(raw))
-                    )
-                except Exception:
-                    break
-        except Exception:
-            pass
-        finally:
-            try:
-                await gw_ws.close()
-            except Exception:
-                pass
-            logger.debug("MiniCPM 单次响应结束")
-
     async def _close_minicpm_session(self, websocket) -> None:
-        """清理指定客户端的 MiniCPM 会话标记。"""
+        """清理指定客户端的 LLM 聊天会话标记。"""
         self._minicpm_sessions.pop(id(websocket), None)
 
     async def _on_chat_user_text(self, text: str) -> None:
