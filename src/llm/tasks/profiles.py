@@ -8,10 +8,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from string import Template
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Literal, Optional, Tuple, Union
+
+from ..types import LLMCapability
 
 
 ResponseFormat = Union[str, Dict[str, Any]]
+ResponseMode = Literal["text", "voice_stream"]
+ReasoningEffort = Literal["low", "medium", "high"]
+ProviderName = str
+VOICE_OPTION_KEYS = {"tts", "tts_enabled", "use_tts_template"}
 
 
 @dataclass(frozen=True)
@@ -23,6 +29,11 @@ class TaskProfile:
     temperature: float = 0.3
     max_tokens: int = 512
     response_format: Optional[ResponseFormat] = None
+    default_provider: Optional[ProviderName] = None
+    required_capabilities: Tuple[LLMCapability, ...] = ()
+    response_mode: ResponseMode = "text"
+    enable_thinking: Optional[bool] = None
+    reasoning_effort: Optional[ReasoningEffort] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def render_system_prompt(self, **context: Any) -> str:
@@ -41,10 +52,30 @@ class TaskProfile:
         }
         if self.response_format is not None:
             options["response_format"] = self.response_format
+        if self.enable_thinking is not None:
+            options["enable_thinking"] = self.enable_thinking
+        if self.reasoning_effort is not None:
+            options["reasoning_effort"] = self.reasoning_effort
 
         for key, value in overrides.items():
             if value is not None:
                 options[key] = value
+
+        if self.response_mode == "text":
+            for key in VOICE_OPTION_KEYS:
+                options.pop(key, None)
+        return options
+
+    def stream_options(
+        self,
+        voice_response: bool = False,
+        **overrides: Any,
+    ) -> Dict[str, Any]:
+        """Return stream options and enable TTS for voice-stream tasks when requested."""
+        options = self.chat_options(**overrides)
+        if voice_response and self.response_mode == "voice_stream":
+            options.setdefault("tts_enabled", True)
+            options.setdefault("use_tts_template", True)
         return options
 
 
@@ -52,5 +83,31 @@ GENERAL_CHAT_PROFILE = TaskProfile(
     name="general_chat",
     temperature=0.7,
     max_tokens=512,
+    default_provider="minicpm",
+    required_capabilities=(LLMCapability.CHAT, LLMCapability.STREAM_CHAT),
+    response_mode="voice_stream",
     system_prompt_template="你是一个可靠、简洁的助手。",
+)
+
+
+VOICE_FEEDBACK_PROFILE = TaskProfile(
+    name="voice_feedback",
+    temperature=0.4,
+    max_tokens=80,
+    default_provider="minicpm",
+    required_capabilities=(LLMCapability.CHAT, LLMCapability.STREAM_CHAT),
+    response_mode="voice_stream",
+    enable_thinking=False,
+    system_prompt_template="""你是机器人语音反馈模块。
+
+你的任务是把内部错误或状态转换成一句自然、简短、适合机器人说出口的中文反馈。
+
+必须遵守：
+1. 只输出一句话。
+2. 不要输出 JSON、Markdown 或列表。
+3. 不要提到配置项、序列号、设备清单、堆栈、接口名、相机状态列表。
+4. 不要逐字复述技术错误。
+5. 语气自然、礼貌、像机器人在和用户说明当前情况。
+6. 如果有建议回复，优先保留其含义，并让表达更口语化。
+7. 字数控制在 40 个中文字符以内。""",
 )

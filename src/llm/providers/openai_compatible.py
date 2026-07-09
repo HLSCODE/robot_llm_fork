@@ -165,6 +165,18 @@ class OpenAICompatibleClient(LLMClient):
         elif isinstance(response_format, dict):
             request["response_format"] = response_format
 
+        reasoning_effort = options.get("reasoning_effort")
+        if reasoning_effort is not None:
+            request["reasoning_effort"] = reasoning_effort
+
+        extra_body = options.get("extra_body")
+        if isinstance(extra_body, dict):
+            request["extra_body"] = dict(extra_body)
+
+        enable_thinking = options.get("enable_thinking")
+        if enable_thinking is not None:
+            request.setdefault("extra_body", {})["enable_thinking"] = bool(enable_thinking)
+
         return request
 
     def _convert_message(self, message: LLMMessage) -> Dict[str, Any]:

@@ -8,15 +8,16 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from ..base import BaseLLMClient, LLMPlanResult
 from ..errors import LLMError
 from ..sync_utils import run_coro_sync
-from ..types import LLMMessage
+from ..types import LLMCapability, LLMMessage
 from .profiles import TaskProfile
 
 logger = logging.getLogger(__name__)
+ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 
 ROBOT_PLANNER_PROFILE = TaskProfile(
@@ -24,6 +25,10 @@ ROBOT_PLANNER_PROFILE = TaskProfile(
     temperature=0.3,
     max_tokens=800,
     response_format="json",
+    default_provider="dashscope",
+    required_capabilities=(LLMCapability.CHAT, LLMCapability.PLANNING),
+    response_mode="text",
+    enable_thinking=False,
     system_prompt_template="""你是一个机器人动作规划助手。
 
 项目中有以下技能可用（每个技能由多个原子动作步骤组成）：
@@ -51,9 +56,15 @@ $skill_desc
 class SkillPlanner:
     """使用任意支持 chat 的 LLM 客户端完成机器人技能规划。"""
 
-    def __init__(self, llm: BaseLLMClient, profile: TaskProfile = ROBOT_PLANNER_PROFILE) -> None:
+    def __init__(
+        self,
+        llm: Optional[BaseLLMClient] = None,
+        profile: TaskProfile = ROBOT_PLANNER_PROFILE,
+        client_resolver: Optional[ClientResolver] = None,
+    ) -> None:
         self._llm = llm
         self._profile = profile
+        self._client_resolver = client_resolver
 
     async def plan(
         self,
@@ -61,20 +72,22 @@ class SkillPlanner:
         skill_summaries: List[Dict[str, Any]],
         system_prompt: str | None = None,
         profile: TaskProfile | None = None,
+        provider: str | None = None,
         **chat_options: Any,
     ) -> LLMPlanResult:
         """异步规划入口。"""
-        if not self._llm.is_available():
+        active_profile = profile or self._profile
+        llm = self._resolve_llm(active_profile, provider)
+        if not llm.is_available():
             return LLMPlanResult(
                 skill_id=None,
                 skill_name="",
                 parameters={},
                 reasoning="",
                 confidence=0.0,
-                error=f"{self._llm.get_provider_name()} LLM 不可用，请检查配置",
+                error=f"{llm.get_provider_name()} LLM 不可用，请检查配置",
             )
 
-        active_profile = profile or self._profile
         rendered_system_prompt = system_prompt or active_profile.render_system_prompt(
             skill_desc=self._build_skill_desc(skill_summaries)
         )
@@ -85,7 +98,7 @@ class SkillPlanner:
         ]
 
         try:
-            result = await self._llm.chat(
+            result = await llm.chat(
                 messages,
                 **active_profile.chat_options(**chat_options),
             )
@@ -118,6 +131,7 @@ class SkillPlanner:
         skill_summaries: List[Dict[str, Any]],
         system_prompt: str | None = None,
         profile: TaskProfile | None = None,
+        provider: str | None = None,
         **chat_options: Any,
     ) -> LLMPlanResult:
         """同步规划入口，用于兼容 GUI 后台线程和旧调用点。"""
@@ -127,9 +141,21 @@ class SkillPlanner:
                 skill_summaries,
                 system_prompt=system_prompt,
                 profile=profile,
+                provider=provider,
                 **chat_options,
             )
         )
+
+    def _resolve_llm(
+        self,
+        profile: TaskProfile,
+        provider: Optional[str],
+    ) -> BaseLLMClient:
+        if self._client_resolver is not None:
+            return self._client_resolver(profile, provider)
+        if self._llm is None:
+            raise ValueError("SkillPlanner 未配置 LLM client")
+        return self._llm
 
     def _build_skill_desc(self, skill_summaries: List[Dict[str, Any]]) -> str:
         if not skill_summaries:

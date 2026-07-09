@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Callable, Dict, Optional
 
 from ..base import BaseLLMClient
-from ..types import LLMMessage
+from ..types import LLMCapability, LLMMessage
 from .profiles import TaskProfile
 
 logger = logging.getLogger(__name__)
+ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 
 INSTRUCTION_CLASSIFIER_PROFILE = TaskProfile(
@@ -19,6 +20,10 @@ INSTRUCTION_CLASSIFIER_PROFILE = TaskProfile(
     temperature=0.1,
     max_tokens=200,
     response_format="json",
+    default_provider="dashscope",
+    required_capabilities=(LLMCapability.CHAT,),
+    response_mode="text",
+    enable_thinking=False,
     system_prompt_template="""你是机器人唤醒后的语音意图识别模块。
 
 当前机器人已经被唤醒，正在监听用户后续语音。你的任务是判断用户这句话的意图，以及机器人是否应该继续当前 session。
@@ -66,11 +71,13 @@ class InstructionClassifier:
 
     def __init__(
         self,
-        llm: BaseLLMClient,
+        llm: Optional[BaseLLMClient] = None,
         profile: TaskProfile = INSTRUCTION_CLASSIFIER_PROFILE,
+        client_resolver: Optional[ClientResolver] = None,
     ) -> None:
         self._llm = llm
         self._profile = profile
+        self._client_resolver = client_resolver
 
     async def classify(
         self,
@@ -78,18 +85,20 @@ class InstructionClassifier:
         enabled: bool = True,
         system_prompt: str | None = None,
         profile: TaskProfile | None = None,
+        provider: str | None = None,
         **chat_options: Any,
     ) -> Dict[str, Any]:
         if not enabled:
             return _fallback_result(user_input)
 
-        if not self._llm.is_available():
+        active_profile = profile or self._profile
+        llm = self._resolve_llm(active_profile, provider)
+        if not llm.is_available():
             logger.info("指令分类 LLM 不可用，跳过分类")
             return _fallback_result(user_input)
 
         try:
-            active_profile = profile or self._profile
-            result = await self._llm.chat(
+            result = await llm.chat(
                 [
                     LLMMessage(
                         role="system",
@@ -104,6 +113,17 @@ class InstructionClassifier:
         except Exception as exc:
             logger.warning("指令分类失败 (%s)，按非指令处理", exc)
             return _fallback_result(user_input)
+
+    def _resolve_llm(
+        self,
+        profile: TaskProfile,
+        provider: Optional[str],
+    ) -> BaseLLMClient:
+        if self._client_resolver is not None:
+            return self._client_resolver(profile, provider)
+        if self._llm is None:
+            raise ValueError("InstructionClassifier 未配置 LLM client")
+        return self._llm
 
 
 def _normalize_result(user_input: str, data: Dict[str, Any]) -> Dict[str, Any]:

@@ -21,13 +21,15 @@ class Config:
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str = ""
-    MODEL_PROVIDER: str = "openai"
-    LLM_CHAT_PROVIDER: str = ""
-    LLM_PLANNER_PROVIDER: str = ""
-    LLM_VISION_PROVIDER: str = ""
+    LLM_DEFAULT_PROVIDER: str = "openai"
     LLM_DEFAULT_TEMPERATURE: float = 0.3
     LLM_DEFAULT_MAX_TOKENS: int = 512
     LLM_REQUEST_TIMEOUT_S: float = 60.0
+    VOICE_SESSION_TIMEOUT_S: float = 30.0
+    VOICE_AUTO_EXECUTE_COMMAND: bool = False
+    VOICE_TTS_ENABLED: bool = False
+    VOICE_WAKE_WORD_ENABLED: bool = False
+    VOICE_ASR_ENABLED: bool = False
 
     # 系统配置
     LOG_LEVEL: str = "INFO"
@@ -203,13 +205,23 @@ class Config:
         instance.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
         instance.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
         instance.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
-        instance.MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai")
-        instance.LLM_CHAT_PROVIDER = os.getenv("LLM_CHAT_PROVIDER", "")
-        instance.LLM_PLANNER_PROVIDER = os.getenv("LLM_PLANNER_PROVIDER", "")
-        instance.LLM_VISION_PROVIDER = os.getenv("LLM_VISION_PROVIDER", "")
+        instance.LLM_DEFAULT_PROVIDER = os.getenv("LLM_DEFAULT_PROVIDER", "openai")
         instance.LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.3"))
         instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
         instance.LLM_REQUEST_TIMEOUT_S = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "60"))
+        instance.VOICE_SESSION_TIMEOUT_S = float(os.getenv("VOICE_SESSION_TIMEOUT_S", "30"))
+        instance.VOICE_AUTO_EXECUTE_COMMAND = os.getenv(
+            "VOICE_AUTO_EXECUTE_COMMAND", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_TTS_ENABLED = os.getenv(
+            "VOICE_TTS_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_WAKE_WORD_ENABLED = os.getenv(
+            "VOICE_WAKE_WORD_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_ASR_ENABLED = os.getenv(
+            "VOICE_ASR_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         instance.RUN_MODE = os.getenv("RUN_MODE", "server")
         instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
@@ -376,12 +388,10 @@ class Config:
 
     @classmethod
     def is_api_key_set(cls) -> bool:
-        """检查当前规划模型 provider 是否已配置。"""
+        """检查默认 LLM provider 是否已配置。"""
         instance = cls.get_instance()
         provider = (
-            instance.LLM_PLANNER_PROVIDER
-            or instance.LLM_CHAT_PROVIDER
-            or instance.MODEL_PROVIDER
+            instance.LLM_DEFAULT_PROVIDER
             or "openai"
         ).lower()
         if provider == "minicpm":
@@ -628,16 +638,26 @@ class Config:
         """获取 LLM 能力层配置摘要。"""
         instance = cls.get_instance()
         return {
-            "model_provider": instance.MODEL_PROVIDER,
-            "chat_provider": instance.LLM_CHAT_PROVIDER or instance.MODEL_PROVIDER,
-            "planner_provider": instance.LLM_PLANNER_PROVIDER or instance.LLM_CHAT_PROVIDER or instance.MODEL_PROVIDER,
-            "vision_provider": instance.LLM_VISION_PROVIDER or instance.LLM_CHAT_PROVIDER or instance.MODEL_PROVIDER,
+            "default_provider": instance.LLM_DEFAULT_PROVIDER,
+            "supported_providers": ["openai", "deepseek", "dashscope", "minicpm"],
             "openai_model": instance.OPENAI_MODEL,
             "openai_base_url": instance.OPENAI_BASE_URL,
             "minicpm_model": instance.MINICPM_MODEL,
             "minicpm_ws_scheme": instance.MINICPM_WS_SCHEME,
             "minicpm_realtime_path": instance.MINICPM_REALTIME_PATH,
             "timeout_s": instance.LLM_REQUEST_TIMEOUT_S,
+        }
+
+    @classmethod
+    def get_voice_interaction_config(cls) -> dict:
+        """获取唤醒后语音会话配置。"""
+        instance = cls.get_instance()
+        return {
+            "session_timeout_s": instance.VOICE_SESSION_TIMEOUT_S,
+            "auto_execute_command": instance.VOICE_AUTO_EXECUTE_COMMAND,
+            "tts_enabled": instance.VOICE_TTS_ENABLED,
+            "wake_word_enabled": instance.VOICE_WAKE_WORD_ENABLED,
+            "asr_enabled": instance.VOICE_ASR_ENABLED,
         }
     
     @classmethod

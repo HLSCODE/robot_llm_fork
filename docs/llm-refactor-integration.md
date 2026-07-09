@@ -242,12 +242,15 @@ CUSTOM_PLANNER_PROFILE = TaskProfile(
     temperature=0.2,
     max_tokens=800,
     response_format="json",
+    default_provider="dashscope",
+    enable_thinking=False,
 )
 ```
 
 语义边界：
 
-- `TaskProfile` 管提示词模板和模型调用参数。
+- `TaskProfile` 管提示词模板、默认 provider 和模型调用参数。
+- `enable_thinking` / `reasoning_effort` 属于 task 级语义配置，调用时仍可覆盖；具体如何映射到请求体由 provider 负责。
 - `TaskRunner` 管普通 LLM 调用的消息构造和 profile 注入。
 - `SkillPlanner`、`InstructionClassifier` 管业务输入构造和结果解析。
 - `OpenAICompatibleClient`、`MiniCPMRealtimeClient` 管具体模型协议。
@@ -565,6 +568,8 @@ connect
 }
 ```
 
+当 MiniCPM 请求启用 TTS 且调用方没有显式传入 `tts.ref_audio_data` / `ref_audio_data` 时，`MiniCPMRealtimeClient` 默认读取应用内参考音频 `assets/ref_audio/ref_minicpm_signature.wav`，将 16-bit PCM 采样转换为 little-endian float32 裸音频数据，再 base64 后写入 `input.tts.ref_audio_data`。
+
 ### 12.2 响应映射
 
 MiniCPM 事件映射到统一事件：
@@ -684,7 +689,7 @@ class LLMRegistry:
     @classmethod
     def from_config(cls, config) -> "LLMRegistry":
         registry = cls()
-        provider = config.MODEL_PROVIDER.lower()
+        provider = config.LLM_DEFAULT_PROVIDER.lower()
 
         if provider == "minicpm":
             registry.default_chat = MiniCPMRealtimeClient(
@@ -719,15 +724,13 @@ class LLMRegistry:
         return registry
 ```
 
-后续可以支持按能力选择不同模型：
+后续通过 `TaskProfile.default_provider` 和调用时 `provider` 覆盖选择不同模型：
 
 ```env
-LLM_CHAT_PROVIDER=minicpm
-LLM_PLANNER_PROVIDER=dashscope
-LLM_VISION_PROVIDER=minicpm
+LLM_DEFAULT_PROVIDER=minicpm
 ```
 
-第一阶段可以继续复用 `MODEL_PROVIDER`，降低配置迁移成本。
+第一阶段只保留 `LLM_DEFAULT_PROVIDER` 作为全局默认 provider。
 
 ## 15. 配置建议
 
@@ -739,7 +742,7 @@ LLM_VISION_PROVIDER=minicpm
 OPENAI_API_KEY=
 OPENAI_BASE_URL=
 OPENAI_MODEL=
-MODEL_PROVIDER=dashscope
+LLM_DEFAULT_PROVIDER=dashscope
 
 MINICPM_GATEWAY_HOST=10.10.17.15
 MINICPM_GATEWAY_PORT=8006
@@ -751,7 +754,7 @@ MINICPM_REALTIME_PATH=/v1/realtime
 新增 provider 值：
 
 ```env
-MODEL_PROVIDER=minicpm
+LLM_DEFAULT_PROVIDER=minicpm
 ```
 
 语义：
@@ -759,21 +762,24 @@ MODEL_PROVIDER=minicpm
 - `openai` / `deepseek` / `dashscope`：OpenAI-compatible HTTP provider
 - `minicpm`：MiniCPM Realtime WebSocket provider
 
-### 15.2 第二阶段：能力级配置
+### 15.2 第二阶段：Provider Registry + TaskProfile 默认 provider
 
-当业务需要“聊天用 MiniCPM，规划用 DashScope”时，再引入：
+当业务需要“某个 task 默认用 MiniCPM，某次调用临时用 DashScope”时，不再新增环境变量，而是在 profile 或调用参数中声明：
 
-```env
-LLM_CHAT_PROVIDER=minicpm
-LLM_PLANNER_PROVIDER=dashscope
-LLM_VISION_PROVIDER=minicpm
+```python
+TaskProfile(
+    name="vision_fusion",
+    default_provider="minicpm",
+    response_mode="voice_stream",
+)
 
-LLM_DEFAULT_TEMPERATURE=0.3
-LLM_DEFAULT_MAX_TOKENS=512
-LLM_REQUEST_TIMEOUT_S=60
+await registry.chat(
+    user_text="你好",
+    provider="dashscope",
+)
 ```
 
-此时 `MODEL_PROVIDER` 可以保留为旧配置别名。
+此时 `LLM_DEFAULT_PROVIDER` 是全局默认 provider。
 
 ## 16. 迁移计划
 
@@ -870,7 +876,7 @@ LLM_REQUEST_TIMEOUT_S=60
 
 目标：
 
-- `MODEL_PROVIDER=minicpm` 时，规划和聊天可以走 MiniCPM Realtime Chat
+- `LLM_DEFAULT_PROVIDER=minicpm` 时，规划和聊天可以走 MiniCPM Realtime Chat
 - MiniCPM 上游 WebSocket 只存在于 provider 内部
 
 ### 阶段 6：迁移 `ws_server.py` 的聊天 action
@@ -1053,10 +1059,10 @@ fake = FakeRealtimeTransport([
 
 覆盖：
 
-- `MODEL_PROVIDER=openai`
-- `MODEL_PROVIDER=deepseek`
-- `MODEL_PROVIDER=dashscope`
-- `MODEL_PROVIDER=minicpm`
+- `LLM_DEFAULT_PROVIDER=openai`
+- `LLM_DEFAULT_PROVIDER=deepseek`
+- `LLM_DEFAULT_PROVIDER=dashscope`
+- `LLM_DEFAULT_PROVIDER=minicpm`
 - `ai_status` 显示当前 provider、model、可用能力
 - `ai_chat` 能正常生成规划预览
 - MiniCPM `chat` 能返回 `chat_data` chunk/done
@@ -1098,7 +1104,7 @@ result = await planner.plan(...)
 README 建议更新：
 
 - `src/llm/` 描述为“大模型能力层”
-- `MODEL_PROVIDER=minicpm` 的说明
+- `LLM_DEFAULT_PROVIDER=minicpm` 的说明
 - MiniCPM Realtime Chat 和旧 MiniCPM 代理的区别
 
 `docs/websocket-api.md` 建议更新：

@@ -22,9 +22,9 @@
 4. 根据意图调用对应 task：
    - `chat`：普通大模型对话。
    - `command`：技能规划，生成指令序列。
-   - `vision_question`：采集相机画面并做视觉融合问答。
+   - `vision_question`：通过 `src/cameras/` 采集相机画面并做视觉融合问答。
    - `session_control`：结束、暂停、取消任务等。
-5. 支持流式文本和后续语音回复。
+5. 支持流式文本和语音回复；纯语音对话类 task 使用流式语音响应，结构化 task 使用文本响应。
 6. 第一阶段不依赖真实语音链路，使用 GUI 手动输入模拟 ASR 文本。
 
 ## 3. 非目标
@@ -55,7 +55,7 @@ src/voice_interaction/
 - `session.py`：维护唤醒状态、超时、历史上下文、当前任务状态。
 - `controller.py`：主入口，接收文本输入，驱动 classify -> route -> response。
 - `router.py`：根据 intent 调用对应 task。
-- `adapters.py`：预留唤醒词、ASR、TTS、音频播放适配接口。
+- `adapters.py`：预留唤醒词、ASR、TTS、音频播放适配接口，并提供 `CamerasModuleProvider` 通过 `src/cameras.camera_factory.get_camera_manager()` 获取视觉帧。
 
 第一阶段只需要实现 `types.py`、`session.py`、`controller.py`、`router.py`，语音适配器用 mock。
 
@@ -76,9 +76,9 @@ classifying
   v
 routing
   |-------------------------|
-  | chat                    | -> TaskRunner.stream_chat()
+  | chat                    | -> TaskRunner.stream_chat(voice_response=True)
   | command                 | -> SkillPlanner.plan() -> skill engine
-  | vision_question         | -> capture images -> VisionFusionTask.stream_observe()
+  | vision_question         | -> CamerasModuleProvider.capture_llm_parts() -> VisionFusionTask.stream_observe(voice_response=True)
   | session_control         | -> end / pause / cancel
   |-------------------------|
   v
@@ -259,16 +259,34 @@ async def _route(self, text: str, intent: dict):
         return
 ```
 
-## 10. Chat 处理
+## 10. 响应模式
 
-普通聊天只调用通用对话 task：
+每个 `TaskProfile` 需要声明响应模式：
+
+- `response_mode="voice_stream"`：用户可听见的任务，例如普通聊天、复述、视觉问答。语音会话中传 `voice_response=True` 时，MiniCPM 等支持 TTS 的 provider 会返回 `audio_delta`。
+- `response_mode="text"`：结构化或内部任务，例如 `InstructionClassifier`、`SkillPlanner`。这类任务始终走文本结果，并会剔除误传的 TTS 选项，避免语音模板污染 JSON 或规划格式。
+- `enable_thinking=False`：推荐用于 JSON、原样返回、视觉融合观察等格式敏感任务，避免模型输出推理过程或影响固定响应格式。
+- `command` 和 `session_control` 虽然内部会执行规划、取消、暂停、结束等控制逻辑，但仍应返回一段用户可听见的反馈；固定反馈文本优先通过 `RepeatTask.stream_repeat(voice_response=True)` 播报，未启用 TTS 时直接返回文本反馈。
+
+推荐默认划分：
+
+```text
+TaskRunner / GENERAL_CHAT_PROFILE       -> voice_stream
+RepeatTask / REPEAT_PROFILE             -> voice_stream
+VisionFusionTask / VISION_FUSION_PROFILE -> voice_stream
+InstructionClassifier                    -> text
+SkillPlanner                             -> text
+```
+
+## 11. Chat 处理
+
+普通聊天只调用通用对话 task。语音会话中使用 `voice_response=True`，router 内部还应判断当前 provider 是否支持 TTS：
 
 ```python
 async def _handle_chat(self, text: str):
     async for event in self.llm_registry.task_runner.stream_chat(
         user_text=text,
-        tts_enabled=True,
-        use_tts_template=True,
+        voice_response=True,
     ):
         yield self._from_llm_event(event)
 ```
@@ -280,7 +298,7 @@ async for event in self.llm_registry.task_runner.stream_chat(user_text=text):
     ...
 ```
 
-## 11. Command 处理
+## 12. Command 处理
 
 命令走两步：
 
@@ -326,9 +344,19 @@ async def _handle_command(self, text: str):
 - 后续可加配置：`VOICE_AUTO_EXECUTE_COMMAND=true/false`。
 - 执行动作时必须支持取消。
 
-## 12. Vision 处理
+## 13. Vision 处理
 
-视觉问题需要先采集图像，再调用视觉融合 task：
+视觉问题需要先通过 `src/cameras/` 采集图像，再调用视觉融合 task。GUI 第一阶段默认注入 `CamerasModuleProvider`：
+
+```python
+camera_provider = CamerasModuleProvider(
+    camera_name=Config.get_instance().VISION_CAMERA_NAME or None,
+)
+```
+
+`CamerasModuleProvider` 会从 `camera_factory.get_camera_manager()` 获取相机管理器，并调用 `get_latest_jpegs()` 转成 `LLMContentPart(type="image")`。如果 `VISION_CAMERA_NAME` 为空，则使用所有在线相机；如果配置了名称或序列号，则只使用对应相机。
+
+当相机未连接、未启动或没有最新帧时，不应把设备状态列表直接反馈给用户。适配器抛出 `CameraCaptureError`，其中 `user_message` 是适合语音播报的自然提示，`technical_detail` 只用于日志和调试数据。需要根据技术细节进一步润色时，路由层可使用 `VOICE_FEEDBACK_PROFILE` 生成一句更拟人化的反馈。
 
 ```python
 async def _handle_vision(self, text: str):
@@ -342,13 +370,12 @@ async def _handle_vision(self, text: str):
     async for event in self.llm_registry.vision_fusion.stream_observe(
         images=images,
         question=text,
-        tts_enabled=True,
-        use_tts_template=True,
+        voice_response=True,
     ):
         yield self._from_llm_event(event)
 ```
 
-第一阶段如果相机链路没准备好，可以用 mock：
+测试时如果相机链路没准备好，可以用 mock：
 
 ```python
 class MockCameraProvider:
@@ -358,7 +385,7 @@ class MockCameraProvider:
 
 或者先让 `_handle_vision()` 返回固定提示，验证路由。
 
-## 13. Session Control 处理
+## 14. Session Control 处理
 
 ```python
 async def _handle_session_control(self, intent: dict):
@@ -385,8 +412,9 @@ async def _handle_session_control(self, intent: dict):
 - “停下”通常是 `command`，不是结束 session。
 - “没事了”“不用了”“先这样”通常结束 session。
 - “取消刚才那个”通常取消任务，但不一定结束 session。
+- 会话控制类意图需要先反馈“已取消”“会话已结束”等可听响应，再更新最终 session 状态，避免用户听不到控制结果。
 
-## 14. 语音能力适配层
+## 15. 语音能力适配层
 
 第一阶段不实现真实语音，但接口先预留：
 
@@ -418,7 +446,7 @@ LLMStreamEvent.audio_delta
   -> TTSPlayer.play_delta()
 ```
 
-## 15. GUI 第一阶段接入
+## 16. GUI 第一阶段接入
 
 建议在 GUI 增加一个“语音会话调试面板”：
 
@@ -450,11 +478,14 @@ VoiceSessionWorker(QThread)
 5. 对 `command_preview` 显示技能预览。
 6. 对 `session_ended` 切回未唤醒状态。
 
-## 16. 配置建议
+## 17. 配置建议
 
 新增配置：
 
 ```env
+LLM_DEFAULT_PROVIDER=minicpm
+CAMERA_PROVIDER=realsense
+VISION_CAMERA_NAME=monitor1
 VOICE_SESSION_TIMEOUT_S=30
 VOICE_AUTO_EXECUTE_COMMAND=false
 VOICE_TTS_ENABLED=false
@@ -464,15 +495,21 @@ VOICE_ASR_ENABLED=false
 
 含义：
 
+- `LLM_DEFAULT_PROVIDER`：默认 LLM provider。具体 task 可通过 `TaskProfile.default_provider` 覆盖，单次调用也可传 `provider` 覆盖。
+- `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/cameras/` 支持的 `realsense` / `webcam`。
+- `VISION_CAMERA_NAME`：视觉问答默认使用的相机名称或序列号；为空时使用所有在线相机。
 - `VOICE_SESSION_TIMEOUT_S`：唤醒后无交互多久自动休眠。
 - `VOICE_AUTO_EXECUTE_COMMAND`：命令是否自动执行，第一阶段建议 false。
-- `VOICE_TTS_ENABLED`：是否请求模型生成语音回复。
+- `VOICE_TTS_ENABLED`：是否在 `voice_stream` task 中请求模型生成语音回复。`classifier/planner` 等文本 task 不受该配置影响。
 - `VOICE_WAKE_WORD_ENABLED`：是否启用真实唤醒词。
 - `VOICE_ASR_ENABLED`：是否启用真实 ASR。
 
 第一阶段配置：
 
 ```env
+LLM_DEFAULT_PROVIDER=minicpm
+CAMERA_PROVIDER=realsense
+VISION_CAMERA_NAME=monitor1
 VOICE_SESSION_TIMEOUT_S=30
 VOICE_AUTO_EXECUTE_COMMAND=false
 VOICE_TTS_ENABLED=false
@@ -480,7 +517,7 @@ VOICE_WAKE_WORD_ENABLED=false
 VOICE_ASR_ENABLED=false
 ```
 
-## 17. 错误和取消
+## 18. 错误和取消
 
 必须处理：
 
@@ -495,9 +532,9 @@ VOICE_ASR_ENABLED=false
 
 建议所有异常都转成 `VoiceEvent(type="error")`，不要让 GUI worker 崩溃。
 
-## 18. 测试方案
+## 19. 测试方案
 
-### 18.1 单元测试
+### 19.1 单元测试
 
 覆盖：
 
@@ -508,7 +545,7 @@ VOICE_ASR_ENABLED=false
 - `vision_question` 无相机时错误返回。
 - `chat` 流式事件映射。
 
-### 18.2 Fake LLM 测试
+### 19.2 Fake LLM 测试
 
 使用 fake registry：
 
@@ -520,7 +557,7 @@ class FakeClassifier:
 
 验证 controller 不依赖真实模型。
 
-### 18.3 GUI 手动测试
+### 19.3 GUI 手动测试
 
 用输入框模拟：
 
@@ -531,7 +568,7 @@ class FakeClassifier:
 - “取消刚才那个” -> session_control/cancel_task。
 - “停下” -> command。
 
-## 19. 推荐实施顺序
+## 20. 推荐实施顺序
 
 1. 新增 `src/voice_interaction/types.py`。
 2. 新增 `src/voice_interaction/session.py`。
@@ -547,7 +584,7 @@ class FakeClassifier:
 12. 再接真实 ASR。
 13. 最后接 TTS 音频播放。
 
-## 20. 第一阶段验收标准
+## 21. 第一阶段验收标准
 
 在无真实语音输入的情况下，通过 GUI 手动输入可以完成：
 
@@ -560,7 +597,7 @@ class FakeClassifier:
 7. 输入“取消刚才那个”能触发 cancel_task。
 8. LLM 或相机不可用时 GUI 不崩溃，有明确错误事件。
 
-## 21. 后续扩展
+## 22. 后续扩展
 
 后续接入真实语音后只替换 IO 层：
 

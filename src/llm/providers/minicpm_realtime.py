@@ -4,10 +4,14 @@ MiniCPM-o Realtime Chat provider。
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import ssl
+import struct
+import wave
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 try:
@@ -27,6 +31,12 @@ from ..types import (
 )
 
 logger = logging.getLogger(__name__)
+DEFAULT_REF_AUDIO_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "assets"
+    / "ref_audio"
+    / "ref_minicpm_signature.wav"
+)
 
 
 class MiniCPMRealtimeClient(LLMClient):
@@ -42,6 +52,7 @@ class MiniCPMRealtimeClient(LLMClient):
         model: str = "minicpm-o",
         timeout_s: float = 60.0,
         verify_ssl: bool = False,
+        default_ref_audio_path: Optional[str | Path] = None,
     ) -> None:
         self._gateway_host = gateway_host
         self._gateway_port = int(gateway_port)
@@ -51,6 +62,13 @@ class MiniCPMRealtimeClient(LLMClient):
         self._model = model or "minicpm-o"
         self._timeout_s = float(timeout_s)
         self._verify_ssl = verify_ssl
+        self._default_ref_audio_path = (
+            Path(default_ref_audio_path)
+            if default_ref_audio_path is not None
+            else DEFAULT_REF_AUDIO_PATH
+        )
+        self._default_ref_audio_data: Optional[str] = None
+        self._default_ref_audio_loaded = False
         self._available = websockets is not None and bool(gateway_host)
 
         if websockets is None:
@@ -227,6 +245,7 @@ class MiniCPMRealtimeClient(LLMClient):
         streaming = bool(options.get("streaming", True))
         tts_options = options.get("tts") if isinstance(options.get("tts"), dict) else {}
 
+        tts_enabled = bool(options.get("tts_enabled", tts_options.get("enabled", False)))
         input_payload: Dict[str, Any] = {
             "messages": [self._convert_message(message) for message in messages],
             "streaming": streaming,
@@ -239,19 +258,82 @@ class MiniCPMRealtimeClient(LLMClient):
             },
             "omni_mode": bool(options.get("omni_mode", False)),
             "tts": {
-                "enabled": bool(options.get("tts_enabled", tts_options.get("enabled", False))),
+                "enabled": tts_enabled,
             },
             "use_tts_template": bool(options.get("use_tts_template", False)),
             "enable_thinking": bool(options.get("enable_thinking", False)),
         }
 
-        if tts_options.get("ref_audio_data"):
-            input_payload["tts"]["ref_audio_data"] = tts_options["ref_audio_data"]
+        ref_audio_data = self._resolve_ref_audio_data(options, tts_options, tts_enabled)
+        if ref_audio_data:
+            input_payload["tts"]["ref_audio_data"] = ref_audio_data
 
         return {
             "type": "input.append",
             "input": input_payload,
         }
+
+    def _resolve_ref_audio_data(
+        self,
+        options: Dict[str, Any],
+        tts_options: Dict[str, Any],
+        tts_enabled: bool,
+    ) -> Optional[str]:
+        explicit = (
+            options.get("ref_audio_data")
+            or options.get("tts_ref_audio_data")
+            or tts_options.get("ref_audio_data")
+        )
+        if explicit:
+            return str(explicit)
+        if not tts_enabled:
+            return None
+        return self._load_default_ref_audio_data()
+
+    def _load_default_ref_audio_data(self) -> Optional[str]:
+        if self._default_ref_audio_loaded:
+            return self._default_ref_audio_data
+
+        self._default_ref_audio_loaded = True
+        try:
+            self._default_ref_audio_data = self._encode_wav_as_float32_base64(
+                self._default_ref_audio_path
+            )
+        except FileNotFoundError:
+            logger.warning("MiniCPM 默认参考音频不存在: %s", self._default_ref_audio_path)
+            return None
+        except Exception as exc:
+            logger.warning("读取 MiniCPM 默认参考音频失败: %s", exc)
+            return None
+
+        logger.info("MiniCPM 默认参考音频已按 float32 PCM 编码: %s", self._default_ref_audio_path)
+        return self._default_ref_audio_data
+
+    @staticmethod
+    def _encode_wav_as_float32_base64(path: Path) -> str:
+        """Encode 16-bit PCM wav as raw little-endian float32 base64."""
+        with wave.open(str(path), "rb") as wav_file:
+            sample_width = wav_file.getsampwidth()
+            frame_count = wav_file.getnframes()
+            channels = wav_file.getnchannels()
+            frames = wav_file.readframes(frame_count)
+
+        if sample_width != 2:
+            raise ValueError(f"MiniCPM 默认参考音频仅支持 16-bit PCM WAV，当前 sample_width={sample_width}")
+
+        sample_count = len(frames) // sample_width
+        samples = struct.unpack(f"<{sample_count}h", frames)
+        float_bytes = struct.pack(
+            f"<{sample_count}f",
+            *(sample / 32768.0 for sample in samples),
+        )
+        logger.debug(
+            "MiniCPM 参考音频编码: channels=%s samples=%s bytes=%s",
+            channels,
+            sample_count,
+            len(float_bytes),
+        )
+        return base64.b64encode(float_bytes).decode("ascii")
 
     def _convert_message(self, message: LLMMessage) -> Dict[str, Any]:
         return {

@@ -2,6 +2,7 @@
 AI助手 Tab 组件
 提供基于大模型的自然语言动作规划和执行功能
 """
+import asyncio
 import logging
 from typing import List, Dict, Any
 
@@ -10,13 +11,42 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QCheckBox, QScrollArea, QGroupBox,
     QListWidget, QListWidgetItem, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSlot
+from PyQt6.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont, QColor, QTextCursor
 
 from ..ai_integration import AIController, ExecutionBridge
+from ..core.config_loader import Config
 from ..gui.dialogs import ActionPreviewDialog
+from ..voice_interaction import CamerasModuleProvider, VoiceInteractionController, VoiceSessionState
+from .voice_audio_player import VoiceAudioPlayer
 
 logger = logging.getLogger(__name__)
+
+
+class VoiceSessionWorker(QObject):
+    """Run one voice-session text turn in a background thread."""
+
+    event_ready = pyqtSignal(dict)
+    error_occurred = pyqtSignal(str)
+    finished = pyqtSignal()
+
+    def __init__(self, controller: VoiceInteractionController, text: str):
+        super().__init__()
+        self._controller = controller
+        self._text = text
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            asyncio.run(self._run_async())
+        except Exception as exc:
+            self.error_occurred.emit(str(exc))
+        finally:
+            self.finished.emit()
+
+    async def _run_async(self):
+        async for event in self._controller.handle_text(self._text):
+            self.event_ready.emit(event.to_dict())
 
 
 class AIAssistantWidget(QWidget):
@@ -31,6 +61,26 @@ class AIAssistantWidget(QWidget):
         # 初始化执行桥接器和AI控制器
         self._execution_bridge = ExecutionBridge()
         self._ai_controller = AIController(execution_bridge=self._execution_bridge)
+        config = Config.get_instance()
+        voice_config = Config.get_voice_interaction_config()
+        self._voice_controller = VoiceInteractionController(
+            llm_registry=self._ai_controller.get_llm_registry(),
+            skill_engine=self._ai_controller.get_skill_engine(),
+            camera_provider=CamerasModuleProvider(
+                camera_name=config.VISION_CAMERA_NAME or None,
+            ),
+            timeout_s=voice_config["session_timeout_s"],
+            cancel_callback=self._ai_controller.cancel_current_task,
+            tts_enabled=voice_config["tts_enabled"],
+            auto_execute_command=voice_config["auto_execute_command"],
+        )
+        self._voice_thread = None
+        self._voice_worker = None
+        self._voice_processing = False
+        self._voice_streaming_reply = False
+        self._voice_audio_chunk_count = 0
+        self._voice_audio_playback_error_reported = False
+        self._voice_audio_player = VoiceAudioPlayer(self)
 
         # 主窗口引用，用于同步动作序列到右侧
         self._main_window = None
@@ -42,6 +92,10 @@ class AIAssistantWidget(QWidget):
         self._init_ui()
         self._connect_signals()
         self._update_status_display()
+        self._voice_timeout_timer = QTimer(self)
+        self._voice_timeout_timer.setInterval(1000)
+        self._voice_timeout_timer.timeout.connect(self._check_voice_session_timeout)
+        self._voice_timeout_timer.start()
 
     def _init_ui(self):
         """初始化UI"""
@@ -74,6 +128,40 @@ class AIAssistantWidget(QWidget):
         status_layout.addWidget(self.simulation_checkbox)
 
         layout.addWidget(status_widget)
+
+        # ── Voice session debug controls ──
+        voice_group = QGroupBox("🎙 语音会话调试")
+        voice_layout = QHBoxLayout(voice_group)
+        voice_layout.setContentsMargins(8, 6, 8, 6)
+        voice_layout.setSpacing(6)
+
+        self.voice_wake_button = QPushButton("唤醒")
+        self.voice_wake_button.setMinimumHeight(30)
+        self.voice_wake_button.setStyleSheet("""
+            QPushButton { background: #0f766e; color: #fff; font-weight: 700; border: none; border-radius: 7px; }
+            QPushButton:hover { background: #0d9488; }
+        """)
+        self.voice_wake_button.clicked.connect(self._on_voice_wake_clicked)
+        voice_layout.addWidget(self.voice_wake_button)
+
+        self.voice_sleep_button = QPushButton("结束会话")
+        self.voice_sleep_button.setMinimumHeight(30)
+        self.voice_sleep_button.setStyleSheet("""
+            QPushButton { background: #ffffff; color: #475569; border: 1px solid #cbd5e1; border-radius: 7px; }
+            QPushButton:hover { background: #f8fafc; border-color: #64748b; }
+        """)
+        self.voice_sleep_button.clicked.connect(self._on_voice_sleep_clicked)
+        voice_layout.addWidget(self.voice_sleep_button)
+
+        self.voice_state_label = QLabel("语音: sleeping")
+        self.voice_state_label.setStyleSheet("font-size: 11px; color: #475569; border: none;")
+        voice_layout.addWidget(self.voice_state_label)
+
+        self.voice_intent_label = QLabel("意图: —")
+        self.voice_intent_label.setStyleSheet("font-size: 11px; color: #475569; border: none;")
+        voice_layout.addWidget(self.voice_intent_label, stretch=1)
+
+        layout.addWidget(voice_group)
 
         # ── Chat history ──
         self.chat_history = QTextEdit()
@@ -221,6 +309,7 @@ class AIAssistantWidget(QWidget):
         # 执行桥接器信号
         self._execution_bridge.log_message.connect(self._on_execution_log)
         self._execution_bridge.execution_status_changed.connect(self._on_status_changed)
+        self._voice_audio_player.error_occurred.connect(self._on_voice_audio_error)
 
     def _refresh_skill_list(self):
         """刷新技能列表"""
@@ -281,6 +370,54 @@ class AIAssistantWidget(QWidget):
         self.input_field.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
 
+    def _is_voice_session_active(self) -> bool:
+        return self._voice_controller.session.state != VoiceSessionState.SLEEPING
+
+    def _update_voice_status_display(self):
+        state = self._voice_controller.session.state.value
+        self.voice_state_label.setText(f"语音: {state}")
+        if state == VoiceSessionState.SLEEPING.value:
+            self.voice_state_label.setStyleSheet("font-size: 11px; color: #64748b; border: none;")
+        else:
+            self.voice_state_label.setStyleSheet("font-size: 11px; color: #0f766e; font-weight: 700; border: none;")
+
+    def _check_voice_session_timeout(self):
+        if self._voice_processing:
+            return
+        event = self._voice_controller.check_timeout()
+        if event is None:
+            return
+        self._handle_voice_event(event.to_dict())
+        self.status_label.setText("状态: 会话超时")
+
+    def _append_bot_delta(self, text: str):
+        if not text:
+            return
+        cursor = self.chat_history.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.chat_history.setTextColor(QColor("#334155"))
+        if not self._voice_streaming_reply:
+            cursor.insertText("\n🤖 ")
+            self._voice_streaming_reply = True
+        cursor.insertText(text)
+        self.chat_history.setTextColor(QColor("#1e293b"))
+        self.chat_history.ensureCursorVisible()
+
+    def _finish_bot_delta(self):
+        if not self._voice_streaming_reply:
+            return
+        cursor = self.chat_history.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText("\n")
+        self._voice_streaming_reply = False
+        self.chat_history.ensureCursorVisible()
+
+    def _enqueue_voice_audio(self, audio_data: str):
+        if not audio_data:
+            return
+        if self._voice_audio_player.enqueue_base64(audio_data):
+            self._voice_audio_chunk_count += 1
+
     # ==================== 事件处理 ====================
 
     def _on_send_clicked(self):
@@ -291,16 +428,139 @@ class AIAssistantWidget(QWidget):
 
         # 检查API Key
         if not self._ai_controller.is_api_key_set():
-            self._add_system_message("请先配置 LLM 模型！\n请在项目根目录创建 config.env 文件，设置 MODEL_PROVIDER 及对应模型配置。")
+            self._add_system_message("请先配置 LLM 模型！\n请在项目根目录创建 config.env 文件，设置 LLM_DEFAULT_PROVIDER 及对应模型配置。")
             return
 
         # 添加用户消息
         self._add_user_message(text)
         self.input_field.clear()
 
+        if self._is_voice_session_active():
+            self._start_voice_text_turn(text)
+            return
+
         # 处理输入
         self._set_input_enabled(False)
         self._ai_controller.process_input(text)
+
+    def _on_voice_wake_clicked(self):
+        event = self._voice_controller.wake()
+        self._handle_voice_event(event.to_dict())
+        self.input_field.setPlaceholderText("语音会话已唤醒，输入文字模拟 ASR 后按 Enter...")
+
+    def _on_voice_sleep_clicked(self):
+        event = self._voice_controller.sleep()
+        self._handle_voice_event(event.to_dict())
+        self.input_field.setPlaceholderText("请输入您的指令，按 Enter 发送...")
+
+    def _start_voice_text_turn(self, text: str):
+        if self._voice_processing:
+            self._add_system_message("语音会话正在处理上一句话，请稍候")
+            return
+
+        self._voice_processing = True
+        self._voice_streaming_reply = False
+        self._voice_audio_chunk_count = 0
+        self._voice_audio_playback_error_reported = False
+        self._voice_audio_player.stop()
+        self._set_input_enabled(False)
+        self.status_label.setText("状态: 语音会话处理中...")
+
+        self._voice_thread = QThread(self)
+        self._voice_worker = VoiceSessionWorker(self._voice_controller, text)
+        self._voice_worker.moveToThread(self._voice_thread)
+        self._voice_thread.started.connect(self._voice_worker.run)
+        self._voice_worker.event_ready.connect(self._handle_voice_event)
+        self._voice_worker.error_occurred.connect(self._on_voice_worker_error)
+        self._voice_worker.finished.connect(self._on_voice_worker_finished)
+        self._voice_worker.finished.connect(self._voice_thread.quit)
+        self._voice_worker.finished.connect(self._voice_worker.deleteLater)
+        self._voice_thread.finished.connect(self._on_voice_thread_finished)
+        self._voice_thread.finished.connect(self._voice_thread.deleteLater)
+        self._voice_thread.start()
+
+    @pyqtSlot(dict)
+    def _handle_voice_event(self, event: dict):
+        event_type = event.get("type", "")
+        if event_type == "session_started":
+            self._add_system_message(event.get("text") or "语音会话已唤醒")
+            self.voice_intent_label.setText("意图: —")
+        elif event_type == "session_ended":
+            preserve_audio = bool((event.get("data") or {}).get("preserve_audio"))
+            self._finish_bot_delta()
+            if not preserve_audio:
+                self._voice_audio_player.stop()
+            self._add_system_message(event.get("text") or "语音会话已结束")
+            self.voice_intent_label.setText("意图: —")
+            self.input_field.setPlaceholderText("请输入您的指令，按 Enter 发送...")
+            self._set_input_enabled(True)
+        elif event_type == "session_paused":
+            self._add_system_message(event.get("text") or "语音会话已暂停")
+        elif event_type == "session_resumed":
+            self._add_system_message(event.get("text") or "语音会话已恢复")
+        elif event_type == "ignored":
+            self._add_system_message(event.get("text") or "已忽略")
+        elif event_type == "intent":
+            intent = event.get("intent") or {}
+            intent_name = intent.get("intent", "unknown")
+            action = intent.get("session_action", "none")
+            self.voice_intent_label.setText(f"意图: {intent_name} / {action}")
+            self._add_system_message(f"语音意图: {intent_name}（session: {action}）")
+        elif event_type == "text_delta":
+            self._append_bot_delta(event.get("text_delta", ""))
+        elif event_type == "audio_delta":
+            self._enqueue_voice_audio(event.get("audio_data", ""))
+        elif event_type == "vision_started":
+            self._add_system_message(event.get("text") or "开始视觉观察")
+        elif event_type == "command_preview":
+            self._finish_bot_delta()
+            data = event.get("data") or {}
+            self._current_preview_items = data.get("sequence", [])
+            self._current_skill_info = data.get("skill_info", {})
+            if not data.get("suppress_message"):
+                self._add_bot_message(event.get("text") or "已生成动作预览")
+            self.preview_button.setEnabled(bool(self._current_preview_items))
+            self.execute_button.setEnabled(False)
+            self.cancel_button.setEnabled(True)
+        elif event_type == "done":
+            text = event.get("text", "")
+            if text and not self._voice_streaming_reply:
+                self._add_bot_message(text)
+            if self._voice_audio_chunk_count == 0:
+                self._enqueue_voice_audio(event.get("audio_data", ""))
+            self._finish_bot_delta()
+            if self._voice_audio_chunk_count:
+                self._add_system_message(f"正在播放 {self._voice_audio_chunk_count} 段语音数据")
+        elif event_type == "error":
+            self._finish_bot_delta()
+            self._voice_audio_player.stop()
+            self._add_system_message(f"语音会话错误: {event.get('text') or '未知错误'}")
+
+        self._update_voice_status_display()
+
+    @pyqtSlot(str)
+    def _on_voice_worker_error(self, error: str):
+        self._add_system_message(f"语音会话错误: {error}")
+
+    @pyqtSlot(str)
+    def _on_voice_audio_error(self, error: str):
+        if self._voice_audio_playback_error_reported:
+            return
+        self._voice_audio_playback_error_reported = True
+        self._add_system_message(f"语音播放失败: {error}")
+
+    @pyqtSlot()
+    def _on_voice_worker_finished(self):
+        self._finish_bot_delta()
+        self._voice_processing = False
+        self._set_input_enabled(True)
+        self._update_voice_status_display()
+        self.status_label.setText("状态: 就绪")
+
+    @pyqtSlot()
+    def _on_voice_thread_finished(self):
+        self._voice_thread = None
+        self._voice_worker = None
 
     def _on_execute_clicked(self):
         """执行按钮点击"""
@@ -331,6 +591,7 @@ class AIAssistantWidget(QWidget):
 
     def _on_cancel_clicked(self):
         """取消按钮点击"""
+        self._voice_audio_player.stop()
         self._ai_controller.cancel_current_task()
         self._reset_ui()
 

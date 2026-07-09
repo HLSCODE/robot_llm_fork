@@ -7,7 +7,7 @@ business results; specialized tasks such as SkillPlanner still own that part.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Any, List, Optional, Sequence, Union
+from typing import Any, Callable, List, Optional, Sequence, Union
 
 from ..base import BaseLLMClient
 from ..sync_utils import run_coro_sync
@@ -16,6 +16,7 @@ from .profiles import GENERAL_CHAT_PROFILE, TaskProfile
 
 
 MessageContent = Union[str, List[LLMContentPart]]
+ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 
 class TaskRunner:
@@ -23,11 +24,13 @@ class TaskRunner:
 
     def __init__(
         self,
-        llm: BaseLLMClient,
+        llm: Optional[BaseLLMClient] = None,
         default_profile: TaskProfile = GENERAL_CHAT_PROFILE,
+        client_resolver: Optional[ClientResolver] = None,
     ) -> None:
         self._llm = llm
         self._default_profile = default_profile
+        self._client_resolver = client_resolver
 
     async def chat(
         self,
@@ -36,10 +39,12 @@ class TaskRunner:
         system_prompt: Optional[str] = None,
         profile: Optional[TaskProfile] = None,
         prompt_context: Optional[dict[str, Any]] = None,
+        provider: Optional[str] = None,
         **chat_options: Any,
     ) -> LLMChatResult:
         """Run a non-streaming chat call with a TaskProfile."""
         active_profile = profile or self._default_profile
+        llm = self._resolve_llm(active_profile, provider)
         final_messages = self._build_messages(
             user_text=user_text,
             messages=messages,
@@ -47,7 +52,7 @@ class TaskRunner:
             profile=active_profile,
             prompt_context=prompt_context,
         )
-        return await self._llm.chat(
+        return await llm.chat(
             final_messages,
             **active_profile.chat_options(**chat_options),
         )
@@ -59,6 +64,7 @@ class TaskRunner:
         system_prompt: Optional[str] = None,
         profile: Optional[TaskProfile] = None,
         prompt_context: Optional[dict[str, Any]] = None,
+        provider: Optional[str] = None,
         **chat_options: Any,
     ) -> LLMChatResult:
         """Synchronous wrapper for normal chat tasks."""
@@ -69,6 +75,7 @@ class TaskRunner:
                 system_prompt=system_prompt,
                 profile=profile,
                 prompt_context=prompt_context,
+                provider=provider,
                 **chat_options,
             )
         )
@@ -80,10 +87,13 @@ class TaskRunner:
         system_prompt: Optional[str] = None,
         profile: Optional[TaskProfile] = None,
         prompt_context: Optional[dict[str, Any]] = None,
+        voice_response: bool = False,
+        provider: Optional[str] = None,
         **chat_options: Any,
     ) -> AsyncIterator[LLMStreamEvent]:
         """Run a streaming chat call with a TaskProfile."""
         active_profile = profile or self._default_profile
+        llm = self._resolve_llm(active_profile, provider)
         final_messages = self._build_messages(
             user_text=user_text,
             messages=messages,
@@ -91,9 +101,12 @@ class TaskRunner:
             profile=active_profile,
             prompt_context=prompt_context,
         )
-        async for event in self._llm.stream_chat(
+        async for event in llm.stream_chat(
             final_messages,
-            **active_profile.chat_options(**chat_options),
+            **active_profile.stream_options(
+                voice_response=voice_response,
+                **chat_options,
+            ),
         ):
             yield event
 
@@ -104,6 +117,8 @@ class TaskRunner:
         system_prompt: Optional[str] = None,
         profile: Optional[TaskProfile] = None,
         prompt_context: Optional[dict[str, Any]] = None,
+        voice_response: bool = False,
+        provider: Optional[str] = None,
         **chat_options: Any,
     ) -> AsyncIterator[LLMStreamEvent]:
         """Alias for stream_chat()."""
@@ -113,9 +128,22 @@ class TaskRunner:
             system_prompt=system_prompt,
             profile=profile,
             prompt_context=prompt_context,
+            voice_response=voice_response,
+            provider=provider,
             **chat_options,
         ):
             yield event
+
+    def _resolve_llm(
+        self,
+        profile: TaskProfile,
+        provider: Optional[str],
+    ) -> BaseLLMClient:
+        if self._client_resolver is not None:
+            return self._client_resolver(profile, provider)
+        if self._llm is None:
+            raise ValueError("TaskRunner 未配置 LLM client")
+        return self._llm
 
     def _build_messages(
         self,

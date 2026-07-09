@@ -129,9 +129,7 @@ SIMULATION_MODE=false
 WEBSOCKET_HOST=0.0.0.0
 WEBSOCKET_PORT=8765
 
-MODEL_PROVIDER=dashscope
-LLM_CHAT_PROVIDER=
-LLM_PLANNER_PROVIDER=
+LLM_DEFAULT_PROVIDER=dashscope
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_MODEL=qwen-turbo
@@ -158,16 +156,14 @@ MINICPM_ASK_MODEL=qwen-turbo
 | `SIMULATION_MODE` | 是否模拟模式 | `true` 时不连接真实硬件 |
 | `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `0.0.0.0` |
 | `WEBSOCKET_PORT` | WebSocket 监听端口 | 默认 `8765` |
-| `MODEL_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm` |
-| `LLM_CHAT_PROVIDER` | 聊天 provider | 留空时回退到 `MODEL_PROVIDER` |
-| `LLM_PLANNER_PROVIDER` | AI 规划 provider | 留空时回退到聊天 provider 或 `MODEL_PROVIDER` |
+| `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
 | `OPENAI_API_KEY` | OpenAI-compatible API Key | `openai` / `deepseek` / `dashscope` 使用 |
 | `OPENAI_BASE_URL` | OpenAI-compatible Base URL | 留空时使用 provider 默认值 |
 | `OPENAI_MODEL` | OpenAI-compatible 模型名 | 如 `qwen-turbo` / `gpt-4o` |
 | `REALSENSE_DEVICE_SN` | RealSense 序列号 | 支持逗号分隔多台 |
 | `REALSENSE_DEVICE_NAMES` | RealSense 名称 | 与序列号一一对应 |
-| `MINICPM_GATEWAY_HOST` | MiniCPM 网关主机 | `MODEL_PROVIDER=minicpm` 或聊天使用 |
-| `MINICPM_GATEWAY_PORT` | MiniCPM 网关端口 | `MODEL_PROVIDER=minicpm` 或聊天使用 |
+| `MINICPM_GATEWAY_HOST` | MiniCPM 网关主机 | `LLM_DEFAULT_PROVIDER=minicpm`、task 默认 provider 为 `minicpm` 或请求指定 `provider=minicpm` 时使用 |
+| `MINICPM_GATEWAY_PORT` | MiniCPM 网关端口 | 同上 |
 | `MINICPM_WS_SCHEME` | MiniCPM WebSocket 协议 | `wss` 或 `ws`，默认 `wss` |
 | `MINICPM_REALTIME_PATH` | Realtime Chat 路径 | 最终连接为 `{MINICPM_WS_SCHEME}://HOST:PORT{PATH_PREFIX}{REALTIME_PATH}?mode=chat` |
 | `MINICPM_ASK_ENABLED` | 是否启用指令分类 | 仅影响是否触发 `minicpm_instruction` / AI 规划，不影响 MiniCPM 聊天回复 |
@@ -1632,7 +1628,7 @@ ws.onmessage = (event) => {
 - AI 规划和 `minicpm_instruction` 不是同一个概念。
 - `minicpm_instruction` 只表示“这句话被判定为机器人指令”，不代表任务序列已经生成。
 - 真正的任务序列只会出现在 `ai_preview_ready.sequence` 中。
-- AI 规划依赖 `LLM_PLANNER_PROVIDER` 或默认 `MODEL_PROVIDER` 对应的模型配置；如果规划 provider 不可用，`ai_chat` 会直接返回 `error`，聊天链路触发时则可能只看到 `minicpm_instruction`，看不到后续规划事件。
+- AI 规划依赖 `TaskProfile.default_provider` 或 `LLM_DEFAULT_PROVIDER` 解析出的 provider；如果 provider 不可用，`ai_chat` 会直接返回 `error`，聊天链路触发时则可能只看到 `minicpm_instruction`，看不到后续规划事件。
 
 ### 11.0 AI 规划完整事件流
 
@@ -1981,6 +1977,9 @@ AI 执行流程结束示例：
   "api_key_set": true,
   "model": "qwen-turbo",
   "provider": "DASHSCOPE",
+  "default_provider": "dashscope",
+  "providers": ["openai", "deepseek", "dashscope", "minicpm"],
+  "loaded_providers": ["dashscope"],
   "capabilities": ["chat", "stream_chat", "planning"],
   "chat_available": true,
   "chat_provider": "minicpm",
@@ -1998,15 +1997,18 @@ AI 执行流程结束示例：
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `llm_available` | `boolean` | AI 规划 LLM 是否可用 |
-| `api_key_set` | `boolean` | 规划 provider 所需配置是否已配置 |
+| `api_key_set` | `boolean` | 默认 provider 所需配置是否已配置 |
 | `model` | `string` | 当前规划模型名 |
-| `provider` | `string` | 当前规划 provider |
+| `provider` | `string` | 默认 provider |
+| `default_provider` | `string` | `LLM_DEFAULT_PROVIDER` 解析后的 provider |
+| `providers` | `array` | 当前 registry 已注册的 provider 名称 |
+| `loaded_providers` | `array` | 当前进程已经懒加载实例化的 provider 名称 |
 | `capabilities` | `array` | 聊天 provider 支持的能力 |
 | `chat_available` | `boolean` | 聊天 provider 是否可用 |
-| `chat_provider` | `string` | 聊天 provider |
+| `chat_provider` | `string` | 当前聊天 profile 解析到的 provider，兼容观察字段 |
 | `chat_model` | `string` | 聊天模型 |
 | `planner_available` | `boolean` | 规划 provider 是否可用 |
-| `planner_provider` | `string` | 规划 provider |
+| `planner_provider` | `string` | 当前规划 profile 解析到的 provider，兼容观察字段 |
 | `planner_model` | `string` | 规划模型 |
 | `processing` | `boolean` | 是否正在处理中 |
 | `has_preview` | `boolean` | 是否存在待确认预览 |
@@ -2236,6 +2238,7 @@ function toImageSrc(frame) {
 ```json
 {
   "action": "chat",
+  "provider": "minicpm",
   "messages": [
     {
       "role": "user",
@@ -2251,6 +2254,7 @@ function toImageSrc(frame) {
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `action` | `string` | 是 | 固定值 `chat` |
+| `provider` | `string` | 否 | 覆盖本次调用使用的 provider，支持 `openai` / `deepseek` / `dashscope` / `minicpm` |
 | `messages` | `array` | 是 | 聊天消息列表 |
 | `streaming` | `boolean` | 否 | 是否流式 |
 | 其他字段 | 任意 | 否 | 会作为 LLM options 传给 provider |
@@ -2258,7 +2262,7 @@ function toImageSrc(frame) {
 说明：
 
 - 调用前必须先 `chat_connect`
-- 每次 `chat` 时服务端调用当前聊天 provider 的 `stream_chat`
+- 每次 `chat` 时服务端调用解析后的 provider 的 `stream_chat`：请求 `provider` > `GENERAL_CHAT_PROFILE.default_provider` > `LLM_DEFAULT_PROVIDER`
 - 如果聊天 provider 是 MiniCPM，MiniCPM 上游 WebSocket 由 `src/llm/providers/minicpm_realtime.py` 内部维护
 - 但前端与本服务的聊天会话状态仍保持
 

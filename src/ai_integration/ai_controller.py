@@ -90,17 +90,12 @@ class AIController(QObject):
         """初始化 LLM 和 Skill 引擎"""
         # 初始化 LLM 能力层
         self._llm_registry = LLMRegistry.from_config(self._config)
-        self._llm_client = self._llm_registry.get_chat_client()
-        self._planner_client = self._llm_registry.get_planner_client()
         self._skill_planner = self._llm_registry.skill_planner
-        if self._llm_client.is_available():
-            logger.info(
-                "LLM 客户端就绪: %s/%s",
-                self._llm_client.get_provider_name(),
-                self._llm_client.get_model_name(),
-            )
-        else:
-            logger.warning("LLM 客户端不可用，请检查模型配置")
+        logger.info(
+            "LLMRegistry 就绪: default=%s, providers=%s",
+            self._llm_registry.default_provider,
+            self._llm_registry.describe_providers(),
+        )
 
         # 初始化 Skill 引擎
         self._skill_engine = SkillEngine()
@@ -139,11 +134,11 @@ class AIController(QObject):
                     self._emit_status("模拟模式")
                     return
 
+                planner_client = self._get_planner_client()
                 if (
-                    self._llm_client is None
-                    or self._planner_client is None
+                    planner_client is None
                     or self._skill_planner is None
-                    or not self._planner_client.is_available()
+                    or not planner_client.is_available()
                 ):
                     self._emit_error("LLM 不可用，请检查模型配置")
                     self._emit_status("错误")
@@ -315,26 +310,44 @@ class AIController(QObject):
             return []
         return self._skill_engine.list_all_skills()
 
+    def get_llm_registry(self) -> Optional[LLMRegistry]:
+        """获取 LLMRegistry，供上层编排器复用模型能力。"""
+        return self._llm_registry
+
+    def get_skill_engine(self) -> Optional[SkillEngine]:
+        """获取 SkillEngine，供上层编排器复用技能预览能力。"""
+        return self._skill_engine
+
     def get_current_preview(self) -> tuple:
         """获取当前预览信息"""
         return self._current_sequence, self._current_skill_info
 
     def is_llm_available(self) -> bool:
         """LLM 是否可用"""
-        return self._planner_client is not None and self._planner_client.is_available()
+        planner_client = self._get_planner_client()
+        return planner_client is not None and planner_client.is_available()
 
     def get_llm_model_name(self) -> str:
         """获取 LLM 模型名称"""
-        if self._planner_client:
-            return self._planner_client.get_model_name()
+        planner_client = self._get_planner_client()
+        if planner_client:
+            return planner_client.get_model_name()
         return "未配置"
 
     def get_model_provider(self) -> str:
         """获取模型提供商名称"""
-        if self._planner_client:
-            return self._planner_client.get_provider_name().upper()
-        return self._config.MODEL_PROVIDER.upper()
+        planner_client = self._get_planner_client()
+        if planner_client:
+            return planner_client.get_provider_name().upper()
+        return self._config.LLM_DEFAULT_PROVIDER.upper()
 
     def is_api_key_set(self) -> bool:
         """模型配置是否已配置"""
         return Config.is_api_key_set()
+
+    def _get_planner_client(self) -> Optional[BaseLLMClient]:
+        if self._llm_registry is None:
+            return None
+        if self._planner_client is None:
+            self._planner_client = self._llm_registry.get_planner_client()
+        return self._planner_client

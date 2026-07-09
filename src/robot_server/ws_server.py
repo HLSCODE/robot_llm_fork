@@ -326,21 +326,25 @@ class RobotWebSocketServer:
 
             # 初始化 LLM 能力层
             self._llm_registry = LLMRegistry.from_config(config)
-            self._llm_client = self._llm_registry.get_chat_client()
-            self._planner_client = self._llm_registry.get_planner_client()
             self._skill_planner = self._llm_registry.skill_planner
-
-            if self._llm_client.is_available():
-                logger.info(
-                    "LLM 客户端就绪: %s/%s",
-                    self._llm_client.get_provider_name(),
-                    self._llm_client.get_model_name(),
-                )
-            else:
-                logger.warning("LLM 客户端不可用，请检查模型配置")
+            logger.info(
+                "LLMRegistry 就绪: default=%s, providers=%s",
+                self._llm_registry.default_provider,
+                self._llm_registry.describe_providers(),
+            )
 
         except Exception as e:
             logger.warning("AI 组件初始化失败: %s", e)
+
+    def _get_chat_client(self, provider: Optional[str] = None):
+        if self._llm_registry is not None:
+            return self._llm_registry.get_chat_client(provider)
+        return self._llm_client
+
+    def _get_planner_client(self, provider: Optional[str] = None):
+        if self._llm_registry is not None:
+            return self._llm_registry.get_planner_client(provider)
+        return self._planner_client
 
     # ------------------------------------------------------------------
     # 连接处理
@@ -1351,11 +1355,11 @@ class RobotWebSocketServer:
             ))
             return
 
+        planner_client = self._get_planner_client()
         if (
-            self._llm_client is None
-            or self._planner_client is None
+            planner_client is None
             or self._skill_planner is None
-            or not self._planner_client.is_available()
+            or not planner_client.is_available()
         ):
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "LLM 不可用，请检查 config.env 中的模型配置"}
@@ -1420,18 +1424,24 @@ class RobotWebSocketServer:
 
     async def _handle_ai_status(self, websocket, data: dict) -> None:
         """查询 AI/LLM 状态"""
-        planner_available = self._planner_client is not None and self._planner_client.is_available()
-        chat_available = self._llm_client is not None and self._llm_client.is_available()
+        planner_client = self._get_planner_client()
+        chat_client = self._get_chat_client()
+        planner_available = planner_client is not None and planner_client.is_available()
+        chat_available = chat_client is not None and chat_client.is_available()
         llm_available = planner_available
-        model_name = self._planner_client.get_model_name() if self._planner_client else "未配置"
+        model_name = planner_client.get_model_name() if planner_client else "未配置"
         capabilities = (
-            [cap.value for cap in self._llm_client.capabilities()]
-            if self._llm_client else []
+            [cap.value for cap in chat_client.capabilities()]
+            if chat_client else []
         )
 
         try:
             config = Config.get_instance()
-            provider = self._planner_client.get_provider_name().upper() if self._planner_client else config.MODEL_PROVIDER.upper()
+            provider = (
+                self._llm_registry.default_provider.upper()
+                if self._llm_registry
+                else config.LLM_DEFAULT_PROVIDER.upper()
+            )
             api_key_set = Config.is_api_key_set()
         except Exception:
             provider = "未知"
@@ -1443,13 +1453,16 @@ class RobotWebSocketServer:
             "api_key_set": api_key_set,
             "model": model_name,
             "provider": provider,
+            "default_provider": self._llm_registry.default_provider if self._llm_registry else "未配置",
+            "providers": list(self._llm_registry.provider_names) if self._llm_registry else [],
+            "loaded_providers": list(self._llm_registry.loaded_provider_names) if self._llm_registry else [],
             "capabilities": capabilities,
             "chat_available": chat_available,
-            "chat_provider": self._llm_client.get_provider_name() if self._llm_client else "未配置",
-            "chat_model": self._llm_client.get_model_name() if self._llm_client else "未配置",
+            "chat_provider": chat_client.get_provider_name() if chat_client else "未配置",
+            "chat_model": chat_client.get_model_name() if chat_client else "未配置",
             "planner_available": planner_available,
-            "planner_provider": self._planner_client.get_provider_name() if self._planner_client else "未配置",
-            "planner_model": self._planner_client.get_model_name() if self._planner_client else "未配置",
+            "planner_provider": planner_client.get_provider_name() if planner_client else "未配置",
+            "planner_model": planner_client.get_model_name() if planner_client else "未配置",
             "processing": self._ai_processing,
             "has_preview": bool(self._ai_preview_sequence),
         }))
@@ -1477,11 +1490,11 @@ class RobotWebSocketServer:
         """
         if self._ai_processing:
             return False
+        planner_client = self._get_planner_client()
         if (
-            self._llm_client is None
-            or self._planner_client is None
+            planner_client is None
             or self._skill_planner is None
-            or not self._planner_client.is_available()
+            or not planner_client.is_available()
         ):
             return False
         if self._skill_engine is None:
@@ -1975,12 +1988,25 @@ class RobotWebSocketServer:
         请求: {"action": "chat_connect"}
         成功: {"event": "chat_connected"}
         """
-        if self._llm_client is None or not self._llm_client.is_available():
+        provider = data.get("provider")
+        chat_client = None
+        if self._llm_registry is not None:
+            try:
+                chat_client = self._llm_registry.get_chat_client(provider)
+            except Exception as exc:
+                await websocket.send(self._json_msg({
+                    "event": "error", "message": f"LLM provider 选择失败: {exc}"
+                }))
+                return
+        else:
+            chat_client = self._llm_client
+
+        if chat_client is None or not chat_client.is_available():
             await websocket.send(self._json_msg({
                 "event": "error", "message": "LLM 聊天模型不可用，请检查模型配置"
             }))
             return
-        if LLMCapability.STREAM_CHAT not in self._llm_client.capabilities():
+        if LLMCapability.STREAM_CHAT not in chat_client.capabilities():
             await websocket.send(self._json_msg({
                 "event": "error", "message": "当前 LLM 不支持流式聊天"
             }))
@@ -1991,11 +2017,14 @@ class RobotWebSocketServer:
             }))
             return
 
-        self._minicpm_sessions[id(websocket)] = {"active": True}
+        self._minicpm_sessions[id(websocket)] = {
+            "active": True,
+            "provider": provider,
+        }
         await websocket.send(self._json_msg({
             "event": "chat_connected",
-            "provider": self._llm_client.get_provider_name(),
-            "model": self._llm_client.get_model_name(),
+            "provider": chat_client.get_provider_name(),
+            "model": chat_client.get_model_name(),
         }))
         logger.info("LLM 聊天会话已就绪: %s", websocket.remote_address)
 
@@ -2011,15 +2040,34 @@ class RobotWebSocketServer:
         请求: {"action": "chat", "messages": [...], "streaming": true, ...}
         服务端持续推送规范化的 chat_data 事件。上游模型连接由 LLM provider 维护。
         """
-        if id(websocket) not in self._minicpm_sessions:
+        session = self._minicpm_sessions.get(id(websocket))
+        if session is None:
             await websocket.send(self._json_msg({
                 "event": "error", "message": "请先发送 chat_connect 建立聊天会话"
             }))
             return
 
-        if self._llm_client is None or not self._llm_client.is_available():
+        provider = data.get("provider") or session.get("provider")
+        chat_client = None
+        if self._llm_registry is not None:
+            try:
+                chat_client = self._llm_registry.get_chat_client(provider)
+            except Exception as exc:
+                await websocket.send(self._json_msg({
+                    "event": "error", "message": f"LLM provider 选择失败: {exc}"
+                }))
+                return
+        else:
+            chat_client = self._llm_client
+
+        if chat_client is None or not chat_client.is_available():
             await websocket.send(self._json_msg({
                 "event": "error", "message": "LLM 聊天模型不可用，请检查模型配置"
+            }))
+            return
+        if LLMCapability.STREAM_CHAT not in chat_client.capabilities():
+            await websocket.send(self._json_msg({
+                "event": "error", "message": "当前 LLM 不支持流式聊天"
             }))
             return
 
@@ -2048,7 +2096,7 @@ class RobotWebSocketServer:
 
         options = self._extract_llm_options(payload)
         try:
-            async for event in self._llm_client.stream_chat(messages, **options):
+            async for event in chat_client.stream_chat(messages, **options):
                 await websocket.send(
                     self._json_msg(self._llm_stream_event_to_chat_data(event))
                 )
