@@ -25,15 +25,13 @@
    - `vision_question`：通过 `src/cameras/` 采集相机画面并做视觉融合问答。
    - `session_control`：结束、暂停、取消任务等。
 5. 支持流式文本和语音回复；纯语音对话类 task 使用流式语音响应，结构化 task 使用文本响应。
-6. 第一阶段不依赖真实语音链路，使用 GUI 手动输入模拟 ASR 文本。
+6. GUI 底部文本框是通用对话入口，不需要唤醒；真实语音链路由 `VoiceSpeechRuntime` 独立启动并维护语音 session。
 
 ## 3. 非目标
 
-1. 第一阶段不实现真实唤醒词模型。
-2. 第一阶段不实现真实 ASR。
-3. 第一阶段不要求实时播放 TTS 音频，可以先处理文本流。
-4. 不把语音输入、会话管理、技能执行逻辑塞进 `src/llm/`。
-5. 不让 LLM task 直接执行机器人动作。
+1. 不把语音输入、会话管理、技能执行逻辑塞进 `src/llm/`。
+2. 不让 LLM task 直接执行机器人动作。
+3. 不让项目代码依赖临时 `asr/` 目录；ASR、VAD、唤醒词和音频采集实现应位于 `src/voice_interaction/`。
 
 ## 4. 推荐架构
 
@@ -42,22 +40,37 @@
 ```text
 src/voice_interaction/
   __init__.py
-  types.py
-  session.py
-  controller.py
-  router.py
-  adapters.py
+  core/
+    types.py
+    session.py
+    controller.py
+    router.py
+  adapters/
+    cameras.py
+  speech/
+    audio.py
+    asr.py
+    vad.py
+    wake_word.py
+    utterance.py
+    runtime.py
 ```
 
 职责划分：
 
-- `types.py`：定义 session 状态、输入事件、输出事件、执行结果。
-- `session.py`：维护唤醒状态、超时、历史上下文、当前任务状态。
-- `controller.py`：主入口，接收文本输入，驱动 classify -> route -> response。
-- `router.py`：根据 intent 调用对应 task。
-- `adapters.py`：预留唤醒词、ASR、TTS、音频播放适配接口，并提供 `CamerasModuleProvider` 通过 `src/cameras.camera_factory.get_camera_manager()` 获取视觉帧。
+- `core/types.py`：定义 session 状态、输入事件、输出事件、执行结果。
+- `core/session.py`：维护唤醒状态、超时、历史上下文、当前任务状态。
+- `core/controller.py`：主入口，接收文本输入，驱动 classify -> route -> response。
+- `core/router.py`：根据 intent 调用对应 task。
+- `adapters/cameras.py`：提供 `CamerasModuleProvider` 通过 `src/cameras.camera_factory.get_camera_manager()` 获取视觉帧。
+- `speech/audio.py`：sounddevice 麦克风采集和 float32/int16 音频工具。
+- `speech/vad.py`：FunASR VAD 适配器。
+- `speech/asr.py`：FunASR 语音识别适配器。
+- `speech/wake_word.py`：sherpa-onnx、dummy、openWakeWord 唤醒词适配器。
+- `speech/utterance.py`：VAD 事件与 RMS 静音兜底组合成一句完整 utterance。
+- `speech/runtime.py`：真实语音运行时，将麦克风 -> 唤醒词 -> VAD -> ASR -> `VoiceInteractionController.handle_text()` 串起来。
 
-第一阶段只需要实现 `types.py`、`session.py`、`controller.py`、`router.py`，语音适配器用 mock。
+GUI 仍可用手动文本直接对话；真实语音输入通过 `VoiceSpeechRuntime` 单独启动，避免 GUI、WebSocket 和测试互相耦合。
 
 ## 5. 总体流程
 
@@ -68,7 +81,7 @@ sleeping
   v
 awake/listening
   |
-  | handle_text("用户手动输入，模拟 ASR")
+  | handle_text("用户手动输入")
   v
 classifying
   |
@@ -416,16 +429,19 @@ async def _handle_session_control(self, intent: dict):
 
 ## 15. 语音能力适配层
 
-第一阶段不实现真实语音，但接口先预留：
+真实语音输入已经迁入 `src/voice_interaction/`，接口如下：
 
 ```python
 class WakeWordAdapter:
-    async def listen(self):
+    def reset(self) -> None:
+        ...
+
+    def accept_audio(self, audio_float32, sample_rate: int) -> dict:
         ...
 
 
 class ASRAdapter:
-    async def transcribe(self, audio_chunk: bytes) -> str:
+    def transcribe(self, audio_float32, sample_rate: int) -> str:
         ...
 
 
@@ -437,24 +453,43 @@ class TTSPlayer:
 后续真实链路：
 
 ```text
+VoiceSpeechRuntime
+  -> AudioCapture 读取麦克风
 WakeWordAdapter 检测唤醒
   -> controller.wake()
-Microphone stream
-  -> ASRAdapter
+VAD + UtteranceEndpoint 判断一句话结束
+  -> ASRAdapter.transcribe()
   -> controller.handle_text(asr_text)
 LLMStreamEvent.audio_delta
   -> TTSPlayer.play_delta()
 ```
 
-## 16. GUI 第一阶段接入
+创建运行时：
 
-建议在 GUI 增加一个“语音会话调试面板”：
+```python
+from src.voice_interaction import build_voice_speech_runtime
+
+runtime = build_voice_speech_runtime(controller)
+async for event in runtime.run():
+    handle_voice_event(event)
+```
+
+`build_voice_speech_runtime()` 读取 `Config.get_voice_interaction_config()`：
+
+- `VOICE_INPUT_ENABLED=true` 才会创建真实语音输入运行时。
+- 真实语音输入运行时会同时加载 ASR/VAD 与 `VOICE_WAKE_ENGINE` 指定的唤醒词模型。
+- `VOICE_INPUT_ENABLED=false` 时，不加载 ASR/KWS 依赖；GUI 底部文本对话入口仍可直接使用。
+- 默认 sherpa-onnx 模型路径指向 `models/kws/...`，不能指向临时 `asr/models`。
+
+## 16. GUI 接入
+
+GUI 底部文本框作为通用对话入口；开启真实语音输入时，额外显示语音 session 状态：
 
 ```text
-[唤醒机器人] [结束会话]
-输入框：模拟 ASR 文本
+[结束语音会话] [启动监听 / 停止监听] Session: 未唤醒 / 已唤醒 / 回复中，监听: 待启动 / 运行中
+输入框：输入消息、问题或机器人指令，按 Enter 发送
 [发送]
-状态：sleeping / awake / responding
+状态：就绪 / 对话处理中 / 语音监听中 / 语音识别中
 意图：chat / command / vision_question / session_control
 输出区域：流式文本
 ```
@@ -465,11 +500,16 @@ Qt 中不要在主线程跑 async。推荐：
 VoiceSessionWorker(QThread)
   -> asyncio.run(controller.handle_text())
   -> event_signal.emit(VoiceEvent)
+
+VoiceSpeechRuntimeWorker(QThread)
+  -> build_voice_speech_runtime(controller)
+  -> runtime.run()
+  -> event_signal.emit(VoiceEvent)
 主线程 UI
   -> 根据 event 更新界面
 ```
 
-第一阶段 GUI 行为：
+GUI 行为：
 
 1. 点击“唤醒机器人”调用 `controller.wake()`。
 2. 输入文本点击“发送”调用 `controller.handle_text(text)`。
@@ -477,6 +517,12 @@ VoiceSessionWorker(QThread)
 4. 对 `text_delta` 做流式追加。
 5. 对 `command_preview` 显示技能预览。
 6. 对 `session_ended` 切回未唤醒状态。
+7. 底部文本输入不依赖唤醒词，发送后直接进入 intent classifier 和 router。
+8. `VOICE_INPUT_ENABLED=false` 时，不显示语音 session 区域，也不加载 ASR/KWS 依赖。
+9. `VOICE_INPUT_ENABLED=true` 时，后台线程加载 FunASR/VAD、唤醒词模型和麦克风采集。
+10. `VOICE_INPUT_ENABLED=true` 时，GUI 启动后先自动加载真实语音监听并等待唤醒词；Robot、底盘、串口等启动硬件会优先等待语音 runtime 初始化。
+11. 首次运行 FunASR 可能下载模型。若超过 `VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S`，GUI 会先继续初始化 Robot，语音 runtime 仍在后台下载/加载。
+12. GUI 收到 `asr_result` 后显示用户文本；收到 `done/audio_delta` 后显示/播放机器人回复。
 
 ## 17. 配置建议
 
@@ -487,10 +533,16 @@ LLM_DEFAULT_PROVIDER=minicpm
 CAMERA_PROVIDER=realsense
 VISION_CAMERA_NAME=monitor1
 VOICE_SESSION_TIMEOUT_S=30
+VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S=30
 VOICE_AUTO_EXECUTE_COMMAND=false
 VOICE_TTS_ENABLED=false
-VOICE_WAKE_WORD_ENABLED=false
-VOICE_ASR_ENABLED=false
+VOICE_INPUT_ENABLED=false
+VOICE_AUDIO_SAMPLE_RATE=16000
+VOICE_AUDIO_DEVICE=
+VOICE_VAD_MODEL=fsmn-vad
+VOICE_ASR_MODEL=iic/SenseVoiceSmall
+VOICE_WAKE_ENGINE=sherpa
+VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 ```
 
 含义：
@@ -501,10 +553,9 @@ VOICE_ASR_ENABLED=false
 - `VOICE_SESSION_TIMEOUT_S`：唤醒后无交互多久自动休眠。
 - `VOICE_AUTO_EXECUTE_COMMAND`：命令是否自动执行，第一阶段建议 false。
 - `VOICE_TTS_ENABLED`：是否在 `voice_stream` task 中请求模型生成语音回复。`classifier/planner` 等文本 task 不受该配置影响。
-- `VOICE_WAKE_WORD_ENABLED`：是否启用真实唤醒词。
-- `VOICE_ASR_ENABLED`：是否启用真实 ASR。
+- `VOICE_INPUT_ENABLED`：是否启用真实语音输入；true 时同时启用唤醒词和 ASR，false 时二者都不加载。
 
-第一阶段配置：
+手动调试配置：
 
 ```env
 LLM_DEFAULT_PROVIDER=minicpm
@@ -513,8 +564,15 @@ VISION_CAMERA_NAME=monitor1
 VOICE_SESSION_TIMEOUT_S=30
 VOICE_AUTO_EXECUTE_COMMAND=false
 VOICE_TTS_ENABLED=false
-VOICE_WAKE_WORD_ENABLED=false
-VOICE_ASR_ENABLED=false
+VOICE_INPUT_ENABLED=false
+```
+
+真实语音监听配置：
+
+```env
+VOICE_INPUT_ENABLED=true
+VOICE_WAKE_ENGINE=sherpa
+VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 ```
 
 ## 18. 错误和取消
@@ -570,19 +628,19 @@ class FakeClassifier:
 
 ## 20. 推荐实施顺序
 
-1. 新增 `src/voice_interaction/types.py`。
-2. 新增 `src/voice_interaction/session.py`。
-3. 新增 `src/voice_interaction/controller.py`。
-4. 新增 `src/voice_interaction/router.py` 或先把 `_route()` 放在 controller 内。
+1. 新增 `src/voice_interaction/core/types.py`。
+2. 新增 `src/voice_interaction/core/session.py`。
+3. 新增 `src/voice_interaction/core/controller.py`。
+4. 新增 `src/voice_interaction/core/router.py` 或先把 `_route()` 放在 controller 内。
 5. GUI 增加手动唤醒和文本输入调试入口。
 6. 接入 `InstructionClassifier` 路由。
 7. 接入 `TaskRunner` 聊天流。
 8. 接入 `SkillPlanner` 命令预览。
 9. 接入 `VisionFusionTask`，相机先 mock。
 10. 增加 session 超时和取消逻辑。
-11. 再接真实唤醒词。
-12. 再接真实 ASR。
-13. 最后接 TTS 音频播放。
+11. 按需在 GUI 或 WebSocket 服务中启动 `VoiceSpeechRuntime`。
+12. 准备 `models/kws` 下的 sherpa-onnx 模型与关键词文件。
+13. 最后做真实设备上的麦克风、VAD、ASR、TTS 联调。
 
 ## 21. 第一阶段验收标准
 
@@ -599,7 +657,7 @@ class FakeClassifier:
 
 ## 22. 后续扩展
 
-后续接入真实语音后只替换 IO 层：
+真实语音链路接入后仍只替换 IO 层：
 
 - 唤醒词模型只负责调用 `controller.wake()`。
 - ASR 只负责产出文本并调用 `controller.handle_text(text)`。

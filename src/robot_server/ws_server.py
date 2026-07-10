@@ -34,7 +34,7 @@ WebSocket 服务端
         {"action": "delete_task",   "name": "xxx.task"}    删除任务文件
 
     === AI 助手 ===
-        {"action": "ai_chat",      "text": "帮我抓一个瓶子"}  AI 自然语言规划
+        {"action": "ai_chat",      "text": "帮我抓一个瓶子"}  远程文本意图入口（chat/command/vision/session）
         {"action": "ai_confirm"}                            确认执行 AI 规划的序列
         {"action": "ai_cancel"}                             取消 AI 规划
         {"action": "ai_status"}                             查询 AI/LLM 状态
@@ -54,6 +54,8 @@ WebSocket 服务端
         {"action": "minicpm_status"}                       查询 MiniCPM 网关配置与状态
         {"action": "chat_connect"}                         建立聊天会话（标记当前连接进入聊天模式）
         {"action": "chat",         "messages": [...]}      发送聊天消息（底层由 LLM provider 处理）
+        {"action": "chat",         "messages": [...], "route_to_interaction": true}
+                                                              聊天同时显式路由到当前机器人意图入口
         {"action": "chat_disconnect"}                      断开聊天会话
 
 WebSocket 路径:
@@ -90,7 +92,6 @@ import json
 import logging
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Set, List, Dict, Any
 from uuid import uuid4
@@ -103,12 +104,12 @@ except ImportError:
 from src.cameras import get_camera_manager
 from src.cameras.camera_factory import CameraManager
 from .action_executor import ActionExecutor
-from .ask_service import classify_instruction
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
 from ..core.storage import StorageManager
 from ..core.config_loader import Config
 from ..llm import LLMCapability, LLMContentPart, LLMMessage, LLMRegistry, LLMStreamEvent
 from ..arm_sdk import RobotController
+from ..voice_interaction import CamerasModuleProvider, VoiceInteractionController
 
 
 
@@ -116,7 +117,7 @@ logger = logging.getLogger(__name__)
 
 
 class MiniCPMChatConfig:
-    """MiniCPM 相关配置，仅用于状态展示和指令分类。"""
+    """MiniCPM 相关配置，仅用于状态展示。"""
 
     def __init__(
         self,
@@ -231,14 +232,13 @@ class RobotWebSocketServer:
         self._ai_preview_sequence: List[SequenceItem] = []
         self._ai_preview_skill_info: Dict[str, Any] = {}
         self._ai_processing = False
-        self._ai_thread_pool = ThreadPoolExecutor(max_workers=1)
 
         # LLM 客户端和技能引擎（延迟初始化，避免未安装 AI 依赖时报错）
         self._llm_registry: Optional[LLMRegistry] = None
         self._llm_client = None
         self._planner_client = None
-        self._skill_planner = None
         self._skill_engine = None
+        self._interaction_controller: Optional[VoiceInteractionController] = None
 
         # 设备连接状态
         self._device_status = {
@@ -326,11 +326,24 @@ class RobotWebSocketServer:
 
             # 初始化 LLM 能力层
             self._llm_registry = LLMRegistry.from_config(config)
-            self._skill_planner = self._llm_registry.skill_planner
             logger.info(
                 "LLMRegistry 就绪: default=%s, providers=%s",
                 self._llm_registry.default_provider,
                 self._llm_registry.describe_providers(),
+            )
+
+            voice_config = Config.get_voice_interaction_config()
+            self._interaction_controller = VoiceInteractionController(
+                llm_registry=self._llm_registry,
+                skill_engine=self._skill_engine,
+                camera_provider=CamerasModuleProvider(
+                    camera_name=config.VISION_CAMERA_NAME or None,
+                    manager_factory=lambda: self._camera_manager,
+                ),
+                timeout_s=voice_config["session_timeout_s"],
+                cancel_callback=self._cancel_current_ai_task,
+                tts_enabled=voice_config["tts_enabled"],
+                auto_execute_command=voice_config["auto_execute_command"],
             )
 
         except Exception as e:
@@ -1338,9 +1351,9 @@ class RobotWebSocketServer:
 
     async def _handle_ai_chat(self, websocket, data: dict) -> None:
         """
-        AI 自然语言规划
+        远程文本意图入口。
         请求: {"action": "ai_chat", "text": "帮我抓一个瓶子"}
-        流程: text → LLM → SkillEngine → 预览序列推送到前端
+        流程: text → voice_interaction → chat / vision / command / session_control
         """
         text = data.get("text", "").strip()
         if not text:
@@ -1355,24 +1368,16 @@ class RobotWebSocketServer:
             ))
             return
 
-        planner_client = self._get_planner_client()
-        if (
-            planner_client is None
-            or self._skill_planner is None
-            or not planner_client.is_available()
-        ):
+        if self._interaction_controller is None:
             await websocket.send(self._json_msg(
-                {"event": "error", "message": "LLM 不可用，请检查 config.env 中的模型配置"}
+                {"event": "error", "message": "语音/意图交互模块未初始化，请检查 LLM 配置"}
             ))
             return
 
-        if self._skill_engine is None:
+        if not await self._run_interaction_text(text):
             await websocket.send(self._json_msg(
-                {"event": "error", "message": "技能引擎未初始化"}
+                {"event": "error", "message": "请求未能启动，请稍后重试"}
             ))
-            return
-
-        self._start_ai_planning(text)
 
     async def _handle_ai_confirm(self, websocket, data: dict) -> None:
         """
@@ -1482,84 +1487,172 @@ class RobotWebSocketServer:
             "skills": skills,
         }))
 
-    def _start_ai_planning(self, text: str) -> bool:
-        """启动 AI 技能规划（后台线程）。
-
-        返回 True 表示已提交规划任务；False 表示条件不满足（处理中 / 组件不可用）。
-        外部调用方负责事先验证 text 不为空。
-        """
+    async def _run_interaction_text(
+        self,
+        text: str,
+        *,
+        emit_minicpm_instruction: bool = False,
+    ) -> bool:
+        """通过 voice_interaction 处理远程文本输入。"""
         if self._ai_processing:
             return False
-        planner_client = self._get_planner_client()
-        if (
-            planner_client is None
-            or self._skill_planner is None
-            or not planner_client.is_available()
-        ):
-            return False
-        if self._skill_engine is None:
+        if self._interaction_controller is None:
             return False
 
         self._ai_processing = True
-        self._broadcast_threadsafe({"event": "ai_status_changed", "status": "分析中..."})
+        await self._broadcast({"event": "ai_status_changed", "status": "分析中..."})
+        if emit_minicpm_instruction:
+            await self._broadcast({"event": "minicpm_instruction", "instruction": text})
 
-        def _do_work():
-            try:
-                from ..skill_system.models import SkillMatchResult
-
-                skill_summaries = self._skill_engine.list_all_skills()
-                llm_result = self._skill_planner.plan_sync(text, skill_summaries)
-                if not llm_result.is_valid():
-                    error_msg = llm_result.error or f"无法理解您的意图（置信度: {llm_result.confidence:.0%}）"
-                    self._broadcast_threadsafe({"event": "ai_skill_not_matched", "error": error_msg})
-                    self._broadcast_threadsafe({"event": "ai_status_changed", "status": "匹配失败"})
-                    return
-
-                skill_match = SkillMatchResult(
-                    skill_id=llm_result.skill_id,
-                    skill_name=llm_result.skill_name,
-                    confidence=llm_result.confidence,
-                    extracted_params=llm_result.parameters,
-                    reasoning=llm_result.reasoning,
-                )
-                self._broadcast_threadsafe({
-                    "event": "ai_skill_matched",
-                    "skill_id": llm_result.skill_id,
-                    "skill_name": llm_result.skill_name,
-                    "confidence": llm_result.confidence,
-                    "params": llm_result.parameters,
-                    "reasoning": llm_result.reasoning,
-                })
-
-                skill_info = self._skill_engine.get_skill_info(llm_result.skill_id)
-                if skill_info is None:
-                    self._broadcast_threadsafe({"event": "error", "message": f"技能 {llm_result.skill_id} 不存在"})
-                    return
-
-                sequence, validation = self._skill_engine.parse_and_expand(skill_match)
-                if not validation.is_valid:
-                    self._broadcast_threadsafe({"event": "error", "message": validation.message})
-                    return
-
-                self._ai_preview_sequence = sequence
-                self._ai_preview_skill_info = skill_info
-                self._broadcast_threadsafe({
-                    "event": "ai_preview_ready",
-                    "sequence": [item.to_dict() for item in sequence],
-                    "skill_info": skill_info,
-                })
-                self._broadcast_threadsafe({"event": "ai_status_changed", "status": "预览就绪"})
-                logger.info("AI 规划完成: %s → %d 个动作", llm_result.skill_name, len(sequence))
-
-            except Exception as e:
-                logger.error("AI 处理失败: %s", e, exc_info=True)
-                self._broadcast_threadsafe({"event": "error", "message": f"AI 处理失败: {str(e)}"})
-            finally:
-                self._ai_processing = False
-
-        self._ai_thread_pool.submit(_do_work)
+        try:
+            async for event in self._interaction_controller.handle_text(
+                text,
+                require_awake=False,
+            ):
+                await self._emit_interaction_event(event.to_dict())
+        except Exception as exc:
+            logger.error("远程文本意图处理失败: %s", exc, exc_info=True)
+            await self._broadcast({
+                "event": "error",
+                "message": f"远程文本意图处理失败: {exc}",
+            })
+        finally:
+            self._ai_processing = False
         return True
 
+    async def _emit_interaction_event(self, event: Dict[str, Any]) -> None:
+        """将 voice_interaction 统一事件映射为 WebSocket 协议事件。"""
+        event_type = event.get("type", "")
+        text = event.get("text") or ""
+        data = event.get("data") or {}
+        intent = event.get("intent")
+        interaction_data = dict(data)
+        if event_type in ("text_delta", "audio_delta", "done"):
+            interaction_data.pop("raw", None)
+
+        await self._broadcast({
+            "event": "interaction_event",
+            "type": event_type,
+            "text": text,
+            "text_delta": event.get("text_delta") or "",
+            "intent": intent,
+            "data": interaction_data,
+        })
+
+        if event_type == "intent":
+            intent_name = (intent or {}).get("intent", "unknown")
+            await self._broadcast({
+                "event": "ai_intent",
+                "intent": intent,
+                "input": data.get("input"),
+            })
+            if intent_name == "command":
+                await self._broadcast({"event": "ai_status_changed", "status": "规划中..."})
+            elif intent_name == "vision_question":
+                await self._broadcast({"event": "ai_status_changed", "status": "观察中..."})
+            else:
+                await self._broadcast({"event": "ai_status_changed", "status": "回复中..."})
+            return
+
+        if event_type == "command_preview":
+            sequence_dicts = data.get("sequence") or []
+            try:
+                sequence = [
+                    SequenceItem.from_dict(item)
+                    for item in sequence_dicts
+                    if isinstance(item, dict)
+                ]
+            except Exception as exc:
+                logger.error("命令预览序列解析失败: %s", exc, exc_info=True)
+                await self._broadcast({
+                    "event": "error",
+                    "message": f"命令预览序列解析失败: {exc}",
+                })
+                return
+
+            plan = data.get("plan") or {}
+            skill_info = data.get("skill_info") or {}
+            self._ai_preview_sequence = sequence
+            self._ai_preview_skill_info = skill_info
+
+            if plan:
+                await self._broadcast({
+                    "event": "ai_skill_matched",
+                    "skill_id": plan.get("skill_id"),
+                    "skill_name": plan.get("skill_name"),
+                    "confidence": plan.get("confidence"),
+                    "params": plan.get("parameters") or {},
+                    "reasoning": plan.get("reasoning") or "",
+                })
+
+            await self._broadcast({
+                "event": "ai_preview_ready",
+                "sequence": [item.to_dict() for item in sequence],
+                "skill_info": skill_info,
+                "plan": plan,
+                "validation": data.get("validation") or {},
+                "message": text,
+            })
+            await self._broadcast({"event": "ai_status_changed", "status": "预览就绪"})
+            logger.info("远程文本生成动作预览: %d 个动作", len(sequence))
+            return
+
+        if event_type == "text_delta":
+            await self._broadcast({
+                "event": "chat_data",
+                "type": "chunk",
+                "text_delta": event.get("text_delta") or "",
+                "source": "voice_interaction",
+                "packet": data.get("raw"),
+            })
+            return
+
+        if event_type == "audio_delta":
+            await self._broadcast({
+                "event": "chat_data",
+                "type": "chunk",
+                "audio_data": event.get("audio_data"),
+                "source": "voice_interaction",
+                "packet": data.get("raw"),
+            })
+            return
+
+        if event_type == "done":
+            await self._broadcast({
+                "event": "chat_data",
+                "type": "done",
+                "text": text,
+                "audio_data": event.get("audio_data"),
+                "source": "voice_interaction",
+                "metrics": data.get("metrics"),
+                "packet": data.get("raw"),
+            })
+            if not self._ai_preview_sequence:
+                await self._broadcast({"event": "ai_status_changed", "status": "完成"})
+            return
+
+        if event_type == "error":
+            await self._broadcast({
+                "event": "error",
+                "message": text or "语音/意图交互处理失败",
+            })
+            await self._broadcast({"event": "ai_status_changed", "status": "失败"})
+            return
+
+        if event_type == "ignored":
+            await self._broadcast({
+                "event": "ai_ignored",
+                "message": text or "已忽略本次输入",
+                "intent": intent,
+            })
+            await self._broadcast({"event": "ai_status_changed", "status": "已忽略"})
+
+    async def _cancel_current_ai_task(self) -> None:
+        """供 voice_interaction 的 session_control.cancel_task 调用。"""
+        self._ai_preview_sequence = []
+        self._ai_preview_skill_info = {}
+        if self._executor is not None and self._executor.is_running:
+            self._executor.stop()
 
     # ==================================================================
     # 设备管理
@@ -2086,10 +2179,11 @@ class RobotWebSocketServer:
             }))
             return
 
-        # 指令分类
+        # chat 默认只做纯 LLM 聊天；需要远程控制当前机器人时，使用 ai_chat，
+        # 或显式传 route_to_interaction / robot_interaction 复用同一段用户文本。
         try:
             user_text = _extract_user_text(payload)
-            if user_text:
+            if user_text and (payload.get("route_to_interaction") or payload.get("robot_interaction")):
                 asyncio.ensure_future(self._on_chat_user_text(user_text))
         except Exception:
             pass
@@ -2223,25 +2317,12 @@ class RobotWebSocketServer:
         self._minicpm_sessions.pop(id(websocket), None)
 
     async def _on_chat_user_text(self, text: str) -> None:
-        """对聊天用户输入进行指令分类，必要时触发 AI 技能规划。"""
+        """把聊天消息显式路由到 voice_interaction。"""
         if not text.strip():
             return
-        cfg = self._minicpm_cfg
-        ask_result = await classify_instruction(
-            text,
-            api_key=cfg.ask_api_key if cfg else "",
-            base_url=cfg.ask_base_url if cfg else "",
-            model=cfg.ask_model if cfg else "gpt-4o-mini",
-            enabled=cfg.ask_enabled if cfg else False,
-        )
-        if not ask_result.get("is_Instruction", False):
-            logger.debug("用户输入非指令，跳过规划: %s", text[:60])
-            return
-        instruction = ask_result.get("Instruction", text)
-        logger.info("检测到机器人指令，触发 AI 规划: %s", instruction)
-        self._broadcast_threadsafe({"event": "minicpm_instruction", "instruction": instruction})
-        if not self._start_ai_planning(instruction):
-            logger.debug("AI 规划未启动（处理中或组件不可用），指令: %s", instruction)
+        logger.info("聊天消息显式路由到 voice_interaction: %s", text[:80])
+        if not await self._run_interaction_text(text, emit_minicpm_instruction=True):
+            logger.debug("voice_interaction 未启动（处理中或组件不可用），输入: %s", text[:80])
 
     # ==================================================================
     # 序列解析

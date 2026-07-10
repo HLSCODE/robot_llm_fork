@@ -61,20 +61,26 @@ class VoiceInteractionController:
             return VoiceEvent(type="session_ended", text="会话已超时")
         return None
 
-    async def handle_text(self, text: str) -> AsyncIterator[VoiceEvent]:
+    async def handle_text(
+        self,
+        text: str,
+        *,
+        require_awake: bool = True,
+    ) -> AsyncIterator[VoiceEvent]:
         text = text or ""
-        if self.session.state == VoiceSessionState.SLEEPING:
-            yield VoiceEvent(type="error", text="机器人未唤醒")
-            return
+        if require_awake:
+            if self.session.state == VoiceSessionState.SLEEPING:
+                yield VoiceEvent(type="error", text="机器人未唤醒")
+                return
 
-        if self.session.is_expired():
-            self.session.sleep()
-            yield VoiceEvent(type="session_ended", text="会话已超时")
-            return
+            if self.session.is_expired():
+                self.session.sleep()
+                yield VoiceEvent(type="session_ended", text="会话已超时")
+                return
 
-        if self.session.state == VoiceSessionState.PAUSED:
-            self.session.resume()
-            yield VoiceEvent(type="session_resumed", text="会话已恢复")
+            if self.session.state == VoiceSessionState.PAUSED:
+                self.session.resume()
+                yield VoiceEvent(type="session_resumed", text="会话已恢复")
 
         self.session.touch()
         self.session.add_history("user", text)

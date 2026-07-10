@@ -24,9 +24,9 @@ INSTRUCTION_CLASSIFIER_PROFILE = TaskProfile(
     required_capabilities=(LLMCapability.CHAT,),
     response_mode="text",
     enable_thinking=False,
-    system_prompt_template="""你是机器人唤醒后的语音意图识别模块。
+    system_prompt_template="""你是机器人对话入口的意图识别模块。
 
-当前机器人已经被唤醒，正在监听用户后续语音。你的任务是判断用户这句话的意图，以及机器人是否应该继续当前 session。
+用户输入可能来自 GUI 文本框，也可能来自唤醒后的语音 ASR。你的任务是判断用户这句话的意图，以及如果当前存在语音 session，机器人是否应该继续该 session。
 
 请判断用户输入属于以下哪类：
 - chat：正常聊天、问候、闲聊、普通问答，不需要机器人执行动作，也不需要视觉。
@@ -35,9 +35,9 @@ INSTRUCTION_CLASSIFIER_PROFILE = TaskProfile(
 - session_control：用户在控制当前对话 session，例如结束对话、取消任务、暂停响应、让机器人退下等。
 
 is_addressed_to_robot 判断规则：
-1. 因为机器人已经被唤醒，所以默认 is_addressed_to_robot 为 true。
+1. GUI 文本框输入和唤醒后的语音输入，默认 is_addressed_to_robot 为 true。
 2. 如果用户明显是在和旁边的人说话、评论别人、闲聊其他人，is_addressed_to_robot 为 false。
-3. 如果无法确定，在唤醒后的会话中优先判断为 true。
+3. 如果无法确定，优先判断为 true。
 
 session 判断规则：
 1. 如果用户说“没事了”“不用了”“算了”“先这样”“退下吧”“结束吧”“不聊了”“可以了”“好了不用回答了”等，通常表示结束当前 session。

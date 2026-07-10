@@ -7,9 +7,9 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any, Callable, Optional
 
-from ..llm import LLMCapability, LLMPlanResult, LLMStreamEvent, VOICE_FEEDBACK_PROFILE
-from ..skill_system.models import SkillMatchResult
-from .adapters import CameraCaptureError
+from ...llm import LLMCapability, LLMPlanResult, LLMStreamEvent, VOICE_FEEDBACK_PROFILE
+from ...skill_system.models import SkillMatchResult
+from ..adapters import CameraCaptureError
 from .session import VoiceSession
 from .types import VoiceEvent, VoiceSessionState
 

@@ -1,8 +1,5 @@
 """
-Adapter protocols for future wake word, ASR, camera, and TTS integrations.
-
-The first stage uses manual text input, so these interfaces are intentionally
-small and optional.
+Camera adapters for voice interaction tasks.
 """
 from __future__ import annotations
 
@@ -11,24 +8,9 @@ import logging
 import time
 from typing import Callable, Optional, Protocol, Sequence
 
-from ..llm import LLMContentPart
+from ...llm import LLMContentPart
 
 logger = logging.getLogger(__name__)
-
-
-class WakeWordAdapter(Protocol):
-    async def listen(self) -> None:
-        """Block until wake word is detected."""
-
-
-class ASRAdapter(Protocol):
-    async def transcribe(self, audio_chunk: bytes) -> str:
-        """Convert audio bytes to text."""
-
-
-class TTSPlayer(Protocol):
-    async def play_delta(self, audio_data: str) -> None:
-        """Play one streaming audio delta."""
 
 
 class CameraProvider(Protocol):
@@ -94,7 +76,7 @@ class CamerasModuleProvider:
         if self._manager_factory is not None:
             manager = self._manager_factory()
         else:
-            from ..cameras.camera_factory import get_camera_manager
+            from ...cameras.camera_factory import get_camera_manager
 
             manager = get_camera_manager()
         if manager is None:

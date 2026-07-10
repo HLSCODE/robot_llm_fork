@@ -65,29 +65,42 @@
 
 ### 4.4 `ai_integration`
 
-负责 GUI 或控制器层编排：
+负责 GUI 执行上下文：
 
-- 收集用户输入
-- 调用 `SkillPlanner`
-- 发出 UI 信号
-- 不直接关心具体模型 provider
+- 初始化并持有 `LLMRegistry`
+- 初始化并持有 `SkillEngine`
+- 保存 `voice_interaction` 生成的当前动作预览
+- 通过 `ExecutionBridge` 执行动作序列
+
+不再负责自然语言输入解析、意图识别或技能规划；这些统一收敛到 `voice_interaction`。
+
+### 4.5 `voice_interaction`
+
+负责统一对话和意图入口：
+
+- GUI 文本输入
+- 真实语音 ASR 文本
+- 后续 WebSocket 远程调用入口
+- `chat / command / vision_question / session_control` 路由
+- command 场景下调用 `SkillPlanner` 并生成动作预览
 
 ## 5. 总体架构
 
 ```text
-Frontend / GUI
+GUI / Voice ASR / WebSocket Client
     |
-    | WebSocket / Qt Signal
+    | text / event
     v
-robot_server / ai_integration
+voice_interaction
     |
-    | calls
+    | uses
+    |------------------------------|
+    v                              v
+src/llm                       ai_integration
+    |                         |
+    | LLMRegistry             | ExecutionBridge
     v
-src/llm
-    |
-    | LLMRegistry.from_config()
-    v
-provider strategy
+provider strategy            current robot process
     |----------------------------------|
     | OpenAI-compatible HTTP           |
     | DeepSeek OpenAI-compatible HTTP  |

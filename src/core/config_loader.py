@@ -26,10 +26,45 @@ class Config:
     LLM_DEFAULT_MAX_TOKENS: int = 512
     LLM_REQUEST_TIMEOUT_S: float = 60.0
     VOICE_SESSION_TIMEOUT_S: float = 30.0
+    VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S: float = 30.0
     VOICE_AUTO_EXECUTE_COMMAND: bool = False
     VOICE_TTS_ENABLED: bool = False
-    VOICE_WAKE_WORD_ENABLED: bool = False
-    VOICE_ASR_ENABLED: bool = False
+    VOICE_INPUT_ENABLED: bool = False
+    VOICE_AUDIO_SAMPLE_RATE: int = 16000
+    VOICE_AUDIO_CHANNELS: int = 1
+    VOICE_AUDIO_BLOCK_MS: int = 100
+    VOICE_AUDIO_QUEUE_SIZE: int = 300
+    VOICE_AUDIO_LATENCY: str = "high"
+    VOICE_AUDIO_DEVICE: str = ""
+    VOICE_AUDIO_SHOW_STATUS: bool = False
+    VOICE_VAD_MODEL: str = "fsmn-vad"
+    VOICE_VAD_CHUNK_MS: int = 200
+    VOICE_MIN_UTTERANCE_MS: int = 500
+    VOICE_MAX_UTTERANCE_MS: int = 30000
+    VOICE_END_SILENCE_MS: int = 800
+    VOICE_LISTENING_TIMEOUT_S: float = 8.0
+    VOICE_WAKE_COOLDOWN_S: float = 1.5
+    VOICE_SILENCE_RMS_THRESHOLD: float = 0.01
+    VOICE_SUPPRESS_MODEL_OUTPUT: bool = True
+    VOICE_SHOW_ASR_TIMING: bool = False
+    VOICE_ASR_MODEL: str = "iic/SenseVoiceSmall"
+    VOICE_ASR_PUNC_MODEL: str = "ct-punc"
+    VOICE_ASR_DEVICE: str = ""
+    VOICE_ASR_BATCH_SIZE_S: int = 60
+    VOICE_WAKE_ENGINE: str = "sherpa"
+    VOICE_WAKE_AUTO_TRIGGER: bool = False
+    VOICE_KWS_ENCODER: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+    VOICE_KWS_DECODER: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+    VOICE_KWS_JOINER: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx"
+    VOICE_KWS_TOKENS: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt"
+    VOICE_KWS_KEYWORDS_FILE: str = "models/kws/keywords.txt"
+    VOICE_KWS_PROVIDER: str = "cpu"
+    VOICE_KWS_THRESHOLD: float = 0.35
+    VOICE_KWS_SCORE: float = 1.5
+    VOICE_KWS_NUM_THREADS: int = 1
+    VOICE_KWS_MAX_ACTIVE_PATHS: int = 4
+    VOICE_OPENWAKEWORD_MODEL_PATHS: str = ""
+    VOICE_OPENWAKEWORD_THRESHOLD: float = 0.6
 
     # 系统配置
     LOG_LEVEL: str = "INFO"
@@ -210,18 +245,75 @@ class Config:
         instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
         instance.LLM_REQUEST_TIMEOUT_S = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "60"))
         instance.VOICE_SESSION_TIMEOUT_S = float(os.getenv("VOICE_SESSION_TIMEOUT_S", "30"))
+        instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S = float(os.getenv(
+            "VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S", "30"
+        ))
         instance.VOICE_AUTO_EXECUTE_COMMAND = os.getenv(
             "VOICE_AUTO_EXECUTE_COMMAND", "false"
         ).lower() in ("true", "1", "yes")
         instance.VOICE_TTS_ENABLED = os.getenv(
             "VOICE_TTS_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
-        instance.VOICE_WAKE_WORD_ENABLED = os.getenv(
-            "VOICE_WAKE_WORD_ENABLED", "false"
+        instance.VOICE_INPUT_ENABLED = os.getenv(
+            "VOICE_INPUT_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
-        instance.VOICE_ASR_ENABLED = os.getenv(
-            "VOICE_ASR_ENABLED", "false"
+        instance.VOICE_AUDIO_SAMPLE_RATE = int(os.getenv("VOICE_AUDIO_SAMPLE_RATE", "16000"))
+        instance.VOICE_AUDIO_CHANNELS = int(os.getenv("VOICE_AUDIO_CHANNELS", "1"))
+        instance.VOICE_AUDIO_BLOCK_MS = int(os.getenv("VOICE_AUDIO_BLOCK_MS", "100"))
+        instance.VOICE_AUDIO_QUEUE_SIZE = int(os.getenv("VOICE_AUDIO_QUEUE_SIZE", "300"))
+        instance.VOICE_AUDIO_LATENCY = os.getenv("VOICE_AUDIO_LATENCY", "high")
+        instance.VOICE_AUDIO_DEVICE = os.getenv("VOICE_AUDIO_DEVICE", "")
+        instance.VOICE_AUDIO_SHOW_STATUS = os.getenv(
+            "VOICE_AUDIO_SHOW_STATUS", "false"
         ).lower() in ("true", "1", "yes")
+        instance.VOICE_VAD_MODEL = os.getenv("VOICE_VAD_MODEL", "fsmn-vad")
+        instance.VOICE_VAD_CHUNK_MS = int(os.getenv("VOICE_VAD_CHUNK_MS", "200"))
+        instance.VOICE_MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "500"))
+        instance.VOICE_MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "30000"))
+        instance.VOICE_END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "800"))
+        instance.VOICE_LISTENING_TIMEOUT_S = float(os.getenv("VOICE_LISTENING_TIMEOUT_S", "8.0"))
+        instance.VOICE_WAKE_COOLDOWN_S = float(os.getenv("VOICE_WAKE_COOLDOWN_S", "1.5"))
+        instance.VOICE_SILENCE_RMS_THRESHOLD = float(os.getenv("VOICE_SILENCE_RMS_THRESHOLD", "0.01"))
+        instance.VOICE_SUPPRESS_MODEL_OUTPUT = os.getenv(
+            "VOICE_SUPPRESS_MODEL_OUTPUT", "true"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_SHOW_ASR_TIMING = os.getenv(
+            "VOICE_SHOW_ASR_TIMING", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_ASR_MODEL = os.getenv("VOICE_ASR_MODEL", "iic/SenseVoiceSmall")
+        instance.VOICE_ASR_PUNC_MODEL = os.getenv("VOICE_ASR_PUNC_MODEL", "ct-punc")
+        instance.VOICE_ASR_DEVICE = os.getenv("VOICE_ASR_DEVICE", "")
+        instance.VOICE_ASR_BATCH_SIZE_S = int(os.getenv("VOICE_ASR_BATCH_SIZE_S", "60"))
+        instance.VOICE_WAKE_ENGINE = os.getenv("VOICE_WAKE_ENGINE", "sherpa")
+        instance.VOICE_WAKE_AUTO_TRIGGER = os.getenv(
+            "VOICE_WAKE_AUTO_TRIGGER", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_KWS_ENCODER = os.getenv(
+            "VOICE_KWS_ENCODER",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+        )
+        instance.VOICE_KWS_DECODER = os.getenv(
+            "VOICE_KWS_DECODER",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+        )
+        instance.VOICE_KWS_JOINER = os.getenv(
+            "VOICE_KWS_JOINER",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx",
+        )
+        instance.VOICE_KWS_TOKENS = os.getenv(
+            "VOICE_KWS_TOKENS",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt",
+        )
+        instance.VOICE_KWS_KEYWORDS_FILE = os.getenv(
+            "VOICE_KWS_KEYWORDS_FILE", "models/kws/keywords.txt"
+        )
+        instance.VOICE_KWS_PROVIDER = os.getenv("VOICE_KWS_PROVIDER", "cpu")
+        instance.VOICE_KWS_THRESHOLD = float(os.getenv("VOICE_KWS_THRESHOLD", "0.35"))
+        instance.VOICE_KWS_SCORE = float(os.getenv("VOICE_KWS_SCORE", "1.5"))
+        instance.VOICE_KWS_NUM_THREADS = int(os.getenv("VOICE_KWS_NUM_THREADS", "1"))
+        instance.VOICE_KWS_MAX_ACTIVE_PATHS = int(os.getenv("VOICE_KWS_MAX_ACTIVE_PATHS", "4"))
+        instance.VOICE_OPENWAKEWORD_MODEL_PATHS = os.getenv("VOICE_OPENWAKEWORD_MODEL_PATHS", "")
+        instance.VOICE_OPENWAKEWORD_THRESHOLD = float(os.getenv("VOICE_OPENWAKEWORD_THRESHOLD", "0.6"))
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         instance.RUN_MODE = os.getenv("RUN_MODE", "server")
         instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
@@ -654,10 +746,47 @@ class Config:
         instance = cls.get_instance()
         return {
             "session_timeout_s": instance.VOICE_SESSION_TIMEOUT_S,
+            "speech_startup_wait_timeout_s": instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S,
             "auto_execute_command": instance.VOICE_AUTO_EXECUTE_COMMAND,
             "tts_enabled": instance.VOICE_TTS_ENABLED,
-            "wake_word_enabled": instance.VOICE_WAKE_WORD_ENABLED,
-            "asr_enabled": instance.VOICE_ASR_ENABLED,
+            "speech_input_enabled": instance.VOICE_INPUT_ENABLED,
+            "wake_word_enabled": instance.VOICE_INPUT_ENABLED,
+            "asr_enabled": instance.VOICE_INPUT_ENABLED,
+            "audio_sample_rate": instance.VOICE_AUDIO_SAMPLE_RATE,
+            "audio_channels": instance.VOICE_AUDIO_CHANNELS,
+            "audio_block_ms": instance.VOICE_AUDIO_BLOCK_MS,
+            "audio_queue_size": instance.VOICE_AUDIO_QUEUE_SIZE,
+            "audio_latency": instance.VOICE_AUDIO_LATENCY,
+            "audio_device": instance.VOICE_AUDIO_DEVICE,
+            "audio_show_status": instance.VOICE_AUDIO_SHOW_STATUS,
+            "vad_model": instance.VOICE_VAD_MODEL,
+            "vad_chunk_ms": instance.VOICE_VAD_CHUNK_MS,
+            "min_utterance_ms": instance.VOICE_MIN_UTTERANCE_MS,
+            "max_utterance_ms": instance.VOICE_MAX_UTTERANCE_MS,
+            "end_silence_ms": instance.VOICE_END_SILENCE_MS,
+            "listening_timeout_s": instance.VOICE_LISTENING_TIMEOUT_S,
+            "wake_cooldown_s": instance.VOICE_WAKE_COOLDOWN_S,
+            "silence_rms_threshold": instance.VOICE_SILENCE_RMS_THRESHOLD,
+            "suppress_model_output": instance.VOICE_SUPPRESS_MODEL_OUTPUT,
+            "show_asr_timing": instance.VOICE_SHOW_ASR_TIMING,
+            "asr_model": instance.VOICE_ASR_MODEL,
+            "asr_punc_model": instance.VOICE_ASR_PUNC_MODEL,
+            "asr_device": instance.VOICE_ASR_DEVICE,
+            "asr_batch_size_s": instance.VOICE_ASR_BATCH_SIZE_S,
+            "wake_engine": instance.VOICE_WAKE_ENGINE,
+            "wake_auto_trigger": instance.VOICE_WAKE_AUTO_TRIGGER,
+            "kws_encoder": instance.VOICE_KWS_ENCODER,
+            "kws_decoder": instance.VOICE_KWS_DECODER,
+            "kws_joiner": instance.VOICE_KWS_JOINER,
+            "kws_tokens": instance.VOICE_KWS_TOKENS,
+            "kws_keywords_file": instance.VOICE_KWS_KEYWORDS_FILE,
+            "kws_provider": instance.VOICE_KWS_PROVIDER,
+            "kws_threshold": instance.VOICE_KWS_THRESHOLD,
+            "kws_score": instance.VOICE_KWS_SCORE,
+            "kws_num_threads": instance.VOICE_KWS_NUM_THREADS,
+            "kws_max_active_paths": instance.VOICE_KWS_MAX_ACTIVE_PATHS,
+            "openwakeword_model_paths": instance.VOICE_OPENWAKEWORD_MODEL_PATHS,
+            "openwakeword_threshold": instance.VOICE_OPENWAKEWORD_THRESHOLD,
         }
     
     @classmethod
