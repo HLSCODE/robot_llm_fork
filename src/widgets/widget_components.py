@@ -20,6 +20,7 @@ class ActionListWidget(QListWidget):
         ActionType.INSPECT: ("🔍", QColor(16, 185, 129)),        # emerald
         ActionType.CHANGE_GUN: ("🔧", QColor(139, 92, 246)),     # violet
         ActionType.VISION_CAPTURE: ("👁", QColor(14, 165, 233)), # sky
+        ActionType.VISION_RELOCALIZE: ("📍", QColor(6, 182, 212)), # cyan
         ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),     # teal
     }
 
@@ -505,6 +506,7 @@ class SequenceListWidget(QTreeWidget):
         ActionType.INSPECT: ("🔍", QColor(16, 185, 129)),
         ActionType.CHANGE_GUN: ("🔧", QColor(139, 92, 246)),
         ActionType.VISION_CAPTURE: ("👁", QColor(14, 165, 233)),
+        ActionType.VISION_RELOCALIZE: ("📍", QColor(6, 182, 212)),
         ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),
     }
 
@@ -516,6 +518,7 @@ class SequenceListWidget(QTreeWidget):
         ActionType.INSPECT: "检测",
         ActionType.CHANGE_GUN: "换枪",
         ActionType.VISION_CAPTURE: "视觉抓取",
+        ActionType.VISION_RELOCALIZE: "视觉重定位",
         ActionType.TRAJECTORY: "轨迹",
     }
 

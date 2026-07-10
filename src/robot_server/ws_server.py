@@ -556,6 +556,7 @@ class RobotWebSocketServer:
             "INSPECT_AND_OUTPUT": [],
             "CHANGE_GUN": [],
             "VISION_CAPTURE": [],
+            "VISION_RELOCALIZE": [],
             "TRAJECTORY": [],
         }
         for a in all_actions:
@@ -689,6 +690,21 @@ class RobotWebSocketServer:
                     "夹爪长度":   {"type": "number", "default": 150.0, "unit": "mm", "label": "夹爪长度", "readonly": True}
                 },
                 "note": "视觉抓取参数已固定，前端仅需填写动作名称即可"
+            },
+            "VISION_RELOCALIZE": {
+                "label": "视觉重定位",
+                "description": "移动到拍照位，识别 Tag，并更新本次任务的工位定位状态",
+                "fields": {
+                    "action_mode": {"type": "select", "options": ["run", "teach"], "default": "run", "label": "动作模式"},
+                    "arm": {"type": "select", "options": ["left", "right"], "default": "left", "label": "机械臂"},
+                    "station_name": {"type": "text", "label": "工位名称", "required": True},
+                    "photo_pose": {"type": "text", "label": "示教拍照位姿"},
+                    "camera_name": {"type": "text", "label": "示教相机名称"},
+                    "marker_width": {"type": "number", "min": 0.000001, "default": 0.158, "label": "示教marker宽度(同位姿单位)"},
+                    "marker_height": {"type": "number", "min": 0.000001, "default": 0.158, "label": "示教marker高度(同位姿单位)"},
+                    "move_mode": {"type": "select", "options": ["move_j", "move_l"], "default": "move_j", "label": "移动模式"}
+                },
+                "note": "工位名称是唯一用户输入；内部兼容 station_id。photo_pose、camera_name、marker 宽高只在 action_mode=teach 时填写；run 时只需要选择已保存的工位"
             },
             "TRAJECTORY": {
                 "label": "轨迹类",

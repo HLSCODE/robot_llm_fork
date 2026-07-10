@@ -153,6 +153,7 @@ class ActionConfigDialog(QDialog):
             ActionType.BASE_MOVE: self._init_base_move_ui,
             ActionType.CHANGE_GUN: self._init_change_gun_ui,
             ActionType.VISION_CAPTURE: self._init_vision_capture_ui,
+            ActionType.VISION_RELOCALIZE: self._init_vision_relocalize_ui,
             ActionType.TRAJECTORY: self._init_trajectory_ui,
         }
         
@@ -165,6 +166,7 @@ class ActionConfigDialog(QDialog):
             ActionType.BASE_MOVE: self._build_base_move_params,
             ActionType.CHANGE_GUN: self._build_change_gun_params,
             ActionType.VISION_CAPTURE: self._build_vision_capture_params,
+            ActionType.VISION_RELOCALIZE: self._build_vision_relocalize_params,
             ActionType.TRAJECTORY: self._build_trajectory_params,
         }
         
@@ -262,6 +264,7 @@ class ActionConfigDialog(QDialog):
         self.arm_combo.addItem("右", "右")
         current_arm = self.action_data.get('parameters', {}).get('臂', '左')
         self.arm_combo.setCurrentText(current_arm)
+        self.arm_combo.currentIndexChanged.connect(self._refresh_vision_station_choices)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItem("关节运动 (move_j)", "move_j")
@@ -273,11 +276,25 @@ class ActionConfigDialog(QDialog):
         self.target_pose_input.setText(self.action_data.get('parameters', {}).get('点位', ''))
         self.target_pose_input.setPlaceholderText("例如：[-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]")
 
-        localization_config = self.action_data.get('parameters', {}).get('定位补偿', {})
-        self.localization_reference = localization_config.get('teach_offset')
-        self.localization_checkbox = QCheckBox("启用定位补偿")
-        default_localization_enabled = bool(localization_config.get('enabled', not self.action_data))
-        self.localization_checkbox.setChecked(default_localization_enabled)
+        params = self.action_data.get('parameters', {})
+        compensation_config = params.get('补偿', {})
+        localization_config = params.get('定位补偿', {})
+        if not compensation_config and localization_config.get('enabled'):
+            compensation_config = {'mode': 'udp', 'udp': localization_config}
+
+        current_compensation_mode = compensation_config.get('mode', 'none')
+        self.localization_reference = (
+            compensation_config.get('udp', {}).get('teach_offset')
+            or localization_config.get('teach_offset')
+        )
+
+        self.compensation_mode_combo = QComboBox()
+        self.compensation_mode_combo.addItem("不补偿", "none")
+        self.compensation_mode_combo.addItem("UDP 定位补偿", "udp")
+        self.compensation_mode_combo.addItem("视觉重定位补偿", "vision")
+        index = self.compensation_mode_combo.findData(current_compensation_mode)
+        self.compensation_mode_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.compensation_mode_combo.currentIndexChanged.connect(self._on_compensation_mode_changed)
 
         localization_row = QWidget()
         localization_layout = QHBoxLayout(localization_row)
@@ -291,12 +308,20 @@ class ActionConfigDialog(QDialog):
         localization_layout.addWidget(self.localization_status_label, stretch=1)
         localization_layout.addWidget(capture_localization_btn)
 
+        vision_config = compensation_config.get('vision', compensation_config if current_compensation_mode == 'vision' else {})
+        self.vision_station_combo = QComboBox()
+        self.vision_station_combo.setEditable(True)
+        self._vision_station_current = str(vision_config.get('station_id', ''))
+        self._refresh_vision_station_choices()
+
         robot_layout.addRow("臂:", self.arm_combo)
         robot_layout.addRow("运动模式:", self.mode_combo)
         robot_layout.addRow("点位:", self.target_pose_input)
-        robot_layout.addRow("", self.localization_checkbox)
-        robot_layout.addRow("创建定位:", localization_row)
+        robot_layout.addRow("补偿方式:", self.compensation_mode_combo)
+        robot_layout.addRow("UDP基准:", localization_row)
+        robot_layout.addRow("视觉工位:", self.vision_station_combo)
         self.robot_widget.setLayout(robot_layout)
+        self._on_compensation_mode_changed()
 
         # 身体参数面板
         self.body_widget = QWidget()
@@ -638,6 +663,199 @@ class ActionConfigDialog(QDialog):
         form_layout.addRow("夹爪长度:", self.vision_gripper_length_input)
         form_layout.addRow("", self.vision_debug_checkbox)
 
+    def _init_vision_relocalize_ui(self, form_layout: QFormLayout):
+        """初始化视觉重定位动作 UI。"""
+        from ..core.config_loader import Config
+        cfg = Config.get_instance()
+        params = self.action_data.get('parameters', {})
+
+        self.relocalize_mode_combo = QComboBox()
+        self.relocalize_mode_combo.addItem("运行时重定位", "run")
+        self.relocalize_mode_combo.addItem("采集/更新示教基准", "teach")
+        current_mode = params.get("action_mode", "run")
+        index = self.relocalize_mode_combo.findData(current_mode)
+        self.relocalize_mode_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.relocalize_mode_combo.currentIndexChanged.connect(self._on_relocalize_mode_changed)
+
+        self.relocalize_arm_combo = QComboBox()
+        self.relocalize_arm_combo.addItem("左臂", "left")
+        self.relocalize_arm_combo.addItem("右臂", "right")
+        current_arm = params.get("arm", "left")
+        index = self.relocalize_arm_combo.findData(current_arm)
+        self.relocalize_arm_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.relocalize_arm_combo.currentIndexChanged.connect(self._on_relocalize_arm_changed)
+
+        self.relocalize_station_combo = QComboBox()
+        self.relocalize_station_combo.currentIndexChanged.connect(self._on_relocalize_station_selected)
+        self.relocalize_station_current = str(params.get("station_id") or params.get("station_name") or "").strip()
+
+        self.relocalize_station_id_input = QLineEdit()
+        self.relocalize_station_id_input.setText(params.get("station_id") or params.get("station_name", ""))
+        self.relocalize_station_id_input.setPlaceholderText("例如：station_1")
+
+        self.relocalize_station_name_input = QLineEdit()
+        self.relocalize_station_name_input.setText(params.get("station_name") or params.get("station_id", ""))
+        self.relocalize_station_name_input.setPlaceholderText("例如：一号工位")
+
+        self.relocalize_photo_pose_input = QLineEdit()
+        photo_pose = params.get("photo_pose", "")
+        if isinstance(photo_pose, list):
+            photo_pose = str(photo_pose)
+        self.relocalize_photo_pose_input.setText(str(photo_pose or ""))
+        self.relocalize_photo_pose_input.setPlaceholderText("留空则采集示教时使用当前位姿；运行时优先使用示教库位姿")
+
+        self.relocalize_camera_input = QLineEdit()
+        self.relocalize_camera_input.setText(params.get("camera_name", ""))
+        relocalize_cfg = cfg.get_vision_relocalization_config(current_arm)
+        self.relocalize_camera_input.setPlaceholderText(relocalize_cfg.get("camera_name", ""))
+
+        marker_params = params.get("marker", {}) if isinstance(params.get("marker"), dict) else {}
+        default_marker = relocalize_cfg.get("marker", {})
+        marker_width = params.get("marker_width", marker_params.get("width", default_marker.get("width", 0.158)))
+        marker_height = params.get("marker_height", marker_params.get("height", default_marker.get("height", 0.158)))
+
+        self.relocalize_marker_width_input = QDoubleSpinBox()
+        self.relocalize_marker_width_input.setRange(0.000001, 10000.0)
+        self.relocalize_marker_width_input.setDecimals(6)
+        self.relocalize_marker_width_input.setValue(float(marker_width or 0.158))
+
+        self.relocalize_marker_height_input = QDoubleSpinBox()
+        self.relocalize_marker_height_input.setRange(0.000001, 10000.0)
+        self.relocalize_marker_height_input.setDecimals(6)
+        self.relocalize_marker_height_input.setValue(float(marker_height or 0.158))
+
+        self.relocalize_move_mode_combo = QComboBox()
+        self.relocalize_move_mode_combo.addItem("关节运动 (move_j)", "move_j")
+        self.relocalize_move_mode_combo.addItem("直线运动 (move_l)", "move_l")
+        current_move_mode = params.get("move_mode", "move_j")
+        index = self.relocalize_move_mode_combo.findData(current_move_mode)
+        self.relocalize_move_mode_combo.setCurrentIndex(index if index >= 0 else 0)
+
+        form_layout.addRow("动作模式:", self.relocalize_mode_combo)
+        form_layout.addRow("机械臂:", self.relocalize_arm_combo)
+        self.relocalize_station_combo_label = QLabel("示教工位:")
+        self.relocalize_station_name_label = QLabel("工位名称:")
+        self.relocalize_photo_pose_label = QLabel("拍照位姿:")
+        self.relocalize_camera_label = QLabel("相机名称:")
+        form_layout.addRow(self.relocalize_station_combo_label, self.relocalize_station_combo)
+        form_layout.addRow(self.relocalize_station_name_label, self.relocalize_station_name_input)
+        form_layout.addRow(self.relocalize_photo_pose_label, self.relocalize_photo_pose_input)
+        form_layout.addRow(self.relocalize_camera_label, self.relocalize_camera_input)
+        self.relocalize_marker_width_label = QLabel("示教marker宽度(同位姿单位):")
+        self.relocalize_marker_height_label = QLabel("示教marker高度(同位姿单位):")
+        form_layout.addRow(self.relocalize_marker_width_label, self.relocalize_marker_width_input)
+        form_layout.addRow(self.relocalize_marker_height_label, self.relocalize_marker_height_input)
+        form_layout.addRow("移动模式:", self.relocalize_move_mode_combo)
+        self._refresh_relocalize_station_choices()
+        self._on_relocalize_mode_changed()
+
+    def _on_relocalize_arm_changed(self):
+        if not hasattr(self, 'relocalize_camera_input'):
+            return
+        from ..core.config_loader import Config
+
+        arm = self.relocalize_arm_combo.currentData()
+        camera_name = Config.get_instance().get_vision_relocalization_config(arm).get("camera_name", "")
+        self.relocalize_camera_input.setPlaceholderText(camera_name)
+        self._refresh_relocalize_station_choices()
+
+    def _on_relocalize_mode_changed(self):
+        teach_mode = (
+            hasattr(self, 'relocalize_mode_combo')
+            and self.relocalize_mode_combo.currentData() == "teach"
+        )
+        for attr in (
+            'relocalize_station_combo_label',
+            'relocalize_station_combo',
+        ):
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                widget.setVisible(not teach_mode)
+        for attr in (
+            'relocalize_station_name_label',
+            'relocalize_station_name_input',
+            'relocalize_photo_pose_label',
+            'relocalize_photo_pose_input',
+            'relocalize_camera_label',
+            'relocalize_camera_input',
+        ):
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                widget.setVisible(teach_mode)
+        for attr in (
+            'relocalize_marker_width_label',
+            'relocalize_marker_width_input',
+            'relocalize_marker_height_label',
+            'relocalize_marker_height_input',
+        ):
+            widget = getattr(self, attr, None)
+            if widget is not None:
+                widget.setVisible(teach_mode)
+        if not teach_mode:
+            self._on_relocalize_station_selected()
+
+    def _refresh_relocalize_station_choices(self):
+        if not hasattr(self, 'relocalize_station_combo'):
+            return
+
+        current = self.relocalize_station_id_input.text().strip()
+        if not current:
+            current = getattr(self, 'relocalize_station_current', '')
+
+        self.relocalize_station_combo.blockSignals(True)
+        self.relocalize_station_combo.clear()
+        self.relocalize_station_combo.addItem("请选择示教工位", "")
+        try:
+            from ..core.vision_station_storage import VisionStationStorage
+
+            arm = self.relocalize_arm_combo.currentData()
+            for station_id, label in VisionStationStorage.list_station_choices(arm):
+                self.relocalize_station_combo.addItem(label, station_id)
+        except Exception:
+            pass
+
+        if current:
+            index = self.relocalize_station_combo.findData(current)
+            if index >= 0:
+                self.relocalize_station_combo.setCurrentIndex(index)
+            else:
+                self.relocalize_station_combo.setCurrentIndex(0)
+        self.relocalize_station_combo.blockSignals(False)
+        self._on_relocalize_station_selected()
+
+    def _selected_relocalize_station_id(self) -> str:
+        if not hasattr(self, 'relocalize_station_combo'):
+            return self.relocalize_station_id_input.text().strip()
+        data = self.relocalize_station_combo.currentData()
+        return str(data or "").strip()
+
+    def _on_relocalize_station_selected(self):
+        if not hasattr(self, 'relocalize_station_combo'):
+            return
+        if self.relocalize_mode_combo.currentData() == "teach":
+            return
+
+        station_id = self._selected_relocalize_station_id()
+        self.relocalize_station_id_input.setText(station_id)
+        if not station_id:
+            self.relocalize_station_name_input.clear()
+            self.relocalize_photo_pose_input.clear()
+            self.relocalize_camera_input.clear()
+            return
+
+        try:
+            from ..core.vision_station_storage import VisionStationStorage
+
+            profile = VisionStationStorage.get_profile(station_id, self.relocalize_arm_combo.currentData())
+        except Exception:
+            profile = None
+        if not profile:
+            return
+
+        self.relocalize_station_name_input.setText(str(profile.get("station_name") or station_id))
+        self.relocalize_photo_pose_input.setText(str(profile.get("photo_pose") or ""))
+        self.relocalize_camera_input.setText(str(profile.get("camera_name") or ""))
+
     def _init_trajectory_ui(self, form_layout: QFormLayout):
         self.trajectory_robot_combo = QComboBox()
         self.trajectory_robot_combo.addItem("R1", "robot1")
@@ -694,7 +912,10 @@ class ActionConfigDialog(QDialog):
             "angle": position.get("angle", 0.0),
             "timestamp": position.get("timestamp", 0.0),
         }
-        self.localization_checkbox.setChecked(True)
+        if hasattr(self, 'compensation_mode_combo'):
+            index = self.compensation_mode_combo.findData("udp")
+            if index >= 0:
+                self.compensation_mode_combo.setCurrentIndex(index)
         self.localization_status_label.setText(self._format_localization_reference(self.localization_reference))
 
     def _format_localization_reference(self, reference: dict | None) -> str:
@@ -706,6 +927,52 @@ class ActionConfigDialog(QDialog):
             f"Y={float(reference.get('y', 0.0)):.3f}cm  "
             f"Angle={float(reference.get('angle', 0.0)):.3f}deg"
         )
+
+    def _on_compensation_mode_changed(self):
+        mode = self.compensation_mode_combo.currentData() if hasattr(self, 'compensation_mode_combo') else "none"
+        if hasattr(self, 'localization_status_label'):
+            self.localization_status_label.parentWidget().setEnabled(mode == "udp")
+        if hasattr(self, 'vision_station_combo'):
+            self.vision_station_combo.setEnabled(mode == "vision")
+
+    def _refresh_vision_station_choices(self):
+        if not hasattr(self, 'vision_station_combo') or not hasattr(self, 'arm_combo'):
+            return
+
+        current = self._selected_vision_station_id()
+        if not current:
+            current = getattr(self, '_vision_station_current', '')
+
+        self.vision_station_combo.blockSignals(True)
+        self.vision_station_combo.clear()
+        try:
+            from ..core.vision_station_storage import VisionStationStorage
+
+            choices = VisionStationStorage.list_station_choices(self.arm_combo.currentText())
+        except Exception:
+            choices = []
+
+        for station_id, label in choices:
+            self.vision_station_combo.addItem(f"{station_id} | {label}", station_id)
+
+        if current:
+            index = self.vision_station_combo.findData(current)
+            if index >= 0:
+                self.vision_station_combo.setCurrentIndex(index)
+            else:
+                self.vision_station_combo.setEditText(current)
+        self.vision_station_combo.blockSignals(False)
+
+    def _selected_vision_station_id(self) -> str:
+        if not hasattr(self, 'vision_station_combo'):
+            return ""
+        data = self.vision_station_combo.currentData()
+        if data:
+            return str(data).strip()
+        text = self.vision_station_combo.currentText().strip()
+        if "|" in text:
+            text = text.split("|", 1)[0].strip()
+        return text
 
     def _on_executor_changed(self):
         """根据选择的执行器类型切换参数面板"""
@@ -767,7 +1034,8 @@ class ActionConfigDialog(QDialog):
             ActionType.INSPECT: "检测",
             ActionType.WAIT: "Wait",
             ActionType.CHANGE_GUN: "换枪",
-            ActionType.VISION_CAPTURE: "视觉抓取"
+            ActionType.VISION_CAPTURE: "视觉抓取",
+            ActionType.VISION_RELOCALIZE: "视觉重定位"
         }
         return type_map.get(self.action_type, "")
 
@@ -793,14 +1061,18 @@ class ActionConfigDialog(QDialog):
                     if not target_pose:
                         self.target_pose_input.setFocus()
                         return
-                    if (
-                        hasattr(self, 'localization_checkbox')
-                        and self.localization_checkbox.isChecked()
-                        and not self.localization_reference
-                    ):
+                    compensation_mode = (
+                        self.compensation_mode_combo.currentData()
+                        if hasattr(self, 'compensation_mode_combo')
+                        else "none"
+                    )
+                    if compensation_mode == "udp" and not self.localization_reference:
                         self._capture_localization_reference()
                         if not self.localization_reference:
                             return
+                    if compensation_mode == "vision" and not self._selected_vision_station_id():
+                        self.vision_station_combo.setFocus()
+                        return
                 # 身体模式不需要额外验证
             else:
                 target_pose = self.target_pose_input.text().strip()
@@ -836,6 +1108,15 @@ class ActionConfigDialog(QDialog):
                 self.trajectory_path_input.setFocus()
                 return
 
+        if self.action_type == ActionType.VISION_RELOCALIZE:
+            if self.relocalize_mode_combo.currentData() == "run":
+                if not self._selected_relocalize_station_id():
+                    self.relocalize_station_combo.setFocus()
+                    return
+            elif not self.relocalize_station_name_input.text().strip():
+                self.relocalize_station_name_input.setFocus()
+                return
+
         self.accept()
 
     def get_action_definition(self) -> ActionDefinition:
@@ -865,13 +1146,28 @@ class ActionConfigDialog(QDialog):
         """构建机械臂/身体移动动作参数"""
         target = self.target_combo.currentData()
         if target == '机械臂':
+            compensation_mode = (
+                self.compensation_mode_combo.currentData()
+                if hasattr(self, 'compensation_mode_combo')
+                else "none"
+            )
             params = {
                 '目标': target,
                 '臂': self.arm_combo.currentText(),
                 '模式': self.mode_combo.currentData(),
-                '点位': self.target_pose_input.text().strip()
+                '点位': self.target_pose_input.text().strip(),
+                '补偿': {
+                    'mode': compensation_mode,
+                }
             }
-            if hasattr(self, 'localization_checkbox') and self.localization_checkbox.isChecked():
+            if compensation_mode == "udp":
+                params['补偿']['udp'] = {
+                    'teach_offset': self.localization_reference,
+                    'udp_linear_unit': 'cm',
+                    'udp_angle_unit': 'deg',
+                    'pose_linear_unit': 'm',
+                    'pose_angle_unit': 'rad',
+                }
                 params['定位补偿'] = {
                     'enabled': True,
                     'teach_offset': self.localization_reference,
@@ -879,6 +1175,11 @@ class ActionConfigDialog(QDialog):
                     'udp_angle_unit': 'deg',
                     'pose_linear_unit': 'm',
                     'pose_angle_unit': 'rad',
+                }
+            elif compensation_mode == "vision":
+                params['补偿']['vision'] = {
+                    'station_id': self._selected_vision_station_id(),
+                    'arm': self.arm_combo.currentText(),
                 }
             return params
         else:
@@ -971,6 +1272,39 @@ class ActionConfigDialog(QDialog):
             '移动速度': self.vision_velocity_input.value(),
             '夹爪长度': self.vision_gripper_length_input.value(),
         }
+
+    def _build_vision_relocalize_params(self) -> dict:
+        """构建视觉重定位动作参数。"""
+        action_mode = self.relocalize_mode_combo.currentData()
+        params = {
+            'action_mode': action_mode,
+            'arm': self.relocalize_arm_combo.currentData(),
+            'move_mode': self.relocalize_move_mode_combo.currentData(),
+        }
+        if action_mode == "teach":
+            station_name = self.relocalize_station_name_input.text().strip()
+            params.update({
+                'station_id': station_name,
+                'station_name': station_name,
+                'photo_pose': self.relocalize_photo_pose_input.text().strip(),
+                'camera_name': self.relocalize_camera_input.text().strip(),
+            })
+            marker_width = self.relocalize_marker_width_input.value()
+            marker_height = self.relocalize_marker_height_input.value()
+            params.update({
+                'marker_width': marker_width,
+                'marker_height': marker_height,
+                'marker': {
+                    'width': marker_width,
+                    'height': marker_height,
+                },
+            })
+        else:
+            station_id = self._selected_relocalize_station_id()
+            params['station_id'] = station_id
+            params['station_name'] = self.relocalize_station_name_input.text().strip()
+        return params
+
     def _build_trajectory_params(self) -> dict:
         return {
             'robot': self.trajectory_robot_combo.currentData(),

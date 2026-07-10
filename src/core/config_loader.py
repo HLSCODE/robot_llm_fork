@@ -56,6 +56,27 @@ class Config:
     VISION_PREP_OFFSET_X: float = -0.07
     VISION_GRASP_Z: float = -0.24
     VISION_GMM_COMPONENTS: int = 1
+
+    # 视觉重定位 / Tag 补偿参数
+    VISION_RELOCALIZATION_STATIONS_FILE: str = "data/vision_stations/profiles.json"
+    VISION_RELOCALIZATION_LEFT_CAMERA_NAME: str = ""
+    VISION_RELOCALIZATION_RIGHT_CAMERA_NAME: str = ""
+    VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX: list = None
+    VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX: list = None
+    VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION: list = None
+    VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION: list = None
+    VISION_RELOCALIZATION_LEFT_DIST_COEFFS: list = None
+    VISION_RELOCALIZATION_RIGHT_DIST_COEFFS: list = None
+    VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH: float = 0.158
+    VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT: float = 0.158
+    VISION_RELOCALIZATION_POSE_ROTATION_TYPE: str = "rpy"
+    VISION_RELOCALIZATION_POSE_ANGLE_UNIT: str = "rad"
+    VISION_RELOCALIZATION_LEFT_T_E_C: list = None
+    VISION_RELOCALIZATION_RIGHT_T_E_C: list = None
+    VISION_RELOCALIZATION_MODE: str = "planar"
+    VISION_RELOCALIZATION_PLANAR_CONSTRAINT: str = "none"
+    VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES: bool = True
+    VISION_RELOCALIZATION_DEBUG_DIR: str = "data/vision_stations/debug"
     
     # 机械臂配置
     ROBOT1_IP: str = "192.168.3.19"
@@ -233,6 +254,86 @@ class Config:
         instance.VISION_PREP_OFFSET_X = float(os.getenv("VISION_PREP_OFFSET_X", "-0.07"))
         instance.VISION_GRASP_Z = float(os.getenv("VISION_GRASP_Z", "-0.24"))
         instance.VISION_GMM_COMPONENTS = int(os.getenv("VISION_GMM_COMPONENTS", "1"))
+
+        # 视觉重定位 / Tag 补偿参数
+        instance.VISION_RELOCALIZATION_STATIONS_FILE = os.getenv(
+            "VISION_RELOCALIZATION_STATIONS_FILE",
+            "data/vision_stations/profiles.json",
+        )
+        instance.VISION_RELOCALIZATION_LEFT_CAMERA_NAME = os.getenv(
+            "VISION_RELOCALIZATION_LEFT_CAMERA_NAME",
+            instance.VISION_CAMERA_NAME,
+        )
+        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_NAME = os.getenv(
+            "VISION_RELOCALIZATION_RIGHT_CAMERA_NAME",
+            instance.VISION_CAMERA_NAME,
+        )
+        default_camera_matrix = "1361.8900146484375,0.0,930.7236938476562,0.0,1361.31640625,547.1578979492188,0.0,0.0,1.0"
+        legacy_camera_matrix = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_CAMERA_MATRIX",
+            default_camera_matrix,
+        ))
+        legacy_camera_resolution = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_CAMERA_MATRIX_RESOLUTION",
+            "1920,1080",
+        ))
+        legacy_dist_coeffs = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_DIST_COEFFS",
+            "0,0,0,0,0",
+        ))
+        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX",
+            "",
+        )) or legacy_camera_matrix
+        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX",
+            "",
+        )) or legacy_camera_matrix
+        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION",
+            "",
+        )) or legacy_camera_resolution
+        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION",
+            "",
+        )) or legacy_camera_resolution
+        instance.VISION_RELOCALIZATION_LEFT_DIST_COEFFS = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_LEFT_DIST_COEFFS",
+            "",
+        )) or legacy_dist_coeffs
+        instance.VISION_RELOCALIZATION_RIGHT_DIST_COEFFS = cls._parse_float_list(os.getenv(
+            "VISION_RELOCALIZATION_RIGHT_DIST_COEFFS",
+            "",
+        )) or legacy_dist_coeffs
+        instance.VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH = float(os.getenv(
+            "VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH",
+            os.getenv("VISION_RELOCALIZATION_MARKER_WIDTH", "0.158"),
+        ))
+        instance.VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT = float(os.getenv(
+            "VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT",
+            os.getenv("VISION_RELOCALIZATION_MARKER_HEIGHT", "0.158"),
+        ))
+        instance.VISION_RELOCALIZATION_POSE_ROTATION_TYPE = os.getenv("VISION_RELOCALIZATION_POSE_ROTATION_TYPE", "rpy")
+        instance.VISION_RELOCALIZATION_POSE_ANGLE_UNIT = os.getenv("VISION_RELOCALIZATION_POSE_ANGLE_UNIT", "rad")
+        default_t_e_c = cls._matrix4_from_rt(instance.VISION_ROTATION_MATRIX, instance.VISION_TRANSLATION_VECTOR)
+        instance.VISION_RELOCALIZATION_LEFT_T_E_C = cls._parse_matrix4(
+            os.getenv("VISION_RELOCALIZATION_LEFT_T_E_C", ""),
+            default_t_e_c,
+        )
+        instance.VISION_RELOCALIZATION_RIGHT_T_E_C = cls._parse_matrix4(
+            os.getenv("VISION_RELOCALIZATION_RIGHT_T_E_C", ""),
+            default_t_e_c,
+        )
+        instance.VISION_RELOCALIZATION_MODE = os.getenv("VISION_RELOCALIZATION_MODE", "planar")
+        instance.VISION_RELOCALIZATION_PLANAR_CONSTRAINT = os.getenv("VISION_RELOCALIZATION_PLANAR_CONSTRAINT", "none")
+        instance.VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES = os.getenv(
+            "VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES",
+            "true",
+        ).lower() in ("true", "1", "yes")
+        instance.VISION_RELOCALIZATION_DEBUG_DIR = os.getenv(
+            "VISION_RELOCALIZATION_DEBUG_DIR",
+            "data/vision_stations/debug",
+        )
         
         # 机械臂配置
         instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.19")
@@ -387,6 +488,42 @@ class Config:
             return [float(x.strip()) for x in value.split(",")]
         except (ValueError, AttributeError):
             return []
+
+    @classmethod
+    def _matrix4_from_rt(cls, rotation_flat: list, translation: list) -> list:
+        rot = rotation_flat or [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        trans = translation or [0, 0, 0]
+        if len(rot) != 9:
+            rot = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+        if len(trans) != 3:
+            trans = [0, 0, 0]
+        return [
+            [rot[0], rot[1], rot[2], trans[0]],
+            [rot[3], rot[4], rot[5], trans[1]],
+            [rot[6], rot[7], rot[8], trans[2]],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+
+    @classmethod
+    def _parse_matrix4(cls, value: str, default: list | None = None) -> list:
+        values = cls._parse_float_list(value)
+        if len(values) != 16:
+            return default or cls._matrix4_from_rt([], [])
+        return [values[i:i + 4] for i in range(0, 16, 4)]
+
+    @classmethod
+    def _matrix3_from_flat(cls, values: list) -> list:
+        if len(values or []) == 9:
+            return [
+                values[0:3],
+                values[3:6],
+                values[6:9],
+            ]
+        return [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]
 
 
     @classmethod
@@ -572,6 +709,59 @@ class Config:
             "rotation_matrix": rotation_matrix,
             "translation_vector": instance.VISION_TRANSLATION_VECTOR or [0.0, 0.0, 0.0],
             "gripper_offset": instance.VISION_GRIPPER_OFFSET or [3.146, 0.0, 3.128],
+        }
+
+    @classmethod
+    def get_vision_relocalization_config(cls, arm: str | None = None) -> dict:
+        """获取视觉重定位固定参数。"""
+        instance = cls.get_instance()
+        arm_text = str(arm or "").strip().lower()
+        is_right = arm_text in {"right", "r", "robot2", "r2", "2", "右", "右臂"}
+        camera_name = (
+            instance.VISION_RELOCALIZATION_RIGHT_CAMERA_NAME
+            if is_right
+            else instance.VISION_RELOCALIZATION_LEFT_CAMERA_NAME
+        )
+        t_e_c = (
+            instance.VISION_RELOCALIZATION_RIGHT_T_E_C
+            if is_right
+            else instance.VISION_RELOCALIZATION_LEFT_T_E_C
+        )
+        camera_values = (
+            instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX
+            if is_right
+            else instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX
+        ) or []
+        camera_matrix = cls._matrix3_from_flat(camera_values)
+        camera_resolution = (
+            instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION
+            if is_right
+            else instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION
+        )
+        if len(camera_resolution or []) != 2:
+            camera_resolution = None
+        dist_coeffs = (
+            instance.VISION_RELOCALIZATION_RIGHT_DIST_COEFFS
+            if is_right
+            else instance.VISION_RELOCALIZATION_LEFT_DIST_COEFFS
+        )
+        return {
+            "stations_file": instance.VISION_RELOCALIZATION_STATIONS_FILE,
+            "camera_name": camera_name,
+            "camera_matrix": camera_matrix,
+            "camera_matrix_resolution": camera_resolution,
+            "dist_coeffs": dist_coeffs or [0, 0, 0, 0, 0],
+            "marker": {
+                "width": instance.VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH,
+                "height": instance.VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT,
+            },
+            "pose_rotation_type": instance.VISION_RELOCALIZATION_POSE_ROTATION_TYPE,
+            "pose_angle_unit": instance.VISION_RELOCALIZATION_POSE_ANGLE_UNIT,
+            "T_E_C": t_e_c,
+            "mode": instance.VISION_RELOCALIZATION_MODE,
+            "planar_constraint": instance.VISION_RELOCALIZATION_PLANAR_CONSTRAINT,
+            "save_debug_images": instance.VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES,
+            "debug_dir": instance.VISION_RELOCALIZATION_DEBUG_DIR,
         }
 
     @classmethod

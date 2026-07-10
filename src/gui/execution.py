@@ -4,6 +4,8 @@ from pathlib import Path
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from ..core.models import SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
+from ..core.execution_context import ExecutionContext
+from ..core.move_compensation import resolve_robot_target_pose
 from ..arm_sdk.controller import RobotController
 from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
 from ..base_move.move_controller import RobotMoveController
@@ -29,6 +31,7 @@ class ExecutionThread(QThread):
         self._move_controller = move_controller
 
         self.config = Config.get_instance()
+        self.execution_context = ExecutionContext()
 
         self.execute_methods = {
             ActionType.MOVE: self._execute_move,
@@ -38,6 +41,7 @@ class ExecutionThread(QThread):
             ActionType.WAIT: self._execute_wait,
             ActionType.CHANGE_GUN: self._execute_change_gun,
             ActionType.VISION_CAPTURE: self._execute_vision_capture,
+            ActionType.VISION_RELOCALIZE: self._execute_vision_relocalize,
             ActionType.TRAJECTORY: self._execute_trajectory,
         }
 
@@ -53,6 +57,7 @@ class ExecutionThread(QThread):
 
     def run(self):
         self.started.emit()
+        self.execution_context.clear()
 
         # 构建扁平执行列表：(SequenceItem, parent_loop_or_None)
         flat_sequence: list[tuple[SequenceItem, LoopBlock | None]] = []
@@ -160,30 +165,12 @@ class ExecutionThread(QThread):
             return False
 
         try:
-            from ..core.pose_compensation import compensate_pose, parse_pose
-
-            target_pose = parse_pose(target_pose_str)
-            localization_config = params.get('定位补偿', {})
-            if localization_config.get('enabled'):
-                teach_offset = localization_config.get('teach_offset')
-                if not teach_offset:
-                    self.log_message.emit("定位补偿已启用，但动作中缺少创建时定位基准")
-                    return False
-
-                from .udp_receive import get_latest_position
-
-                current_offset = get_latest_position(max_age=2.0, wait_timeout=1.5)
-                if current_offset is None:
-                    self.log_message.emit("定位补偿已启用，但未收到当前有效定位数据")
-                    return False
-
-                target_pose = compensate_pose(target_pose, teach_offset, current_offset, arm=arm)
-                self.log_message.emit(
-                    "定位补偿: "
-                    f"teach=({teach_offset.get('x')}, {teach_offset.get('y')}, {teach_offset.get('angle')}) "
-                    f"current=({current_offset.get('x')}, {current_offset.get('y')}, {current_offset.get('angle')})"
-                )
-                self.log_message.emit(f"补偿后点位: {target_pose}")
+            target_pose = resolve_robot_target_pose(
+                params,
+                arm,
+                self.execution_context,
+                self.log_message.emit,
+            )
 
             if arm == '左':
                 if mode == 'move_j':
@@ -589,3 +576,18 @@ class ExecutionThread(QThread):
         """执行视觉抓取动作（委托共用模块）"""
         from ..vision.executor import execute_vision_capture
         return execute_vision_capture(self._robot_controller, params, self.log_message.emit)
+
+    def _execute_vision_relocalize(self, params: dict) -> bool:
+        """执行视觉重定位动作。"""
+        from ..vision.relocalization import execute_vision_relocalization
+
+        try:
+            return execute_vision_relocalization(
+                self._robot_controller,
+                params,
+                self.execution_context,
+                self.log_message.emit,
+            )
+        except Exception as exc:
+            self.log_message.emit(f"视觉重定位失败: {exc}")
+            return False
