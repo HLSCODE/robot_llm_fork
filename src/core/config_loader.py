@@ -34,8 +34,19 @@ class Config:
     CAMERA_PROVIDER: str = "auto"
     REALSENSE_DEVICE_SN: str = ""
     REALSENSE_DEVICE_NAMES: str = ""
+    REALSENSE_COLOR_WIDTH: int = 640
+    REALSENSE_COLOR_HEIGHT: int = 480
+    REALSENSE_DEPTH_WIDTH: int = 640
+    REALSENSE_DEPTH_HEIGHT: int = 480
+    REALSENSE_FPS: int = 0
+    REALSENSE_JPEG_QUALITY: int = 85
+    REALSENSE_ALIGN_DEPTH_TO_COLOR: bool = True
     WEBCAM_DEVICE_INDEXES: str = "0"
     WEBCAM_DEVICE_NAMES: str = ""
+    WEBCAM_WIDTH: int = 640
+    WEBCAM_HEIGHT: int = 480
+    WEBCAM_FPS: int = 30
+    WEBCAM_JPEG_QUALITY: int = 85
     VISION_CAMERA_HOST: str = "localhost"
     VISION_CAMERA_PORT: int = 12345
     YOLO_MODEL_PATH: str = "models/best.pt"
@@ -225,8 +236,22 @@ class Config:
         instance.CAMERA_PROVIDER = os.getenv("CAMERA_PROVIDER", "auto")
         instance.REALSENSE_DEVICE_SN = os.getenv("REALSENSE_DEVICE_SN", "")
         instance.REALSENSE_DEVICE_NAMES = os.getenv("REALSENSE_DEVICE_NAMES", "")
+        instance.REALSENSE_COLOR_WIDTH = int(os.getenv("REALSENSE_COLOR_WIDTH", "640"))
+        instance.REALSENSE_COLOR_HEIGHT = int(os.getenv("REALSENSE_COLOR_HEIGHT", "480"))
+        instance.REALSENSE_DEPTH_WIDTH = int(os.getenv("REALSENSE_DEPTH_WIDTH", "640"))
+        instance.REALSENSE_DEPTH_HEIGHT = int(os.getenv("REALSENSE_DEPTH_HEIGHT", "480"))
+        instance.REALSENSE_FPS = int(os.getenv("REALSENSE_FPS", "0"))
+        instance.REALSENSE_JPEG_QUALITY = int(os.getenv("REALSENSE_JPEG_QUALITY", "85"))
+        instance.REALSENSE_ALIGN_DEPTH_TO_COLOR = os.getenv(
+            "REALSENSE_ALIGN_DEPTH_TO_COLOR",
+            "true",
+        ).lower() in ("true", "1", "yes")
         instance.WEBCAM_DEVICE_INDEXES = os.getenv("WEBCAM_DEVICE_INDEXES", "0")
         instance.WEBCAM_DEVICE_NAMES = os.getenv("WEBCAM_DEVICE_NAMES", "")
+        instance.WEBCAM_WIDTH = int(os.getenv("WEBCAM_WIDTH", "640"))
+        instance.WEBCAM_HEIGHT = int(os.getenv("WEBCAM_HEIGHT", "480"))
+        instance.WEBCAM_FPS = int(os.getenv("WEBCAM_FPS", "30"))
+        instance.WEBCAM_JPEG_QUALITY = int(os.getenv("WEBCAM_JPEG_QUALITY", "85"))
 
         # RealSense 相机配置
         instance.VISION_CAMERA_HOST = os.getenv("VISION_CAMERA_HOST", "localhost")

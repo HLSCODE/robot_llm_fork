@@ -52,10 +52,14 @@ class RealSenseManager:
         fps: int = 30,
         width: int = 640,
         height: int = 480,
+        depth_width: int | None = None,
+        depth_height: int | None = None,
+        depth_fps: int | None = None,
         jpeg_quality: int = 85,
         grid_cols: int = 2,
         output_width: int = 0,
         output_height: int = 0,
+        align_depth_to_color: bool = True,
     ) -> None:
         # 规范化相机配置，缺省 name 用 serial 代替
         self._cameras: list[dict] = [
@@ -65,10 +69,14 @@ class RealSenseManager:
         self._fps = fps
         self._width = width
         self._height = height
+        self._depth_width = depth_width or width
+        self._depth_height = depth_height or height
+        self._depth_fps = depth_fps or fps
         self._jpeg_quality = jpeg_quality
         self._grid_cols = max(1, grid_cols)
         self._output_width = output_width
         self._output_height = output_height
+        self._align_depth_to_color = align_depth_to_color
 
         # (serial, name, pipeline)
         self._pipelines: list[tuple[str, str, "rs.pipeline"]] = []
@@ -206,8 +214,8 @@ class RealSenseManager:
                     _cfg.enable_device(serial)
                 _cfg.enable_stream(rs.stream.color, self._width, self._height,
                                    rs.format.bgr8, self._fps)
-                _cfg.enable_stream(rs.stream.depth, self._width, self._height,
-                                   rs.format.z16, self._fps)
+                _cfg.enable_stream(rs.stream.depth, self._depth_width, self._depth_height,
+                                   rs.format.z16, self._depth_fps)
                 return _pipeline, _cfg
 
             # 带重试的启动（USB 带宽协商偶尔需要多次尝试）
@@ -329,10 +337,13 @@ class RealSenseManager:
         import time as _time
         _time.sleep(1.0)
 
+        align = rs.align(rs.stream.color) if self._align_depth_to_color else None
         fail_count = 0
         while self._running:
             try:
                 frameset = pipeline.wait_for_frames(timeout_ms=1000)
+                if align is not None:
+                    frameset = align.process(frameset)
                 color_frame = frameset.get_color_frame()
                 depth_frame = frameset.get_depth_frame()
                 if color_frame and depth_frame:
