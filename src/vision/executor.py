@@ -56,7 +56,7 @@ def execute_vision_capture(
 
     try:
         # ── 从 camera_factory 获取相机管理器取帧 ──
-        from ..cameras.camera_factory import get_camera_manager
+        from ..cameras.camera_factory import get_camera_manager, stop_camera_manager
 
         mgr = get_camera_manager()
         if mgr is None:
@@ -79,14 +79,18 @@ def execute_vision_capture(
             info = mgr.get_cameras_info()
             online = [c["name"] for c in info if c.get("online")]
             log_fn(f"相机取帧失败：{camera_name or '(auto)'} 未获取到有效帧，在线相机: {online or '无'}")
+            stop_camera_manager()
             return False
 
         color, depth, intr = raw
         if color is None or depth is None or intr is None:
             log_fn("相机取帧失败：帧数据不完整")
+            stop_camera_manager()
             return False
 
         controller.inject_frames(color, depth, intr)
+        # 后续算法使用已注入的帧，不再需要持续采集。
+        stop_camera_manager()
 
         from .capture_gui import VisionCaptureGUIAction
 

@@ -227,8 +227,7 @@ class RobotWebSocketServer:
         # 初始化 AI 组件
         self._init_ai()
 
-        # 启动相机管理器
-        self._init_camera()
+        # 相机在视觉动作、测试或订阅实时预览时按需启动。
 
         # 加载 MiniCPM 代理配置
         self._init_minicpm_config()
@@ -325,6 +324,7 @@ class RobotWebSocketServer:
         finally:
             self._clients.discard(websocket)
             self._camera_frame_subs.discard(websocket)
+            self._stop_camera_if_idle()
             await self._close_minicpm_session(websocket)
             print(f"前端客户端断开: {remote}")
 
@@ -1642,7 +1642,7 @@ class RobotWebSocketServer:
         def _do_test():
             try:
                 import time
-                from ..cameras.camera_factory import get_camera_manager
+                from ..cameras.camera_factory import get_camera_manager, stop_camera_manager
                 from ..cameras.realsense_manager import RealSenseManager
 
                 config = Config.get_instance()
@@ -1746,6 +1746,8 @@ class RobotWebSocketServer:
                     "success": False,
                     "message": f"测试异常: {str(e)}",
                 })
+            finally:
+                stop_camera_manager()
 
         threading.Thread(target=_do_test, daemon=True, name="TestCamera").start()
         await websocket.send(self._json_msg({"event": "log", "level": "info", "message": "正在测试相机..."}))
@@ -1850,6 +1852,8 @@ class RobotWebSocketServer:
         请求: {"action": "subscribe_camera_frames"}
         成功后服务端持续推送: {"event": "camera_frames", "frames": [...]}
         """
+        if self._camera_manager is None or not self._camera_manager.is_running:
+            self._init_camera()
         if self._camera_manager is None:
             await websocket.send(self._json_msg({
                 "event": "camera_error",
@@ -1878,6 +1882,8 @@ class RobotWebSocketServer:
         """
         self._camera_frame_subs.discard(websocket)
         await websocket.send(self._json_msg({"event": "camera_unsubscribed"}))
+        if not self._camera_frame_subs:
+            self._stop_camera_if_idle()
 
     async def _camera_push_loop(self) -> None:
         """后台任务：以 30fps 向所有订阅客户端推送相机帧。"""
@@ -1908,6 +1914,15 @@ class RobotWebSocketServer:
                         self._camera_frame_subs.discard(ws)
             await asyncio.sleep(interval)
         self._camera_push_task = None
+        self._stop_camera_if_idle()
+
+    def _stop_camera_if_idle(self) -> None:
+        """实时预览结束后释放相机；视觉动作自行管理其短暂采集。"""
+        if self._camera_frame_subs:
+            return
+        from src.cameras.camera_factory import stop_camera_manager
+
+        stop_camera_manager()
 
     # ==================================================================
     # MiniCPM 聊天代理（dispatch 模式）

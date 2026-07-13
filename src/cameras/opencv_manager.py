@@ -27,6 +27,7 @@ class OpenCVCameraManager:
         width: int = 640,
         height: int = 480,
         jpeg_quality: int = 85,
+        encode_fps: int | None = None,
         backend: Optional[int] = None,
     ) -> None:
         self._cameras: list[dict] = [
@@ -40,6 +41,7 @@ class OpenCVCameraManager:
         self._width = width
         self._height = height
         self._jpeg_quality = jpeg_quality
+        self._encode_fps = max(1, encode_fps or fps)
         self._backend = backend if backend is not None else getattr(cv2, "CAP_DSHOW", 0)
 
         self._captures: list[tuple[int, str, "cv2.VideoCapture"]] = []
@@ -57,6 +59,11 @@ class OpenCVCameraManager:
             with _instance_lock:
                 if _instance is None:
                     _instance = cls(**kwargs)
+        return _instance
+
+    @classmethod
+    def peek_instance(cls) -> Optional["OpenCVCameraManager"]:
+        """返回已有单例；不会因查询或关闭操作创建空实例。"""
         return _instance
 
     @classmethod
@@ -129,6 +136,8 @@ class OpenCVCameraManager:
             except Exception:
                 pass
         self._captures.clear()
+        with self._lock:
+            self._latest_jpegs.clear()
 
     def get_latest_jpeg(self) -> Optional[bytes]:
         with self._lock:
@@ -151,7 +160,7 @@ class OpenCVCameraManager:
         return result
 
     def _capture_loop(self) -> None:
-        interval = 1.0 / max(self._fps, 1)
+        interval = 1.0 / max(self._encode_fps, 1)
         while self._running:
             frames: list[tuple[str, str, bytes]] = []
             for index, name, capture in self._captures:

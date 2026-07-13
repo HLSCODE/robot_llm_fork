@@ -144,36 +144,39 @@ def _decode_jpeg(jpeg_bytes: bytes):
 
 
 def capture_color_frame(camera_name: str | None = None, timeout_seconds: float = 10.0):
-    from ...cameras.camera_factory import get_camera_manager
+    from ...cameras.camera_factory import get_camera_manager, stop_camera_manager
 
     mgr = get_camera_manager()
     if mgr is None:
         raise RuntimeError("相机管理器未启动")
 
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        if hasattr(mgr, "get_latest_raw_frames"):
-            raw = mgr.get_latest_raw_frames(camera_name or None)
-            if raw is not None:
-                color, _depth, _intr = raw
-                if color is not None:
-                    return color
+    try:
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            if hasattr(mgr, "get_latest_raw_frames"):
+                raw = mgr.get_latest_raw_frames(camera_name or None)
+                if raw is not None:
+                    color, _depth, _intr = raw
+                    if color is not None:
+                        return color
 
-        if hasattr(mgr, "get_latest_jpegs"):
-            jpegs = mgr.get_latest_jpegs()
-            for serial, name, jpeg in jpegs:
-                if camera_name and camera_name not in {serial, name}:
-                    continue
-                frame = _decode_jpeg(jpeg)
-                if frame is not None:
-                    return frame
-            if jpegs and not camera_name:
-                frame = _decode_jpeg(jpegs[0][2])
-                if frame is not None:
-                    return frame
-        time.sleep(0.2)
+            if hasattr(mgr, "get_latest_jpegs"):
+                jpegs = mgr.get_latest_jpegs()
+                for serial, name, jpeg in jpegs:
+                    if camera_name and camera_name not in {serial, name}:
+                        continue
+                    frame = _decode_jpeg(jpeg)
+                    if frame is not None:
+                        return frame
+                if jpegs and not camera_name:
+                    frame = _decode_jpeg(jpegs[0][2])
+                    if frame is not None:
+                        return frame
+            time.sleep(0.2)
 
-    raise RuntimeError(f"相机取帧超时: {camera_name or '(auto)'}")
+        raise RuntimeError(f"相机取帧超时: {camera_name or '(auto)'}")
+    finally:
+        stop_camera_manager()
 
 
 def _debug_paths(station_id: str, arm: str, suffix: str) -> tuple[Path | None, Path | None]:

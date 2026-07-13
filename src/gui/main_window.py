@@ -2423,7 +2423,7 @@ class MainWindow(QMainWindow):
 
             def run(self):
                 import time
-                from src.cameras.camera_factory import get_camera_manager
+                from src.cameras.camera_factory import get_camera_manager, stop_camera_manager
                 from src.cameras.realsense_manager import RealSenseManager
                 from src.core.config_loader import Config
 
@@ -2499,6 +2499,8 @@ class MainWindow(QMainWindow):
 
                 except Exception as e:
                     self.result.emit(False, f"测试异常: {str(e)}")
+                finally:
+                    stop_camera_manager()
 
         def on_result(success, msg):
             self.log_widget.append_log(f"[相机测试] {msg}")

@@ -60,6 +60,7 @@ class RealSenseManager:
         output_width: int = 0,
         output_height: int = 0,
         align_depth_to_color: bool = True,
+        encode_fps: int | None = None,
     ) -> None:
         # 规范化相机配置，缺省 name 用 serial 代替
         self._cameras: list[dict] = [
@@ -73,6 +74,7 @@ class RealSenseManager:
         self._depth_height = depth_height or height
         self._depth_fps = depth_fps or fps
         self._jpeg_quality = jpeg_quality
+        self._encode_fps = max(1, encode_fps or fps)
         self._grid_cols = max(1, grid_cols)
         self._output_width = output_width
         self._output_height = output_height
@@ -106,6 +108,11 @@ class RealSenseManager:
             with _instance_lock:
                 if _instance is None:
                     _instance = cls(**kwargs)
+        return _instance
+
+    @classmethod
+    def peek_instance(cls) -> Optional["RealSenseManager"]:
+        """返回已有单例；不会因查询或关闭操作创建空实例。"""
         return _instance
 
     @classmethod
@@ -293,6 +300,11 @@ class RealSenseManager:
             except Exception:
                 pass
         self._pipelines.clear()
+        with self._raw_lock:
+            self._raw_frames.clear()
+        with self._lock:
+            self._latest_jpeg = None
+            self._latest_jpegs.clear()
 
     def get_latest_jpeg(self) -> Optional[bytes]:
         """返回最新拼接 JPEG 帧（线程安全）。"""
@@ -399,7 +411,7 @@ class RealSenseManager:
 
     def _encode_loop(self) -> None:
         """编码线程：读取所有相机最新原始帧，编码为 JPEG 写入公开缓冲区。"""
-        interval = 1.0 / max(self._fps, 1)
+        interval = 1.0 / max(self._encode_fps, 1)
         while self._running:
             with self._raw_lock:
                 snapshot = [(serial, name, color) for serial, (name, color, _depth, _intr) in self._raw_frames.items()]

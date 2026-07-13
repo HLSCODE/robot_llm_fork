@@ -41,6 +41,7 @@ class Config:
     REALSENSE_FPS: int = 0
     REALSENSE_JPEG_QUALITY: int = 85
     REALSENSE_ALIGN_DEPTH_TO_COLOR: bool = True
+    CAMERA_ENCODE_FPS: int = 5
     WEBCAM_DEVICE_INDEXES: str = "0"
     WEBCAM_DEVICE_NAMES: str = ""
     WEBCAM_WIDTH: int = 640
@@ -246,6 +247,7 @@ class Config:
             "REALSENSE_ALIGN_DEPTH_TO_COLOR",
             "true",
         ).lower() in ("true", "1", "yes")
+        instance.CAMERA_ENCODE_FPS = int(os.getenv("CAMERA_ENCODE_FPS", "5"))
         instance.WEBCAM_DEVICE_INDEXES = os.getenv("WEBCAM_DEVICE_INDEXES", "0")
         instance.WEBCAM_DEVICE_NAMES = os.getenv("WEBCAM_DEVICE_NAMES", "")
         instance.WEBCAM_WIDTH = int(os.getenv("WEBCAM_WIDTH", "640"))
