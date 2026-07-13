@@ -35,6 +35,7 @@ class VoiceSpeechRuntimeConfig:
     endpoint: UtteranceEndpointConfig = field(default_factory=UtteranceEndpointConfig)
     vad_chunk_ms: int = 200
     listening_timeout_s: float = 8.0
+    follow_up_listening_timeout_s: float = 25.0
     wake_cooldown_s: float = 1.5
     show_asr_timing: bool = False
 
@@ -76,6 +77,7 @@ class VoiceSpeechRuntime:
         vad_accumulator: list[np.ndarray] = []
         wake_cooldown_until = 0.0
         listening_started_at = 0.0
+        has_valid_user_input = False
 
         with AudioCapture(self.config.audio) as capture:
             for chunk in capture.chunks():
@@ -92,9 +94,13 @@ class VoiceSpeechRuntime:
                         continue
                     wake_result = self.wake_word.accept_audio(chunk, self.config.audio.sample_rate)
                     if bool(wake_result.get("triggered")):
+                        has_valid_user_input = False
                         event = self.controller.wake()
                         event.data.update({"wake_word": wake_result})
                         yield event
+                        async for feedback_event in self.controller.stream_wake_feedback():
+                            feedback_event.data["wake_word"] = wake_result
+                            yield feedback_event
                         self._reset_detectors(endpoint, buffer, vad_accumulator)
                         wake_cooldown_until = now + self.config.wake_cooldown_s
                         listening_started_at = now
@@ -119,7 +125,8 @@ class VoiceSpeechRuntime:
 
                 if (
                     not endpoint.in_speech
-                    and now - listening_started_at > self.config.listening_timeout_s
+                    and now - listening_started_at
+                    > self._listening_timeout_s(has_valid_user_input)
                 ):
                     self.controller.sleep()
                     self._reset_all(endpoint, buffer, vad_accumulator)
@@ -154,6 +161,8 @@ class VoiceSpeechRuntime:
                         capture=capture,
                         reason=reason,
                     ):
+                        if event.type == "asr_result" and event.text.strip():
+                            has_valid_user_input = True
                         yield event
                     vad_accumulator.clear()
                     listening_started_at = time.monotonic()
@@ -227,6 +236,12 @@ class VoiceSpeechRuntime:
         buffer.clear()
         vad_accumulator.clear()
 
+    def _listening_timeout_s(self, has_valid_user_input: bool) -> float:
+        """Use a longer follow-up window after the user has started a conversation."""
+        if has_valid_user_input:
+            return self.config.follow_up_listening_timeout_s
+        return self.config.listening_timeout_s
+
 
 def build_voice_speech_runtime(
     controller: VoiceInteractionController,
@@ -291,6 +306,9 @@ def _runtime_config_from_dict(config: dict[str, Any]) -> VoiceSpeechRuntimeConfi
         endpoint=endpoint,
         vad_chunk_ms=int(config.get("vad_chunk_ms") or 200),
         listening_timeout_s=float(config.get("listening_timeout_s") or 8.0),
+        follow_up_listening_timeout_s=float(
+            config.get("follow_up_listening_timeout_s") or 25.0
+        ),
         wake_cooldown_s=float(config.get("wake_cooldown_s") or 1.5),
         show_asr_timing=bool(config.get("show_asr_timing", False)),
     )

@@ -17,7 +17,12 @@ from PyQt6.QtGui import QFont, QColor, QTextCursor
 from ..ai_integration import AIController, ExecutionBridge
 from ..core.config_loader import Config
 from ..gui.dialogs import ActionPreviewDialog
-from ..voice_interaction import CamerasModuleProvider, VoiceInteractionController, VoiceSessionState
+from ..voice_interaction import (
+    CamerasModuleProvider,
+    WakeFeedback,
+    VoiceInteractionController,
+    VoiceSessionState,
+)
 from .voice_audio_player import VoiceAudioPlayer
 
 logger = logging.getLogger(__name__)
@@ -141,6 +146,10 @@ class AIAssistantWidget(QWidget):
             cancel_callback=self._ai_controller.cancel_current_task,
             tts_enabled=voice_config["tts_enabled"],
             auto_execute_command=voice_config["auto_execute_command"],
+            wake_feedback=WakeFeedback(
+                enabled=bool(voice_config.get("wake_feedback_enabled", True)),
+                text=str(voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
+            ),
         )
         self._dialog_controller = VoiceInteractionController(
             llm_registry=self._ai_controller.get_llm_registry(),

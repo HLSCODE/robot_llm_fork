@@ -109,7 +109,7 @@ from ..core.storage import StorageManager
 from ..core.config_loader import Config
 from ..llm import LLMCapability, LLMContentPart, LLMMessage, LLMRegistry, LLMStreamEvent
 from ..arm_sdk import RobotController
-from ..voice_interaction import CamerasModuleProvider, VoiceInteractionController
+from ..voice_interaction import CamerasModuleProvider, WakeFeedback, VoiceInteractionController
 
 
 
@@ -344,6 +344,10 @@ class RobotWebSocketServer:
                 cancel_callback=self._cancel_current_ai_task,
                 tts_enabled=voice_config["tts_enabled"],
                 auto_execute_command=voice_config["auto_execute_command"],
+                wake_feedback=WakeFeedback(
+                    enabled=bool(voice_config.get("wake_feedback_enabled", True)),
+                    text=str(voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
+                ),
             )
 
         except Exception as e:

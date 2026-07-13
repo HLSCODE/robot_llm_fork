@@ -2,7 +2,7 @@
 Wake-session voice interaction orchestration.
 """
 from .adapters import CameraCaptureError, CamerasModuleProvider
-from .core import VoiceEvent, VoiceInteractionController, VoiceSession, VoiceSessionState
+from .core import WakeFeedback, VoiceEvent, VoiceInteractionController, VoiceSession, VoiceSessionState
 
 _LAZY_EXPORTS = {
     "ASREngine": (".speech", "ASREngine"),
@@ -55,6 +55,7 @@ __all__ = [
     "VoiceSession",
     "VoiceSessionState",
     "VoiceInteractionController",
+    "WakeFeedback",
     "WakeWordEngine",
     "build_voice_speech_runtime",
     "list_input_devices",

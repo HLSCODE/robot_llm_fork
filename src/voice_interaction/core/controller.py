@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 from .router import VoiceIntentRouter
 from .session import VoiceSession
 from .types import VoiceEvent, VoiceSessionState
+from .wake_feedback import WakeFeedback
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,13 @@ class VoiceInteractionController:
         cancel_callback: Optional[Callable[[], Any]] = None,
         tts_enabled: bool = False,
         auto_execute_command: bool = False,
+        wake_feedback: Optional[WakeFeedback] = None,
     ) -> None:
         self.llm_registry = llm_registry
         self.skill_engine = skill_engine
         self.camera_provider = camera_provider
         self.session = session or VoiceSession(timeout_s=timeout_s)
+        self.wake_feedback = wake_feedback or WakeFeedback()
         self.router = VoiceIntentRouter(
             llm_registry=llm_registry,
             session=self.session,
@@ -45,6 +48,11 @@ class VoiceInteractionController:
     def wake(self) -> VoiceEvent:
         self.session.wake()
         return VoiceEvent(type="session_started", text="机器人已唤醒")
+
+    async def stream_wake_feedback(self) -> AsyncIterator[VoiceEvent]:
+        """Stream the acknowledgement for a physical wake-word trigger."""
+        async for event in self.wake_feedback.stream(self.llm_registry):
+            yield event
 
     def sleep(self) -> VoiceEvent:
         self.session.sleep()

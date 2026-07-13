@@ -43,7 +43,10 @@ class Config:
     VOICE_MAX_UTTERANCE_MS: int = 30000
     VOICE_END_SILENCE_MS: int = 800
     VOICE_LISTENING_TIMEOUT_S: float = 8.0
+    VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S: float = 25.0
     VOICE_WAKE_COOLDOWN_S: float = 1.5
+    VOICE_WAKE_FEEDBACK_ENABLED: bool = True
+    VOICE_WAKE_FEEDBACK_TEXT: str = "明德博士在，请说。"
     VOICE_SILENCE_RMS_THRESHOLD: float = 0.01
     VOICE_SUPPRESS_MODEL_OUTPUT: bool = True
     VOICE_SHOW_ASR_TIMING: bool = False
@@ -272,7 +275,16 @@ class Config:
         instance.VOICE_MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "30000"))
         instance.VOICE_END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "800"))
         instance.VOICE_LISTENING_TIMEOUT_S = float(os.getenv("VOICE_LISTENING_TIMEOUT_S", "8.0"))
+        instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S = float(os.getenv(
+            "VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S", "25.0"
+        ))
         instance.VOICE_WAKE_COOLDOWN_S = float(os.getenv("VOICE_WAKE_COOLDOWN_S", "1.5"))
+        instance.VOICE_WAKE_FEEDBACK_ENABLED = os.getenv(
+            "VOICE_WAKE_FEEDBACK_ENABLED", "true"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_WAKE_FEEDBACK_TEXT = os.getenv(
+            "VOICE_WAKE_FEEDBACK_TEXT", "明德博士在，请说。"
+        )
         instance.VOICE_SILENCE_RMS_THRESHOLD = float(os.getenv("VOICE_SILENCE_RMS_THRESHOLD", "0.01"))
         instance.VOICE_SUPPRESS_MODEL_OUTPUT = os.getenv(
             "VOICE_SUPPRESS_MODEL_OUTPUT", "true"
@@ -765,7 +777,10 @@ class Config:
             "max_utterance_ms": instance.VOICE_MAX_UTTERANCE_MS,
             "end_silence_ms": instance.VOICE_END_SILENCE_MS,
             "listening_timeout_s": instance.VOICE_LISTENING_TIMEOUT_S,
+            "follow_up_listening_timeout_s": instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S,
             "wake_cooldown_s": instance.VOICE_WAKE_COOLDOWN_S,
+            "wake_feedback_enabled": instance.VOICE_WAKE_FEEDBACK_ENABLED,
+            "wake_feedback_text": instance.VOICE_WAKE_FEEDBACK_TEXT,
             "silence_rms_threshold": instance.VOICE_SILENCE_RMS_THRESHOLD,
             "suppress_model_output": instance.VOICE_SUPPRESS_MODEL_OUTPUT,
             "show_asr_timing": instance.VOICE_SHOW_ASR_TIMING,
