@@ -18,6 +18,7 @@ from ..ai_integration import AIController, ExecutionBridge
 from ..core.config_loader import Config
 from ..gui.dialogs import ActionPreviewDialog
 from ..voice_interaction import (
+    AudioOutputGate,
     CamerasModuleProvider,
     WakeFeedback,
     VoiceInteractionController,
@@ -71,10 +72,16 @@ class VoiceSpeechRuntimeWorker(QObject):
     error_occurred = pyqtSignal(str)
     finished = pyqtSignal()
 
-    def __init__(self, controller: VoiceInteractionController, voice_config: dict):
+    def __init__(
+        self,
+        controller: VoiceInteractionController,
+        voice_config: dict,
+        audio_output_gate: AudioOutputGate,
+    ):
         super().__init__()
         self._controller = controller
         self._voice_config = dict(voice_config)
+        self._audio_output_gate = audio_output_gate
         self._runtime = None
         self._stop_requested = False
 
@@ -99,6 +106,7 @@ class VoiceSpeechRuntimeWorker(QObject):
         self._runtime = build_voice_speech_runtime(
             self._controller,
             self._voice_config,
+            audio_output_gate=self._audio_output_gate,
         )
         wake_enabled = bool(self._voice_config.get("wake_word_enabled"))
         self.event_ready.emit({
@@ -175,7 +183,11 @@ class AIAssistantWidget(QWidget):
         self._voice_streaming_reply = False
         self._voice_audio_chunk_count = 0
         self._voice_audio_playback_error_reported = False
-        self._voice_audio_player = VoiceAudioPlayer(self)
+        self._voice_audio_output_gate = AudioOutputGate()
+        self._voice_audio_player = VoiceAudioPlayer(
+            self,
+            output_gate=self._voice_audio_output_gate,
+        )
 
         # 主窗口引用，用于同步动作序列到右侧
         self._main_window = None
@@ -640,7 +652,11 @@ class AIAssistantWidget(QWidget):
             self._add_system_message("正在加载真实语音监听链路...")
 
         self._speech_thread = QThread(self)
-        self._speech_worker = VoiceSpeechRuntimeWorker(self._voice_controller, voice_config)
+        self._speech_worker = VoiceSpeechRuntimeWorker(
+            self._voice_controller,
+            voice_config,
+            self._voice_audio_output_gate,
+        )
         self._speech_worker.moveToThread(self._speech_thread)
         self._speech_thread.started.connect(self._speech_worker.run)
         self._speech_worker.event_ready.connect(self._handle_voice_event)

@@ -16,6 +16,8 @@ from typing import Deque, Optional
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
+from ..voice_interaction.speech.output_gate import AudioOutputGate
+
 try:
     from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 except Exception as exc:  # pragma: no cover - depends on local Qt install
@@ -40,6 +42,7 @@ class VoiceAudioPlayer(QObject):
         parent: Optional[QObject] = None,
         sample_rate: int = 24000,
         channel_count: int = 1,
+        output_gate: Optional[AudioOutputGate] = None,
     ) -> None:
         super().__init__(parent)
         self._sample_rate = sample_rate
@@ -50,6 +53,7 @@ class VoiceAudioPlayer(QObject):
         self._format = None
         self._sample_format = "float32"
         self._reported_unavailable = False
+        self._output_gate = output_gate or AudioOutputGate()
 
         self._flush_timer = QTimer(self)
         self._flush_timer.setInterval(10)
@@ -57,6 +61,7 @@ class VoiceAudioPlayer(QObject):
 
     def stop(self) -> None:
         """Stop playback and discard pending chunks."""
+        self._output_gate.end_playback()
         self._flush_timer.stop()
         self._queue.clear()
         self._audio_io = None
@@ -146,6 +151,7 @@ class VoiceAudioPlayer(QObject):
             written = self._audio_io.write(chunk[:writable])
             if written <= 0:
                 break
+            self._output_gate.begin_playback()
             if written == len(chunk):
                 self._queue.popleft()
             else:
@@ -154,7 +160,21 @@ class VoiceAudioPlayer(QObject):
         if self._queue:
             self._flush_timer.start()
         else:
+            self._finish_when_drained()
+
+    def _finish_when_drained(self) -> None:
+        """Keep the gate closed only after Qt's output buffer has drained."""
+        if self._sink is None:
+            self._output_gate.end_playback()
             self._flush_timer.stop()
+            return
+
+        buffer_size = self._sink.bufferSize()
+        if buffer_size > 0 and self._sink.bytesFree() >= buffer_size:
+            self._output_gate.end_playback()
+            self._flush_timer.stop()
+            return
+        self._flush_timer.start()
 
     @staticmethod
     def _decode_base64(audio_data: str) -> bytes:

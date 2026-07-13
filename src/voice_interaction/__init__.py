@@ -7,6 +7,7 @@ from .core import WakeFeedback, VoiceEvent, VoiceInteractionController, VoiceSes
 _LAZY_EXPORTS = {
     "ASREngine": (".speech", "ASREngine"),
     "AudioCapture": (".speech", "AudioCapture"),
+    "AudioOutputGate": (".speech", "AudioOutputGate"),
     "DummyWakeWordEngine": (".speech", "DummyWakeWordEngine"),
     "FunASRConfig": (".speech", "FunASRConfig"),
     "FunASRRecognizer": (".speech", "FunASRRecognizer"),
@@ -38,6 +39,7 @@ def __getattr__(name: str):
 __all__ = [
     "ASREngine",
     "AudioCapture",
+    "AudioOutputGate",
     "CamerasModuleProvider",
     "CameraCaptureError",
     "DummyWakeWordEngine",

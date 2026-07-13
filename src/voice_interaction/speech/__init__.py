@@ -10,6 +10,7 @@ _LAZY_EXPORTS = {
     "FunASRVAD": (".vad", "FunASRVAD"),
     "FunASRVADConfig": (".vad", "FunASRVADConfig"),
     "OpenWakeWordEngine": (".wake_word", "OpenWakeWordEngine"),
+    "AudioOutputGate": (".output_gate", "AudioOutputGate"),
     "SherpaOnnxWakeWordEngine": (".wake_word", "SherpaOnnxWakeWordEngine"),
     "VADDetector": (".vad", "VADDetector"),
     "VoiceAudioConfig": (".audio", "VoiceAudioConfig"),
@@ -35,6 +36,7 @@ def __getattr__(name: str):
 __all__ = [
     "ASREngine",
     "AudioCapture",
+    "AudioOutputGate",
     "DummyWakeWordEngine",
     "FunASRConfig",
     "FunASRRecognizer",

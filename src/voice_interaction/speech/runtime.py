@@ -15,6 +15,7 @@ import numpy as np
 
 from .asr import ASREngine, FunASRConfig, FunASRRecognizer
 from .audio import AudioCapture, VoiceAudioConfig, duration_ms
+from .output_gate import AudioOutputGate
 from ..core.controller import VoiceInteractionController
 from ..core.types import VoiceEvent, VoiceSessionState
 from .utterance import UtteranceBuffer, UtteranceEndpoint, UtteranceEndpointConfig
@@ -57,12 +58,14 @@ class VoiceSpeechRuntime:
         asr: ASREngine,
         vad: VADDetector,
         wake_word: Optional[WakeWordEngine] = None,
+        audio_output_gate: Optional[AudioOutputGate] = None,
         config: VoiceSpeechRuntimeConfig | None = None,
     ) -> None:
         self.controller = controller
         self.asr = asr
         self.vad = vad
         self.wake_word = wake_word
+        self.audio_output_gate = audio_output_gate
         self.config = config or VoiceSpeechRuntimeConfig()
         self._stop_requested = False
 
@@ -86,6 +89,12 @@ class VoiceSpeechRuntime:
                 await asyncio.sleep(0)
 
                 now = time.monotonic()
+                if self._is_robot_speaking():
+                    # Discard speaker echo instead of allowing it into KWS, VAD, or ASR.
+                    self._reset_detectors(endpoint, buffer, vad_accumulator)
+                    capture.clear()
+                    continue
+
                 session = self.controller.session
 
                 if session.state == VoiceSessionState.SLEEPING:
@@ -236,6 +245,9 @@ class VoiceSpeechRuntime:
         buffer.clear()
         vad_accumulator.clear()
 
+    def _is_robot_speaking(self) -> bool:
+        return self.audio_output_gate is not None and self.audio_output_gate.is_playing()
+
     def _listening_timeout_s(self, has_valid_user_input: bool) -> float:
         """Use a longer follow-up window after the user has started a conversation."""
         if has_valid_user_input:
@@ -246,6 +258,7 @@ class VoiceSpeechRuntime:
 def build_voice_speech_runtime(
     controller: VoiceInteractionController,
     config: Optional[dict[str, Any]] = None,
+    audio_output_gate: Optional[AudioOutputGate] = None,
 ) -> VoiceSpeechRuntime:
     """Create a runtime from Config.get_voice_interaction_config()."""
     if config is None:
@@ -281,6 +294,7 @@ def build_voice_speech_runtime(
         asr=asr,
         vad=vad,
         wake_word=wake_word,
+        audio_output_gate=audio_output_gate,
         config=runtime_config,
     )
 
