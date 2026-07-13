@@ -42,6 +42,8 @@ class Config:
     VOICE_MIN_UTTERANCE_MS: int = 500
     VOICE_MAX_UTTERANCE_MS: int = 30000
     VOICE_END_SILENCE_MS: int = 800
+    VOICE_SPEECH_START_RMS_THRESHOLD: float = 0.025
+    VOICE_SPEECH_START_CONFIRM_CHUNKS: int = 1
     VOICE_LISTENING_TIMEOUT_S: float = 8.0
     VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S: float = 25.0
     VOICE_WAKE_COOLDOWN_S: float = 1.5
@@ -274,6 +276,12 @@ class Config:
         instance.VOICE_MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "500"))
         instance.VOICE_MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "30000"))
         instance.VOICE_END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "800"))
+        instance.VOICE_SPEECH_START_RMS_THRESHOLD = float(os.getenv(
+            "VOICE_SPEECH_START_RMS_THRESHOLD", "0.025"
+        ))
+        instance.VOICE_SPEECH_START_CONFIRM_CHUNKS = int(os.getenv(
+            "VOICE_SPEECH_START_CONFIRM_CHUNKS", "1"
+        ))
         instance.VOICE_LISTENING_TIMEOUT_S = float(os.getenv("VOICE_LISTENING_TIMEOUT_S", "8.0"))
         instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S = float(os.getenv(
             "VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S", "25.0"
@@ -776,6 +784,8 @@ class Config:
             "min_utterance_ms": instance.VOICE_MIN_UTTERANCE_MS,
             "max_utterance_ms": instance.VOICE_MAX_UTTERANCE_MS,
             "end_silence_ms": instance.VOICE_END_SILENCE_MS,
+            "speech_start_rms_threshold": instance.VOICE_SPEECH_START_RMS_THRESHOLD,
+            "speech_start_confirm_chunks": instance.VOICE_SPEECH_START_CONFIRM_CHUNKS,
             "listening_timeout_s": instance.VOICE_LISTENING_TIMEOUT_S,
             "follow_up_listening_timeout_s": instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S,
             "wake_cooldown_s": instance.VOICE_WAKE_COOLDOWN_S,

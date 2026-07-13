@@ -16,6 +16,8 @@ class UtteranceEndpointConfig:
     min_utterance_ms: int = 500
     max_utterance_ms: int = 30_000
     end_silence_ms: int = 800
+    speech_start_rms_threshold: float = 0.025
+    speech_start_confirm_chunks: int = 1
     silence_rms_threshold: float = 0.01
 
 
@@ -58,20 +60,34 @@ class UtteranceEndpoint:
         self.in_speech = False
         self.speech_start_at = 0.0
         self.last_voice_at = 0.0
+        self._start_confirm_count = 0
 
     def observe(self, chunk: np.ndarray, vad_result: dict[str, object]) -> tuple[bool, str]:
         now = self._clock()
         speech_started = bool(vad_result.get("speech_started"))
         speech_ended = bool(vad_result.get("speech_ended"))
-        has_energy = rms(chunk) >= self.config.silence_rms_threshold
-
-        if speech_started and not self.in_speech:
-            self.in_speech = True
-            self.speech_start_at = now
-            self.last_voice_at = now
-            return False, "started"
+        chunk_rms = rms(chunk)
+        has_energy = chunk_rms >= self.config.silence_rms_threshold
+        has_start_energy = chunk_rms >= self.config.speech_start_rms_threshold
 
         if not self.in_speech:
+            if speech_ended:
+                self._start_confirm_count = 0
+                return False, "idle"
+
+            if has_start_energy and (speech_started or self._start_confirm_count):
+                self._start_confirm_count += 1
+            elif self._start_confirm_count:
+                self._start_confirm_count = 0
+
+            required_chunks = max(1, self.config.speech_start_confirm_chunks)
+            if self._start_confirm_count >= required_chunks:
+                self.in_speech = True
+                self.speech_start_at = now
+                self.last_voice_at = now
+                self._start_confirm_count = 0
+                return False, "started"
+
             return False, "idle"
 
         if speech_started or has_energy:

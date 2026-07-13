@@ -313,6 +313,12 @@ def _runtime_config_from_dict(config: dict[str, Any]) -> VoiceSpeechRuntimeConfi
         min_utterance_ms=int(config.get("min_utterance_ms") or 500),
         max_utterance_ms=int(config.get("max_utterance_ms") or 30_000),
         end_silence_ms=int(config.get("end_silence_ms") or 800),
+        speech_start_rms_threshold=float(
+            config.get("speech_start_rms_threshold") or 0.025
+        ),
+        speech_start_confirm_chunks=int(
+            config.get("speech_start_confirm_chunks") or 1
+        ),
         silence_rms_threshold=float(config.get("silence_rms_threshold") or 0.01),
     )
     return VoiceSpeechRuntimeConfig(
