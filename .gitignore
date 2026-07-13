@@ -8,6 +8,7 @@
 # ��������ݼ��ļ��У�����Ҳ�ų�
 data/
 temp_models/
+models/
 
 # --- Python �����뻷�� ---
 __pycache__/
