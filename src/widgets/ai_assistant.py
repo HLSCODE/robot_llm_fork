@@ -775,6 +775,12 @@ class AIAssistantWidget(QWidget):
                 self._voice_processing = False
                 self._set_input_enabled(True)
                 self.status_label.setText("状态: 未识别到有效语音")
+        elif event_type == "wake_welcome_requested":
+            task_name = str((event.get("data") or {}).get("task_name") or "").strip()
+            if self._main_window is None or not task_name:
+                logger.debug("跳过唤醒欢迎动作: task=%s", task_name or "<empty>")
+            else:
+                self._main_window.execute_wake_welcome_task(task_name)
         elif event_type == "ignored":
             self._add_system_message(event.get("text") or "已忽略")
             if self._speech_runtime_active and is_voice_source:

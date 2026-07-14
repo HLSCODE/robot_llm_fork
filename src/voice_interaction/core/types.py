@@ -28,6 +28,7 @@ VoiceEventType = Literal[
     "speech_started",
     "asr_started",
     "asr_result",
+    "wake_welcome_requested",
     "ignored",
     "intent",
     "text_delta",

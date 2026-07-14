@@ -49,6 +49,8 @@ class Config:
     VOICE_WAKE_COOLDOWN_S: float = 1.5
     VOICE_WAKE_FEEDBACK_ENABLED: bool = True
     VOICE_WAKE_FEEDBACK_TEXT: str = "明德博士在，请说。"
+    VOICE_WAKE_WELCOME_ENABLED: bool = False
+    VOICE_WAKE_WELCOME_TASK: str = ""
     VOICE_SILENCE_RMS_THRESHOLD: float = 0.01
     VOICE_SUPPRESS_MODEL_OUTPUT: bool = True
     VOICE_SHOW_ASR_TIMING: bool = False
@@ -293,6 +295,10 @@ class Config:
         instance.VOICE_WAKE_FEEDBACK_TEXT = os.getenv(
             "VOICE_WAKE_FEEDBACK_TEXT", "明德博士在，请说。"
         )
+        instance.VOICE_WAKE_WELCOME_ENABLED = os.getenv(
+            "VOICE_WAKE_WELCOME_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_WAKE_WELCOME_TASK = os.getenv("VOICE_WAKE_WELCOME_TASK", "")
         instance.VOICE_SILENCE_RMS_THRESHOLD = float(os.getenv("VOICE_SILENCE_RMS_THRESHOLD", "0.01"))
         instance.VOICE_SUPPRESS_MODEL_OUTPUT = os.getenv(
             "VOICE_SUPPRESS_MODEL_OUTPUT", "true"
@@ -791,6 +797,8 @@ class Config:
             "wake_cooldown_s": instance.VOICE_WAKE_COOLDOWN_S,
             "wake_feedback_enabled": instance.VOICE_WAKE_FEEDBACK_ENABLED,
             "wake_feedback_text": instance.VOICE_WAKE_FEEDBACK_TEXT,
+            "wake_welcome_enabled": instance.VOICE_WAKE_WELCOME_ENABLED,
+            "wake_welcome_task": instance.VOICE_WAKE_WELCOME_TASK,
             "silence_rms_threshold": instance.VOICE_SILENCE_RMS_THRESHOLD,
             "suppress_model_output": instance.VOICE_SUPPRESS_MODEL_OUTPUT,
             "show_asr_timing": instance.VOICE_SHOW_ASR_TIMING,

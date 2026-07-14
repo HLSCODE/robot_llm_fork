@@ -2141,6 +2141,19 @@ class MainWindow(QMainWindow):
 
         self._start_sequence_execution(sequence, display_list=None, label="任务组合序列")
 
+    def execute_wake_welcome_task(self, task_name: str) -> None:
+        """Execute a configured wake lifecycle task without affecting the composer."""
+        if self.execution_thread and self.execution_thread.isRunning():
+            self.log_widget.append_log(f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}")
+            return
+
+        entries = StorageManager.load_entries(task_name)
+        if not entries:
+            self.log_widget.append_log(f"跳过唤醒欢迎任务，任务不存在或为空: {task_name}")
+            return
+
+        self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务")
+
     def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
         if self.execution_thread and self.execution_thread.isRunning():
             QMessageBox.warning(self, "警告", "当前已有序列正在执行")
