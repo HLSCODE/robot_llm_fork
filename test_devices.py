@@ -238,6 +238,11 @@ def run_interactive(port: str) -> None:
             time.sleep(0.5 - gap)
         _last_cmd_time = time.monotonic()
 
+    def _gripper_move(percent: int):
+        percent = max(0, min(100, percent))
+        gripper.move_to(percent)
+        print(f"  夹爪: 移动到 {percent}%")
+
     def _gripper_dump():
         gripper_dump(transport, GRIPPER_ADDRESS)
 
@@ -283,19 +288,19 @@ def run_interactive(port: str) -> None:
 
     commands = {
         # ---- 夹爪 (此型号不支持 0x0109 寄存器，用 move_to 替代 grip/release) ----
-        "grip":         lambda: (gripper.move_to(100), print("  夹爪: 夹取 (完全闭合)")),
-        "release":      lambda: (gripper.move_to(0), print("  夹爪: 释放 (完全张开)")),
-        "gripper_open": lambda: (gripper.move_to(80), print(f"  夹爪: 闭合到 80%")),
-        "gripper_init": lambda: (gripper.initialize(), print("  夹爪: 初始化")),
-        "gripper_pos":  lambda: print(f"  夹爪位置: {gripper.read_position()}%"),
-        "gripper_dump": lambda: _gripper_dump(),
-        "scan_gripper": lambda: _scan_gripper(bus),
+        "grip":         lambda *a: (gripper.move_to(100), print("  夹爪: 夹取 (完全闭合)")),
+        "release":      lambda *a: (gripper.move_to(0), print("  夹爪: 释放 (完全张开)")),
+        "gripper_move": lambda *a: _gripper_move(int(a[0]) if a else 50),
+        "gripper_init": lambda *a: (gripper.initialize(), print("  夹爪: 初始化")),
+        "gripper_pos":  lambda *a: print(f"  夹爪位置: {gripper.read_position()}%"),
+        "gripper_dump": lambda *a: _gripper_dump(),
+        "scan_gripper": lambda *a: _scan_gripper(bus),
         # ---- 旋转电机 ----
         "rot_enable":   lambda: motor_enable(bus, ROTATION_ADDRESS),
         "rot_disable":  lambda: motor_disable(bus, ROTATION_ADDRESS),
         "rot_dump":     lambda: motor_dump(bus, ROTATION_ADDRESS, "旋转"),
-        "rot_cw":       lambda: _rot_motor("正转", STEPS),
-        "rot_ccw":      lambda: _rot_motor("反转", -STEPS),
+        "rot_cw":       lambda *a: _rot_motor("正转", int(a[0]) if a else STEPS),
+        "rot_ccw":      lambda *a: _rot_motor("反转", -int(a[0]) if a else -STEPS),
         "rot_pos":      lambda: print(f"  旋转位置: {rot_motor.read_actual_position()} steps"),
         "rot_status":   lambda: print(f"  旋转状态: {rot_motor.read_status().name}"),
         "rot_stop":     lambda: (motor_stop(bus, ROTATION_ADDRESS), _cmd_gap()),
@@ -304,8 +309,8 @@ def run_interactive(port: str) -> None:
         "lift_enable":  lambda: motor_enable(bus, LIFT_ADDRESS),
         "lift_disable": lambda: motor_disable(bus, LIFT_ADDRESS),
         "lift_dump":    lambda: motor_dump(bus, LIFT_ADDRESS, "升降"),
-        "lift_up":      lambda: _lift_motor("上升", STEPS),
-        "lift_down":    lambda: _lift_motor("下降", -STEPS),
+        "lift_up":      lambda *a: _lift_motor("上升", int(a[0]) if a else STEPS),
+        "lift_down":    lambda *a: _lift_motor("下降", -int(a[0]) if a else -STEPS),
         "lift_pos":     lambda: print(f"  升降位置: {lift_motor.read_actual_position()} steps"),
         "lift_status":  lambda: print(f"  升降状态: {lift_motor.read_status().name}"),
         "lift_stop":    lambda: (motor_stop(bus, LIFT_ADDRESS), _cmd_gap()),
@@ -340,24 +345,24 @@ def run_interactive(port: str) -> None:
         print("    rot_enable     使能旋转电机")
         print("    lift_enable    使能升降电机")
         print("  ── 运动 (旋转) ──")
-        print("    rot_cw         正转")
-        print("    rot_ccw        反转")
+        print("    rot_cw [步数]   正转 (默认5000)")
+        print("    rot_ccw [步数]  反转 (默认5000)")
         print("    rot_stop       停止")
         print("    rot_home       当前位置设为零")
         print("    rot_pos        读取位置")
         print("    rot_status     读取状态")
         print("  ── 运动 (升降) ──")
-        print("    lift_up        上升")
-        print("    lift_down      下降")
+        print("    lift_up [步数]  上升 (默认5000)")
+        print("    lift_down [步数] 下降 (默认5000)")
         print("    lift_stop      停止")
         print("    lift_home      当前位置设为零")
         print("    lift_pos       读取位置")
         print("    lift_status    读取状态")
-        print("  ── 夹爪 (注意: grip/release 实际为完全闭合/张开) ──")
+        print("  ── 夹爪 ──")
         print("    gripper_init   初始化夹爪")
-        print("    gripper_open   张开到 80%")
-        print("    grip           夹取")
-        print("    release        释放")
+        print("    gripper_move N 夹爪移动到 N% (0-100)")
+        print("    grip           夹取 (完全闭合)")
+        print("    release        释放 (完全张开)")
         print("    gripper_pos    读取位置")
         print("    scan_gripper   扫描夹爪地址")
         print("  ── 其他 ──")
@@ -373,11 +378,16 @@ def run_interactive(port: str) -> None:
 
         while True:
             try:
-                cmd = input("\n> ").strip().lower()
+                raw = input("\n> ").strip()
+                if not raw:
+                    continue
+                parts = raw.lower().split(maxsplit=1)
+                cmd = parts[0]
+                arg = parts[1] if len(parts) > 1 else None
                 if cmd == "exit":
                     break
                 if cmd in commands:
-                    commands[cmd]()
+                    commands[cmd](arg) if arg is not None else commands[cmd]()
                 elif cmd:
                     print(f"  未知命令: {cmd}，输入 help 查看可用命令")
             except KeyboardInterrupt:

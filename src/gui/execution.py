@@ -9,6 +9,7 @@ from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
 from ..base_move.move_controller import RobotMoveController
 from ..core.config_loader import Config
 from ..actions.circle_dispense import execute_right_arm_circle_dispense
+from ..devices.tapping_controller import TappingController
 class ExecutionThread(QThread):
     started = pyqtSignal()
     finished = pyqtSignal()
@@ -370,6 +371,8 @@ class ExecutionThread(QThread):
                 stop_requested=lambda: self._stop_requested,
                 paused=lambda: self._paused,
             )
+        elif executor == '加粉装置':
+            return self._execute_tapping(params)
         else:
             self.log_message.emit(f"未知的执行器: {executor}")
             return False
@@ -471,6 +474,30 @@ class ExecutionThread(QThread):
         except Exception as e:
             self.log_message.emit(f"执行吸液枪出错: {str(e)}")
             return False
+
+
+    def _execute_tapping(self, params: dict) -> bool:
+        """执行加粉装置动作（夹爪/针升降/针旋转）。"""
+        from ..devices.tapping_controller import OPERATIONS
+
+        operation = params.get('操作', '')
+        self.log_message.emit(f"加粉装置动作: {operation}")
+
+        if operation not in OPERATIONS:
+            self.log_message.emit(f"未知的加粉装置操作: {operation}")
+            return False
+
+        ctrl = TappingController.from_config()
+        try:
+            ctrl.enable_all()
+            OPERATIONS[operation](ctrl, **params)
+            self.log_message.emit(f"加粉装置 {operation} 执行完成")
+            return True
+        except Exception as e:
+            self.log_message.emit(f"加粉装置 {operation} 执行失败: {e}")
+            return False
+        finally:
+            ctrl.close()
 
 
     def _execute_inspect(self, params: dict) -> bool:

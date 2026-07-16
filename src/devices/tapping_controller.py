@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from ..device_control_sdk import (
@@ -20,7 +21,8 @@ from ..device_control_sdk import (
     StepperBus,
     ElectricGripper,
 )
-from ..device_control_sdk.devices.stepper_motor import MSeriesRegister
+from ..device_control_sdk.devices.electric_gripper import MotionStatus
+from ..device_control_sdk.devices.stepper_motor import MotorStatus, MSeriesRegister
 from ..core.config_loader import Config
 
 logger = logging.getLogger(__name__)
@@ -64,10 +66,33 @@ class TappingController:
         """关闭串口连接。"""
         self.transport.close()
 
+    # ---- 等待到位 ----
+
+    def _wait_for_gripper(self, timeout: float = 8.0, poll_interval: float = 0.1) -> None:
+        """轮询夹爪运动状态，直到到达目标位置或超时。"""
+        start = time.time()
+        while time.time() - start < timeout:
+            status = self.gripper.read_motion_status()
+            if status == MotionStatus.REACHED_TARGET:
+                return
+            time.sleep(poll_interval)
+        raise TimeoutError(f"夹爪运动超时 ({timeout}s)")
+
+    def _wait_for_motor(self, motor, timeout: float = 15.0, poll_interval: float = 0.1) -> None:
+        """轮询步进电机状态，直到空闲/到位或超时。"""
+        start = time.time()
+        while time.time() - start < timeout:
+            status = motor.read_status()
+            if status == MotorStatus.IDLE_OR_ARRIVED:
+                return
+            time.sleep(poll_interval)
+        raise TimeoutError(f"电机 {motor.address} 运动超时 ({timeout}s)")
+
     # ---- 夹爪 ----
     def gripper_move_to(self, percent: int) -> None:
-        """设置夹爪开度 (0=全开, 100=全闭)。"""
+        """设置夹爪开度 (0=全开, 100=全闭)，等待到位。"""
         self.gripper.move_to(percent)
+        self._wait_for_gripper()
 
     def gripper_grip(self) -> None:
         """夹紧 (完全闭合)。"""
@@ -79,9 +104,10 @@ class TappingController:
 
     # ---- 针升降 ----
     def lift_move_to(self, steps: int) -> None:
-        """升降电机运动到绝对位置。"""
+        """升降电机运动到绝对位置，等待到位。"""
         motor = self.bus.motor(self.lift_address)
         motor.move_to(steps, rpm=DEFAULT_SPEED_RPM, acceleration_ms=DEFAULT_ACCEL_MS)
+        self._wait_for_motor(motor)
 
     def lift_up(self, steps: int = DEFAULT_STEPS) -> None:
         """针上升。"""
@@ -101,9 +127,10 @@ class TappingController:
 
     # ---- 针旋转 ----
     def rotation_move_to(self, steps: int) -> None:
-        """旋转电机运动到绝对位置。"""
+        """旋转电机运动到绝对位置，等待到位。"""
         motor = self.bus.motor(self.rotation_address)
         motor.move_to(steps, rpm=DEFAULT_SPEED_RPM, acceleration_ms=DEFAULT_ACCEL_MS)
+        self._wait_for_motor(motor)
 
     def rotation_cw(self, steps: int = DEFAULT_STEPS) -> None:
         """正转。"""
