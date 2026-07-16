@@ -21,8 +21,57 @@ class Config:
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str = ""
-    MODEL_PROVIDER: str = "openai"
-
+    LLM_DEFAULT_PROVIDER: str = "openai"
+    LLM_DEFAULT_TEMPERATURE: float = 0.3
+    LLM_DEFAULT_MAX_TOKENS: int = 512
+    LLM_REQUEST_TIMEOUT_S: float = 60.0
+    VOICE_SESSION_TIMEOUT_S: float = 30.0
+    VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S: float = 30.0
+    VOICE_AUTO_EXECUTE_COMMAND: bool = False
+    VOICE_TTS_ENABLED: bool = False
+    VOICE_INPUT_ENABLED: bool = False
+    VOICE_AUDIO_SAMPLE_RATE: int = 16000
+    VOICE_AUDIO_CHANNELS: int = 1
+    VOICE_AUDIO_BLOCK_MS: int = 100
+    VOICE_AUDIO_QUEUE_SIZE: int = 300
+    VOICE_AUDIO_LATENCY: str = "high"
+    VOICE_AUDIO_DEVICE: str = ""
+    VOICE_AUDIO_SHOW_STATUS: bool = False
+    VOICE_VAD_MODEL: str = "fsmn-vad"
+    VOICE_VAD_CHUNK_MS: int = 200
+    VOICE_MIN_UTTERANCE_MS: int = 500
+    VOICE_MAX_UTTERANCE_MS: int = 30000
+    VOICE_END_SILENCE_MS: int = 800
+    VOICE_SPEECH_START_RMS_THRESHOLD: float = 0.025
+    VOICE_SPEECH_START_CONFIRM_CHUNKS: int = 1
+    VOICE_LISTENING_TIMEOUT_S: float = 8.0
+    VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S: float = 25.0
+    VOICE_WAKE_COOLDOWN_S: float = 1.5
+    VOICE_WAKE_FEEDBACK_ENABLED: bool = True
+    VOICE_WAKE_FEEDBACK_TEXT: str = "明德博士在，请说。"
+    VOICE_WAKE_WELCOME_ENABLED: bool = False
+    VOICE_WAKE_WELCOME_TASK: str = ""
+    VOICE_SILENCE_RMS_THRESHOLD: float = 0.01
+    VOICE_SUPPRESS_MODEL_OUTPUT: bool = True
+    VOICE_SHOW_ASR_TIMING: bool = False
+    VOICE_ASR_MODEL: str = "iic/SenseVoiceSmall"
+    VOICE_ASR_PUNC_MODEL: str = "ct-punc"
+    VOICE_ASR_DEVICE: str = ""
+    VOICE_ASR_BATCH_SIZE_S: int = 60
+    VOICE_WAKE_ENGINE: str = "sherpa"
+    VOICE_WAKE_AUTO_TRIGGER: bool = False
+    VOICE_KWS_ENCODER: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+    VOICE_KWS_DECODER: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+    VOICE_KWS_JOINER: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx"
+    VOICE_KWS_TOKENS: str = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt"
+    VOICE_KWS_KEYWORDS_FILE: str = "models/kws/keywords.txt"
+    VOICE_KWS_PROVIDER: str = "cpu"
+    VOICE_KWS_THRESHOLD: float = 0.35
+    VOICE_KWS_SCORE: float = 1.5
+    VOICE_KWS_NUM_THREADS: int = 1
+    VOICE_KWS_MAX_ACTIVE_PATHS: int = 4
+    VOICE_OPENWAKEWORD_MODEL_PATHS: str = ""
+    VOICE_OPENWAKEWORD_THRESHOLD: float = 0.6
 
     # 系统配置
     LOG_LEVEL: str = "INFO"
@@ -135,11 +184,13 @@ class Config:
     WEBSOCKET_HOST: str = "0.0.0.0"
     WEBSOCKET_PORT: int = 8765
 
-    # MiniCPM 聊天代理配置
+    # MiniCPM Realtime / 聊天配置
     MINICPM_GATEWAY_HOST: str = "localhost"
     MINICPM_GATEWAY_PORT: int = 8006
-    MINICPM_GATEWAY_SCHEME: str = "https"
+    MINICPM_WS_SCHEME: str = "wss"
     MINICPM_GATEWAY_PATH_PREFIX: str = ""
+    MINICPM_REALTIME_PATH: str = "/v1/realtime"
+    MINICPM_MODEL: str = "minicpm-o"
     MINICPM_ASK_ENABLED: bool = True
     MINICPM_ASK_API_KEY: str = ""
     MINICPM_ASK_BASE_URL: str = ""
@@ -196,7 +247,99 @@ class Config:
         instance.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
         instance.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
         instance.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
-        instance.MODEL_PROVIDER = os.getenv("MODEL_PROVIDER", "openai")
+        instance.LLM_DEFAULT_PROVIDER = os.getenv("LLM_DEFAULT_PROVIDER", "openai")
+        instance.LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.3"))
+        instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
+        instance.LLM_REQUEST_TIMEOUT_S = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "60"))
+        instance.VOICE_SESSION_TIMEOUT_S = float(os.getenv("VOICE_SESSION_TIMEOUT_S", "30"))
+        instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S = float(os.getenv(
+            "VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S", "30"
+        ))
+        instance.VOICE_AUTO_EXECUTE_COMMAND = os.getenv(
+            "VOICE_AUTO_EXECUTE_COMMAND", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_TTS_ENABLED = os.getenv(
+            "VOICE_TTS_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_INPUT_ENABLED = os.getenv(
+            "VOICE_INPUT_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_AUDIO_SAMPLE_RATE = int(os.getenv("VOICE_AUDIO_SAMPLE_RATE", "16000"))
+        instance.VOICE_AUDIO_CHANNELS = int(os.getenv("VOICE_AUDIO_CHANNELS", "1"))
+        instance.VOICE_AUDIO_BLOCK_MS = int(os.getenv("VOICE_AUDIO_BLOCK_MS", "100"))
+        instance.VOICE_AUDIO_QUEUE_SIZE = int(os.getenv("VOICE_AUDIO_QUEUE_SIZE", "300"))
+        instance.VOICE_AUDIO_LATENCY = os.getenv("VOICE_AUDIO_LATENCY", "high")
+        instance.VOICE_AUDIO_DEVICE = os.getenv("VOICE_AUDIO_DEVICE", "")
+        instance.VOICE_AUDIO_SHOW_STATUS = os.getenv(
+            "VOICE_AUDIO_SHOW_STATUS", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_VAD_MODEL = os.getenv("VOICE_VAD_MODEL", "fsmn-vad")
+        instance.VOICE_VAD_CHUNK_MS = int(os.getenv("VOICE_VAD_CHUNK_MS", "200"))
+        instance.VOICE_MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "500"))
+        instance.VOICE_MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "30000"))
+        instance.VOICE_END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "800"))
+        instance.VOICE_SPEECH_START_RMS_THRESHOLD = float(os.getenv(
+            "VOICE_SPEECH_START_RMS_THRESHOLD", "0.025"
+        ))
+        instance.VOICE_SPEECH_START_CONFIRM_CHUNKS = int(os.getenv(
+            "VOICE_SPEECH_START_CONFIRM_CHUNKS", "1"
+        ))
+        instance.VOICE_LISTENING_TIMEOUT_S = float(os.getenv("VOICE_LISTENING_TIMEOUT_S", "8.0"))
+        instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S = float(os.getenv(
+            "VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S", "25.0"
+        ))
+        instance.VOICE_WAKE_COOLDOWN_S = float(os.getenv("VOICE_WAKE_COOLDOWN_S", "1.5"))
+        instance.VOICE_WAKE_FEEDBACK_ENABLED = os.getenv(
+            "VOICE_WAKE_FEEDBACK_ENABLED", "true"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_WAKE_FEEDBACK_TEXT = os.getenv(
+            "VOICE_WAKE_FEEDBACK_TEXT", "明德博士在，请说。"
+        )
+        instance.VOICE_WAKE_WELCOME_ENABLED = os.getenv(
+            "VOICE_WAKE_WELCOME_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_WAKE_WELCOME_TASK = os.getenv("VOICE_WAKE_WELCOME_TASK", "")
+        instance.VOICE_SILENCE_RMS_THRESHOLD = float(os.getenv("VOICE_SILENCE_RMS_THRESHOLD", "0.01"))
+        instance.VOICE_SUPPRESS_MODEL_OUTPUT = os.getenv(
+            "VOICE_SUPPRESS_MODEL_OUTPUT", "true"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_SHOW_ASR_TIMING = os.getenv(
+            "VOICE_SHOW_ASR_TIMING", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_ASR_MODEL = os.getenv("VOICE_ASR_MODEL", "iic/SenseVoiceSmall")
+        instance.VOICE_ASR_PUNC_MODEL = os.getenv("VOICE_ASR_PUNC_MODEL", "ct-punc")
+        instance.VOICE_ASR_DEVICE = os.getenv("VOICE_ASR_DEVICE", "")
+        instance.VOICE_ASR_BATCH_SIZE_S = int(os.getenv("VOICE_ASR_BATCH_SIZE_S", "60"))
+        instance.VOICE_WAKE_ENGINE = os.getenv("VOICE_WAKE_ENGINE", "sherpa")
+        instance.VOICE_WAKE_AUTO_TRIGGER = os.getenv(
+            "VOICE_WAKE_AUTO_TRIGGER", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.VOICE_KWS_ENCODER = os.getenv(
+            "VOICE_KWS_ENCODER",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+        )
+        instance.VOICE_KWS_DECODER = os.getenv(
+            "VOICE_KWS_DECODER",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+        )
+        instance.VOICE_KWS_JOINER = os.getenv(
+            "VOICE_KWS_JOINER",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx",
+        )
+        instance.VOICE_KWS_TOKENS = os.getenv(
+            "VOICE_KWS_TOKENS",
+            "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt",
+        )
+        instance.VOICE_KWS_KEYWORDS_FILE = os.getenv(
+            "VOICE_KWS_KEYWORDS_FILE", "models/kws/keywords.txt"
+        )
+        instance.VOICE_KWS_PROVIDER = os.getenv("VOICE_KWS_PROVIDER", "cpu")
+        instance.VOICE_KWS_THRESHOLD = float(os.getenv("VOICE_KWS_THRESHOLD", "0.35"))
+        instance.VOICE_KWS_SCORE = float(os.getenv("VOICE_KWS_SCORE", "1.5"))
+        instance.VOICE_KWS_NUM_THREADS = int(os.getenv("VOICE_KWS_NUM_THREADS", "1"))
+        instance.VOICE_KWS_MAX_ACTIVE_PATHS = int(os.getenv("VOICE_KWS_MAX_ACTIVE_PATHS", "4"))
+        instance.VOICE_OPENWAKEWORD_MODEL_PATHS = os.getenv("VOICE_OPENWAKEWORD_MODEL_PATHS", "")
+        instance.VOICE_OPENWAKEWORD_THRESHOLD = float(os.getenv("VOICE_OPENWAKEWORD_THRESHOLD", "0.6"))
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         instance.RUN_MODE = os.getenv("RUN_MODE", "server")
         instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
@@ -316,11 +459,13 @@ class Config:
         instance.WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
         instance.WEBSOCKET_PORT = int(os.getenv("WEBSOCKET_PORT", "8765"))
 
-        # MiniCPM 聊天代理配置
+        # MiniCPM Realtime / 聊天配置
         instance.MINICPM_GATEWAY_HOST = os.getenv("MINICPM_GATEWAY_HOST", "localhost")
         instance.MINICPM_GATEWAY_PORT = int(os.getenv("MINICPM_GATEWAY_PORT", "8006"))
-        instance.MINICPM_GATEWAY_SCHEME = os.getenv("MINICPM_GATEWAY_SCHEME", "https")
+        instance.MINICPM_WS_SCHEME = os.getenv("MINICPM_WS_SCHEME", "wss")
         instance.MINICPM_GATEWAY_PATH_PREFIX = os.getenv("MINICPM_GATEWAY_PATH_PREFIX", "")
+        instance.MINICPM_REALTIME_PATH = os.getenv("MINICPM_REALTIME_PATH", "/v1/realtime")
+        instance.MINICPM_MODEL = os.getenv("MINICPM_MODEL", "minicpm-o")
         instance.MINICPM_ASK_ENABLED = os.getenv(
             "MINICPM_ASK_ENABLED", "true").lower() in ("true", "1", "yes")
         instance.MINICPM_ASK_API_KEY = os.getenv("MINICPM_ASK_API_KEY", "")
@@ -361,8 +506,15 @@ class Config:
 
     @classmethod
     def is_api_key_set(cls) -> bool:
-        """检查 OpenAI API Key 是否已配置"""
-        key = cls.get_instance().OPENAI_API_KEY
+        """检查默认 LLM provider 是否已配置。"""
+        instance = cls.get_instance()
+        provider = (
+            instance.LLM_DEFAULT_PROVIDER
+            or "openai"
+        ).lower()
+        if provider == "minicpm":
+            return bool(instance.MINICPM_GATEWAY_HOST)
+        key = instance.OPENAI_API_KEY
         return bool(key and key != "your_openai_key_here")
 
     @classmethod
@@ -584,18 +736,90 @@ class Config:
         }
 
     @classmethod
-    def get_minicpm_proxy_config(cls) -> dict:
-        """获取 MiniCPM 聊天代理配置"""
+    def get_minicpm_config(cls) -> dict:
+        """获取 MiniCPM Realtime / 聊天配置"""
         instance = cls.get_instance()
         return {
             "gateway_host": instance.MINICPM_GATEWAY_HOST,
             "gateway_port": instance.MINICPM_GATEWAY_PORT,
-            "gateway_scheme": instance.MINICPM_GATEWAY_SCHEME,
+            "ws_scheme": instance.MINICPM_WS_SCHEME,
             "gateway_path_prefix": instance.MINICPM_GATEWAY_PATH_PREFIX,
+            "realtime_path": instance.MINICPM_REALTIME_PATH,
             "ask_enabled": instance.MINICPM_ASK_ENABLED,
             "ask_api_key": instance.MINICPM_ASK_API_KEY or instance.OPENAI_API_KEY,
             "ask_base_url": instance.MINICPM_ASK_BASE_URL or instance.OPENAI_BASE_URL,
             "ask_model": instance.MINICPM_ASK_MODEL,
+        }
+
+    @classmethod
+    def get_llm_config(cls) -> dict:
+        """获取 LLM 能力层配置摘要。"""
+        instance = cls.get_instance()
+        return {
+            "default_provider": instance.LLM_DEFAULT_PROVIDER,
+            "supported_providers": ["openai", "deepseek", "dashscope", "minicpm"],
+            "openai_model": instance.OPENAI_MODEL,
+            "openai_base_url": instance.OPENAI_BASE_URL,
+            "minicpm_model": instance.MINICPM_MODEL,
+            "minicpm_ws_scheme": instance.MINICPM_WS_SCHEME,
+            "minicpm_realtime_path": instance.MINICPM_REALTIME_PATH,
+            "timeout_s": instance.LLM_REQUEST_TIMEOUT_S,
+        }
+
+    @classmethod
+    def get_voice_interaction_config(cls) -> dict:
+        """获取唤醒后语音会话配置。"""
+        instance = cls.get_instance()
+        return {
+            "session_timeout_s": instance.VOICE_SESSION_TIMEOUT_S,
+            "speech_startup_wait_timeout_s": instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S,
+            "auto_execute_command": instance.VOICE_AUTO_EXECUTE_COMMAND,
+            "tts_enabled": instance.VOICE_TTS_ENABLED,
+            "speech_input_enabled": instance.VOICE_INPUT_ENABLED,
+            "wake_word_enabled": instance.VOICE_INPUT_ENABLED,
+            "asr_enabled": instance.VOICE_INPUT_ENABLED,
+            "audio_sample_rate": instance.VOICE_AUDIO_SAMPLE_RATE,
+            "audio_channels": instance.VOICE_AUDIO_CHANNELS,
+            "audio_block_ms": instance.VOICE_AUDIO_BLOCK_MS,
+            "audio_queue_size": instance.VOICE_AUDIO_QUEUE_SIZE,
+            "audio_latency": instance.VOICE_AUDIO_LATENCY,
+            "audio_device": instance.VOICE_AUDIO_DEVICE,
+            "audio_show_status": instance.VOICE_AUDIO_SHOW_STATUS,
+            "vad_model": instance.VOICE_VAD_MODEL,
+            "vad_chunk_ms": instance.VOICE_VAD_CHUNK_MS,
+            "min_utterance_ms": instance.VOICE_MIN_UTTERANCE_MS,
+            "max_utterance_ms": instance.VOICE_MAX_UTTERANCE_MS,
+            "end_silence_ms": instance.VOICE_END_SILENCE_MS,
+            "speech_start_rms_threshold": instance.VOICE_SPEECH_START_RMS_THRESHOLD,
+            "speech_start_confirm_chunks": instance.VOICE_SPEECH_START_CONFIRM_CHUNKS,
+            "listening_timeout_s": instance.VOICE_LISTENING_TIMEOUT_S,
+            "follow_up_listening_timeout_s": instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S,
+            "wake_cooldown_s": instance.VOICE_WAKE_COOLDOWN_S,
+            "wake_feedback_enabled": instance.VOICE_WAKE_FEEDBACK_ENABLED,
+            "wake_feedback_text": instance.VOICE_WAKE_FEEDBACK_TEXT,
+            "wake_welcome_enabled": instance.VOICE_WAKE_WELCOME_ENABLED,
+            "wake_welcome_task": instance.VOICE_WAKE_WELCOME_TASK,
+            "silence_rms_threshold": instance.VOICE_SILENCE_RMS_THRESHOLD,
+            "suppress_model_output": instance.VOICE_SUPPRESS_MODEL_OUTPUT,
+            "show_asr_timing": instance.VOICE_SHOW_ASR_TIMING,
+            "asr_model": instance.VOICE_ASR_MODEL,
+            "asr_punc_model": instance.VOICE_ASR_PUNC_MODEL,
+            "asr_device": instance.VOICE_ASR_DEVICE,
+            "asr_batch_size_s": instance.VOICE_ASR_BATCH_SIZE_S,
+            "wake_engine": instance.VOICE_WAKE_ENGINE,
+            "wake_auto_trigger": instance.VOICE_WAKE_AUTO_TRIGGER,
+            "kws_encoder": instance.VOICE_KWS_ENCODER,
+            "kws_decoder": instance.VOICE_KWS_DECODER,
+            "kws_joiner": instance.VOICE_KWS_JOINER,
+            "kws_tokens": instance.VOICE_KWS_TOKENS,
+            "kws_keywords_file": instance.VOICE_KWS_KEYWORDS_FILE,
+            "kws_provider": instance.VOICE_KWS_PROVIDER,
+            "kws_threshold": instance.VOICE_KWS_THRESHOLD,
+            "kws_score": instance.VOICE_KWS_SCORE,
+            "kws_num_threads": instance.VOICE_KWS_NUM_THREADS,
+            "kws_max_active_paths": instance.VOICE_KWS_MAX_ACTIVE_PATHS,
+            "openwakeword_model_paths": instance.VOICE_OPENWAKEWORD_MODEL_PATHS,
+            "openwakeword_threshold": instance.VOICE_OPENWAKEWORD_THRESHOLD,
         }
     
     @classmethod

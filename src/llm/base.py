@@ -1,10 +1,14 @@
 """
-LLM 抽象基类
-定义 LLM 客户端的接口规范
+LLM 抽象基类。
+
+保留旧 `LLMClient.plan()` 入口，同时新增 chat / stream_chat 等通用模型能力。
 """
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
+
+from .types import LLMCapability, LLMChatResult, LLMMessage, LLMStreamEvent
 
 
 @dataclass
@@ -23,25 +27,10 @@ class LLMPlanResult:
         return self.confidence >= 0.5 and self.error is None
 
 
-class LLMClient(ABC):
+class BaseLLMClient(ABC):
     """
-    LLM 客户端抽象基类
-    定义与大模型交互的接口规范
+    通用 LLM 客户端抽象基类。
     """
-
-    @abstractmethod
-    def plan(self, user_text: str, skill_summaries: List[Dict[str, Any]]) -> LLMPlanResult:
-        """
-        分析用户输入，返回技能调用参数
-
-        Args:
-            user_text: 用户的自然语言输入
-            skill_summaries: 技能摘要列表
-
-        Returns:
-            LLMPlanResult: 解析结果
-        """
-        pass
 
     @abstractmethod
     def is_available(self) -> bool:
@@ -60,5 +49,54 @@ class LLMClient(ABC):
 
         Returns:
             模型名称
+        """
+        pass
+
+    @abstractmethod
+    def get_provider_name(self) -> str:
+        """获取 provider 名称。"""
+        pass
+
+    @abstractmethod
+    def capabilities(self) -> set[LLMCapability]:
+        """获取 provider 支持的能力集合。"""
+        pass
+
+    async def chat(
+        self,
+        messages: List[LLMMessage],
+        **options: Any,
+    ) -> LLMChatResult:
+        """普通非流式对话。"""
+        raise NotImplementedError
+
+    async def stream_chat(
+        self,
+        messages: List[LLMMessage],
+        **options: Any,
+    ) -> AsyncIterator[LLMStreamEvent]:
+        """流式对话。"""
+        raise NotImplementedError
+
+    async def close(self) -> None:
+        """释放底层资源。"""
+
+
+class LLMClient(BaseLLMClient):
+    """
+    兼容旧规划接口的 LLM 客户端抽象基类。
+    """
+
+    @abstractmethod
+    def plan(self, user_text: str, skill_summaries: List[Dict[str, Any]]) -> LLMPlanResult:
+        """
+        分析用户输入，返回技能调用参数。
+
+        Args:
+            user_text: 用户的自然语言输入
+            skill_summaries: 技能摘要列表
+
+        Returns:
+            LLMPlanResult: 解析结果
         """
         pass

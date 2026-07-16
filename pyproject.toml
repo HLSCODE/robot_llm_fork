@@ -8,6 +8,8 @@ dependencies = [
     "openai>=1.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
     "opencv-python>=4.13.0.92",
     "pyserial>=3.5",
     "ultralytics>=8.4.36",
@@ -15,7 +17,23 @@ dependencies = [
     "robotic-arm>=1.1.5",
     "pyrealsense2>=2.57.7.10387",
     "websockets>=12.0",
+    "sherpa-onnx-core>=1.13.4",
 ]
+
+[project.optional-dependencies]
+voice = [
+    "funasr>=1.2.0",
+    "llvmlite>=0.44.0",
+    "numba>=0.61.0",
+    "pypinyin>=0.50",
+    "sounddevice>=0.5",
+    "torch>=2.3",
+    "torchaudio>=2.11.0",
+]
+kws = [
+    "sherpa-onnx>=1.10.0",
+]
+openwakeword = []
 
 [project.scripts]
 t5l-dgus = "src.expression_display.t5l_dgusii.cli:main"
@@ -35,3 +53,12 @@ default = true
 
 [dependency-groups]
 dev = []
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

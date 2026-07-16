@@ -29,7 +29,7 @@
 - AI 规划
 - 设备状态管理
 - RealSense 相机状态查询与帧订阅
-- MiniCPM 聊天代理
+- LLM 聊天 / MiniCPM Realtime
 
 主连接地址：
 
@@ -129,12 +129,18 @@ SIMULATION_MODE=false
 WEBSOCKET_HOST=0.0.0.0
 WEBSOCKET_PORT=8765
 
+LLM_DEFAULT_PROVIDER=dashscope
+OPENAI_API_KEY=
+OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+OPENAI_MODEL=qwen-turbo
+
 REALSENSE_DEVICE_SN=153122077516
 REALSENSE_DEVICE_NAMES=
 
 MINICPM_GATEWAY_HOST=10.10.17.13
 MINICPM_GATEWAY_PORT=8006
-MINICPM_GATEWAY_SCHEME=https
+MINICPM_WS_SCHEME=wss
+MINICPM_REALTIME_PATH=/v1/realtime
 
 MINICPM_ASK_ENABLED=true
 MINICPM_ASK_API_KEY=
@@ -150,11 +156,16 @@ MINICPM_ASK_MODEL=qwen-turbo
 | `SIMULATION_MODE` | 是否模拟模式 | `true` 时不连接真实硬件 |
 | `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `0.0.0.0` |
 | `WEBSOCKET_PORT` | WebSocket 监听端口 | 默认 `8765` |
+| `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
+| `OPENAI_API_KEY` | OpenAI-compatible API Key | `openai` / `deepseek` / `dashscope` 使用 |
+| `OPENAI_BASE_URL` | OpenAI-compatible Base URL | 留空时使用 provider 默认值 |
+| `OPENAI_MODEL` | OpenAI-compatible 模型名 | 如 `qwen-turbo` / `gpt-4o` |
 | `REALSENSE_DEVICE_SN` | RealSense 序列号 | 支持逗号分隔多台 |
 | `REALSENSE_DEVICE_NAMES` | RealSense 名称 | 与序列号一一对应 |
-| `MINICPM_GATEWAY_HOST` | MiniCPM 网关主机 | 聊天代理使用 |
-| `MINICPM_GATEWAY_PORT` | MiniCPM 网关端口 | 聊天代理使用 |
-| `MINICPM_GATEWAY_SCHEME` | 网关协议 | `http` 或 `https` |
+| `MINICPM_GATEWAY_HOST` | MiniCPM 网关主机 | `LLM_DEFAULT_PROVIDER=minicpm`、task 默认 provider 为 `minicpm` 或请求指定 `provider=minicpm` 时使用 |
+| `MINICPM_GATEWAY_PORT` | MiniCPM 网关端口 | 同上 |
+| `MINICPM_WS_SCHEME` | MiniCPM WebSocket 协议 | `wss` 或 `ws`，默认 `wss` |
+| `MINICPM_REALTIME_PATH` | Realtime Chat 路径 | 最终连接为 `{MINICPM_WS_SCHEME}://HOST:PORT{PATH_PREFIX}{REALTIME_PATH}?mode=chat` |
 | `MINICPM_ASK_ENABLED` | 是否启用指令分类 | 仅影响是否触发 `minicpm_instruction` / AI 规划，不影响 MiniCPM 聊天回复 |
 | `MINICPM_ASK_API_KEY` | 指令分类模型的 API Key | 留空时回退到 `OPENAI_API_KEY`；若两者都为空，则跳过分类，不自动规划 |
 | `MINICPM_ASK_BASE_URL` | 指令分类模型 Base URL | 留空时回退到 `OPENAI_BASE_URL` |
@@ -1617,7 +1628,7 @@ ws.onmessage = (event) => {
 - AI 规划和 `minicpm_instruction` 不是同一个概念。
 - `minicpm_instruction` 只表示“这句话被判定为机器人指令”，不代表任务序列已经生成。
 - 真正的任务序列只会出现在 `ai_preview_ready.sequence` 中。
-- AI 规划依赖 `OPENAI_API_KEY` 对应的 LLM 配置；如果未配置，`ai_chat` 会直接返回 `error`，聊天链路触发时则可能只看到 `minicpm_instruction`，看不到后续规划事件。
+- AI 规划依赖 `TaskProfile.default_provider` 或 `LLM_DEFAULT_PROVIDER` 解析出的 provider；如果 provider 不可用，`ai_chat` 会直接返回 `error`，聊天链路触发时则可能只看到 `minicpm_instruction`，看不到后续规划事件。
 
 ### 11.0 AI 规划完整事件流
 
@@ -1760,7 +1771,7 @@ ws.onmessage = (event) => {
 ```json
 {
   "event": "error",
-  "message": "LLM 不可用，请检查 config.env 中的 API Key 配置"
+  "message": "LLM 不可用，请检查 config.env 中的模型配置"
 }
 ```
 
@@ -1768,7 +1779,7 @@ ws.onmessage = (event) => {
 
 - `ai_chat.text` 为空
 - 当前已有一轮 AI 规划正在处理中
-- `OPENAI_API_KEY` 未配置，导致 LLM 客户端不可用
+- 当前规划 provider 所需配置未完成，导致 LLM 客户端不可用
 - 技能引擎未初始化
 - 规划展开或校验失败
 
@@ -1817,7 +1828,7 @@ ws.onmessage = (event) => {
 前置条件：
 
 - 服务端已正确初始化 LLM 客户端
-- `OPENAI_API_KEY` 已配置且可用
+- 当前规划 provider 已配置且可用
 - 当前没有另一轮 AI 规划正在处理中
 - 技能引擎已成功加载
 
@@ -1964,8 +1975,18 @@ AI 执行流程结束示例：
   "event": "ai_status",
   "llm_available": true,
   "api_key_set": true,
-  "model": "gpt-4o",
-  "provider": "OPENAI",
+  "model": "qwen-turbo",
+  "provider": "DASHSCOPE",
+  "default_provider": "dashscope",
+  "providers": ["openai", "deepseek", "dashscope", "minicpm"],
+  "loaded_providers": ["dashscope"],
+  "capabilities": ["chat", "stream_chat", "planning"],
+  "chat_available": true,
+  "chat_provider": "minicpm",
+  "chat_model": "minicpm-o",
+  "planner_available": true,
+  "planner_provider": "dashscope",
+  "planner_model": "qwen-turbo",
   "processing": false,
   "has_preview": true
 }
@@ -1975,10 +1996,20 @@ AI 执行流程结束示例：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `llm_available` | `boolean` | LLM 是否可用 |
-| `api_key_set` | `boolean` | 是否已配置 API Key |
-| `model` | `string` | 当前模型名 |
-| `provider` | `string` | 提供商 |
+| `llm_available` | `boolean` | AI 规划 LLM 是否可用 |
+| `api_key_set` | `boolean` | 默认 provider 所需配置是否已配置 |
+| `model` | `string` | 当前规划模型名 |
+| `provider` | `string` | 默认 provider |
+| `default_provider` | `string` | `LLM_DEFAULT_PROVIDER` 解析后的 provider |
+| `providers` | `array` | 当前 registry 已注册的 provider 名称 |
+| `loaded_providers` | `array` | 当前进程已经懒加载实例化的 provider 名称 |
+| `capabilities` | `array` | 聊天 provider 支持的能力 |
+| `chat_available` | `boolean` | 聊天 provider 是否可用 |
+| `chat_provider` | `string` | 当前聊天 profile 解析到的 provider，兼容观察字段 |
+| `chat_model` | `string` | 聊天模型 |
+| `planner_available` | `boolean` | 规划 provider 是否可用 |
+| `planner_provider` | `string` | 当前规划 profile 解析到的 provider，兼容观察字段 |
+| `planner_model` | `string` | 规划模型 |
 | `processing` | `boolean` | 是否正在处理中 |
 | `has_preview` | `boolean` | 是否存在待确认预览 |
 
@@ -2142,9 +2173,9 @@ function toImageSrc(frame) {
 
 ---
 
-## 13. MiniCPM 聊天代理接口
+## 13. LLM 聊天接口
 
-该部分能力是“当前服务作为代理，转发前端消息到 MiniCPM 网关”。
+该部分能力通过主控 WebSocket 暴露统一聊天接口。服务端调用 `src/llm/` 能力层，底层 provider 可以是 OpenAI-compatible HTTP，也可以是 MiniCPM Realtime WebSocket。前端不需要关心上游协议。
 
 ### 13.1 查询 MiniCPM 状态 `minicpm_status`
 
@@ -2198,7 +2229,7 @@ function toImageSrc(frame) {
 说明：
 
 - 表示前端连接已进入聊天模式
-- 不是和网关建立永久长连接
+- 不是和具体模型 provider 建立永久长连接
 
 ### 13.3 发送聊天消息 `chat`
 
@@ -2207,6 +2238,7 @@ function toImageSrc(frame) {
 ```json
 {
   "action": "chat",
+  "provider": "minicpm",
   "messages": [
     {
       "role": "user",
@@ -2222,15 +2254,16 @@ function toImageSrc(frame) {
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `action` | `string` | 是 | 固定值 `chat` |
+| `provider` | `string` | 否 | 覆盖本次调用使用的 provider，支持 `openai` / `deepseek` / `dashscope` / `minicpm` |
 | `messages` | `array` | 是 | 聊天消息列表 |
 | `streaming` | `boolean` | 否 | 是否流式 |
-| 其他字段 | 任意 | 否 | 会被透传给上游网关 |
+| 其他字段 | 任意 | 否 | 会作为 LLM options 传给 provider |
 
 说明：
 
 - 调用前必须先 `chat_connect`
-- 每次 `chat` 时服务端会临时连接 MiniCPM 网关
-- 返回完成后网关连接会关闭
+- 每次 `chat` 时服务端调用解析后的 provider 的 `stream_chat`：请求 `provider` > `GENERAL_CHAT_PROFILE.default_provider` > `LLM_DEFAULT_PROVIDER`
+- 如果聊天 provider 是 MiniCPM，MiniCPM 上游 WebSocket 由 `src/llm/providers/minicpm_realtime.py` 内部维护
 - 但前端与本服务的聊天会话状态仍保持
 
 上游返回内容会被包装成：
@@ -2590,7 +2623,7 @@ function handleChatData(data) {
 | 空序列执行 | 序列为空 |
 | 动作参数错误 | 参数解析失败 |
 | 硬件未就绪 | 机械臂控制器未初始化 |
-| AI 不可用 | API Key 未配置或 LLM 不可用 |
+| AI 不可用 | 规划模型未配置或 LLM 不可用 |
 | 相机不可用 | 未配置序列号或未检测到设备 |
 | MiniCPM 不可用 | 网关连接失败 |
 

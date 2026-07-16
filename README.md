@@ -1,6 +1,6 @@
 # Robot Action Orchestrator
 
-机器人操作编排系统，支持通过 PyQt6 图形界面或 WebSocket 服务编排、执行和管理机器人动作，并集成 AI 自然语言任务规划、视觉感知、双机械臂、底盘、升降平台、快换手、吸液枪和 MiniCPM 聊天代理等能力。
+机器人操作编排系统，支持通过 PyQt6 图形界面或 WebSocket 服务编排、执行和管理机器人动作，并集成 AI 自然语言任务规划、统一 LLM 能力层、视觉感知、双机械臂、底盘、升降平台、快换手、吸液枪和 MiniCPM Realtime 聊天等能力。
 
 ## 功能概览
 
@@ -10,7 +10,7 @@
 - AI 规划：可通过自然语言匹配技能，生成可确认执行的动作序列。
 - 视觉能力：支持 RealSense / OpenCV 摄像头、YOLO + SAM 目标检测分割、相机帧订阅。
 - 硬件控制：覆盖 RM 机械臂、底盘移动、Modbus 升降平台、PWM 颈部舵机、快换手、继电器和 ADP 吸液枪。
-- MiniCPM 代理：通过 WebSocket 转发聊天请求，并支持可执行机器人指令识别。
+- LLM 聊天：通过统一模型能力层接入 OpenAI-compatible 和 MiniCPM Realtime，并支持可执行机器人指令识别。
 
 ## 运行环境
 
@@ -83,6 +83,9 @@ WEBSOCKET_PORT=8765
 
 OPENAI_API_KEY=
 MODEL_PROVIDER=dashscope
+# 可选：按能力指定 provider，留空则回退到 MODEL_PROVIDER
+LLM_CHAT_PROVIDER=
+LLM_PLANNER_PROVIDER=
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_MODEL=qwen-turbo
 
@@ -195,9 +198,9 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请优先使�
     ├── core/                  # 数据模型、配置加载、存储、启动器
     ├── gui/                   # PyQt6 主界面与执行线程
     ├── widgets/               # GUI 组件与 AI 助手组件
-    ├── robot_server/          # WebSocket 服务、执行器、MiniCPM 代理
+    ├── robot_server/          # WebSocket 服务、执行器、聊天转发
     ├── skill_system/          # 技能模型、注册表与匹配引擎
-    ├── llm/                   # OpenAI / DeepSeek 等 LLM 客户端
+    ├── llm/                   # 大模型能力层与 provider 策略
     ├── arm_sdk/               # RM 机械臂控制封装
     ├── base_move/             # 底盘移动控制
     ├── devices/               # 串口设备、快换手、继电器、吸液枪等
@@ -235,7 +238,7 @@ AI 规划流程：
 4. 用户确认后发送 `ai_confirm`
 5. 服务端执行序列并推送执行事件
 
-LLM 配置通过 `OPENAI_API_KEY`、`MODEL_PROVIDER`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL` 管理，支持 OpenAI 兼容接口。
+LLM 配置通过 `MODEL_PROVIDER` 选择默认 provider，支持 `openai`、`deepseek`、`dashscope` 和 `minicpm`。OpenAI-compatible provider 继续使用 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；MiniCPM Realtime provider 使用 `MINICPM_GATEWAY_*` 配置。需要分开指定聊天和规划模型时，可使用 `LLM_CHAT_PROVIDER`、`LLM_PLANNER_PROVIDER`。
 
 ## 相机与视觉
 
@@ -264,7 +267,7 @@ WebSocket 模式下可通过 `camera_status` 查询相机状态，通过 `subscr
 - PWM 颈部舵机
 - 底盘移动控制器
 - 相机管理器
-- MiniCPM 代理配置
+- MiniCPM Realtime / 聊天配置
 
 若只调试前端、接口或 AI 流程，请使用：
 
@@ -298,7 +301,7 @@ python run.py --simulation
 
 ### AI 规划不可用
 
-检查 `OPENAI_API_KEY`、`MODEL_PROVIDER`、`OPENAI_BASE_URL`、`OPENAI_MODEL` 是否正确，并调用 `ai_status` 查看服务端状态。
+检查 `MODEL_PROVIDER`、`LLM_PLANNER_PROVIDER` 及对应模型配置是否正确，并调用 `ai_status` 查看服务端状态。
 
 ### 相机没有画面
 
