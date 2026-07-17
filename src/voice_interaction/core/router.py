@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any, Callable, Optional
 
-from ...llm import LLMCapability, LLMPlanResult, LLMStreamEvent, VOICE_FEEDBACK_PROFILE
+from ...llm import LLMCapability, LLMMessage, LLMPlanResult, LLMStreamEvent, VOICE_FEEDBACK_PROFILE
 from ...skill_system.models import SkillMatchResult
 from ..adapters import CameraCaptureError
 from .session import VoiceSession
@@ -30,6 +30,7 @@ class VoiceIntentRouter:
         cancel_callback: Optional[CancelCallback] = None,
         tts_enabled: bool = False,
         auto_execute_command: bool = False,
+        history_turns: int = 6,
     ) -> None:
         self.llm_registry = llm_registry
         self.session = session
@@ -38,6 +39,7 @@ class VoiceIntentRouter:
         self.cancel_callback = cancel_callback
         self.tts_enabled = bool(tts_enabled)
         self.auto_execute_command = bool(auto_execute_command)
+        self.history_turns = max(0, int(history_turns))
 
     async def route(
         self,
@@ -73,9 +75,16 @@ class VoiceIntentRouter:
 
     async def _handle_chat(self, text: str) -> AsyncIterator[VoiceEvent]:
         self.session.responding()
+        history = self.session.recent_history(self.history_turns)
+        messages = [
+            LLMMessage(role=item["role"], content=str(item["content"]))
+            for item in history
+            if item.get("role") in ("user", "assistant") and item.get("content")
+        ]
         try:
             async for event in self.llm_registry.task_runner.stream_chat(
-                user_text=text,
+                user_text=text if not messages else None,
+                messages=messages or None,
                 voice_response=self._chat_voice_response_enabled(),
             ):
                 yield self._from_llm_event(event)
@@ -240,13 +249,25 @@ class VoiceIntentRouter:
             await result
 
     def _chat_voice_response_enabled(self) -> bool:
-        return self._voice_response_enabled("get_chat_client", "chat")
+        return self._repeat_voice_response_enabled("chat")
 
     def _vision_voice_response_enabled(self) -> bool:
         return self._voice_response_enabled("get_vision_client", "vision")
 
     def _feedback_voice_response_enabled(self) -> bool:
-        return self._voice_response_enabled("get_feedback_client", "feedback")
+        return self._repeat_voice_response_enabled("feedback")
+
+    def _repeat_voice_response_enabled(self, task_name: str) -> bool:
+        """Enable TaskRunner speech when its RepeatTask backend supports TTS."""
+        if not self.tts_enabled:
+            logger.info("%s voice stream disabled: VOICE_TTS_ENABLED=false", task_name)
+            return False
+
+        if not self._registry_client_supports_tts("get_repeat_client"):
+            logger.info("%s voice stream disabled: repeat provider does not support TTS", task_name)
+            return False
+
+        return True
 
     def _voice_response_enabled(self, getter_name: str, task_name: str) -> bool:
         if not self.tts_enabled:

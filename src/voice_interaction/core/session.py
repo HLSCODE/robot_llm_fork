@@ -52,3 +52,13 @@ class VoiceSession:
 
     def add_history(self, role: str, content: str) -> None:
         self.history.append({"role": role, "content": content})
+
+    def recent_history(self, max_turns: int) -> List[Dict[str, Any]]:
+        """Return the most recent user/assistant conversation window."""
+        if max_turns <= 0:
+            return []
+
+        entries = self.history[-(max_turns * 2):]
+        if entries and entries[0].get("role") == "assistant":
+            entries = entries[1:]
+        return [dict(entry) for entry in entries]

@@ -341,6 +341,7 @@ class RobotWebSocketServer:
                     manager_factory=lambda: self._camera_manager,
                 ),
                 timeout_s=voice_config["session_timeout_s"],
+                history_turns=voice_config["session_history_turns"],
                 cancel_callback=self._cancel_current_ai_task,
                 tts_enabled=voice_config["tts_enabled"],
                 auto_execute_command=voice_config["auto_execute_command"],

@@ -28,6 +28,7 @@ class VoiceInteractionController:
         cancel_callback: Optional[Callable[[], Any]] = None,
         tts_enabled: bool = False,
         auto_execute_command: bool = False,
+        history_turns: int = 6,
         wake_feedback: Optional[WakeFeedback] = None,
     ) -> None:
         self.llm_registry = llm_registry
@@ -43,6 +44,7 @@ class VoiceInteractionController:
             cancel_callback=cancel_callback,
             tts_enabled=tts_enabled,
             auto_execute_command=auto_execute_command,
+            history_turns=history_turns,
         )
 
     def wake(self) -> VoiceEvent:
@@ -108,14 +110,21 @@ class VoiceInteractionController:
 
         yield VoiceEvent(type="intent", intent=intent, data={"input": text})
 
+        assistant_text_parts: list[str] = []
+        assistant_done_text = ""
         try:
             async for event in self.router.route(text, intent):
-                if event.type in ("text_delta", "done") and (event.text_delta or event.text):
-                    self.session.add_history("assistant", event.text_delta or event.text)
+                if event.type == "text_delta" and event.text_delta:
+                    assistant_text_parts.append(event.text_delta)
+                elif event.type == "done" and event.text:
+                    assistant_done_text = event.text
                 yield event
         except Exception as exc:
             logger.error("语音会话路由失败: %s", exc, exc_info=True)
             yield VoiceEvent(type="error", text=f"语音会话处理失败: {exc}")
         finally:
+            assistant_text = "".join(assistant_text_parts).strip() or assistant_done_text.strip()
+            if assistant_text:
+                self.session.add_history("assistant", assistant_text)
             if self.session.state == VoiceSessionState.RESPONDING:
                 self.session.resume()
