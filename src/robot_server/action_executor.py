@@ -447,6 +447,10 @@ class ActionExecutor:
                 stop_requested=lambda: self._stop_requested,
                 paused=lambda: self._paused,
             )
+        elif executor == '智能加粉':
+            return self._execute_powder_dispense(params)
+        elif executor == '加粉装置':
+            return self._execute_tapping(params)
         else:
             self._on_log(f"未知的执行器: {executor}", "error")
             return False
@@ -512,6 +516,62 @@ class ActionExecutor:
 
         self._on_log("夹爪重试次数耗尽", "error")
         return False
+
+    def _execute_tapping(self, params: dict) -> bool:
+        """执行加粉装置动作（夹爪/针升降/针旋转）。"""
+        from ..devices.tapping_controller import TappingController, OPERATIONS
+
+        operation = params.get('操作', '')
+        self._on_log(f"加粉装置动作: {operation}")
+
+        if operation not in OPERATIONS:
+            self._on_log(f"未知的加粉装置操作: {operation}", "error")
+            return False
+
+        ctrl = TappingController.from_config()
+        try:
+            ctrl.enable_all()
+            OPERATIONS[operation](ctrl, **params)
+            self._on_log(f"加粉装置 {operation} 执行完成")
+            return True
+        except Exception as e:
+            self._on_log(f"加粉装置 {operation} 执行失败: {e}", "error")
+            return False
+        finally:
+            ctrl.close()
+
+    def _execute_powder_dispense(self, params: dict) -> bool:
+        """执行智能闭环加粉动作。"""
+        from ..agents.powder_dispense_agent import PowderDispenseAgent, config_from_params
+        from ..devices.tapping_controller import TappingController
+        from ..vision.balance_reader_simple import read_balance
+
+        config = config_from_params(params, Config.get_tapping_config())
+        self._on_log(
+            f"智能加粉动作: 目标={config.target_mg:.1f}mg, "
+            f"容差={config.tolerance_mg:.1f}mg, 最大轮次={config.max_rounds}"
+        )
+
+        agent = PowderDispenseAgent(
+            TappingController.from_config,
+            read_balance,
+            log=lambda msg: self._on_log(msg),
+            should_stop=lambda: self._stop_requested,
+        )
+        try:
+            result = agent.run(config)
+        except Exception as e:
+            self._on_log(f"智能加粉执行失败: {e}", "error")
+            return False
+
+        level = "info" if result.success else "error"
+        self._on_log(
+            f"智能加粉结束: {result.message}, "
+            f"已加={result.added_mg:.1f}mg/{result.target_mg:.1f}mg, "
+            f"轮次={result.rounds}, 终值={result.final_g:.4f}g",
+            level,
+        )
+        return result.success
 
     def _execute_pipette(self, params: dict) -> bool:
         """执行吸液枪动作（吸/吐）"""

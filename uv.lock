@@ -2041,7 +2041,7 @@ requires-dist = [
     { name = "numba", marker = "extra == 'voice'", specifier = ">=0.61.0" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "openai", specifier = ">=1.0.0" },
-    { name = "opencv-python", specifier = ">=4.13.0.92" },
+    { name = "opencv-python", specifier = ">=4.10,<5" },
     { name = "pypinyin", marker = "extra == 'voice'", specifier = ">=0.50" },
     { name = "pyqt6", specifier = ">=6.6.0" },
     { name = "pyrealsense2", specifier = ">=2.57.7.10387" },

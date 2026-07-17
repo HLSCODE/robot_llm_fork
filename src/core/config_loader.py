@@ -167,6 +167,21 @@ class Config:
     EXPRESSION_DISPLAY_TEST_INTERVAL: float = 1.5
     EXPRESSION_DISPLAY_TX_DELAY: float = 0.05
 
+    # 加粉装置配置
+    TAPPING_SERIAL_PORT: str = "/dev/ttyACM0"
+    TAPPING_BAUDRATE: int = 115200
+    TAPPING_TIMEOUT: float = 0.5
+    TAPPING_GRIPPER_ADDRESS: int = 9
+    TAPPING_LIFT_ADDRESS: int = 7
+    TAPPING_ROTATION_ADDRESS: int = 6
+    TAPPING_LIFT_SAFE_POSITION: int = 0
+    TAPPING_LIFT_DISPENSE_POSITION: int = 50000
+    TAPPING_ROTATION_HOME_POSITION: int = 0
+    POWDER_DISPENSE_LARGE_STEP: int = 20000
+    POWDER_DISPENSE_MEDIUM_STEP: int = 8000
+    POWDER_DISPENSE_SMALL_STEP: int = 2000
+    POWDER_DISPENSE_MICRO_STEP: int = 500
+
     # PWM 颈部舵机配置
     PWM_NECK_SERIAL_PORT: str = "/dev/neck"
     PWM_NECK_BAUDRATE: int = 9600
@@ -458,6 +473,21 @@ class Config:
         instance.EXPRESSION_DISPLAY_CLEAR_VPS = os.getenv("EXPRESSION_DISPLAY_CLEAR_VPS", "")
         instance.EXPRESSION_DISPLAY_TEST_INTERVAL = float(os.getenv("EXPRESSION_DISPLAY_TEST_INTERVAL", "1.5"))
         instance.EXPRESSION_DISPLAY_TX_DELAY = float(os.getenv("EXPRESSION_DISPLAY_TX_DELAY", "0.05"))
+
+        # 加粉装置
+        instance.TAPPING_SERIAL_PORT = os.getenv("TAPPING_SERIAL_PORT", "/dev/ttyACM0")
+        instance.TAPPING_BAUDRATE = int(os.getenv("TAPPING_BAUDRATE", "115200"))
+        instance.TAPPING_TIMEOUT = float(os.getenv("TAPPING_TIMEOUT", "0.5"))
+        instance.TAPPING_GRIPPER_ADDRESS = int(os.getenv("TAPPING_GRIPPER_ADDRESS", "9"))
+        instance.TAPPING_LIFT_ADDRESS = int(os.getenv("TAPPING_LIFT_ADDRESS", "7"))
+        instance.TAPPING_ROTATION_ADDRESS = int(os.getenv("TAPPING_ROTATION_ADDRESS", "6"))
+        instance.TAPPING_LIFT_SAFE_POSITION = int(os.getenv("TAPPING_LIFT_SAFE_POSITION", "0"))
+        instance.TAPPING_LIFT_DISPENSE_POSITION = int(os.getenv("TAPPING_LIFT_DISPENSE_POSITION", "50000"))
+        instance.TAPPING_ROTATION_HOME_POSITION = int(os.getenv("TAPPING_ROTATION_HOME_POSITION", "0"))
+        instance.POWDER_DISPENSE_LARGE_STEP = int(os.getenv("POWDER_DISPENSE_LARGE_STEP", "20000"))
+        instance.POWDER_DISPENSE_MEDIUM_STEP = int(os.getenv("POWDER_DISPENSE_MEDIUM_STEP", "8000"))
+        instance.POWDER_DISPENSE_SMALL_STEP = int(os.getenv("POWDER_DISPENSE_SMALL_STEP", "2000"))
+        instance.POWDER_DISPENSE_MICRO_STEP = int(os.getenv("POWDER_DISPENSE_MICRO_STEP", "500"))
         
         # WebSocket 服务器配置
         instance.WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
@@ -674,6 +704,26 @@ class Config:
             "clear_vps": instance.EXPRESSION_DISPLAY_CLEAR_VPS,
             "test_interval": instance.EXPRESSION_DISPLAY_TEST_INTERVAL,
             "tx_delay": instance.EXPRESSION_DISPLAY_TX_DELAY,
+        }
+
+    @classmethod
+    def get_tapping_config(cls) -> dict:
+        """获取加粉装置控制器配置"""
+        instance = cls.get_instance()
+        return {
+            "port": instance.TAPPING_SERIAL_PORT,
+            "baudrate": instance.TAPPING_BAUDRATE,
+            "timeout": instance.TAPPING_TIMEOUT,
+            "gripper_address": instance.TAPPING_GRIPPER_ADDRESS,
+            "lift_address": instance.TAPPING_LIFT_ADDRESS,
+            "rotation_address": instance.TAPPING_ROTATION_ADDRESS,
+            "lift_safe_position": instance.TAPPING_LIFT_SAFE_POSITION,
+            "lift_dispense_position": instance.TAPPING_LIFT_DISPENSE_POSITION,
+            "rotation_home_position": instance.TAPPING_ROTATION_HOME_POSITION,
+            "powder_large_step": instance.POWDER_DISPENSE_LARGE_STEP,
+            "powder_medium_step": instance.POWDER_DISPENSE_MEDIUM_STEP,
+            "powder_small_step": instance.POWDER_DISPENSE_SMALL_STEP,
+            "powder_micro_step": instance.POWDER_DISPENSE_MICRO_STEP,
         }
 
     @classmethod

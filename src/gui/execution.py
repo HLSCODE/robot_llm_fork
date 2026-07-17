@@ -9,6 +9,7 @@ from ..devices import ModbusMotor, RelayController, Kuaihuanshou, ADP
 from ..base_move.move_controller import RobotMoveController
 from ..core.config_loader import Config
 from ..actions.circle_dispense import execute_right_arm_circle_dispense
+from ..devices.tapping_controller import TappingController
 class ExecutionThread(QThread):
     started = pyqtSignal()
     finished = pyqtSignal()
@@ -372,6 +373,10 @@ class ExecutionThread(QThread):
                 stop_requested=lambda: self._stop_requested,
                 paused=lambda: self._paused,
             )
+        elif executor == '智能加粉':
+            return self._execute_powder_dispense(params)
+        elif executor == '加粉装置':
+            return self._execute_tapping(params)
         else:
             self.log_message.emit(f"未知的执行器: {executor}")
             return False
@@ -473,6 +478,59 @@ class ExecutionThread(QThread):
         except Exception as e:
             self.log_message.emit(f"执行吸液枪出错: {str(e)}")
             return False
+
+
+    def _execute_tapping(self, params: dict) -> bool:
+        """执行加粉装置动作（夹爪/针升降/针旋转）。"""
+        from ..devices.tapping_controller import OPERATIONS
+
+        operation = params.get('操作', '')
+        self.log_message.emit(f"加粉装置动作: {operation}")
+
+        if operation not in OPERATIONS:
+            self.log_message.emit(f"未知的加粉装置操作: {operation}")
+            return False
+
+        ctrl = TappingController.from_config()
+        try:
+            ctrl.enable_all()
+            OPERATIONS[operation](ctrl, **params)
+            self.log_message.emit(f"加粉装置 {operation} 执行完成")
+            return True
+        except Exception as e:
+            self.log_message.emit(f"加粉装置 {operation} 执行失败: {e}")
+            return False
+        finally:
+            ctrl.close()
+
+    def _execute_powder_dispense(self, params: dict) -> bool:
+        """执行智能闭环加粉动作。"""
+        from ..agents.powder_dispense_agent import PowderDispenseAgent, config_from_params
+        from ..vision.balance_reader_simple import read_balance
+
+        config = config_from_params(params, Config.get_tapping_config())
+        self.log_message.emit(
+            f"智能加粉动作: 目标={config.target_mg:.1f}mg, "
+            f"容差={config.tolerance_mg:.1f}mg, 最大轮次={config.max_rounds}"
+        )
+        agent = PowderDispenseAgent(
+            TappingController.from_config,
+            read_balance,
+            log=lambda msg: self.log_message.emit(msg),
+            should_stop=lambda: self._stop_requested,
+        )
+        try:
+            result = agent.run(config)
+        except Exception as e:
+            self.log_message.emit(f"智能加粉执行失败: {e}")
+            return False
+
+        self.log_message.emit(
+            f"智能加粉结束: {result.message}, "
+            f"已加={result.added_mg:.1f}mg/{result.target_mg:.1f}mg, "
+            f"轮次={result.rounds}, 终值={result.final_g:.4f}g"
+        )
+        return result.success
 
 
     def _execute_inspect(self, params: dict) -> bool:

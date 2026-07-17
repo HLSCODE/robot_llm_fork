@@ -40,7 +40,7 @@ class OpenCVCameraManager:
         self._width = width
         self._height = height
         self._jpeg_quality = jpeg_quality
-        self._backend = backend if backend is not None else getattr(cv2, "CAP_DSHOW", 0)
+        self._backend = backend if backend is not None else 0  # 0 = CAP_ANY, 让 OpenCV 自动选择后端
 
         self._captures: list[tuple[int, str, "cv2.VideoCapture"]] = []
         self._failed_cameras: list[dict] = []

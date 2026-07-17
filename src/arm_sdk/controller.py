@@ -358,6 +358,42 @@ class RobotController:
             raise Exception("Robot1未连接")
         return self.closeclaw(self.robot1_ctrl.robot)
 
+    def gripper_open_robot2(self):
+        """直接打开Robot2夹爪（使用已连接的实例）"""
+        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
+            raise Exception("Robot2未连接")
+        return self.openclaw(self.robot2_ctrl.robot)
+
+    def gripper_close_robot2(self):
+        """直接关闭Robot2夹爪（使用已连接的实例）"""
+        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
+            raise Exception("Robot2未连接")
+        return self.closeclaw(self.robot2_ctrl.robot)
+
+    def gripper_move_robot1(self, position: int) -> bool:
+        """设置Robot1夹爪位置（0~1000）"""
+        if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
+            raise Exception("Robot1未连接")
+        position = max(0, min(1000, position))
+        ret = self.robot1_ctrl.robot.rm_set_gripper_position(
+            position,
+            block=True,
+            timeout=GRIPPER_CONFIG["release"]["timeout"]
+        )
+        return ret == 0
+
+    def gripper_move_robot2(self, position: int) -> bool:
+        """设置Robot2夹爪位置（0~1000）"""
+        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
+            raise Exception("Robot2未连接")
+        position = max(0, min(1000, position))
+        ret = self.robot2_ctrl.robot.rm_set_gripper_position(
+            position,
+            block=True,
+            timeout=GRIPPER_CONFIG["release"]["timeout"]
+        )
+        return ret == 0
+
     def move_robot1(self, target_pose):
         """移动Robot1到指定点位（使用已连接的实例）"""
         if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
@@ -797,6 +833,103 @@ class RobotController:
 
         if retries == max_retries:
             print("达到最大查询次数,退出")
+            return False
+
+    # ------------------------------------------------------------------
+    # 遥操作控制方法
+    # ------------------------------------------------------------------
+
+    def teleop_movej_canfd(self, arm: str, joints: list, follow: bool = True, trajectory_mode: int = 0) -> bool:
+        """
+        遥操作关节透传控制
+        
+        参数:
+            arm: 机械臂选择，"左" 或 "右"
+            joints: [j1, j2, j3, j4, j5, j6] 关节角度（度）
+            follow: True=高跟随模式，False=普通跟随模式
+            trajectory_mode: 0=完全透传，1=平滑轨迹
+        
+        返回:
+            bool: 执行成功返回 True，失败返回 False
+        """
+        # 选择机械臂
+        robot_ctrl = self.robot1_ctrl if arm == "左" else self.robot2_ctrl
+        if robot_ctrl is None or robot_ctrl.robot is None:
+            print(f"{arm}臂未连接")
+            return False
+        
+        robot = robot_ctrl.robot
+        
+        # 验证关节角度数量
+        if len(joints) != 6:
+            print(f"关节角度数量错误：需要6个，实际{len(joints)}个")
+            return False
+        
+        try:
+            with robot_ctrl.sdk_lock:
+                ret = robot.rm_movej_canfd(
+                    joints,
+                    follow,
+                    trajectory_mode=trajectory_mode
+                )
+            
+            if ret == 0:
+                return True
+            else:
+                print(f"遥操作指令执行失败，错误码: {ret}")
+                return False
+                
+        except Exception as e:
+            print(f"遥操作执行异常: {str(e)}")
+            return False
+    
+    def teleop_init_movej(self, arm: str, joints: list, velocity: int = 10, radius: int = 0, connect: int = 0, block: int = 1) -> bool:
+        """
+        遥操作初始化：移动机械臂到指定关节姿态
+        
+        参数:
+            arm: 机械臂选择，"左" 或 "右"
+            joints: [j1, j2, j3, j4, j5, j6] 关节角度（度）
+            velocity: 速度（默认5）
+            radius: 半径（默认0）
+            connect: 连接（默认0）
+            block: 阻塞（默认1，等待执行完成）
+        
+        返回:
+            bool: 执行成功返回 True，失败返回 False
+        """
+        # 选择机械臂
+        robot_ctrl = self.robot1_ctrl if arm == "左" else self.robot2_ctrl
+        if robot_ctrl is None or robot_ctrl.robot is None:
+            print(f"{arm}臂未连接")
+            return False
+        
+        robot = robot_ctrl.robot
+        
+        # 验证关节角度数量
+        if len(joints) != 6:
+            print(f"关节角度数量错误：需要6个，实际{len(joints)}个")
+            return False
+        
+        try:
+            with robot_ctrl.sdk_lock:
+                ret = robot.rm_movej(
+                    joints,
+                    velocity,
+                    radius,
+                    connect,
+                    block
+                )
+            
+            if ret == 0:
+                print(f"{arm}臂初始化移动成功")
+                return True
+            else:
+                print(f"{arm}臂初始化移动失败，错误码: {ret}")
+                return False
+                
+        except Exception as e:
+            print(f"遥操作初始化执行异常: {str(e)}")
             return False
 
     def shutdown(self):
