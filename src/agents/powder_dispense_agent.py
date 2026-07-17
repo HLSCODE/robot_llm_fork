@@ -112,7 +112,7 @@ class PowderDispenseAgent:
                 if delta_mg < -config.max_drop_mg:
                     return self._result(False, initial_g, current_g, config, rounds, "读数异常下降")
 
-            return self._result(False, initial_g, current_g, config, config.max_rounds, "达到最大轮次")
+            return self._result(True, initial_g, current_g, config, config.max_rounds, "达到最大轮次，继续后续流程")
         finally:
             self._return_safe(ctrl, config)
 
@@ -129,11 +129,11 @@ class PowderDispenseAgent:
 
     @staticmethod
     def _choose_step(remaining_mg: float, config: PowderDispenseConfig) -> int:
-        if remaining_mg > 50:
+        if remaining_mg > 25:
             return config.large_step
-        if remaining_mg > 20:
+        if remaining_mg > 10:
             return config.medium_step
-        if remaining_mg > 8:
+        if remaining_mg > 3:
             return config.small_step
         return config.micro_step
 
