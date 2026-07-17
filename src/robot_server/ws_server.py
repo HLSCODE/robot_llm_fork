@@ -685,6 +685,33 @@ class RobotWebSocketServer:
                             "连续运动": {"type": "boolean", "default": True, "label": "连续运动"},
                             "顺时针": {"type": "boolean", "default": False, "label": "顺时针"}
                         }
+                    },
+                    "加粉装置": {
+                        "description": "手动控制加粉装置夹爪、升降和旋转",
+                        "fields": {
+                            "执行器": {"type": "select", "options": ["加粉装置"], "default": "加粉装置", "label": "执行器"},
+                            "操作": {"type": "select", "options": ["使能", "夹爪移动到", "夹爪闭合", "夹爪张开", "针下降", "针上升", "针正转", "针反转", "针停止", "针旋转停止"], "default": "使能", "label": "操作"},
+                            "步数": {"type": "number", "min": -500000, "max": 500000, "default": 5000, "unit": "步", "label": "步数"},
+                            "开度": {"type": "number", "min": 0, "max": 100, "default": 50, "unit": "%", "label": "夹爪开度"}
+                        }
+                    },
+                    "智能加粉": {
+                        "description": "读取天平并闭环控制加粉装置，直到达到目标加粉量",
+                        "fields": {
+                            "执行器": {"type": "select", "options": ["智能加粉"], "default": "智能加粉", "label": "执行器"},
+                            "操作": {"type": "select", "options": ["加粉到目标重量"], "default": "加粉到目标重量", "label": "操作"},
+                            "目标重量mg": {"type": "number", "min": 0.1, "max": 100000, "default": 100, "unit": "mg", "label": "目标重量"},
+                            "容差mg": {"type": "number", "min": 0.1, "max": 10000, "default": 5, "unit": "mg", "label": "容差"},
+                            "最大轮次": {"type": "number", "min": 1, "max": 200, "default": 20, "label": "最大轮次"},
+                            "稳定等待秒数": {"type": "number", "min": 0, "max": 60, "default": 2, "unit": "s", "label": "稳定等待"},
+                            "安全位置步数": {"type": "number", "min": -500000, "max": 500000, "default": 0, "unit": "步", "label": "安全位置"},
+                            "加粉位置步数": {"type": "number", "min": -500000, "max": 500000, "default": 50000, "unit": "步", "label": "加粉位置"},
+                            "旋转原点步数": {"type": "number", "min": -500000, "max": 500000, "default": 0, "unit": "步", "label": "旋转原点"},
+                            "大步步数": {"type": "number", "min": 1, "max": 500000, "default": 20000, "unit": "步", "label": "大步"},
+                            "中步步数": {"type": "number", "min": 1, "max": 500000, "default": 8000, "unit": "步", "label": "中步"},
+                            "小步步数": {"type": "number", "min": 1, "max": 500000, "default": 2000, "unit": "步", "label": "小步"},
+                            "微步步数": {"type": "number", "min": 1, "max": 500000, "default": 500, "unit": "步", "label": "微步"}
+                        }
                     }
                 },
                 "variant_key": "执行器"

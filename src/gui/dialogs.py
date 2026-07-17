@@ -330,6 +330,8 @@ class ActionConfigDialog(QDialog):
         self.executor_combo.addItem("夹爪", "夹爪")
         self.executor_combo.addItem("吸液枪", "吸液枪")
         self.executor_combo.addItem("右臂转圈注液", "右臂转圈注液")
+        self.executor_combo.addItem("加粉装置", "加粉装置")
+        self.executor_combo.addItem("智能加粉", "智能加粉")
         current_executor = self.action_data.get('parameters', {}).get('执行器', '快换手')
         self.executor_combo.setCurrentText(current_executor)
         self.executor_combo.currentIndexChanged.connect(self._on_executor_changed)
@@ -460,11 +462,113 @@ class ActionConfigDialog(QDialog):
         circle_layout.addRow("", self.circle_clockwise_checkbox)
         self.circle_dispense_widget.setLayout(circle_layout)
 
+        # 加粉装置手动动作参数面板
+        self.tapping_widget = QWidget()
+        tapping_layout = QFormLayout()
+        tapping_params = self.action_data.get('parameters', {})
+
+        self.tapping_operation_combo = QComboBox()
+        for op in ["使能", "夹爪移动到", "夹爪闭合", "夹爪张开", "针下降", "针上升", "针正转", "针反转", "针停止", "针旋转停止"]:
+            self.tapping_operation_combo.addItem(op, op)
+        self.tapping_operation_combo.setCurrentText(self._param_text(tapping_params, '操作', '使能'))
+
+        self.tapping_steps_input = QSpinBox()
+        self.tapping_steps_input.setRange(-500000, 500000)
+        self.tapping_steps_input.setSuffix(" 步")
+        self.tapping_steps_input.setValue(self._param_int(tapping_params, '步数', 5000))
+
+        self.tapping_opening_input = QSpinBox()
+        self.tapping_opening_input.setRange(0, 100)
+        self.tapping_opening_input.setSuffix(" %")
+        self.tapping_opening_input.setValue(self._param_int(tapping_params, '开度', 50))
+
+        tapping_layout.addRow("操作:", self.tapping_operation_combo)
+        tapping_layout.addRow("步数:", self.tapping_steps_input)
+        tapping_layout.addRow("夹爪开度:", self.tapping_opening_input)
+        self.tapping_widget.setLayout(tapping_layout)
+
+        # 智能加粉参数面板
+        self.powder_widget = QWidget()
+        powder_layout = QFormLayout()
+        powder_params = self.action_data.get('parameters', {})
+
+        self.powder_target_input = QDoubleSpinBox()
+        self.powder_target_input.setRange(0.1, 100000.0)
+        self.powder_target_input.setDecimals(1)
+        self.powder_target_input.setSuffix(" mg")
+        self.powder_target_input.setValue(self._param_float(powder_params, '目标重量mg', 100.0))
+
+        self.powder_tolerance_input = QDoubleSpinBox()
+        self.powder_tolerance_input.setRange(0.1, 10000.0)
+        self.powder_tolerance_input.setDecimals(1)
+        self.powder_tolerance_input.setSuffix(" mg")
+        self.powder_tolerance_input.setValue(self._param_float(powder_params, '容差mg', 5.0))
+
+        self.powder_max_rounds_input = QSpinBox()
+        self.powder_max_rounds_input.setRange(1, 200)
+        self.powder_max_rounds_input.setValue(self._param_int(powder_params, '最大轮次', 20))
+
+        self.powder_settle_input = QDoubleSpinBox()
+        self.powder_settle_input.setRange(0.0, 60.0)
+        self.powder_settle_input.setDecimals(1)
+        self.powder_settle_input.setSuffix(" s")
+        self.powder_settle_input.setValue(self._param_float(powder_params, '稳定等待秒数', 2.0))
+
+        self.powder_safe_pos_input = QSpinBox()
+        self.powder_safe_pos_input.setRange(-500000, 500000)
+        self.powder_safe_pos_input.setSuffix(" 步")
+        self.powder_safe_pos_input.setValue(self._param_int(powder_params, '安全位置步数', 0))
+
+        self.powder_dispense_pos_input = QSpinBox()
+        self.powder_dispense_pos_input.setRange(-500000, 500000)
+        self.powder_dispense_pos_input.setSuffix(" 步")
+        self.powder_dispense_pos_input.setValue(self._param_int(powder_params, '加粉位置步数', 50000))
+
+        self.powder_rotation_home_input = QSpinBox()
+        self.powder_rotation_home_input.setRange(-500000, 500000)
+        self.powder_rotation_home_input.setSuffix(" 步")
+        self.powder_rotation_home_input.setValue(self._param_int(powder_params, '旋转原点步数', 0))
+
+        self.powder_large_step_input = QSpinBox()
+        self.powder_large_step_input.setRange(1, 500000)
+        self.powder_large_step_input.setSuffix(" 步")
+        self.powder_large_step_input.setValue(self._param_int(powder_params, '大步步数', 20000))
+
+        self.powder_medium_step_input = QSpinBox()
+        self.powder_medium_step_input.setRange(1, 500000)
+        self.powder_medium_step_input.setSuffix(" 步")
+        self.powder_medium_step_input.setValue(self._param_int(powder_params, '中步步数', 8000))
+
+        self.powder_small_step_input = QSpinBox()
+        self.powder_small_step_input.setRange(1, 500000)
+        self.powder_small_step_input.setSuffix(" 步")
+        self.powder_small_step_input.setValue(self._param_int(powder_params, '小步步数', 2000))
+
+        self.powder_micro_step_input = QSpinBox()
+        self.powder_micro_step_input.setRange(1, 500000)
+        self.powder_micro_step_input.setSuffix(" 步")
+        self.powder_micro_step_input.setValue(self._param_int(powder_params, '微步步数', 500))
+
+        powder_layout.addRow("目标重量:", self.powder_target_input)
+        powder_layout.addRow("容差:", self.powder_tolerance_input)
+        powder_layout.addRow("最大轮次:", self.powder_max_rounds_input)
+        powder_layout.addRow("稳定等待:", self.powder_settle_input)
+        powder_layout.addRow("安全位置:", self.powder_safe_pos_input)
+        powder_layout.addRow("加粉位置:", self.powder_dispense_pos_input)
+        powder_layout.addRow("旋转原点:", self.powder_rotation_home_input)
+        powder_layout.addRow("大步:", self.powder_large_step_input)
+        powder_layout.addRow("中步:", self.powder_medium_step_input)
+        powder_layout.addRow("小步:", self.powder_small_step_input)
+        powder_layout.addRow("微步:", self.powder_micro_step_input)
+        self.powder_widget.setLayout(powder_layout)
+
         # 使用堆叠布局根据执行器类型显示不同面板
         self.param_stack = QStackedLayout()
         self.param_stack.addWidget(self.normal_widget)
         self.param_stack.addWidget(self.pipette_widget)
         self.param_stack.addWidget(self.circle_dispense_widget)
+        self.param_stack.addWidget(self.tapping_widget)
+        self.param_stack.addWidget(self.powder_widget)
         self.param_stack.setCurrentWidget(self.normal_widget)
 
         form_layout.addRow("执行器:", self.executor_combo)
@@ -701,6 +805,10 @@ class ActionConfigDialog(QDialog):
                 self.param_stack.setCurrentWidget(self.pipette_widget)
             elif executor == '右臂转圈注液':
                 self.param_stack.setCurrentWidget(self.circle_dispense_widget)
+            elif executor == '加粉装置':
+                self.param_stack.setCurrentWidget(self.tapping_widget)
+            elif executor == '智能加粉':
+                self.param_stack.setCurrentWidget(self.powder_widget)
             else:
                 self.param_stack.setCurrentWidget(self.normal_widget)
 
@@ -901,6 +1009,33 @@ class ActionConfigDialog(QDialog):
                 '运动速度': self.circle_move_velocity_input.value(),
                 '连续运动': self.circle_continuous_checkbox.isChecked(),
                 '顺时针': self.circle_clockwise_checkbox.isChecked(),
+            }
+        elif executor == '加粉装置':
+            operation = self.tapping_operation_combo.currentText()
+            params = {
+                '执行器': executor,
+                '操作': operation,
+            }
+            if operation == '夹爪移动到':
+                params['开度'] = self.tapping_opening_input.value()
+            if operation in {'针下降', '针上升', '针正转', '针反转'}:
+                params['步数'] = self.tapping_steps_input.value()
+            return params
+        elif executor == '智能加粉':
+            return {
+                '执行器': executor,
+                '操作': '加粉到目标重量',
+                '目标重量mg': self.powder_target_input.value(),
+                '容差mg': self.powder_tolerance_input.value(),
+                '最大轮次': self.powder_max_rounds_input.value(),
+                '稳定等待秒数': self.powder_settle_input.value(),
+                '安全位置步数': self.powder_safe_pos_input.value(),
+                '加粉位置步数': self.powder_dispense_pos_input.value(),
+                '旋转原点步数': self.powder_rotation_home_input.value(),
+                '大步步数': self.powder_large_step_input.value(),
+                '中步步数': self.powder_medium_step_input.value(),
+                '小步步数': self.powder_small_step_input.value(),
+                '微步步数': self.powder_micro_step_input.value(),
             }
         else:
             return {

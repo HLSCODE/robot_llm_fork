@@ -371,6 +371,8 @@ class ExecutionThread(QThread):
                 stop_requested=lambda: self._stop_requested,
                 paused=lambda: self._paused,
             )
+        elif executor == '智能加粉':
+            return self._execute_powder_dispense(params)
         elif executor == '加粉装置':
             return self._execute_tapping(params)
         else:
@@ -498,6 +500,35 @@ class ExecutionThread(QThread):
             return False
         finally:
             ctrl.close()
+
+    def _execute_powder_dispense(self, params: dict) -> bool:
+        """执行智能闭环加粉动作。"""
+        from ..agents.powder_dispense_agent import PowderDispenseAgent, config_from_params
+        from ..vision.balance_reader_simple import read_balance
+
+        config = config_from_params(params, Config.get_tapping_config())
+        self.log_message.emit(
+            f"智能加粉动作: 目标={config.target_mg:.1f}mg, "
+            f"容差={config.tolerance_mg:.1f}mg, 最大轮次={config.max_rounds}"
+        )
+        agent = PowderDispenseAgent(
+            TappingController.from_config,
+            read_balance,
+            log=lambda msg: self.log_message.emit(msg),
+            should_stop=lambda: self._stop_requested,
+        )
+        try:
+            result = agent.run(config)
+        except Exception as e:
+            self.log_message.emit(f"智能加粉执行失败: {e}")
+            return False
+
+        self.log_message.emit(
+            f"智能加粉结束: {result.message}, "
+            f"已加={result.added_mg:.1f}mg/{result.target_mg:.1f}mg, "
+            f"轮次={result.rounds}, 终值={result.final_g:.4f}g"
+        )
+        return result.success
 
 
     def _execute_inspect(self, params: dict) -> bool:
