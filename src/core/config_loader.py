@@ -26,6 +26,7 @@ class Config:
     LLM_DEFAULT_MAX_TOKENS: int = 512
     LLM_REQUEST_TIMEOUT_S: float = 60.0
     VOICE_SESSION_TIMEOUT_S: float = 30.0
+    VOICE_SESSION_HISTORY_TURNS: int = 6
     VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S: float = 30.0
     VOICE_AUTO_EXECUTE_COMMAND: bool = False
     VOICE_TTS_ENABLED: bool = False
@@ -252,6 +253,9 @@ class Config:
         instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
         instance.LLM_REQUEST_TIMEOUT_S = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "60"))
         instance.VOICE_SESSION_TIMEOUT_S = float(os.getenv("VOICE_SESSION_TIMEOUT_S", "30"))
+        instance.VOICE_SESSION_HISTORY_TURNS = int(os.getenv(
+            "VOICE_SESSION_HISTORY_TURNS", "6"
+        ))
         instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S = float(os.getenv(
             "VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S", "30"
         ))
@@ -772,6 +776,7 @@ class Config:
         instance = cls.get_instance()
         return {
             "session_timeout_s": instance.VOICE_SESSION_TIMEOUT_S,
+            "session_history_turns": instance.VOICE_SESSION_HISTORY_TURNS,
             "speech_startup_wait_timeout_s": instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S,
             "auto_execute_command": instance.VOICE_AUTO_EXECUTE_COMMAND,
             "tts_enabled": instance.VOICE_TTS_ENABLED,

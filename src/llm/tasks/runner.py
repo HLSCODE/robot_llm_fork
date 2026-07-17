@@ -13,6 +13,7 @@ from ..base import BaseLLMClient
 from ..sync_utils import run_coro_sync
 from ..types import LLMChatResult, LLMContentPart, LLMMessage, LLMStreamEvent
 from .profiles import GENERAL_CHAT_PROFILE, TaskProfile
+from .repeat import RepeatTask
 
 
 MessageContent = Union[str, List[LLMContentPart]]
@@ -27,10 +28,12 @@ class TaskRunner:
         llm: Optional[BaseLLMClient] = None,
         default_profile: TaskProfile = GENERAL_CHAT_PROFILE,
         client_resolver: Optional[ClientResolver] = None,
+        voice_repeater: Optional[RepeatTask] = None,
     ) -> None:
         self._llm = llm
         self._default_profile = default_profile
         self._client_resolver = client_resolver
+        self._voice_repeater = voice_repeater
 
     async def chat(
         self,
@@ -91,7 +94,7 @@ class TaskRunner:
         provider: Optional[str] = None,
         **chat_options: Any,
     ) -> AsyncIterator[LLMStreamEvent]:
-        """Run a streaming chat call with a TaskProfile."""
+        """Run text generation and optionally synthesize its final text as speech."""
         active_profile = profile or self._default_profile
         llm = self._resolve_llm(active_profile, provider)
         final_messages = self._build_messages(
@@ -101,14 +104,60 @@ class TaskRunner:
             profile=active_profile,
             prompt_context=prompt_context,
         )
+        if not voice_response:
+            async for event in llm.stream_chat(
+                final_messages,
+                **active_profile.stream_options(**chat_options),
+            ):
+                yield event
+            return
+
+        if self._voice_repeater is None:
+            raise ValueError("TaskRunner 未配置 RepeatTask，无法生成语音响应")
+
+        text_parts: list[str] = []
+        final_text = ""
         async for event in llm.stream_chat(
             final_messages,
-            **active_profile.stream_options(
-                voice_response=voice_response,
-                **chat_options,
-            ),
+            **active_profile.stream_options(**chat_options),
         ):
-            yield event
+            if event.type == "text_delta":
+                text_parts.append(event.text_delta)
+                yield event
+                continue
+            if event.type == "done":
+                final_text = event.text or "".join(text_parts)
+                continue
+            if event.type == "error":
+                yield event
+                return
+
+        final_text = final_text or "".join(text_parts)
+        if not final_text:
+            yield LLMStreamEvent(type="done", text="")
+            return
+
+        async for event in self._voice_repeater.stream_repeat(
+            final_text,
+            voice_response=True,
+        ):
+            if event.type == "audio_delta":
+                yield event
+                continue
+            if event.type == "done":
+                # DashScope text was already emitted above; only finish playback here.
+                yield LLMStreamEvent(
+                    type="done",
+                    audio_data=event.audio_data,
+                    metrics=event.metrics,
+                    raw=event.raw,
+                )
+                return
+            if event.type == "error":
+                yield event
+                return
+
+        yield LLMStreamEvent(type="done", text="")
 
     async def stream(
         self,

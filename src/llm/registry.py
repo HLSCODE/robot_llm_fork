@@ -61,13 +61,16 @@ class LLMRegistry:
                 }
             )
 
-        self.task_runner = TaskRunner(client_resolver=self.get_client_for_profile)
+        self.repeat_task = RepeatTask(client_resolver=self.get_client_for_profile)
+        self.task_runner = TaskRunner(
+            client_resolver=self.get_client_for_profile,
+            voice_repeater=self.repeat_task,
+        )
         self.skill_planner = SkillPlanner(client_resolver=self.get_client_for_profile)
         self.instruction_classifier = InstructionClassifier(
             client_resolver=self.get_client_for_profile
         )
         self.vision_fusion = VisionFusionTask(client_resolver=self.get_client_for_profile)
-        self.repeat_task = RepeatTask(client_resolver=self.get_client_for_profile)
 
     @classmethod
     def from_config(cls, config) -> "LLMRegistry":
