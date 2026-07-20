@@ -196,6 +196,7 @@ class MainWindow(QMainWindow):
             ActionType.WAIT: [],
             ActionType.CHANGE_GUN: [],
             ActionType.VISION_CAPTURE: [],
+            ActionType.VISION_RELOCALIZE: [],
             ActionType.TRAJECTORY: []
         }
         self.execution_thread: ExecutionThread = None
@@ -1629,10 +1630,17 @@ class MainWindow(QMainWindow):
                 self.move_list.add_action(action)
             return
 
+        if action_type in {ActionType.VISION_CAPTURE, ActionType.VISION_RELOCALIZE}:
+            self.vision_capture_list.clear()
+            for action in self.actions[ActionType.VISION_CAPTURE]:
+                self.vision_capture_list.add_action(action)
+            for action in self.actions[ActionType.VISION_RELOCALIZE]:
+                self.vision_capture_list.add_action(action)
+            return
+
         list_map = {
             ActionType.INSPECT: self.inspect_list,
             ActionType.CHANGE_GUN: self.change_gun_list,
-            ActionType.VISION_CAPTURE: self.vision_capture_list,
             ActionType.TRAJECTORY: self.trajectory_list
         }
         action_list = list_map[action_type]
@@ -1670,7 +1678,6 @@ class MainWindow(QMainWindow):
             0: ActionType.MOVE,  # 移动类 Tab，需要进一步选择
             2: ActionType.INSPECT,
             3: ActionType.CHANGE_GUN,
-            4: ActionType.VISION_CAPTURE,
             6: ActionType.TRAJECTORY
         }
         if current_tab == 1:
@@ -1704,6 +1711,20 @@ class MainWindow(QMainWindow):
                 return ActionType.BASE_MOVE
             else:
                 return (ActionType.MOVE, selected)
+
+        if current_tab == 4:
+            options = ["视觉抓取", "视觉重定位"]
+            selected, ok = QInputDialog.getItem(
+                self,
+                "选择视觉动作",
+                "创建视觉类动作:",
+                options,
+                0,
+                False
+            )
+            if not ok:
+                return None
+            return ActionType.VISION_RELOCALIZE if selected == "视觉重定位" else ActionType.VISION_CAPTURE
 
         return action_type_map.get(current_tab)
 
@@ -1943,6 +1964,7 @@ class MainWindow(QMainWindow):
         ActionType.INSPECT: ("🔍", QColor(16, 185, 129)),
         ActionType.CHANGE_GUN: ("🔧", QColor(139, 92, 246)),
         ActionType.VISION_CAPTURE: ("👁", QColor(14, 165, 233)),
+        ActionType.VISION_RELOCALIZE: ("📍", QColor(6, 182, 212)),
         ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),
     }
 
@@ -1954,6 +1976,7 @@ class MainWindow(QMainWindow):
         ActionType.INSPECT: "检测",
         ActionType.CHANGE_GUN: "换枪",
         ActionType.VISION_CAPTURE: "视觉抓取",
+        ActionType.VISION_RELOCALIZE: "视觉重定位",
         ActionType.TRAJECTORY: "轨迹",
     }
 
@@ -2482,7 +2505,7 @@ class MainWindow(QMainWindow):
 
             def run(self):
                 import time
-                from src.cameras.camera_factory import get_camera_manager
+                from src.cameras.camera_factory import get_camera_manager, stop_camera_manager
                 from src.cameras.realsense_manager import RealSenseManager
                 from src.core.config_loader import Config
 
@@ -2558,6 +2581,8 @@ class MainWindow(QMainWindow):
 
                 except Exception as e:
                     self.result.emit(False, f"测试异常: {str(e)}")
+                finally:
+                    stop_camera_manager()
 
         def on_result(success, msg):
             self.log_widget.append_log(f"[相机测试] {msg}")

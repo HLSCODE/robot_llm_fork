@@ -313,8 +313,7 @@ class RobotWebSocketServer:
         # 初始化 AI 组件
         self._init_ai()
 
-        # 启动相机管理器
-        self._init_camera()
+        # 相机在视觉动作、测试或订阅实时预览时按需启动。
 
         # 加载 MiniCPM 代理配置
         self._init_minicpm_config()
@@ -415,6 +414,7 @@ class RobotWebSocketServer:
         finally:
             self._clients.discard(websocket)
             self._camera_frame_subs.discard(websocket)
+            self._stop_camera_if_idle()
             await self._close_minicpm_session(websocket)
             print(f"前端客户端断开: {remote}")
 
@@ -656,6 +656,7 @@ class RobotWebSocketServer:
             "INSPECT_AND_OUTPUT": [],
             "CHANGE_GUN": [],
             "VISION_CAPTURE": [],
+            "VISION_RELOCALIZE": [],
             "TRAJECTORY": [],
         }
         for a in all_actions:
@@ -816,6 +817,21 @@ class RobotWebSocketServer:
                     "夹爪长度":   {"type": "number", "default": 150.0, "unit": "mm", "label": "夹爪长度", "readonly": True}
                 },
                 "note": "视觉抓取参数已固定，前端仅需填写动作名称即可"
+            },
+            "VISION_RELOCALIZE": {
+                "label": "视觉重定位",
+                "description": "移动到拍照位，识别 Tag，并更新本次任务的工位定位状态",
+                "fields": {
+                    "action_mode": {"type": "select", "options": ["run", "teach"], "default": "run", "label": "动作模式"},
+                    "arm": {"type": "select", "options": ["left", "right"], "default": "left", "label": "机械臂"},
+                    "station_name": {"type": "text", "label": "工位名称", "required": True},
+                    "photo_pose": {"type": "text", "label": "示教拍照位姿"},
+                    "camera_name": {"type": "text", "label": "示教相机名称"},
+                    "marker_width": {"type": "number", "min": 0.000001, "default": 0.158, "label": "示教marker宽度(同位姿单位)"},
+                    "marker_height": {"type": "number", "min": 0.000001, "default": 0.158, "label": "示教marker高度(同位姿单位)"},
+                    "move_mode": {"type": "select", "options": ["move_j", "move_l"], "default": "move_j", "label": "移动模式"}
+                },
+                "note": "工位名称是唯一用户输入；内部兼容 station_id。photo_pose、camera_name、marker 宽高只在 action_mode=teach 时填写；run 时只需要选择已保存的工位"
             },
             "TRAJECTORY": {
                 "label": "轨迹类",
@@ -1865,7 +1881,7 @@ class RobotWebSocketServer:
         def _do_test():
             try:
                 import time
-                from ..cameras.camera_factory import get_camera_manager
+                from ..cameras.camera_factory import get_camera_manager, stop_camera_manager
                 from ..cameras.realsense_manager import RealSenseManager
 
                 config = Config.get_instance()
@@ -1969,6 +1985,8 @@ class RobotWebSocketServer:
                     "success": False,
                     "message": f"测试异常: {str(e)}",
                 })
+            finally:
+                stop_camera_manager()
 
         threading.Thread(target=_do_test, daemon=True, name="TestCamera").start()
         await websocket.send(self._json_msg({"event": "log", "level": "info", "message": "正在测试相机..."}))
@@ -2074,6 +2092,8 @@ class RobotWebSocketServer:
         请求: {"action": "subscribe_camera_frames"}
         成功后服务端持续推送: {"event": "camera_frames", "frames": [...]}
         """
+        if self._camera_manager is None or not self._camera_manager.is_running:
+            self._init_camera()
         if self._camera_manager is None:
             await websocket.send(self._json_msg({
                 "event": "camera_error",
@@ -2102,6 +2122,8 @@ class RobotWebSocketServer:
         """
         self._camera_frame_subs.discard(websocket)
         await websocket.send(self._json_msg({"event": "camera_unsubscribed"}))
+        if not self._camera_frame_subs:
+            self._stop_camera_if_idle()
 
     async def _camera_push_loop(self) -> None:
         """后台任务：以 30fps 向所有订阅客户端推送相机帧。"""
@@ -2132,6 +2154,15 @@ class RobotWebSocketServer:
                         self._camera_frame_subs.discard(ws)
             await asyncio.sleep(interval)
         self._camera_push_task = None
+        self._stop_camera_if_idle()
+
+    def _stop_camera_if_idle(self) -> None:
+        """实时预览结束后释放相机；视觉动作自行管理其短暂采集。"""
+        if self._camera_frame_subs:
+            return
+        from src.cameras.camera_factory import stop_camera_manager
+
+        stop_camera_manager()
 
     # ==================================================================
     # LLM 聊天（dispatch 模式）

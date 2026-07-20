@@ -41,9 +41,35 @@ def get_camera_manager() -> Optional[CameraManager]:
         return None
 
 
+def stop_camera_manager() -> None:
+    """停止当前配置对应的相机采集线程和设备管道。
+
+    管理器实例会保留，因此下一次 ``get_camera_manager()`` 仍可使用同一套
+    配置重新启动。视觉动作应在拿到所需帧后调用此函数，避免持续占用 CPU、
+    USB 带宽和相机设备。
+    """
+    try:
+        config = Config.get_instance()
+        provider = getattr(config, "CAMERA_PROVIDER", "realsense").lower()
+        manager_cls = OpenCVCameraManager if provider in ("webcam", "opencv") else RealSenseManager
+        manager = manager_cls.peek_instance()
+        if manager is not None and manager.is_running:
+            manager.stop()
+            logger.info("相机管理器已按需停止")
+    except Exception as exc:
+        logger.warning("停止相机管理器失败: %s", exc)
+
+
 # ------------------------------------------------------------------
 # 内部实现
 # ------------------------------------------------------------------
+
+def _config_int(config, name: str, default: int) -> int:
+    try:
+        return int(getattr(config, name, default))
+    except (TypeError, ValueError):
+        return default
+
 
 def _get_realsense_manager(config) -> Optional[RealSenseManager]:
     """初始化 RealSense 相机管理器单例。
@@ -65,9 +91,37 @@ def _get_realsense_manager(config) -> Optional[RealSenseManager]:
         for i, serial in enumerate(serials)
     ]
     # 多相机时降低 FPS 以避免 USB 带宽过载（3+ 路 → 15fps）
-    fps = 30 if len(cameras) <= 2 else 15
-    logger.info("RealSense 相机数=%d, FPS=%d", len(cameras), fps)
-    mgr = RealSenseManager.get_instance(cameras=cameras, fps=fps, width=640, height=480, jpeg_quality=85)
+    auto_fps = 30 if len(cameras) <= 2 else 15
+    fps = _config_int(config, "REALSENSE_FPS", 0) or auto_fps
+    color_width = _config_int(config, "REALSENSE_COLOR_WIDTH", 640)
+    color_height = _config_int(config, "REALSENSE_COLOR_HEIGHT", 480)
+    depth_width = _config_int(config, "REALSENSE_DEPTH_WIDTH", 640)
+    depth_height = _config_int(config, "REALSENSE_DEPTH_HEIGHT", 480)
+    jpeg_quality = _config_int(config, "REALSENSE_JPEG_QUALITY", 85)
+    encode_fps = _config_int(config, "CAMERA_ENCODE_FPS", 5)
+    align_depth = bool(getattr(config, "REALSENSE_ALIGN_DEPTH_TO_COLOR", True))
+    logger.info(
+        "RealSense 相机数=%d, color=%dx%d, depth=%dx%d, FPS=%d, encode_fps=%d",
+        len(cameras),
+        color_width,
+        color_height,
+        depth_width,
+        depth_height,
+        fps,
+        encode_fps,
+    )
+    mgr = RealSenseManager.get_instance(
+        cameras=cameras,
+        fps=fps,
+        width=color_width,
+        height=color_height,
+        depth_width=depth_width,
+        depth_height=depth_height,
+        depth_fps=fps,
+        jpeg_quality=jpeg_quality,
+        align_depth_to_color=align_depth,
+        encode_fps=encode_fps,
+    )
     if not mgr.is_running:
         result = mgr.start()
         logger.info("RealSense 相机管理器已启动: %d 路在线, %d 路失败", result["started"], result["failed"])
@@ -88,7 +142,14 @@ def _get_opencv_manager(config) -> OpenCVCameraManager:
         {"index": index, "name": names[i] if i < len(names) else f"webcam-{index}"}
         for i, index in enumerate(indexes)
     ]
-    mgr = OpenCVCameraManager.get_instance(cameras=cameras, fps=30, width=640, height=480, jpeg_quality=85)
+    mgr = OpenCVCameraManager.get_instance(
+        cameras=cameras,
+        fps=_config_int(config, "WEBCAM_FPS", 30),
+        width=_config_int(config, "WEBCAM_WIDTH", 640),
+        height=_config_int(config, "WEBCAM_HEIGHT", 480),
+        jpeg_quality=_config_int(config, "WEBCAM_JPEG_QUALITY", 85),
+        encode_fps=_config_int(config, "CAMERA_ENCODE_FPS", 5),
+    )
     if not mgr.is_running:
         result = mgr.start()
         logger.info("OpenCV 相机管理器已启动: %d 路在线, %d 路失败", result["started"], result["failed"])

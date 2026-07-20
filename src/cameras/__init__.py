@@ -8,6 +8,6 @@
 
 from .realsense_manager import RealSenseManager
 from .opencv_manager import OpenCVCameraManager
-from .camera_factory import get_camera_manager
+from .camera_factory import get_camera_manager, stop_camera_manager
 
-__all__ = ["RealSenseManager", "OpenCVCameraManager", "get_camera_manager"]
+__all__ = ["RealSenseManager", "OpenCVCameraManager", "get_camera_manager", "stop_camera_manager"]
