@@ -1908,6 +1908,7 @@ class MainWindow(QMainWindow):
                     uuid=str(uuid4()),
                     definition=task_item.definition,
                     status=SequenceItemStatus.PENDING,
+                    source_task_name=task_name,
                 )
                 sequence.append(cloned_item)
         return sequence
@@ -2106,6 +2107,7 @@ class MainWindow(QMainWindow):
         if filename:
             task_name = Path(filename).name
             StorageManager.save_entries(entries, task_name)
+            self._loaded_task_name = task_name
             self.refresh_task_library()
             self.log_widget.append_log(f"任务已保存: {task_name}")
 
@@ -2123,6 +2125,7 @@ class MainWindow(QMainWindow):
                 elif isinstance(entry, SequenceItem):
                     self.sequence_list.add_sequence_item(entry)
             self.refresh_task_library()
+            self._loaded_task_name = task_name
             self.log_widget.append_log(f"任务已加载: {task_name}")
 
     def start_execution(self):
@@ -2131,7 +2134,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先添加动作到序列中")
             return
 
-        self._start_sequence_execution(sequence, display_list=self.sequence_list, label="动作编排序列")
+        task_name = getattr(self, "_loaded_task_name", None) or "manual_sequence"
+        self._start_sequence_execution(sequence, display_list=self.sequence_list, label="动作编排序列", task_name=task_name)
 
     def execute_composed_task(self):
         sequence = self._build_composed_task_sequence()
@@ -2139,7 +2143,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "请先向组合计划中添加至少一个任务或动作")
             return
 
-        self._start_sequence_execution(sequence, display_list=None, label="任务组合序列")
+        self._start_sequence_execution(sequence, display_list=None, label="任务组合序列", task_name="manual_sequence")
 
     def execute_wake_welcome_task(self, task_name: str) -> None:
         """Execute a configured wake lifecycle task without affecting the composer."""
@@ -2152,9 +2156,15 @@ class MainWindow(QMainWindow):
             self.log_widget.append_log(f"跳过唤醒欢迎任务，任务不存在或为空: {task_name}")
             return
 
-        self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务")
+        self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务", task_name=task_name)
 
-    def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
+    def _start_sequence_execution(
+        self,
+        sequence: list[SequenceItem],
+        display_list=None,
+        label: str = "序列",
+        task_name: str | None = None,
+    ):
         if self.execution_thread and self.execution_thread.isRunning():
             QMessageBox.warning(self, "警告", "当前已有序列正在执行")
             return
@@ -2198,7 +2208,13 @@ class MainWindow(QMainWindow):
                 elif isinstance(entry, SequenceItem):
                     self.sequence_list._update_item_display(tree_item, entry, i)
 
-        self.execution_thread = ExecutionThread(entries, self.robot_controller, self.body_controller, self.move_controller)
+        self.execution_thread = ExecutionThread(
+            entries,
+            self.robot_controller,
+            self.body_controller,
+            self.move_controller,
+            task_name=task_name,
+        )
         self.execution_thread.step_started.connect(self.on_step_started)
         self.execution_thread.step_completed.connect(self.on_step_completed)
         self.execution_thread.step_failed.connect(self.on_step_failed)

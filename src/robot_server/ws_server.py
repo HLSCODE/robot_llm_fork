@@ -598,7 +598,7 @@ class RobotWebSocketServer:
             "message": f"加载任务 '{task_name}'，开始执行",
             "steps": total_steps,
         })
-        self._executor.execute(entries)
+        self._executor.execute(entries, task_name=task_name)
 
     async def _handle_stop(self, websocket, data: dict) -> None:
         """停止执行"""

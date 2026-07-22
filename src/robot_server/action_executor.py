@@ -64,6 +64,8 @@ class ActionExecutor:
         self._paused = False
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._current_task_name = "manual_sequence"
+        self._current_action_name = ""
 
         # 动作类型与执行方法的映射
         self._execute_methods = {
@@ -89,7 +91,7 @@ class ActionExecutor:
     def is_paused(self) -> bool:
         return self._paused
 
-    def execute(self, sequence: List[SequenceEntry]) -> None:
+    def execute(self, sequence: List[SequenceEntry], task_name: str | None = None) -> None:
         """在后台线程中执行动作序列（含 LoopBlock）"""
         if self._running:
             self._on_log("已有序列正在执行，请先停止")
@@ -98,6 +100,7 @@ class ActionExecutor:
         self._stop_requested = False
         self._paused = False
         self._running = True
+        self._current_task_name = task_name or "manual_sequence"
 
         self._thread = threading.Thread(
             target=self._run, args=(sequence,), daemon=True, name="ActionExecutor"
@@ -132,6 +135,7 @@ class ActionExecutor:
                         for child in entry.items:
                             clone = SequenceItem.from_dict(child.to_dict())
                             clone.uuid = child.uuid
+                            clone.source_task_name = child.source_task_name
                             flat_sequence.append((clone, entry))
                 elif isinstance(entry, SequenceItem):
                     flat_sequence.append((entry, None))
@@ -190,6 +194,10 @@ class ActionExecutor:
     def _execute_action(self, item: SequenceItem) -> bool:
         definition = item.definition
         params = definition.parameters
+        previous_task_name = self._current_task_name
+        previous_action_name = self._current_action_name
+        self._current_task_name = item.source_task_name or previous_task_name or "manual_sequence"
+        self._current_action_name = definition.name
 
         self._on_log(f"正在执行: {definition.name}")
         self._on_log(f"参数: {params}")
@@ -205,6 +213,9 @@ class ActionExecutor:
         except Exception as e:
             self._on_log(f"执行错误: {str(e)}", "error")
             return False
+        finally:
+            self._current_task_name = previous_task_name
+            self._current_action_name = previous_action_name
 
     # ------------------------------------------------------------------
     # 移动类动作
@@ -559,7 +570,13 @@ class ActionExecutor:
             should_stop=lambda: self._stop_requested,
         )
         try:
-            result = agent.run(config)
+            result = agent.run(
+                config,
+                context={
+                    "task_name": self._current_task_name,
+                    "action_name": self._current_action_name,
+                },
+            )
         except Exception as e:
             self._on_log(f"智能加粉执行失败: {e}", "error")
             return False
