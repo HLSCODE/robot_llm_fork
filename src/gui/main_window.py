@@ -721,8 +721,12 @@ class MainWindow(QMainWindow):
         # Row 4: 停止 + 保存
         stop_row = QHBoxLayout()
         stop_row.setSpacing(4)
-        self.stop_composed_task_btn = QPushButton("⏹ 紧急停止")
+        self.stop_composed_task_btn = QPushButton("⏹ 停止任务")
         self.stop_composed_task_btn.setMinimumHeight(32)
+        self.stop_composed_task_btn.setAccessibleName("停止任务")
+        self.stop_composed_task_btn.setToolTip(
+            "请求当前任务在可中断点停止；不会触发设备硬件急停"
+        )
         self.stop_composed_task_btn.setStyleSheet("""
             QPushButton { background: #ef4444; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
             QPushButton:hover { background: #dc2626; }
@@ -2250,7 +2254,11 @@ class MainWindow(QMainWindow):
     def stop_execution(self):
         if self.execution_thread and self.execution_thread.isRunning():
             self.execution_thread.stop()
-            self.log_widget.append_log("紧急停止已触发")
+            self.log_widget.append_log(
+                "已发送任务停止请求（非硬件急停，将在当前动作可中断点停止）"
+            )
+        else:
+            self.log_widget.append_log("当前没有正在执行的任务")
 
     def on_execution_completed(self, success: bool):
         self.log_widget.append_log("AI 序列执行完成" if success else "AI 序列执行失败")

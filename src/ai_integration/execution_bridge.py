@@ -32,6 +32,7 @@ class ExecutionBridge(QObject):
         self._execution_thread = None
         self._simulation_mode = False
         self._main_window = None
+        self._stop_requested = False
         logger.info("ExecutionBridge 初始化完成")
 
     def set_main_window(self, main_window) -> None:
@@ -130,6 +131,7 @@ class ExecutionBridge(QObject):
             return False
 
         try:
+            self._stop_requested = False
             # 获取 robot_controller、body_controller 和 move_controller
             robot_controller = getattr(self._main_window, 'robot_controller', None)
             body_controller = getattr(self._main_window, 'body_controller', None)
@@ -164,13 +166,15 @@ class ExecutionBridge(QObject):
             return False
 
     def stop_execution(self) -> None:
-        """停止当前执行"""
+        """请求协作式停止当前任务，不阻塞 GUI，也不冒充硬件急停。"""
         if self._execution_thread and self._execution_thread.isRunning():
             logger.info("请求停止执行...")
+            self._stop_requested = True
             self._execution_thread.stop()
-            self._execution_thread.wait()  # 等待线程结束
-            self.execution_status_changed.emit("已停止")
-            self.log_message.emit("执行已停止")
+            self.execution_status_changed.emit("停止中...")
+            self.log_message.emit(
+                "已发送任务停止请求（非硬件急停，将在当前动作可中断点停止）"
+            )
 
     def get_execution_status(self) -> str:
         """获取当前执行状态"""
@@ -203,6 +207,13 @@ class ExecutionBridge(QObject):
 
     def _on_execution_finished(self) -> None:
         """执行完成回调"""
+        if self._stop_requested:
+            self._stop_requested = False
+            self.execution_completed.emit(False)
+            self.execution_status_changed.emit("已停止")
+            self.log_message.emit("任务已停止")
+            return
+
         # 检查是否有失败的步骤
         if self._execution_thread:
             failed_count = sum(

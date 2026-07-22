@@ -874,8 +874,10 @@ class ControlPanel(QWidget):
         exec_row1.addWidget(self.pause_btn)
         layout.addLayout(exec_row1)
 
-        self.stop_btn = QPushButton("⏹ 紧急停止")
+        self.stop_btn = QPushButton("⏹ 停止任务")
         self.stop_btn.setMinimumHeight(34)
+        self.stop_btn.setAccessibleName("停止任务")
+        self.stop_btn.setToolTip("请求当前任务在可中断点停止；不会触发设备硬件急停")
         self.stop_btn.setStyleSheet("""
             QPushButton { background: #ef4444; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
             QPushButton:hover { background: #dc2626; }

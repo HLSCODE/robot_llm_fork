@@ -601,13 +601,16 @@ class RobotWebSocketServer:
         self._executor.execute(entries)
 
     async def _handle_stop(self, websocket, data: dict) -> None:
-        """停止执行"""
+        """请求协作式停止任务；该接口不会触发设备硬件急停。"""
         if self._executor.is_running:
             if self._ai_execution_pending:
                 self._execution_had_failure = True  # 人工停止视为未成功完成
             self._executor.stop()
             await websocket.send(self._json_msg(
-                {"event": "stopped", "message": "已发送停止指令"}
+                {
+                    "event": "stopped",
+                    "message": "已发送任务停止请求（非硬件急停）",
+                }
             ))
         else:
             await websocket.send(self._json_msg(

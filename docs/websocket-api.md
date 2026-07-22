@@ -402,7 +402,7 @@ ws.onmessage = (event) => {
 | `step_completed` | 某一步执行完成 |
 | `step_failed` | 某一步执行失败 |
 | `execution_finished` | 整个执行结束 |
-| `stopped` | 已发送停止指令 |
+| `stopped` | 已发送任务停止请求（非硬件急停） |
 | `paused` | 已暂停 |
 | `resumed` | 已恢复 |
 
@@ -886,6 +886,8 @@ ws.onmessage = (event) => {
 
 ### 7.3 停止执行 `stop`
 
+该接口请求任务在当前动作的可中断点停止，**不会触发设备硬件急停**。
+
 请求：
 
 ```json
@@ -899,7 +901,7 @@ ws.onmessage = (event) => {
 ```json
 {
   "event": "stopped",
-  "message": "已发送停止指令"
+  "message": "已发送任务停止请求（非硬件急停）"
 }
 ```
 

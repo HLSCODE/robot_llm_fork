@@ -48,7 +48,13 @@ class ExecutionThread(QThread):
 
 
     def stop(self):
+        """请求协作式停止任务。
+
+        该操作不会触发硬件急停。解除暂停可让工作线程尽快到达下一个
+        取消检查点。
+        """
         self._stop_requested = True
+        self._paused = False
 
     def pause(self):
         self._paused = True

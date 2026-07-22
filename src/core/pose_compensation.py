@@ -95,6 +95,7 @@ def normalize_arm_name(arm: str | None) -> str:
     return "right"
 
 
+
 def corrected_arm_base_from_tcp_matrix(
     pose: list[float],
     teach_offset: dict,
