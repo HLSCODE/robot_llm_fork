@@ -11,10 +11,10 @@
 ```text
 GUI/任务流
   -> ARM_ACTION / 执行器=智能加粉
-  -> ActionExecutor
+  -> ExecutionManager / ActionEngine
   -> PowderDispenseAgent
   -> balance_reader_simple.read_balance()
-  -> TappingController
+  -> DeviceRuntime / PowderDispenser
   -> 加粉装置升降/旋转
 ```
 
@@ -131,7 +131,7 @@ VVEAI_MODEL=doubao-seed-1-8-251228
   - 停止旋转
   - 升降回安全位置
   - 旋转回原点
-  - 关闭串口
+  - 串口由 DeviceRuntime 在应用关闭时统一释放
 
 ## 调试建议
 
@@ -157,8 +157,8 @@ python -m unittest tests.test_powder_dispense_agent
 python -m py_compile \
   src/agents/powder_dispense_agent.py \
   src/devices/tapping_controller.py \
-  src/robot_server/action_executor.py \
-  src/gui/execution.py \
+  src/execution/engine.py \
+  src/device_runtime/factory.py \
   src/gui/dialogs.py \
   src/robot_server/ws_server.py \
   src/core/config_loader.py
@@ -171,7 +171,7 @@ python -m py_compile \
 | `src/agents/powder_dispense_agent.py` | 智能闭环加粉核心逻辑 |
 | `src/devices/tapping_controller.py` | 加粉装置底层控制 |
 | `src/vision/balance_reader_simple.py` | 大模型视觉读取天平 |
-| `src/robot_server/action_executor.py` | 服务端任务执行入口 |
-| `src/gui/execution.py` | 旧 Qt GUI 执行入口 |
+| `src/execution/engine.py` | 唯一动作执行入口 |
+| `src/device_runtime/factory.py` | 加粉设备注册和生命周期 |
 | `src/gui/dialogs.py` | GUI 动作配置面板 |
 | `src/robot_server/ws_server.py` | WebSocket 动作 schema |

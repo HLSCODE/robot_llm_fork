@@ -7,6 +7,14 @@ from contextlib import nullcontext
 from typing import Callable
 
 from ..core.pose_compensation import parse_pose
+from ..device_runtime import (
+    ArmId,
+    ArmMotion,
+    CartesianPose,
+    MotionMode,
+    MotionOptions,
+    Pipette,
+)
 
 
 LogFn = Callable[[str, str], None]
@@ -36,9 +44,9 @@ def _radius_to_meters(radius: float) -> float:
 
 def execute_right_arm_circle_dispense(
     *,
-    robot_controller,
+    robot_motion: ArmMotion,
+    pipette: Pipette,
     params: dict,
-    default_port: str,
     log: LogFn,
     stop_requested: StateFn | None = None,
     paused: StateFn | None = None,
@@ -46,16 +54,6 @@ def execute_right_arm_circle_dispense(
     """Move Robot2 around a circle centered at pose x/y while dispensing."""
     stop_requested = stop_requested or (lambda: False)
     paused = paused or (lambda: False)
-
-    if robot_controller is None:
-        log("机械臂控制器未初始化", "error")
-        return False
-
-    ctrl = getattr(robot_controller, "robot2_ctrl", None)
-    robot = getattr(ctrl, "robot", None)
-    if robot is None:
-        log("robot2 未连接", "error")
-        return False
 
     try:
         center_pose = parse_pose(params.get("位姿", params.get("中心位姿", "")))
@@ -68,7 +66,6 @@ def execute_right_arm_circle_dispense(
         blend_radius = int(_to_float(params, "过渡半径", params.get("平滑半径", 20.0)))
         continuous_motion = _to_bool(params.get("连续运动"), True)
         clockwise = _to_bool(params.get("顺时针"), False)
-        port = params.get("端口", default_port)
     except Exception as exc:
         log(f"右臂转圈注液参数错误: {exc}", "error")
         return False
@@ -105,9 +102,6 @@ def execute_right_arm_circle_dispense(
             rz,
         ]
 
-    lock_factory = getattr(robot_controller, "_sdk_lock_for_robot", None)
-    sdk_lock = lock_factory(robot) if lock_factory else nullcontext()
-
     try:
         log(
             "右臂转圈注液: "
@@ -119,16 +113,14 @@ def execute_right_arm_circle_dispense(
 
         start_pose = circle_pose(0)
         log("移动到圆周起点...")
-        with sdk_lock:
-            ret = robot.rm_movel(start_pose, v=move_velocity, r=0, connect=0, block=1)
-        if ret != 0:
-            log(f"移动到圆周起点失败，错误码: {ret}", "error")
-            return False
+        robot_motion.move_to_pose(
+            ArmId.RIGHT,
+            CartesianPose.from_iterable(start_pose),
+            MotionMode.LINEAR,
+            MotionOptions(velocity_percent=move_velocity),
+        )
 
-        from ..devices import ADP
-
-        adp = ADP(port=port)
-        try:
+        with nullcontext(pipette) as adp:
             log(f"设置吐液速度: {dispense_speed:.1f}ul/s")
             if not adp.set_dispense_speed(int(round(dispense_speed))):
                 log("设置吐液速度失败", "error")
@@ -172,13 +164,17 @@ def execute_right_arm_circle_dispense(
                         connect = 1 if continuous_motion and not is_last else 0
                         block = 0 if continuous_motion and not is_last else 1
                         r = blend_radius if continuous_motion and not is_last else 0
-                        with sdk_lock:
-                            ret = robot.rm_movel(target_pose, v=move_velocity, r=r, connect=connect, block=block)
-                        if ret != 0:
-                            results["motion_error"] = (
-                                f"圆周第 {step}/{total_segments} 段移动失败，错误码: {ret}"
-                            )
-                            return
+                        robot_motion.move_to_pose(
+                            ArmId.RIGHT,
+                            CartesianPose.from_iterable(target_pose),
+                            MotionMode.LINEAR,
+                            MotionOptions(
+                                velocity_percent=move_velocity,
+                                blend_radius=r,
+                                connected=bool(connect),
+                                blocking=bool(block),
+                            ),
+                        )
 
                         if not continuous_motion:
                             target_elapsed = duration * step / total_segments
@@ -212,9 +208,6 @@ def execute_right_arm_circle_dispense(
             extra_wait = duration - (time.monotonic() - started_at[0])
             if extra_wait > 0:
                 time.sleep(extra_wait)
-        finally:
-            adp.close()
-
         log("右臂转圈注液完成")
         return True
     except Exception as exc:

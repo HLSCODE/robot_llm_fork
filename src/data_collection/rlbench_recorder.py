@@ -10,6 +10,8 @@ import numpy as np
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
+from ..device_runtime import ArmId, ArmStateReader, DepthCameraSource
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,20 +63,20 @@ class RLBenchRecorder:
     
     def __init__(
         self,
-        robot_controller,
-        camera_manager,
+        robot_state_reader: ArmStateReader,
+        camera_source: DepthCameraSource,
         config,
     ):
         """
         初始化采集器
         
         Args:
-            robot_controller: RobotController实例
-            camera_manager: RealSenseManager实例
+            robot_state_reader: 项目级机械臂状态能力
+            camera_source: 项目级深度相机能力
             config: DataCollectionConfig实例
         """
-        self._robot_controller = robot_controller
-        self._camera_manager = camera_manager
+        self._robot_state_reader = robot_state_reader
+        self._camera_source = camera_source
         self._config = config
         
         # 采集线程
@@ -312,10 +314,14 @@ class RLBenchRecorder:
         
         try:
             # 1. 获取相机数据
-            if self._camera_manager and self._camera_manager.is_available:
+            if (
+                self._camera_source
+                and self._camera_source.is_running
+                and self._camera_source.camera_count > 0
+            ):
                 # 使用配置指定的相机索引
                 # 先尝试从get_cameras_info()获取相机列表
-                cameras_info = self._camera_manager.get_cameras_info()
+                cameras_info = self._camera_source.get_cameras_info()
                 
                 if cameras_info and len(cameras_info) > 0:
                     # 确定使用的相机索引（默认第一个）
@@ -327,7 +333,9 @@ class RLBenchRecorder:
                     camera_serial = target_camera.get("serial")
                     
                     # 尝试使用名称或序列号获取数据
-                    raw_frames = self._camera_manager.get_latest_raw_frames(camera_name or camera_serial)
+                    raw_frames = self._camera_source.get_latest_raw_frames(
+                        camera_name or camera_serial
+                    )
                     
                     if raw_frames:
                         # raw_frames格式: (color_bgr, depth_uint16, intrinsics_dict)
@@ -353,41 +361,22 @@ class RLBenchRecorder:
                     logger.warning("相机管理器中没有在线相机")
             
             # 2. 获取机械臂状态（简化版）
-            if self._robot_controller:
-                # 尝试从左臂获取（默认）
-                robot_ctrl = self._robot_controller.robot1_ctrl
-                if robot_ctrl and robot_ctrl.is_connected:
-                    ret, state = robot_ctrl.robot.rm_get_current_arm_state()
-                    
-                    if ret == 0:
-                        # 关节位置（7个）
-                        if 'joint' in state:
-                            joint_data = state['joint']
-                            if isinstance(joint_data, list) and len(joint_data) >= 7:
-                                frame_data.joint_positions = np.array(joint_data[:7])
-                        
-                        # 关节速度（简化版，先设为None）
-                        frame_data.joint_velocities = None
-                        
-                        # 末端位姿（简化版）
-                        if 'pose' in state:
-                            pose_data = state['pose']
-                            if isinstance(pose_data, list) and len(pose_data) >= 6:
-                                # pose格式: [x, y, z, rx, ry, rz]（欧拉角）
-                                # 需要转换为四元数（简化版，先用欧拉角）
-                                # TODO: 实现欧拉角转四元数
-                                frame_data.gripper_pose = np.array([
-                                    pose_data[0], pose_data[1], pose_data[2],
-                                    pose_data[3], pose_data[4], pose_data[5], 0.0  # 暂用欧拉角
-                                ])
-                        
-                        # 夹爪状态（简化版，先设为0）
-                        frame_data.gripper_open = 0.0
-                        
-                        # 其他字段（后续完善）
-                        frame_data.joint_forces = None
-                        frame_data.gripper_matrix = None
-                        frame_data.gripper_joint_positions = None
+            if self._robot_state_reader:
+                state = self._robot_state_reader.try_read_arm_state(
+                    ArmId.LEFT
+                )
+                if state is not None:
+                    if state.joints is not None:
+                        frame_data.joint_positions = np.array(
+                            state.joints.positions_deg
+                        )
+                    frame_data.joint_velocities = None
+                    pose = state.pose.to_list()
+                    frame_data.gripper_pose = np.array([*pose, 0.0])
+                    frame_data.gripper_open = 0.0
+                    frame_data.joint_forces = None
+                    frame_data.gripper_matrix = None
+                    frame_data.gripper_joint_positions = None
             
             return frame_data
         

@@ -101,14 +101,18 @@ try:
 except ImportError:
     websockets = None
 
-from src.cameras import get_camera_manager
-from src.cameras.camera_factory import CameraManager
-from .action_executor import ActionExecutor
+from ..application import ApplicationServices
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
 from ..core.storage import StorageManager
 from ..core.config_loader import Config
+from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
+from ..device_runtime import ArmStateReader, DepthCameraSource
+from ..execution import (
+    ExecutionEvent,
+    ExecutionEventType,
+    ExecutionState,
+)
 from ..llm import LLMCapability, LLMContentPart, LLMMessage, LLMRegistry, LLMStreamEvent
-from ..arm_sdk import RobotController
 from ..voice_interaction import CamerasModuleProvider, WakeFeedback, VoiceInteractionController
 from ..data_collection import RLBenchRecorder
 from ..data_collection.config import DataCollectionConfig
@@ -201,10 +205,7 @@ class RobotWebSocketServer:
 
     def __init__(
         self,
-        robot_controller=None,
-        body_controller=None,
-        neck_controller=None,
-        move_controller=None,
+        services: ApplicationServices,
         host: str = "0.0.0.0",
         port: int = 8765,
     ):
@@ -213,18 +214,13 @@ class RobotWebSocketServer:
                 "websockets 库未安装，无法启动 WebSocket 服务端"
             )
 
-        self._robot_controller = robot_controller
-        self._body_controller = body_controller
-        self._neck_controller = neck_controller
-        self._move_controller = move_controller  # 底盘移动控制器
+        self._services = services
         self._host = host
         self._port = port
 
         # 已连接的客户端集合
         self._clients: Set = set()
 
-        # 执行器（延迟创建，回调绑定广播函数）
-        self._executor: Optional[ActionExecutor] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         # 当前编排的序列（对应 GUI 右侧的序列列表）
@@ -241,21 +237,6 @@ class RobotWebSocketServer:
         self._planner_client = None
         self._skill_engine = None
         self._interaction_controller: Optional[VoiceInteractionController] = None
-
-        # 设备连接状态
-        self._device_status = {
-            "robot1": False,
-            "robot2": False,
-            "body": body_controller is not None,
-            "base": move_controller is not None,
-        }
-        # 检测机械臂连接状态
-        if robot_controller is not None:
-            self._device_status["robot1"] = True
-            self._device_status["robot2"] = True
-
-        # RealSense 相机管理器（可选，延迟初始化）
-        self._camera_manager: Optional[CameraManager] = None
 
         # 相机帧订阅：通过 subscribe_camera_frames action 注册
         self._camera_frame_subs: Set = set()
@@ -285,6 +266,18 @@ class RobotWebSocketServer:
             "next_episode_id": 0,
         }
 
+    @property
+    def _robot_system(self):
+        return self._services.device_runtime.get_if_ready(ROBOT_SYSTEM)
+
+    @property
+    def _body_controller(self):
+        return self._services.device_runtime.get_if_ready(BODY_AXIS)
+
+    @property
+    def _camera_manager(self):
+        return self._services.device_runtime.get_if_ready(CAMERA)
+
     # ------------------------------------------------------------------
     # 启动服务
     # ------------------------------------------------------------------
@@ -296,19 +289,6 @@ class RobotWebSocketServer:
     async def _serve(self) -> None:
         """异步启动 WebSocket 服务"""
         self._loop = asyncio.get_running_loop()
-
-        # 创建执行器
-        self._executor = ActionExecutor(
-            robot_controller=self._robot_controller,
-            body_controller=self._body_controller,
-            move_controller=self._move_controller,
-            on_step_started=self._on_step_started,
-            on_step_completed=self._on_step_completed,
-            on_step_failed=self._on_step_failed,
-            on_loop_progress=self._on_loop_progress,
-            on_log=self._on_log,
-            on_finished=self._on_finished,
-        )
 
         # 初始化 AI 组件
         self._init_ai()
@@ -352,8 +332,8 @@ class RobotWebSocketServer:
                 llm_registry=self._llm_registry,
                 skill_engine=self._skill_engine,
                 camera_provider=CamerasModuleProvider(
+                    manager_factory=self._camera_for_capture,
                     camera_name=config.VISION_CAMERA_NAME or None,
-                    manager_factory=lambda: self._camera_manager,
                 ),
                 timeout_s=voice_config["session_timeout_s"],
                 history_turns=voice_config["session_history_turns"],
@@ -373,6 +353,10 @@ class RobotWebSocketServer:
         if self._llm_registry is not None:
             return self._llm_registry.get_chat_client(provider)
         return self._llm_client
+
+    def _camera_for_capture(self):
+        self._services.devices.initialize(CAMERA)
+        return self._camera_manager
 
     def _get_planner_client(self, provider: Optional[str] = None):
         if self._llm_registry is not None:
@@ -415,6 +399,10 @@ class RobotWebSocketServer:
             self._clients.discard(websocket)
             self._camera_frame_subs.discard(websocket)
             self._stop_camera_if_idle()
+            if self._services.teleoperation.active:
+                self._services.teleoperation.stop()
+                for arm_name in self._teleop_modes:
+                    self._teleop_modes[arm_name] = False
             await self._close_minicpm_session(websocket)
             print(f"前端客户端断开: {remote}")
 
@@ -504,13 +492,58 @@ class RobotWebSocketServer:
     # 执行控制
     # ==================================================================
 
+    async def _submit_execution(
+        self,
+        websocket,
+        sequence: list,
+        *,
+        origin: str,
+        message: str,
+        steps: int,
+    ) -> bool:
+        gate_lock = threading.Lock()
+        pending_events: list[ExecutionEvent] = []
+        events_released = False
+
+        def listener(event: ExecutionEvent) -> None:
+            nonlocal events_released
+            with gate_lock:
+                if not events_released:
+                    pending_events.append(event)
+                    return
+            self._on_execution_event(event)
+
+        try:
+            self._services.execution.start(
+                sequence,
+                origin=origin,
+                listener=listener,
+            )
+        except Exception as exc:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "message": f"提交执行失败: {exc}",
+            }))
+            return False
+        await self._broadcast({
+            "event": "accepted",
+            "message": message,
+            "steps": steps,
+        })
+        with gate_lock:
+            for event in pending_events:
+                self._on_execution_event(event)
+            pending_events.clear()
+            events_released = True
+        return True
+
     async def _handle_execute(self, websocket, data: dict) -> None:
         """
         执行动作序列
         请求: {"action": "execute", "sequence": [...]}
         如果 sequence 省略，则执行当前编排的序列
         """
-        if self._executor.is_running:
+        if self._services.execution.snapshot().active:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "已有序列正在执行，请先停止"}
             ))
@@ -548,19 +581,20 @@ class RobotWebSocketServer:
                 entry.status = SequenceItemStatus.PENDING
                 total_steps += 1
 
-        await self._broadcast({
-            "event": "accepted",
-            "message": "开始执行",
-            "steps": total_steps,
-        })
-        self._executor.execute(sequence)
+        await self._submit_execution(
+            websocket,
+            sequence,
+            origin="websocket",
+            message="开始执行",
+            steps=total_steps,
+        )
 
     async def _handle_execute_task(self, websocket, data: dict) -> None:
         """
         加载并执行已保存的任务
         请求: {"action": "execute_task", "name": "xxx.task"}
         """
-        if self._executor.is_running:
+        if self._services.execution.snapshot().active:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "已有序列正在执行，请先停止"}
             ))
@@ -593,19 +627,20 @@ class RobotWebSocketServer:
             for e in entries
         )
 
-        await self._broadcast({
-            "event": "accepted",
-            "message": f"加载任务 '{task_name}'，开始执行",
-            "steps": total_steps,
-        })
-        self._executor.execute(entries)
+        await self._submit_execution(
+            websocket,
+            entries,
+            origin="websocket-task",
+            message=f"加载任务 '{task_name}'，开始执行",
+            steps=total_steps,
+        )
 
     async def _handle_stop(self, websocket, data: dict) -> None:
         """请求协作式停止任务；该接口不会触发设备硬件急停。"""
-        if self._executor.is_running:
+        if self._services.execution.snapshot().active:
             if self._ai_execution_pending:
                 self._execution_had_failure = True  # 人工停止视为未成功完成
-            self._executor.stop()
+            self._services.execution.cancel()
             await websocket.send(self._json_msg(
                 {
                     "event": "stopped",
@@ -619,8 +654,9 @@ class RobotWebSocketServer:
 
     async def _handle_pause(self, websocket, data: dict) -> None:
         """暂停执行"""
-        if self._executor.is_running and not self._executor.is_paused:
-            self._executor.pause()
+        snapshot = self._services.execution.snapshot()
+        if snapshot.state is ExecutionState.RUNNING:
+            self._services.execution.pause()
             await websocket.send(self._json_msg(
                 {"event": "paused", "message": "执行已暂停"}
             ))
@@ -631,8 +667,9 @@ class RobotWebSocketServer:
 
     async def _handle_resume(self, websocket, data: dict) -> None:
         """恢复执行"""
-        if self._executor.is_running and self._executor.is_paused:
-            self._executor.resume()
+        snapshot = self._services.execution.snapshot()
+        if snapshot.state is ExecutionState.PAUSED:
+            self._services.execution.resume()
             await websocket.send(self._json_msg(
                 {"event": "resumed", "message": "执行已恢复"}
             ))
@@ -1470,7 +1507,7 @@ class RobotWebSocketServer:
             ))
             return
 
-        if self._executor.is_running:
+        if self._services.execution.snapshot().active:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "已有序列正在执行，请先停止"}
             ))
@@ -1487,12 +1524,16 @@ class RobotWebSocketServer:
         self._ai_execution_pending = True
         self._execution_had_failure = False
 
-        await self._broadcast({
-            "event": "accepted",
-            "message": "AI 序列开始执行",
-            "steps": len(sequence),
-        })
-        self._executor.execute(sequence)
+        accepted = await self._submit_execution(
+            websocket,
+            sequence,
+            origin="websocket-ai",
+            message="AI 序列开始执行",
+            steps=len(sequence),
+        )
+        if not accepted:
+            self._ai_execution_pending = False
+            return
 
         # 清空预览状态
         self._ai_preview_sequence = []
@@ -1731,8 +1772,8 @@ class RobotWebSocketServer:
         """供 voice_interaction 的 session_control.cancel_task 调用。"""
         self._ai_preview_sequence = []
         self._ai_preview_skill_info = {}
-        if self._executor is not None and self._executor.is_running:
-            self._executor.stop()
+        if self._services.execution.snapshot().active:
+            self._services.execution.cancel()
 
     # ==================================================================
     # 设备管理
@@ -1740,19 +1781,24 @@ class RobotWebSocketServer:
 
     async def _handle_status(self, websocket, data: dict) -> None:
         """查询设备和执行状态"""
+        execution = self._services.execution.snapshot()
+        devices = self._services.devices.status()
+        camera = self._camera_manager
         await websocket.send(self._json_msg({
             "event": "status",
-            "devices": self._device_status,
+            "devices": devices,
             "executor": {
-                "running": self._executor.is_running,
-                "paused": self._executor.is_paused,
+                "run_id": execution.run_id,
+                "state": execution.state.value,
+                "running": execution.active,
+                "paused": execution.state is ExecutionState.PAUSED,
             },
             "sequence_length": len(self._current_sequence),
             "ai_processing": self._ai_processing,
             "camera": {
-                "available": self._camera_manager is not None and self._camera_manager.camera_count > 0,
-                "camera_count": self._camera_manager.camera_count if self._camera_manager else 0,
-                "cameras": self._camera_manager.get_cameras_info() if self._camera_manager else [],
+                "available": camera is not None and camera.camera_count > 0,
+                "camera_count": camera.camera_count if camera else 0,
+                "cameras": camera.get_cameras_info() if camera else [],
             },
             "minicpm": {
                 "configured": self._minicpm_cfg is not None,
@@ -1770,44 +1816,22 @@ class RobotWebSocketServer:
         初始化机械臂
         请求: {"action": "init_robots"}
         """
-        def _do_init():
-            try:
-                self._broadcast_threadsafe({"event": "log", "level": "info", "message": "正在初始化机械臂..."})
-                if RobotController is None:
-                    raise ImportError("RobotController SDK unavailable")
-                self._robot_controller = RobotController()
-
-                # 初始化 Robot1
-                robot1 = self._robot_controller.init_robot1()
-                if robot1 is not None:
-                    self._device_status["robot1"] = True
-                    self._broadcast_threadsafe({"event": "log", "level": "info", "message": "Robot1 初始化成功"})
-                else:
-                    self._broadcast_threadsafe({"event": "log", "level": "warn", "message": "Robot1 初始化失败"})
-
-                # 初始化 Robot2
-                robot2 = self._robot_controller.init_robot2()
-                if robot2 is not None:
-                    self._device_status["robot2"] = True
-                    self._broadcast_threadsafe({"event": "log", "level": "info", "message": "Robot2 初始化成功"})
-                else:
-                    self._broadcast_threadsafe({"event": "log", "level": "warn", "message": "Robot2 初始化失败"})
-
-                # 更新执行器的控制器引用
-                self._executor._robot_controller = self._robot_controller
-
-                self._broadcast_threadsafe({
-                    "event": "device_status_changed",
-                    "devices": self._device_status,
-                })
-
-            except ImportError as e:
-                self._broadcast_threadsafe({"event": "error", "message": f"机械臂模块导入失败: {e}"})
-            except Exception as e:
-                self._broadcast_threadsafe({"event": "error", "message": f"机械臂初始化异常: {e}"})
-
-        threading.Thread(target=_do_init, daemon=True, name="InitRobots").start()
-        await websocket.send(self._json_msg({"event": "log", "level": "info", "message": "开始初始化机械臂..."}))
+        await websocket.send(self._json_msg(
+            {"event": "log", "level": "info", "message": "开始初始化机械臂..."}
+        ))
+        try:
+            await asyncio.to_thread(
+                self._services.devices.initialize,
+                ROBOT_SYSTEM,
+            )
+            await self._broadcast({
+                "event": "device_status_changed",
+                "devices": self._services.devices.status(),
+            })
+        except Exception as exc:
+            await websocket.send(self._json_msg(
+                {"event": "error", "message": f"机械臂初始化异常: {exc}"}
+            ))
 
     async def _handle_init_body(self, websocket, data: dict) -> None:
         """
@@ -1815,13 +1839,10 @@ class RobotWebSocketServer:
         请求: {"action": "init_body"}
         """
         try:
-            from ..devices import ModbusMotor
-            config = Config.get_instance()
-            self._body_controller = ModbusMotor(
-                port=config.BODY_SERIAL_PORT, baudrate=115200, slave_id=1, timeout=1
+            await asyncio.to_thread(
+                self._services.devices.initialize,
+                BODY_AXIS,
             )
-            self._device_status["body"] = True
-            self._executor._body_controller = self._body_controller
 
             await websocket.send(self._json_msg({
                 "event": "log",
@@ -1830,7 +1851,7 @@ class RobotWebSocketServer:
             }))
             await websocket.send(self._json_msg({
                 "event": "device_status_changed",
-                "devices": self._device_status,
+                "devices": self._services.devices.status(),
             }))
         except ImportError as e:
             await websocket.send(self._json_msg(
@@ -1843,55 +1864,29 @@ class RobotWebSocketServer:
 
     async def _handle_disconnect(self, websocket, data: dict) -> None:
         """断开所有硬件连接"""
-        messages = []
-
-        if self._executor.is_running:
-            self._executor.stop()
-            messages.append("已停止当前执行")
-
-        if self._robot_controller is not None:
-            try:
-                self._robot_controller.shutdown()
-                messages.append("机械臂已断开")
-            except Exception as e:
-                messages.append(f"断开机械臂出错: {e}")
-            self._robot_controller = None
-            self._executor._robot_controller = None
-            self._device_status["robot1"] = False
-            self._device_status["robot2"] = False
-
-        if self._body_controller is not None:
-            try:
-                self._body_controller.close()
-                messages.append("身体控制器已断开")
-            except Exception as e:
-                messages.append(f"断开身体控制器出错: {e}")
-            self._body_controller = None
-            self._executor._body_controller = None
-            self._device_status["body"] = False
-
+        results = await asyncio.to_thread(
+            self._services.devices.shutdown_all,
+        )
         await websocket.send(self._json_msg({
             "event": "disconnected",
-            "messages": messages,
-            "devices": self._device_status,
+            "results": results,
+            "devices": self._services.devices.status(),
         }))
 
     async def _handle_test_camera(self, websocket, data: dict) -> None:
         """
-        通过 camera_factory 统一入口测试相机（与视觉抓取使用同一路径）。
+        通过 DeviceRuntime 测试相机（与视觉抓取使用同一实例）。
         请求: {"action": "test_camera"}
         """
         def _do_test():
             try:
                 import time
-                from ..cameras.camera_factory import get_camera_manager, stop_camera_manager
-                from ..cameras.realsense_manager import RealSenseManager
 
                 config = Config.get_instance()
                 camera_name = config.VISION_CAMERA_NAME or None
 
-                # ── 通过 camera_factory 获取管理器（与视觉抓取同一路径）──
-                mgr = get_camera_manager()
+                self._services.devices.initialize(CAMERA)
+                mgr = self._camera_manager
                 if mgr is None:
                     self._broadcast_threadsafe({
                         "event": "camera_test_result",
@@ -1932,7 +1927,7 @@ class RobotWebSocketServer:
                 # 尝试取帧
                 deadline = time.time() + 10
                 while time.time() < deadline:
-                    if isinstance(mgr, RealSenseManager):
+                    if hasattr(mgr, "get_latest_raw_frames"):
                         raw = mgr.get_latest_raw_frames(camera_name)
                         if raw is not None:
                             color, depth, intr = raw
@@ -1988,8 +1983,6 @@ class RobotWebSocketServer:
                     "success": False,
                     "message": f"测试异常: {str(e)}",
                 })
-            finally:
-                stop_camera_manager()
 
         threading.Thread(target=_do_test, daemon=True, name="TestCamera").start()
         await websocket.send(self._json_msg({"event": "log", "level": "info", "message": "正在测试相机..."}))
@@ -2044,8 +2037,8 @@ class RobotWebSocketServer:
     # ==================================================================
 
     def _init_camera(self) -> None:
-        """根据 CAMERA_PROVIDER 初始化相机管理器单例，详见 src/cameras/camera_factory.py。"""
-        self._camera_manager = get_camera_manager()
+        """Initialize the runtime-owned camera manager."""
+        self._services.devices.initialize(CAMERA)
 
     async def _handle_camera_status(self, websocket, data: dict) -> None:
         """
@@ -2160,12 +2153,7 @@ class RobotWebSocketServer:
         self._stop_camera_if_idle()
 
     def _stop_camera_if_idle(self) -> None:
-        """实时预览结束后释放相机；视觉动作自行管理其短暂采集。"""
-        if self._camera_frame_subs:
-            return
-        from src.cameras.camera_factory import stop_camera_manager
-
-        stop_camera_manager()
+        """The device runtime releases the camera during application shutdown."""
 
     # ==================================================================
     # LLM 聊天（dispatch 模式）
@@ -2460,6 +2448,38 @@ class RobotWebSocketServer:
     # 执行器回调 → 广播到所有客户端
     # ==================================================================
 
+    def _on_execution_event(self, event: ExecutionEvent) -> None:
+        """Translate execution-domain events to the WebSocket protocol."""
+        event_type = event.event_type
+        if event_type is ExecutionEventType.STEP_STARTED:
+            self._on_step_started(event.index or 0, event.item)
+        elif event_type is ExecutionEventType.STEP_COMPLETED:
+            self._on_step_completed(event.index or 0, event.item)
+        elif event_type is ExecutionEventType.STEP_FAILED:
+            self._on_step_failed(
+                event.index or 0,
+                event.item,
+                event.message,
+            )
+        elif event_type is ExecutionEventType.LOOP_PROGRESS:
+            self._on_loop_progress(
+                str(event.data["loop_uuid"]),
+                int(event.data["current_iteration"]),
+                int(event.data["total_iterations"]),
+            )
+        elif event_type is ExecutionEventType.LOG:
+            self._on_log(event.message, event.level)
+        elif event_type is ExecutionEventType.FAILED:
+            self._execution_had_failure = True
+            if event.message:
+                self._on_log(event.message, "error")
+            self._on_finished()
+        elif event_type is ExecutionEventType.CANCELLED:
+            self._execution_had_failure = True
+            self._on_finished()
+        elif event_type is ExecutionEventType.SUCCEEDED:
+            self._on_finished()
+
     def _on_step_started(self, index: int, item: SequenceItem) -> None:
         self._broadcast_threadsafe({
             "event": "step_started",
@@ -2557,7 +2577,7 @@ class RobotWebSocketServer:
         joints_data = data.get("joints")
 
         # 检查机械臂是否已连接
-        if self._robot_controller is None:
+        if self._robot_system is None:
             await websocket.send(self._json_msg({
                 "event": "error",
                 "message": "机械臂控制器未初始化"
@@ -2585,7 +2605,10 @@ class RobotWebSocketServer:
             logger.info("遥操作初始化: %s臂移动到 %s", arm, joints)
 
             try:
-                success = self._robot_controller.teleop_init_movej(arm, joints)
+                success = self._services.manual_control.initialize_teleoperation(
+                    arm,
+                    joints,
+                )
                 if success:
                     logger.info("遥操作初始化完成: %s臂", arm)
                     await websocket.send(self._json_msg({
@@ -2637,7 +2660,12 @@ class RobotWebSocketServer:
             success_results = {}
             try:
                 for arm_name, joints in joints_data.items():
-                    success = self._robot_controller.teleop_init_movej(arm_name, joints)
+                    success = (
+                        self._services.manual_control.initialize_teleoperation(
+                            arm_name,
+                            joints,
+                        )
+                    )
                     success_results[arm_name] = success
 
                 if all(success_results.values()):
@@ -2672,7 +2700,7 @@ class RobotWebSocketServer:
         arms_list = data.get("arms")
 
         # 检查是否正在执行其他任务
-        if self._executor.is_running:
+        if self._services.execution.snapshot().active:
             await websocket.send(self._json_msg({
                 "event": "error",
                 "message": "有任务正在执行，无法启动遥操作"
@@ -2680,7 +2708,7 @@ class RobotWebSocketServer:
             return
 
         # 检查机械臂是否已连接
-        if self._robot_controller is None:
+        if self._robot_system is None:
             await websocket.send(self._json_msg({
                 "event": "error",
                 "message": "机械臂控制器未初始化"
@@ -2707,6 +2735,15 @@ class RobotWebSocketServer:
                 }))
                 return
 
+        try:
+            self._services.teleoperation.start()
+        except Exception as exc:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "message": f"遥操作资源申请失败: {exc}",
+            }))
+            return
+
         # 启动指定臂的遥操作模式
         for arm_name in arms_to_start:
             self._teleop_modes[arm_name] = True
@@ -2721,13 +2758,15 @@ class RobotWebSocketServer:
 
     async def _execute_grip_async(self, arm: str, position: int) -> None:
         """在线程池中异步执行夹爪位置指令，不阻塞关节指令流"""
-        if self._robot_controller is None:
+        if self._robot_system is None:
             return
         position = max(0, min(1000, int(position)))
         try:
-            loop = asyncio.get_event_loop()
-            method = self._robot_controller.gripper_move_robot1 if arm == "左" else self._robot_controller.gripper_move_robot2
-            await loop.run_in_executor(None, method, position)
+            await asyncio.to_thread(
+                self._services.teleoperation.set_gripper,
+                arm,
+                position,
+            )
             logger.info("遥操作夹爪位置: %s臂 %d", arm, position)
         except Exception as e:
             logger.error("遥操作夹爪执行异常: arm=%s, error=%s", arm, str(e))
@@ -2779,9 +2818,16 @@ class RobotWebSocketServer:
                             self._teleop_msg_counts[arm], arm, joints)
 
             # 立即发送到机械臂
-            if self._robot_controller:
+            if self._robot_system:
                 try:
-                    success = self._robot_controller.teleop_movej_canfd(arm, joints, follow, trajectory_mode)
+                    success = (
+                        self._services.teleoperation.follow(
+                            arm,
+                            joints,
+                            follow=follow,
+                            trajectory_mode=trajectory_mode,
+                        )
+                    )
                     if not success:
                         logger.warning("遥操作指令 #%d 执行失败", self._teleop_msg_counts[arm])
                         await websocket.send(self._json_msg({
@@ -2843,11 +2889,18 @@ class RobotWebSocketServer:
                             joints_data.get("右"))
 
             # 并行执行双臂指令
-            if self._robot_controller:
+            if self._robot_system:
                 try:
                     success_results = {}
                     for arm_name, joints in joints_data.items():
-                        success = self._robot_controller.teleop_movej_canfd(arm_name, joints, follow, trajectory_mode)
+                        success = (
+                            self._services.teleoperation.follow(
+                                arm_name,
+                                joints,
+                                follow=follow,
+                                trajectory_mode=trajectory_mode,
+                            )
+                        )
                         success_results[arm_name] = success
 
                     if not all(success_results.values()):
@@ -2914,6 +2967,8 @@ class RobotWebSocketServer:
             self._teleop_modes[arm_name] = False
             self._teleop_msg_counts[arm_name] = 0
             self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
+        if not any(self._teleop_modes.values()):
+            self._services.teleoperation.stop()
 
         logger.info("遥操作模式已停止: %s，共执行指令 %s", arms_to_stop, total_counts)
         await websocket.send(self._json_msg({
@@ -2946,9 +3001,17 @@ class RobotWebSocketServer:
         # 初始化数据采集器（延迟初始化）
         if self._demo_recorder is None:
             config = DataCollectionConfig()
+            robot_state_reader = self._services.device_runtime.require(
+                ROBOT_SYSTEM,
+                ArmStateReader,
+            )
+            camera_source = self._services.device_runtime.require(
+                CAMERA,
+                DepthCameraSource,
+            )
             self._demo_recorder = RLBenchRecorder(
-                robot_controller=self._robot_controller,
-                camera_manager=self._camera_manager,
+                robot_state_reader=robot_state_reader,
+                camera_source=camera_source,
                 config=config,
             )
 
@@ -2996,7 +3059,16 @@ class RobotWebSocketServer:
             episode_id = result["episode_id"]
 
             # 自动启动遥操作模式（双臂）
-            if self._robot_controller:
+            if self._robot_system:
+                try:
+                    self._services.teleoperation.start()
+                except Exception as exc:
+                    self._demo_recorder.stop_recording()
+                    await websocket.send(self._json_msg({
+                        "event": "demo_record_error",
+                        "message": f"遥操作资源申请失败: {exc}",
+                    }))
+                    return
                 # 启动双臂遥操作模式
                 for arm_name in ["左", "右"]:
                     self._teleop_modes[arm_name] = True
@@ -3071,7 +3143,7 @@ class RobotWebSocketServer:
         result = self._demo_recorder.end_session()
 
         # 自动停止遥操作模式（双臂）
-        if self._robot_controller:
+        if self._robot_system:
             # 停止双臂遥操作模式
             for arm_name in ["左", "右"]:
                 self._teleop_modes[arm_name] = False
@@ -3079,6 +3151,7 @@ class RobotWebSocketServer:
                 self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
 
             logger.info("数据采集会话已自动停止遥操作模式: 双臂")
+        self._services.teleoperation.stop()
 
         # 清空会话状态
         self._demo_session["active"] = False

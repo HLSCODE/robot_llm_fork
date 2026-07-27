@@ -6,7 +6,7 @@
   - 针升降电机 (Stepper Motor)
   - 针旋转电机 (Stepper Motor)
 
-被 action_executor.py 通过 `执行器: "加粉装置"` 调用，
+被统一 ActionEngine 通过 `执行器: "加粉装置"` 调用，
 不修改任何已有代码。
 """
 
@@ -185,7 +185,7 @@ class TappingController:
         self.rotation_enable()
 
 
-# 操作名称 -> 方法映射 (供 action_executor 使用)
+# 操作名称 -> 方法映射（供统一 ActionEngine 使用）
 OPERATIONS = {
     # 夹爪
     "夹爪闭合":     lambda ctrl, **kw: ctrl.gripper_grip(),

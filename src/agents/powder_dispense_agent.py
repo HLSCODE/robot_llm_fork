@@ -14,7 +14,6 @@ class PowderController(Protocol):
     def rotation_move_relative(self, delta_steps: int) -> None: ...
     def rotation_to_home(self, position: int) -> None: ...
     def rotation_stop(self) -> None: ...
-    def close(self) -> None: ...
 
 
 @dataclass
@@ -50,13 +49,13 @@ class PowderDispenseAgent:
 
     def __init__(
         self,
-        controller_factory: Callable[[], PowderController],
+        controller: PowderController,
         read_balance: Callable[[], float],
         *,
         log: Callable[[str], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
     ) -> None:
-        self._controller_factory = controller_factory
+        self._controller = controller
         self._read_balance = read_balance
         self._log = log or (lambda _msg: None)
         self._should_stop = should_stop or (lambda: False)
@@ -69,7 +68,7 @@ class PowderDispenseAgent:
         if config.max_rounds <= 0:
             raise ValueError("最大轮次必须大于0")
 
-        ctrl = self._controller_factory()
+        ctrl = self._controller
         initial_g = 0.0
         current_g = 0.0
         rounds = 0
@@ -142,7 +141,6 @@ class PowderDispenseAgent:
             ("停止旋转", ctrl.rotation_stop),
             ("升降回安全位置", lambda: ctrl.lift_to_safe(config.lift_safe_position)),
             ("旋转回原点", lambda: ctrl.rotation_to_home(config.rotation_home_position)),
-            ("关闭串口", ctrl.close),
         ):
             try:
                 action()

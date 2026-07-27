@@ -10,9 +10,6 @@ from .display import (
     ExpressionDisplay,
     ExpressionDisplaySettings,
     ExpressionDisplayUnavailable,
-    close_expression_display,
-    get_expression_display,
-    switch_expression,
 )
 from .base import ExpressionDisplayBackend, ExpressionSpec
 
@@ -22,7 +19,4 @@ __all__ = [
     "ExpressionDisplaySettings",
     "ExpressionDisplayUnavailable",
     "ExpressionSpec",
-    "close_expression_display",
-    "get_expression_display",
-    "switch_expression",
 ]

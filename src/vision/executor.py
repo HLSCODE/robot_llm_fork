@@ -2,7 +2,7 @@
 """
 视觉抓取统一执行入口。
 
-GUI (ExecutionThread) 和 WebSocket (ActionExecutor) 共用此模块，消除重复代码。
+统一 ActionEngine 使用此模块执行视觉动作。
 """
 
 from __future__ import annotations
@@ -13,19 +13,19 @@ from typing import Callable
 
 
 def execute_vision_capture(
-    controller,            # RobotController
+    robot_system,
+    camera,
     params: dict,
     log_fn: Callable[[str], None],
 ) -> bool:
     """视觉抓取统一执行入口。
 
     流程：
-    1. 从 camera_factory 获取相机管理器 → 取原始帧 (color + depth + intrinsics)
-    2. 注入 controller
-    3. 创建 VisionCaptureGUIAction 并执行
+    1. 从 DeviceRuntime 注入的相机获取原始帧 (color + depth + intrinsics)
+    2. 创建只依赖项目能力接口的 VisionCaptureAction 并执行
 
     Args:
-        controller: RobotController 实例
+        robot_system: DeviceRuntime 提供的 RobotSystem
         params:    动作参数字典（与 ActionDefinition.parameters 一致）
                    - 目标机械臂 (str): robot1 / robot2
                    - 工作流 (str): bottle / vertical
@@ -50,70 +50,30 @@ def execute_vision_capture(
     log_fn(f"视觉抓取动作: 机械臂={target_robot}, 工作流={workflow}")
     log_fn(f"  置信度={confidence}, 调试图片={debug_images}")
 
-    if controller is None:
-        log_fn("机械臂控制器未初始化")
-        return False
-
     try:
-        # ── 从 camera_factory 获取相机管理器取帧 ──
-        from ..cameras.camera_factory import get_camera_manager, stop_camera_manager
-
-        mgr = get_camera_manager()
-        if mgr is None:
+        if camera is None:
             log_fn("相机管理器未启动，无法取帧")
             return False
 
-        camera_name = Config.get_instance().VISION_CAMERA_NAME or None
+        from .capture import VisionCaptureAction
 
-        # 等待采集线程产出第一帧（D435 自动曝光/白平衡需 1~3 秒）
-        import time
-        deadline = time.time() + 10
-        raw = None
-        while time.time() < deadline:
-            raw = mgr.get_latest_raw_frames(camera_name)
-            if raw is not None:
-                break
-            time.sleep(0.2)
-
-        if raw is None:
-            info = mgr.get_cameras_info()
-            online = [c["name"] for c in info if c.get("online")]
-            log_fn(f"相机取帧失败：{camera_name or '(auto)'} 未获取到有效帧，在线相机: {online or '无'}")
-            stop_camera_manager()
-            return False
-
-        color, depth, intr = raw
-        if color is None or depth is None or intr is None:
-            log_fn("相机取帧失败：帧数据不完整")
-            stop_camera_manager()
-            return False
-
-        controller.inject_frames(color, depth, intr)
-        # 后续算法使用已注入的帧，不再需要持续采集。
-        stop_camera_manager()
-
-        from .capture_gui import VisionCaptureGUIAction
-
-        action = VisionCaptureGUIAction(
-            controller=controller,
+        action = VisionCaptureAction(
+            robot_system=robot_system,
+            camera=camera,
             target_robot=target_robot,
-            confidence=confidence,
-            debug_images=debug_images,
+            confidence_threshold=confidence,
+            save_debug_images=debug_images,
             move_velocity=move_velocity,
             gripper_length=gripper_length,
             workflow=workflow,
             raise_on_error=False,
         )
 
-        result = action.execute()
-
-        if result.get("success"):
+        if action.execute():
             log_fn("视觉抓取执行成功")
             return True
-        else:
-            error = result.get("error", "未知错误")
-            log_fn(f"视觉抓取执行失败: {error}")
-            return False
+        log_fn(f"视觉抓取执行失败: {action.last_error or '未知错误'}")
+        return False
 
     except Exception as e:
         log_fn(f"执行视觉抓取出错: {str(e)}")

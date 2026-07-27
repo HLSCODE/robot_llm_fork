@@ -62,7 +62,8 @@ src/voice_interaction/
 - `core/session.py`：维护唤醒状态、超时、历史上下文、当前任务状态。
 - `core/controller.py`：主入口，接收文本输入，驱动 classify -> route -> response。
 - `core/router.py`：根据 intent 调用对应 task。
-- `adapters/cameras.py`：提供 `CamerasModuleProvider` 通过 `src/cameras.camera_factory.get_camera_manager()` 获取视觉帧。
+- `adapters/cameras.py`：提供 `CamerasModuleProvider`，通过注入的
+  `DeviceRuntime` 相机获取视觉帧。
 - `speech/audio.py`：sounddevice 麦克风采集和 float32/int16 音频工具。
 - `speech/vad.py`：FunASR VAD 适配器。
 - `speech/asr.py`：FunASR 语音识别适配器。
@@ -362,12 +363,22 @@ async def _handle_command(self, text: str):
 视觉问题需要先通过 `src/cameras/` 采集图像，再调用视觉融合 task。GUI 第一阶段默认注入 `CamerasModuleProvider`：
 
 ```python
+def camera_for_capture():
+    application_services.devices.initialize(CAMERA)
+    return application_services.device_runtime.get_if_ready(CAMERA)
+
+
 camera_provider = CamerasModuleProvider(
+    manager_factory=camera_for_capture,
     camera_name=Config.get_instance().VISION_CAMERA_NAME or None,
 )
 ```
 
-`CamerasModuleProvider` 会从 `camera_factory.get_camera_manager()` 获取相机管理器，并调用 `get_latest_jpegs()` 转成 `LLMContentPart(type="image")`。如果 `VISION_CAMERA_NAME` 为空，则使用所有在线相机；如果配置了名称或序列号，则只使用对应相机。
+`manager_factory` 必须由应用组装层注入，并从唯一的 `DeviceRuntime`
+初始化、获取相机；`CamerasModuleProvider` 不创建或关闭相机。它调用
+`get_latest_jpegs()` 转成 `LLMContentPart(type="image")`。如果
+`VISION_CAMERA_NAME` 为空，则使用所有在线相机；如果配置了名称或序列号，
+则只使用对应相机。
 
 当相机未连接、未启动或没有最新帧时，不应把设备状态列表直接反馈给用户。适配器抛出 `CameraCaptureError`，其中 `user_message` 是适合语音播报的自然提示，`technical_detail` 只用于日志和调试数据。需要根据技术细节进一步润色时，路由层可使用 `VOICE_FEEDBACK_PROFILE` 生成一句更拟人化的反馈。
 

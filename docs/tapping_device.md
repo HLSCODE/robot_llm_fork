@@ -130,11 +130,12 @@ finally:
 ## 软件架构
 
 ```
-action_executor.py
+ExecutionManager / ActionEngine
   └── _execute_manipulate()
         └── elif executor == '加粉装置'
               └── _execute_tapping()
-                    └── TappingController.from_config()
+                    └── DeviceRuntime.require(PowderDispenser)
+                          └── TappingController.from_config()
                           ├── SerialTransport (共享串口)
                           ├── ElectricGripper  (夹爪)
                           └── StepperBus
@@ -142,9 +143,9 @@ action_executor.py
                                 └── StepperMotor(地址6, 旋转)
 ```
 
-- `tapping_controller.py` 封装了所有设备操作，供 `action_executor.py` 调用
-- 不修改任何已有代码，通过添加 `elif` 分支扩展
-- 串口连接在每次执行时创建，执行完毕后关闭
+- `tapping_controller.py` 封装设备协议，供 `PowderDispenser` 能力使用
+- `ActionEngine` 只依赖设备能力接口
+- 串口实例由 `DeviceRuntime` 创建一次并在应用关闭时统一释放
 
 ---
 

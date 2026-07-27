@@ -15,6 +15,12 @@ from ...core.vision_station_storage import (
     arm_display_name,
     normalize_arm_name,
 )
+from ...device_runtime import (
+    ArmId,
+    CartesianPose,
+    MotionMode,
+    RobotSystem,
+)
 from .geometry import compensate_taught_pose, compute_marker_in_base_from_image
 
 
@@ -95,47 +101,23 @@ def _camera_name_for_arm(arm: str, override: str | None = None) -> str:
     return config.get("camera_name", "")
 
 
-def _robot_for_arm(controller, arm: str):
-    if controller is None:
-        raise RuntimeError("机械臂控制器未初始化")
-    arm_key = normalize_arm_name(arm)
-    if arm_key == "left":
-        if hasattr(controller, "init_robot1"):
-            robot = controller.init_robot1()
-            if robot is None:
-                raise RuntimeError("左臂未连接")
-            return robot
-        ctrl = getattr(controller, "robot1_ctrl", None)
-    else:
-        if hasattr(controller, "init_robot2"):
-            robot = controller.init_robot2()
-            if robot is None:
-                raise RuntimeError("右臂未连接")
-            return robot
-        ctrl = getattr(controller, "robot2_ctrl", None)
-    robot = getattr(ctrl, "robot", None)
-    if robot is None:
-        raise RuntimeError(f"{arm_display_name(arm_key)}未连接")
-    return robot
+def get_current_arm_pose(robot_system: RobotSystem, arm: str) -> list[float]:
+    arm_id = ArmId.parse(normalize_arm_name(arm))
+    return robot_system.read_arm_state(arm_id).pose.to_list()
 
 
-def get_current_arm_pose(controller, arm: str) -> list[float]:
-    robot = _robot_for_arm(controller, arm)
-    ret, state = robot.rm_get_current_arm_state()
-    if ret != 0:
-        raise RuntimeError(f"获取{arm_display_name(arm)}当前位姿失败，错误码：{ret}")
-    if state.get("error_code", 0) != 0:
-        raise RuntimeError(f"{arm_display_name(arm)}存在错误，错误码：{state['error_code']}")
-    return [float(v) for v in state["pose"]]
-
-
-def move_arm_to_pose(controller, arm: str, pose: list[float], mode: str = "move_j") -> bool:
-    arm_key = normalize_arm_name(arm)
-    if arm_key == "left":
-        method = controller.move_robot1l if mode == "move_l" else controller.move_robot1
-    else:
-        method = controller.move_robot2l if mode == "move_l" else controller.move_robot2
-    return bool(method(pose))
+def move_arm_to_pose(
+    robot_system: RobotSystem,
+    arm: str,
+    pose: list[float],
+    mode: str = "move_j",
+) -> bool:
+    robot_system.move_to_pose(
+        ArmId.parse(normalize_arm_name(arm)),
+        CartesianPose.from_iterable(pose),
+        MotionMode.parse(mode),
+    )
+    return True
 
 
 def _decode_jpeg(jpeg_bytes: bytes):
@@ -143,40 +125,38 @@ def _decode_jpeg(jpeg_bytes: bytes):
     return cv2.imdecode(data, cv2.IMREAD_COLOR)
 
 
-def capture_color_frame(camera_name: str | None = None, timeout_seconds: float = 10.0):
-    from ...cameras.camera_factory import get_camera_manager, stop_camera_manager
-
-    mgr = get_camera_manager()
-    if mgr is None:
+def capture_color_frame(
+    camera,
+    camera_name: str | None = None,
+    timeout_seconds: float = 10.0,
+):
+    if camera is None:
         raise RuntimeError("相机管理器未启动")
 
-    try:
-        deadline = time.time() + timeout_seconds
-        while time.time() < deadline:
-            if hasattr(mgr, "get_latest_raw_frames"):
-                raw = mgr.get_latest_raw_frames(camera_name or None)
-                if raw is not None:
-                    color, _depth, _intr = raw
-                    if color is not None:
-                        return color
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        if hasattr(camera, "get_latest_raw_frames"):
+            raw = camera.get_latest_raw_frames(camera_name or None)
+            if raw is not None:
+                color, _depth, _intr = raw
+                if color is not None:
+                    return color
 
-            if hasattr(mgr, "get_latest_jpegs"):
-                jpegs = mgr.get_latest_jpegs()
-                for serial, name, jpeg in jpegs:
-                    if camera_name and camera_name not in {serial, name}:
-                        continue
-                    frame = _decode_jpeg(jpeg)
-                    if frame is not None:
-                        return frame
-                if jpegs and not camera_name:
-                    frame = _decode_jpeg(jpegs[0][2])
-                    if frame is not None:
-                        return frame
-            time.sleep(0.2)
+        if hasattr(camera, "get_latest_jpegs"):
+            jpegs = camera.get_latest_jpegs()
+            for serial, name, jpeg in jpegs:
+                if camera_name and camera_name not in {serial, name}:
+                    continue
+                frame = _decode_jpeg(jpeg)
+                if frame is not None:
+                    return frame
+            if jpegs and not camera_name:
+                frame = _decode_jpeg(jpegs[0][2])
+                if frame is not None:
+                    return frame
+        time.sleep(0.2)
 
-        raise RuntimeError(f"相机取帧超时: {camera_name or '(auto)'}")
-    finally:
-        stop_camera_manager()
+    raise RuntimeError(f"相机取帧超时: {camera_name or '(auto)'}")
 
 
 def _debug_paths(station_id: str, arm: str, suffix: str) -> tuple[Path | None, Path | None]:
@@ -191,6 +171,7 @@ def _debug_paths(station_id: str, arm: str, suffix: str) -> tuple[Path | None, P
 
 def capture_marker_pose(
     controller,
+    camera,
     station_id: str,
     arm: str,
     camera_name: str,
@@ -207,7 +188,7 @@ def capture_marker_pose(
         f"视觉重定位取帧: 工位={station_id}, {arm_display_name(arm)}, "
         f"相机={camera_name or '(auto)'}, marker={marker_size.get('width')} x {marker_size.get('height')}"
     )
-    image = capture_color_frame(camera_name or None)
+    image = capture_color_frame(camera, camera_name or None)
     if image_path is not None:
         image_path.parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(image_path), image)
@@ -235,6 +216,7 @@ def capture_marker_pose(
 
 def record_teach_profile(
     controller,
+    camera,
     params: dict,
     log_fn: LogFn | None = None,
 ) -> dict:
@@ -258,7 +240,16 @@ def record_teach_profile(
     else:
         log("未填写拍照位姿，将使用当前机械臂位姿作为示教拍照位")
 
-    marker = capture_marker_pose(controller, station_id, arm, camera_name, "teach", marker_size, log)
+    marker = capture_marker_pose(
+        controller,
+        camera,
+        station_id,
+        arm,
+        camera_name,
+        "teach",
+        marker_size,
+        log,
+    )
     profile = {
         "station_id": station_id,
         "station_name": station_name,
@@ -278,6 +269,7 @@ def record_teach_profile(
 
 def execute_vision_relocalization(
     controller,
+    camera,
     params: dict,
     context: ExecutionContext,
     log_fn: LogFn | None = None,
@@ -294,7 +286,7 @@ def execute_vision_relocalization(
     arm = normalize_arm_name(params.get("arm") or params.get("臂") or "left")
 
     if action_mode == "teach":
-        profile = record_teach_profile(controller, params, log)
+        profile = record_teach_profile(controller, camera, params, log)
         station_id = profile["station_id"]
         camera_name = profile.get("camera_name", "")
         context.set_vision_state(
@@ -325,7 +317,16 @@ def execute_vision_relocalization(
             if not move_arm_to_pose(controller, arm, [float(v) for v in photo_pose], mode=params.get("move_mode", "move_j")):
                 raise RuntimeError("移动到重定位拍照位失败")
 
-    marker = capture_marker_pose(controller, station_id, arm, camera_name, "run", marker_size, log)
+    marker = capture_marker_pose(
+        controller,
+        camera,
+        station_id,
+        arm,
+        camera_name,
+        "run",
+        marker_size,
+        log,
+    )
     context.set_vision_state(
         VisionRelocalizationState(
             station_id=station_id,

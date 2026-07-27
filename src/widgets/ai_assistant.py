@@ -15,6 +15,8 @@ from PyQt6.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QFont, QColor, QTextCursor
 
 from ..ai_integration import AIController, ExecutionBridge
+from ..application import ApplicationServices
+from ..device_runtime.ids import CAMERA
 from ..core.config_loader import Config
 from ..gui.dialogs import ActionPreviewDialog
 from ..voice_interaction import (
@@ -136,11 +138,12 @@ class AIAssistantWidget(QWidget):
     """
     speech_runtime_startup_finished = pyqtSignal(bool)
 
-    def __init__(self, parent=None):
+    def __init__(self, services: ApplicationServices, parent=None):
         super().__init__(parent)
 
         # 初始化执行桥接器和AI控制器
-        self._execution_bridge = ExecutionBridge()
+        self._services = services
+        self._execution_bridge = ExecutionBridge(services)
         self._ai_controller = AIController(execution_bridge=self._execution_bridge)
         config = Config.get_instance()
         voice_config = Config.get_voice_interaction_config()
@@ -148,6 +151,7 @@ class AIAssistantWidget(QWidget):
             llm_registry=self._ai_controller.get_llm_registry(),
             skill_engine=self._ai_controller.get_skill_engine(),
             camera_provider=CamerasModuleProvider(
+                manager_factory=self._camera_for_capture,
                 camera_name=config.VISION_CAMERA_NAME or None,
             ),
             timeout_s=voice_config["session_timeout_s"],
@@ -164,6 +168,7 @@ class AIAssistantWidget(QWidget):
             llm_registry=self._ai_controller.get_llm_registry(),
             skill_engine=self._ai_controller.get_skill_engine(),
             camera_provider=CamerasModuleProvider(
+                manager_factory=self._camera_for_capture,
                 camera_name=config.VISION_CAMERA_NAME or None,
             ),
             timeout_s=voice_config["session_timeout_s"],
@@ -207,6 +212,10 @@ class AIAssistantWidget(QWidget):
         self._voice_timeout_timer.timeout.connect(self._check_voice_session_timeout)
         self._voice_timeout_timer.start()
 
+    def _camera_for_capture(self):
+        self._services.devices.initialize(CAMERA)
+        return self._services.device_runtime.get_if_ready(CAMERA)
+
     def _init_ui(self):
         """初始化UI"""
         layout = QVBoxLayout(self)
@@ -232,9 +241,9 @@ class AIAssistantWidget(QWidget):
         status_layout.addStretch()
 
         self.simulation_checkbox = QCheckBox("模拟模式")
-        self.simulation_checkbox.setChecked(False)
+        self.simulation_checkbox.setChecked(self._services.simulation)
+        self.simulation_checkbox.setEnabled(False)
         self.simulation_checkbox.setStyleSheet("border: none; background: transparent;")
-        self.simulation_checkbox.stateChanged.connect(self._on_simulation_changed)
         status_layout.addWidget(self.simulation_checkbox)
 
         layout.addWidget(status_widget)
@@ -415,10 +424,10 @@ class AIAssistantWidget(QWidget):
     def set_main_window(self, main_window):
         """设置主窗口引用，并桥接执行信号到右侧序列列表（仅应调用一次）。"""
         self._main_window = main_window
-        self._execution_bridge.set_main_window(main_window)
         self._execution_bridge.step_started.connect(main_window.on_step_started)
         self._execution_bridge.step_completed.connect(main_window.on_step_completed)
         self._execution_bridge.step_failed.connect(main_window.on_step_failed)
+        self._execution_bridge.loop_progress.connect(main_window.on_loop_progress)
         self._execution_bridge.execution_completed.connect(main_window.on_execution_completed)
 
     def _connect_signals(self):
@@ -938,13 +947,6 @@ class AIAssistantWidget(QWidget):
         self._voice_audio_player.stop()
         self._ai_controller.cancel_current_task()
         self._reset_ui()
-
-    def _on_simulation_changed(self, state: int):
-        """模拟模式切换"""
-        enabled = state == Qt.CheckState.Checked.value
-        self._ai_controller.set_simulation_mode(enabled)
-        mode_text = "启用" if enabled else "禁用"
-        self._add_system_message(f"模拟模式: {mode_text}")
 
     # ==================== 执行上下文信号处理 ====================
 

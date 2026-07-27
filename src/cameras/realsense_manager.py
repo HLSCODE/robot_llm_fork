@@ -16,9 +16,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_instance: Optional["RealSenseManager"] = None
-_instance_lock = threading.Lock()
-
 try:
     import numpy as np
     import pyrealsense2 as rs
@@ -99,28 +96,6 @@ class RealSenseManager:
         self._latest_jpeg: Optional[bytes] = None
         # (serial, name, jpeg_bytes)
         self._latest_jpegs: list[tuple[str, str, bytes]] = []
-
-    @classmethod
-    def get_instance(cls, **kwargs) -> "RealSenseManager":
-        """返回全局单例。首次调用时以 kwargs 初始化，后续调用忽略参数直接返回已有实例。"""
-        global _instance
-        if _instance is None:
-            with _instance_lock:
-                if _instance is None:
-                    _instance = cls(**kwargs)
-        return _instance
-
-    @classmethod
-    def peek_instance(cls) -> Optional["RealSenseManager"]:
-        """返回已有单例；不会因查询或关闭操作创建空实例。"""
-        return _instance
-
-    @classmethod
-    def reset_instance(cls) -> None:
-        """销毁单例（测试或重新配置时使用）。调用前请先手动 stop()。"""
-        global _instance
-        with _instance_lock:
-            _instance = None
 
     # ------------------------------------------------------------------
     # 公开接口

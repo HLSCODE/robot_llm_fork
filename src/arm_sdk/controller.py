@@ -1,23 +1,12 @@
-import cv2
 import time
-import numpy as np
 import os
 import threading
-from sklearn.mixture import GaussianMixture
-import socket
-import pickle
-import struct
 from Robotic_Arm.rm_robot_interface import *
 
 # 先确保配置已加载，再导入配置值
 from .config import ensure_config_loaded
 ensure_config_loaded()  # 在导入具体配置前确保已加载
 from .config import *  # 导入配置值
-from ..devices.kuaihuanshou import Kuaihuanshou
-from ..devices.relay import RelayController
-from ..devices.adp import ADP
-from ..devices import yiyeqiang_out
-from ..core.config_loader import Config
 
 
 class SimpleRobotArm:
@@ -62,6 +51,7 @@ class SimpleRobotArm:
             self.last_error = str(e)
             print(f"{self.robot_name}连接失败: {e}")
             self.is_connected = False
+            self.disconnect()
             raise
 
     def disconnect(self):
@@ -97,394 +87,10 @@ class RobotController:
             self.robot1_ctrl.connect()
             self.robot2_ctrl.connect()
         except Exception as exc:
+            self.robot1_ctrl.disconnect()
+            self.robot2_ctrl.disconnect()
             raise RuntimeError("机械臂连接失败，请检查网络或供电") from exc
 
-        # 快换手点位
-        self.TOOL_POINTS = [
-            {"point_name": "huandian1", "pose": [-374.88 / 1000, 325.69 / 1000, -70 / 1000, -3.141, -0.0, -0.278]},  
-            {"point_name": "huandian2", "pose": [-135.95 / 1000, 324.0 / 1000, -70 / 1000, -3.141, -0.0, -0.278]},  
-            {"point_name": "huandian3", "pose": [-136.08 / 1000, 324.0 / 1000, -96.15 / 1000, -3.141, -0.026, -0.278]},   
-        ]
-        self.gripper_offset = [3.146, 0, 3.128]  # 侧装的垂直姿态（兜底值，优先从 Config 读取）
-        self.translation_vector = [-0.10273135, 0.03312807, -0.07214614]
-
-        # 按需帧注入槽（由 camera_factory 的 RealSenseManager 填充）
-        self._injected_color = None
-        self._injected_depth = None
-        self._injected_intr = None
-
-        self.config = Config.get_instance()
-
-        # 手眼标定参数（优先从 Config 读取，兜底用硬编码值）
-        cal = self.config.get_vision_calibration()
-        self.rotation_matrix = cal.get("rotation_matrix") or [
-            [0.00215684, 0.97503835, 0.22202606],
-            [-0.99995231, -0.0000119, 0.00976617],
-            [0.00952503, -0.22203654, 0.97499182],
-        ]
-        self.translation_vector = cal.get("translation_vector") or self.translation_vector
-        self.gripper_offset = cal.get("gripper_offset") or self.gripper_offset
-
-    def process_mask_with_gmm(self, image, mask, n_components=1):
-        """使用高斯混合模型(GMM)处理图像分割掩码"""
-        masked_image = cv2.bitwise_and(image, image, mask=mask)
-        y_coords, x_coords = np.nonzero(mask)
-        pixels = masked_image[y_coords, x_coords]
-        
-        if len(pixels) == 0:
-            return mask
-
-        features = np.column_stack((x_coords, y_coords, pixels))
-        gmm = GaussianMixture(n_components=n_components, random_state=42)
-        labels = gmm.fit_predict(features)
-        
-        new_mask = np.zeros_like(mask)
-        for i in range(n_components):
-            component_mask = np.zeros_like(mask)
-            component_indices = (labels == i)
-            component_mask[y_coords[component_indices], x_coords[component_indices]] = 255
-            
-            num_labels, labels_im = cv2.connectedComponents(component_mask)
-            if num_labels > 1:
-                largest_label = 1 + np.argmax([np.sum(labels_im == i) for i in range(1, num_labels)])
-                component_mask = (labels_im == largest_label).astype(np.uint8) * 255
-            
-            new_mask = cv2.bitwise_or(new_mask, component_mask)
-        
-        kernel = np.ones((5,5), np.uint8)
-        new_mask = cv2.morphologyEx(new_mask, cv2.MORPH_CLOSE, kernel)
-        new_mask = cv2.morphologyEx(new_mask, cv2.MORPH_OPEN, kernel)
-        
-        return new_mask
-
-    def inject_frames(self, color, depth, intrinsics):
-        """注入帧数据，供 get_frames_from_gui() 直接返回（绕过 socket）。"""
-        self._injected_color = color
-        self._injected_depth = depth
-        self._injected_intr = intrinsics
-
-    def get_frames_from_gui(self, max_retries=3, timeout=5):
-        """从GUI获取帧数据，优先返回 inject_frames 注入的数据。"""
-        # 优先返回已注入的帧数据（由 OnDemandFrameGrabber 填充）
-        if self._injected_color is not None:
-            color = self._injected_color
-            depth = self._injected_depth
-            intr = self._injected_intr
-            self._injected_color = None  # 用完清空，防止复用
-            return color, depth, intr
-
-        retries = 0
-        while retries < max_retries:
-            try:
-                client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                client_socket.settimeout(timeout)
-                client_socket.connect(('localhost', 12345))
-                
-                client_socket.send("get_frames".encode())
-                data_size = struct.unpack(">L", client_socket.recv(4))[0]
-                
-                received_data = b""
-                while len(received_data) < data_size:
-                    data = client_socket.recv(4096)
-                    if not data:
-                        break
-                    received_data += data
-                
-                frames_data = pickle.loads(received_data)
-                return frames_data['color'], frames_data['depth'], frames_data['intrinsics']
-            
-            except (socket.timeout, ConnectionRefusedError) as e:
-                print(f"连接尝试 {retries + 1} 失败: {e}")
-                retries += 1
-                time.sleep(1)
-            except Exception as e:
-                print(f"获取帧错误：{e}")
-                return None, None, None
-            finally:
-                client_socket.close()
-        
-        print("达到最大重试次数，无法获取帧")
-        return None, None, None
-
-    def init_robot1(self):
-        """初始化第一个机械臂"""
-        try:
-            print("\n==== 初始化第一个机械臂 ====")
-            if not self.robot1_ctrl.is_connected:
-                self.robot1_ctrl.connect()
-
-            robot1 = self.robot1_ctrl.robot
-            ret, state = robot1.rm_get_current_arm_state()
-            if ret != 0:
-                raise Exception(f"获取robot1状态失败，错误码：{ret}")
-            if state.get('error_code', 0) != 0:
-                raise Exception(f"robot1存在错误，错误码：{state['error_code']}")
-            print(f"robot1当前状态: {state}")
-            
-            return robot1
-            
-        except Exception as e:
-            print(f"robot1初始化过程出错: {str(e)}")
-            return None
-
-    def init_robot2(self):
-        """初始化第二个机械臂"""
-        try:
-            print("\n==== 初始化第二个机械臂 ====")
-            if not self.robot2_ctrl.is_connected:
-                self.robot2_ctrl.connect()
-
-            robot2 = self.robot2_ctrl.robot
-            ret, state = robot2.rm_get_current_arm_state()
-            if ret != 0:
-                raise Exception(f"获取robot2状态失败，错误码：{ret}")
-            if state.get('error_code', 0) != 0:
-                raise Exception(f"robot2存在错误，错误码：{state['error_code']}")
-            print(f"robot2当前状态: {state}")
-            
-            return robot2
-            
-        except Exception as e:
-            print(f"robot2初始化过程出错: {str(e)}")
-            return None
-
-    def spawn_robot1(self, robot1):
-        """移动 robot1 到初始位置"""
-        try:
-            print("\n==== 移动 robot1 到初始位置 ====")
-            target_pose1 = ROBOT1_CONFIG["initial_pose"]
-            print(f"robot1 目标位置：{target_pose1}")
-            ret = robot1.rm_movej_p(target_pose1, 
-                                   v=MOVE_CONFIG["velocity"], 
-                                   r=MOVE_CONFIG["radius"], 
-                                   connect=MOVE_CONFIG["connect"], 
-                                   block=MOVE_CONFIG["block"])
-            if ret != 0:
-                raise Exception(f"robot1移动失败，错误码：{ret}")
-                
-            ret, state = robot1.rm_get_current_arm_state()
-            if ret == 0:
-                print(f"robot1最终位置: {state['pose']}")
-                
-            print("robot1已就位！")
-            return True
-            
-        except Exception as e:
-            print(f"robot1移动过程出错: {str(e)}")
-            return False
-
-    def spawn_robot2(self, robot2):
-        """移动 robot2 到初始位置"""
-        try:
-            print("\n==== 移动 robot2 到初始位置 ====")
-            target_pose2 = ROBOT2_CONFIG["initial_pose"]
-            print(f"robot2 目标位置：{target_pose2}")
-            ret = robot2.rm_movej_p(target_pose2, 
-                                   v=MOVE_CONFIG["velocity"], 
-                                   r=MOVE_CONFIG["radius"], 
-                                   connect=MOVE_CONFIG["connect"], 
-                                   block=MOVE_CONFIG["block"])
-            if ret != 0:
-                raise Exception(f"robot2移动失败，错误码：{ret}")
-                
-            ret, state = robot2.rm_get_current_arm_state()
-            if ret == 0:
-                print(f"robot2最终位置: {state['pose']}")
-                
-            print("robot2已就位！")
-            return True
-            
-        except Exception as e:
-            print(f"robot2移动过程出错: {str(e)}")
-            return False
-
-    def openclaw(self, robot):
-        """打开夹爪"""
-        attempts = 0
-        max_attempts = MAX_ATTEMPTS
-        while attempts < max_attempts:
-            print("打开夹爪...")
-            ret = robot.rm_set_gripper_release(
-                        speed=GRIPPER_CONFIG["release"]["speed"],
-                        block=True,
-                        timeout=GRIPPER_CONFIG["release"]["timeout"])
-            if ret == 0:
-                print("释放成功")
-                break
-            else:
-                print(f"释放失败，错误码：{ret}")
-                attempts += 1
-                time.sleep(1)
-
-            if attempts == max_attempts:
-                    print("达到最大尝试次数，释放操作仍未成功")
-                    return False
-        return True
-
-    def closeclaw(self, robot):
-        """关闭夹爪"""
-        max_attempts = MAX_ATTEMPTS
-        attempts = 0
-        while attempts < max_attempts:
-            print("夹取物体...")
-            ret = robot.rm_set_gripper_pick_on(
-                    speed=GRIPPER_CONFIG["pick"]["speed"],
-                    block=True,
-                    timeout=GRIPPER_CONFIG["pick"]["timeout"],
-                    force=GRIPPER_CONFIG["pick"]["force"]
-                )
-            if ret == 0:
-                print("夹取成功")
-                time.sleep(1)
-                break
-            else:
-                print(f"夹取失败，错误码：{ret}")
-                attempts += 1
-                time.sleep(1)
-            if attempts == max_attempts:
-                print("达到最大尝试次数，夹取操作仍未成功")
-                return False
-        return True
-
-    def gripper_open_robot1(self):
-        """直接打开Robot1夹爪（使用已连接的实例）"""
-        if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
-            raise Exception("Robot1未连接")
-        return self.openclaw(self.robot1_ctrl.robot)
-
-    def gripper_close_robot1(self):
-        """直接关闭Robot1夹爪（使用已连接的实例）"""
-        if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
-            raise Exception("Robot1未连接")
-        return self.closeclaw(self.robot1_ctrl.robot)
-
-    def gripper_open_robot2(self):
-        """直接打开Robot2夹爪（使用已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        return self.openclaw(self.robot2_ctrl.robot)
-
-    def gripper_close_robot2(self):
-        """直接关闭Robot2夹爪（使用已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        return self.closeclaw(self.robot2_ctrl.robot)
-
-    def gripper_move_robot1(self, position: int) -> bool:
-        """设置Robot1夹爪位置（0~1000）"""
-        if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
-            raise Exception("Robot1未连接")
-        position = max(0, min(1000, position))
-        ret = self.robot1_ctrl.robot.rm_set_gripper_position(
-            position,
-            block=True,
-            timeout=GRIPPER_CONFIG["release"]["timeout"]
-        )
-        return ret == 0
-
-    def gripper_move_robot2(self, position: int) -> bool:
-        """设置Robot2夹爪位置（0~1000）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        position = max(0, min(1000, position))
-        ret = self.robot2_ctrl.robot.rm_set_gripper_position(
-            position,
-            block=True,
-            timeout=GRIPPER_CONFIG["release"]["timeout"]
-        )
-        return ret == 0
-
-    def move_robot1(self, target_pose):
-        """移动Robot1到指定点位（使用已连接的实例）"""
-        if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
-            raise Exception("Robot1未连接")
-        try:
-            print(f"移动Robot1到: {target_pose}")
-            ret = self.robot1_ctrl.robot.rm_movej_p(
-                target_pose,
-                v=MOVE_CONFIG["velocity"],
-                r=MOVE_CONFIG["radius"],
-                connect=MOVE_CONFIG["connect"],
-                block=MOVE_CONFIG["block"]
-            )
-            if ret == 0:
-                print("Robot1移动成功")
-                return True
-            else:
-                print(f"Robot1移动失败，错误码：{ret}")
-                return False
-        except Exception as e:
-            print(f"Robot1移动出错: {str(e)}")
-            return False
-
-    def move_robot2(self, target_pose):
-        """移动Robot2到指定点位（使用已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        try:
-            print(f"移动Robot2到: {target_pose}")
-            ret = self.robot2_ctrl.robot.rm_movej_p(
-                target_pose,
-                v=MOVE_CONFIG["velocity"],
-                r=MOVE_CONFIG["radius"],
-                connect=MOVE_CONFIG["connect"],
-                block=MOVE_CONFIG["block"]
-            )
-            if ret == 0:
-                print("Robot2移动成功")
-                return True
-            else:
-                print(f"Robot2移动失败，错误码：{ret}")
-                return False
-        except Exception as e:
-            print(f"Robot2移动出错: {str(e)}")
-            return False
-
-    def move_robot1l(self, target_pose):
-        """移动Robot1到指定点位（使用已连接的实例）"""
-        if self.robot1_ctrl is None or self.robot1_ctrl.robot is None:
-            raise Exception("Robot1未连接")
-        try:
-            print(f"移动Robot1到: {target_pose}")
-            ret = self.robot1_ctrl.robot.rm_movel(
-                target_pose,
-                v=MOVE_CONFIG["velocity"],
-                r=MOVE_CONFIG["radius"],
-                connect=MOVE_CONFIG["connect"],
-                block=MOVE_CONFIG["block"]
-            )
-            if ret == 0:
-                print("Robot1移动成功")
-                return True
-            else:
-                print(f"Robot1移动失败，错误码：{ret}")
-                return False
-        except Exception as e:
-            print(f"Robot1移动出错: {str(e)}")
-            return False
-
-    def move_robot2l(self, target_pose):
-        """移动Robot2到指定点位（使用已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        try:
-            print(f"移动Robot2到: {target_pose}")
-            ret = self.robot2_ctrl.robot.rm_movel(
-                target_pose,
-                v=MOVE_CONFIG["velocity"],
-                r=MOVE_CONFIG["radius"],
-                connect=MOVE_CONFIG["connect"],
-                block=MOVE_CONFIG["block"]
-            )
-            if ret == 0:
-                print("Robot2移动成功")
-                return True
-            else:
-                print(f"Robot2移动失败，错误码：{ret}")
-                return False
-        except Exception as e:
-            print(f"Robot2移动出错: {str(e)}")
-            return False
     def pick_gun1(self):
         """取枪头1（使用Robot2已连接的实例）"""
         if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
@@ -543,7 +149,7 @@ class RobotController:
         print("取枪头2完成!")
         return True
 
-    def drop_gun1(self):
+    def drop_gun1(self, eject_tip):
         """退枪头1（使用Robot2已连接的实例）"""
         if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
             raise Exception("Robot2未连接")
@@ -566,7 +172,7 @@ class RobotController:
 
         print(f"\n[4] 退枪头（弹出枪头）...")
         
-        result = yiyeqiang_out.eject_tip(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
+        result = eject_tip()
         if result:
             print("退枪头成功!")
         else:
@@ -583,7 +189,7 @@ class RobotController:
         print("退枪头1完成!")
         return True
 
-    def drop_gun2(self):
+    def drop_gun2(self, eject_tip):
         """退枪头2（使用Robot2已连接的实例）"""
         if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
             raise Exception("Robot2未连接")
@@ -604,7 +210,7 @@ class RobotController:
             return False
         
         print(f"\n[4] 退枪头（弹出枪头）...")
-        result = yiyeqiang_out.eject_tip(port=self.config.KUAIHUANSHOU_SERIAL_PORT )
+        result = eject_tip()
         if result:
             print("退枪头成功!")
         else:
@@ -620,119 +226,6 @@ class RobotController:
 
         print("退枪头2完成!")
         return True
-
-    def move_to_plate(self, robot):
-        """移动到放置位置"""
-        try:
-            print("\n==== 移动robot1到放置位置 ====")
-            target_pose1 = [65.02 / 1000, 171.949 / 1000, -178.843 / 1000, -3.104, -0.045, -3]
-            print(f"robot1目标位置: {target_pose1}")
-            ret = robot.rm_movej_p(target_pose1, 
-                                   v=MOVE_CONFIG["velocity"], 
-                                   r=MOVE_CONFIG["radius"], 
-                                   connect=MOVE_CONFIG["connect"], 
-                                   block=MOVE_CONFIG["block"])
-            if ret != 0:
-                raise Exception(f"robot1移动失败，错误码：{ret}")
-            
-            target_pose2 = target_pose1.copy()
-            target_pose2[2] = -301.896 / 1000
-
-            ret = robot.rm_movel(target_pose2, 
-                                   v=MOVE_CONFIG["velocity"], 
-                                   r=MOVE_CONFIG["radius"], 
-                                   connect=MOVE_CONFIG["connect"], 
-                                   block=MOVE_CONFIG["block"])
-            if ret != 0:
-                raise Exception(f"robot1移动失败，错误码：{ret}")
-            
-        except Exception as e:
-            print(f"robot1移动过程出错: {str(e)}")
-            return False
-
-    def execute_robot_task_unlock(self, robot):
-        """执行机械臂解锁任务"""
-        try:
-            ret = robot.rm_movej_p(self.TOOL_POINTS[0]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[2]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-
-            self.relay_controller.turn_off_relay_Y2()
-            time.sleep(2)
-            
-            max_attempts = 5
-            attempt = 0
-            while True:
-                print(f"第 {attempt + 1} 次尝试上锁...")
-                
-                res = self.khs.send_command('close')
-                time.sleep(0.5)
-                
-                status = self.khs.send_command('status')
-                print(f"当前状态: {status}")
-                
-                if status == "locked":
-                    print("上锁成功！")
-                    break
-                
-                attempt += 1
-                if attempt >= max_attempts:
-                    print(f"警告：尝试{max_attempts}次后仍未成功上锁")
-                    break
-                    
-                print("上锁未成功，等待后重试...")
-                time.sleep(1)
-            
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[0]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-
-            print("任务执行完成")
-            return True
-        except Exception as e:
-            print(f"执行任务出错: {str(e)}")
-            return False
-        finally:
-            self.relay_controller.close()
-            self.khs.close()
-
-    def execute_robot_task_lock(self, robot):
-        """执行机械臂锁定任务"""
-        try:
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[2]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-
-            print("执行锁定操作")
-            res = self.khs.send_command('open')
-            time.sleep(0.5)
-            status = self.khs.send_command('status')
-            if status == "unlocked":
-                res = self.khs.send_command('open')
-
-            self.relay_controller.turn_on_relay_Y2()
-            time.sleep(2)
-
-            ret = robot.rm_movel(self.TOOL_POINTS[1]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-            ret = robot.rm_movel(self.TOOL_POINTS[0]["pose"], v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-
-            print("快换手锁定任务执行完成")
-            
-        finally:
-            self.relay_controller.close()
-            self.khs.close()
-
-    def execute_trajectory(self, robot, file_path):
-        """执行轨迹文件"""
-        if not self.demo_send_project(robot, file_path):
-            return False
-            
-        time.sleep(1)
-        while True:
-            rst = self.demo_get_program_run_state(robot, time_sleep=1, max_retries=1)
-            time.sleep(0.5)
-            print(rst)
-            if rst:
-                return True
-        return False
 
     def _sdk_lock_for_robot(self, robot):
         for ctrl in (self.robot1_ctrl, self.robot2_ctrl):
@@ -835,191 +328,9 @@ class RobotController:
             print("达到最大查询次数,退出")
             return False
 
-    # ------------------------------------------------------------------
-    # 遥操作控制方法
-    # ------------------------------------------------------------------
-
-    def teleop_movej_canfd(self, arm: str, joints: list, follow: bool = True, trajectory_mode: int = 0) -> bool:
-        """
-        遥操作关节透传控制
-        
-        参数:
-            arm: 机械臂选择，"左" 或 "右"
-            joints: [j1, j2, j3, j4, j5, j6] 关节角度（度）
-            follow: True=高跟随模式，False=普通跟随模式
-            trajectory_mode: 0=完全透传，1=平滑轨迹
-        
-        返回:
-            bool: 执行成功返回 True，失败返回 False
-        """
-        # 选择机械臂
-        robot_ctrl = self.robot1_ctrl if arm == "左" else self.robot2_ctrl
-        if robot_ctrl is None or robot_ctrl.robot is None:
-            print(f"{arm}臂未连接")
-            return False
-        
-        robot = robot_ctrl.robot
-        
-        # 验证关节角度数量
-        if len(joints) != 6:
-            print(f"关节角度数量错误：需要6个，实际{len(joints)}个")
-            return False
-        
-        try:
-            with robot_ctrl.sdk_lock:
-                ret = robot.rm_movej_canfd(
-                    joints,
-                    follow,
-                    trajectory_mode=trajectory_mode
-                )
-            
-            if ret == 0:
-                return True
-            else:
-                print(f"遥操作指令执行失败，错误码: {ret}")
-                return False
-                
-        except Exception as e:
-            print(f"遥操作执行异常: {str(e)}")
-            return False
-    
-    def teleop_init_movej(self, arm: str, joints: list, velocity: int = 10, radius: int = 0, connect: int = 0, block: int = 1) -> bool:
-        """
-        遥操作初始化：移动机械臂到指定关节姿态
-        
-        参数:
-            arm: 机械臂选择，"左" 或 "右"
-            joints: [j1, j2, j3, j4, j5, j6] 关节角度（度）
-            velocity: 速度（默认5）
-            radius: 半径（默认0）
-            connect: 连接（默认0）
-            block: 阻塞（默认1，等待执行完成）
-        
-        返回:
-            bool: 执行成功返回 True，失败返回 False
-        """
-        # 选择机械臂
-        robot_ctrl = self.robot1_ctrl if arm == "左" else self.robot2_ctrl
-        if robot_ctrl is None or robot_ctrl.robot is None:
-            print(f"{arm}臂未连接")
-            return False
-        
-        robot = robot_ctrl.robot
-        
-        # 验证关节角度数量
-        if len(joints) != 6:
-            print(f"关节角度数量错误：需要6个，实际{len(joints)}个")
-            return False
-        
-        try:
-            with robot_ctrl.sdk_lock:
-                ret = robot.rm_movej(
-                    joints,
-                    velocity,
-                    radius,
-                    connect,
-                    block
-                )
-            
-            if ret == 0:
-                print(f"{arm}臂初始化移动成功")
-                return True
-            else:
-                print(f"{arm}臂初始化移动失败，错误码: {ret}")
-                return False
-                
-        except Exception as e:
-            print(f"遥操作初始化执行异常: {str(e)}")
-            return False
-
     def shutdown(self):
         """断开与机械臂的连接"""
         if hasattr(self, "robot1_ctrl") and self.robot1_ctrl is not None:
             self.robot1_ctrl.disconnect()
         if hasattr(self, "robot2_ctrl") and self.robot2_ctrl is not None:
             self.robot2_ctrl.disconnect()
-
-if __name__ == "__main__":
-    # 创建RobotController实例
-    controller = RobotController()
-    try:
-        # 初始化robot2
-        robot2 = controller.init_robot2()
-        if robot2 is not None:
-            success2 = controller.spawn_robot2(robot2)
-        else:
-            success2 = False
-        
-        time.sleep(1)
-        
-        # 初始化robot1
-        robot1 = controller.init_robot1()
-        if robot1 is not None:
-            success1 = controller.spawn_robot1(robot1)
-        else:
-            success1 = False
-        
-        if success1 and success2:
-            print("\n两个机械臂都已成功移动到初始位置！")
-        else:
-            print("\n机械臂移动过程中出现错误，请检查日志。")
-            
-        # 执行轨迹
-        print("\n开始执行轨迹...")
-        robot2 = controller.init_robot2()
-        success = controller.execute_trajectory(robot2, "/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/code/Path/trajectory_1.txt")
-        if success:
-            print("轨迹执行成功")
-            print("\n开始执行快换手任务...")
-            success = controller.execute_robot_task_unlock(robot2)
-            if success:
-                print("快换手任务执行成功！")
-            else:
-                print("快换手任务执行失败！")
-        else:
-            print("轨迹执行失败")
-
-        # 初始化移液枪
-        adp = ADP(port='COM4')
-        adp.initialize()
-        time.sleep(1)
-
-        success = controller.execute_trajectory(robot2, "/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/code/Path/trajectory_2.txt")
-        if success:
-            print("轨迹执行成功")
-            ret, current_state = robot2.rm_get_current_arm_state()
-            if ret != 0:
-                raise Exception(f"获取当前状态失败，错误码：{ret}")
-            
-            current_pos = current_state['pose']
-            current_pos[4] = 0
-            robot2.rm_movel(current_pos, v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-
-            print("\n4. 下降到取液高度...")
-            current_pos[2] -= 0.12
-            robot2.rm_movel(current_pos, v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-
-            print("\n5. 开始取液...")
-            adp.absorb(800)
-
-            print("\n6. 上升")
-            current_pos[2] += 0.12
-            robot2.rm_movel(current_pos, v=MOVE_CONFIG["velocity"], r=0, connect=0, block=1)
-
-            success = controller.execute_trajectory(robot2, "/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/code/Path/trajectory_3.txt")
-            if success:
-                print("轨迹执行成功")
-                adp.dispense(800)
-                time.sleep(1)
-            else:
-                print("轨迹执行失败")
-
-            success = controller.execute_trajectory(robot2, "/home/maic/rm1/RM_API2-main/RM_API2-main/Demo/vertical_grab/code/Path/trajectory_4.txt")
-            if success:
-                success = controller.execute_robot_task_lock(robot2)
-            else:
-                print("轨迹执行失败")   
-        else:
-            print("轨迹执行失败")
-    finally:
-        controller.shutdown()

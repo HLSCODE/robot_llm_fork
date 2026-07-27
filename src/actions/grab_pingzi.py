@@ -1,264 +1,232 @@
-# -*- coding: utf-8 -*-
-"""
-瓶子/白桌抓取流程（与 GUI 深度相机 D435i 配合：RGB + 对齐 depth + 彩色内参）。
-路径已改为基于本文件，可在任意工程目录运行。
-"""
-import os
-import sys
+from __future__ import annotations
+
+from pathlib import Path
 import time
+from typing import Callable
+
 import cv2
 import numpy as np
 
-from ..vision.interface import vertical_catch
-from ..vision.capture import load_yolo_model, load_sam_model
-from ..arm_sdk.controller import RobotController
-from ..arm_sdk.config import *
 from ..core.config_loader import Config
+from ..device_runtime import (
+    ArmId,
+    CartesianPose,
+    DepthCameraSource,
+    MotionMode,
+    MotionOptions,
+    RobotSystem,
+)
+from ..vision.capture import (
+    load_sam_model,
+    load_yolo_model,
+    process_mask_with_gmm,
+)
+from ..vision.interface import vertical_catch
 
-PICTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "vision", "pictures")
 
-_cfg = Config.get_instance()
-_GRIPPER_LENGTH = _cfg.VISION_DEFAULT_GRIPPER_LENGTH
-_GRASP_Z = _cfg.VISION_GRASP_Z
-_PREP_OFFSET_X = _cfg.VISION_PREP_OFFSET_X
-_VISION_VELOCITY = _cfg.VISION_DEFAULT_VELOCITY
+PICTURE_DIR = Path(__file__).resolve().parents[1] / "vision" / "pictures"
 
 
-def detect_target(image, yolo_model, sam_model, process_mask_fn, width=640, height=480, conf_thresh=0.7):
-    """统一的视觉处理：YOLO -> SAM -> GMM，返回 mask、bbox、detected"""
+def detect_target(
+    image,
+    yolo_model,
+    sam_model,
+    process_mask_fn: Callable,
+    *,
+    width: int,
+    height: int,
+    confidence_threshold: float,
+) -> tuple[np.ndarray, list[int] | None, bool]:
+    """Run YOLO, SAM and mask cleanup for the bottle workflow."""
     mask = np.zeros((height, width), dtype=np.uint8)
     detected = False
-    bbox = None
+    bounding_box: list[int] | None = None
 
-    yolo_results = yolo_model(image, verbose=False)
-    for result in yolo_results:
+    for result in yolo_model(image, verbose=False):
         for box in result.boxes:
             confidence = float(box.conf)
-            if confidence < conf_thresh:
+            if confidence < confidence_threshold:
                 continue
-
             detected = True
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-            bbox = [int(x1), int(y1), int(x2), int(y2)]
-
-            sam_results = sam_model(image, bboxes=[bbox])
-            if sam_results and len(sam_results) > 0:
+            bounding_box = [int(x1), int(y1), int(x2), int(y2)]
+            sam_results = sam_model(image, bboxes=[bounding_box])
+            if sam_results:
                 sam_mask = sam_results[0].masks.data[0].cpu().numpy()
-                sam_mask = (sam_mask * 255).astype(np.uint8)
-                improved_mask = process_mask_fn(image, sam_mask)
-                mask = cv2.bitwise_or(mask, improved_mask)
+                improved = process_mask_fn(
+                    image,
+                    (sam_mask * 255).astype(np.uint8),
+                )
+                mask = cv2.bitwise_or(mask, improved)
+            cv2.rectangle(
+                image,
+                (int(x1), int(y1)),
+                (int(x2), int(y2)),
+                (0, 255, 0),
+                2,
+            )
 
-            cv2.rectangle(image, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-
-    return mask, bbox, detected
+    return mask, bounding_box, detected
 
 
-def execute_pick(robot, target_pose, drop_height):
-    """动作原语：到上方 -> 下降 -> 夹取 -> 抬升"""
+def capture_and_move(
+    robot_system: RobotSystem,
+    camera: DepthCameraSource,
+    arm: ArmId,
+    width: int = 640,
+    height: int = 480,
+) -> bool:
+    """Capture a bottle, grasp it and place it through project capabilities."""
+    config = Config.get_instance()
+    calibration = config.get_vision_calibration()
+    motion_options = MotionOptions(
+        velocity_percent=config.VISION_DEFAULT_VELOCITY,
+    )
 
-    below = target_pose.copy()
-    below[2] = _GRASP_Z
-    ret = robot.rm_movel(below, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-    if ret != 0:
-        raise Exception(f"下降到目标失败，错误码：{ret}")
-
-    attempts = 0
-    while attempts < MAX_ATTEMPTS:
-        ret = robot.rm_set_gripper_pick_on(
-            speed=GRIPPER_CONFIG['pick']['speed'],
-            block=True,
-            timeout=GRIPPER_CONFIG['pick']['timeout'],
-            force=GRIPPER_CONFIG['pick']['force']
+    def move(pose: list[float], mode: MotionMode) -> None:
+        robot_system.move_to_pose(
+            arm,
+            CartesianPose.from_iterable(pose),
+            mode,
+            motion_options,
         )
-        if ret == 0:
-            break
-        attempts += 1
-        time.sleep(1)
-    if attempts == MAX_ATTEMPTS:
-        raise Exception("达到最大尝试次数，夹取仍未成功")
 
-    ret = robot.rm_movel(target_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-    if ret != 0:
-        raise Exception(f"抬升失败，错误码：{ret}")
-
-
-def execute_place(robot, target_pose, drop_height):
-    """动作原语：到上方 -> 下降 -> 松开 -> 抬升"""
-    above = target_pose.copy()
-    tem_pos = [424 / 1000, -92 / 1000, -439 / 1000, 3.15, 0, 1.618]
-    ret = robot.rm_movej_p(tem_pos, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-    ret = robot.rm_movel(above, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-    if ret != 0:
-        raise Exception(f"移动到放置上方失败，错误码：{ret}")
-
-    below = above.copy()
-    below[2] -= drop_height
-    ret = robot.rm_movel(below, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-    if ret != 0:
-        raise Exception(f"下降到放置高度失败，错误码：{ret}")
-
-    attempts = 0
-    while attempts < MAX_ATTEMPTS:
-        ret = robot.rm_set_gripper_release(
-            speed=GRIPPER_CONFIG['release']['speed'],
-            block=True,
-            timeout=GRIPPER_CONFIG['release']['timeout']
-        )
-        if ret == 0:
-            break
-        attempts += 1
-        time.sleep(1)
-    if attempts == MAX_ATTEMPTS:
-        raise Exception("达到最大尝试次数，释放仍未成功")
-
-    ret = robot.rm_movel(above, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-    if ret != 0:
-        raise Exception(f"抬升失败，错误码：{ret}")
-
-    ret = robot.rm_movel(tem_pos, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-
-    ret = robot.rm_movej_p(PLACE_POSITION['pos2'].copy(), v=_VISION_VELOCITY, r=0, connect=0, block=1)
-
-
-def place_at_fixed_position(robot):
-    """使用动作原语完成放置"""
-    execute_place(robot, PLACE_POSITION['above'].copy(), PLACE_POSITION['drop_height'])
-    ret = robot.rm_movej_p(INITIAL_POSE, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-    if ret != 0:
-        raise Exception(f"回到初始位姿失败，错误码：{ret}")
-
-
-def capture_and_move(controller, robot, width=640, height=480):
-    """获取一帧图像并执行抓取、放置"""
     try:
-        # 按需加载视觉模型（不再依赖 RobotController 预加载）
-        yolo_model = load_yolo_model(_cfg.YOLO_MODEL_PATH)
-        sam_model = load_sam_model(_cfg.SAM_MODEL_PATH)
+        yolo_model = load_yolo_model(config.YOLO_MODEL_PATH)
+        sam_model = load_sam_model(config.SAM_MODEL_PATH)
+        robot_system.open_gripper(arm)
+        initial_pose = robot_system.read_arm_state(arm).pose.to_list()
 
-        controller.openclaw(robot)
+        color_image, depth_image, color_intrinsics = _wait_for_frames(
+            camera,
+            config.VISION_CAMERA_NAME or None,
+        )
+        PICTURE_DIR.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(PICTURE_DIR / "original_image.jpg"), color_image)
 
-        ret, initial_state = robot.rm_get_current_arm_state()
-        if ret != 0:
-            raise Exception(f"获取初始位姿失败，错误码：{ret}")
-        initial_pose = initial_state['pose']
-
-        color_image, depth_image, color_intr = controller.get_frames_from_gui()
-        if color_image is None or depth_image is None or color_intr is None:
-            raise Exception("无法获取图像或相机内参")
-
-        os.makedirs(PICTURE_DIR, exist_ok=True)
-        cv2.imwrite(os.path.join(PICTURE_DIR, 'original_image.jpg'), color_image)
-
-        mask, bbox, detected = detect_target(
+        mask, _bounding_box, detected = detect_target(
             color_image,
             yolo_model,
             sam_model,
-            controller.process_mask_with_gmm,
-            width,
-            height
+            process_mask_with_gmm,
+            width=width,
+            height=height,
+            confidence_threshold=config.VISION_DEFAULT_CONFIDENCE,
         )
         if not detected:
-            cv2.imwrite(os.path.join(PICTURE_DIR, 'failed_detection.jpg'), color_image)
-            raise Exception("未检测到目标")
+            cv2.imwrite(
+                str(PICTURE_DIR / "failed_detection.jpg"),
+                color_image,
+            )
+            raise RuntimeError("未检测到目标")
+        cv2.imwrite(str(PICTURE_DIR / "mask_result.jpg"), mask)
 
-        cv2.imwrite(os.path.join(PICTURE_DIR, 'mask_result.jpg'), mask)
-
-        ret, state_dict = robot.rm_get_current_arm_state()
-        if ret != 0:
-            raise Exception(f"获取机械臂状态失败，错误码：{ret}")
-        pose = state_dict['pose']
-
+        current_pose = robot_system.read_arm_state(arm).pose.to_list()
         above_object_pose, _, _ = vertical_catch(
             mask,
             depth_image,
-            color_intr,
-            pose,
-            _GRIPPER_LENGTH,
-            controller.gripper_offset,
-            controller.rotation_matrix,
-            controller.translation_vector
+            color_intrinsics,
+            current_pose,
+            config.VISION_DEFAULT_GRIPPER_LENGTH,
+            calibration["gripper_offset"],
+            calibration["rotation_matrix"],
+            calibration["translation_vector"],
         )
-
         camera_above_pose = above_object_pose.copy()
-        camera_above_pose[0] += _PREP_OFFSET_X
-
-        ret = robot.rm_movej_p(camera_above_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-        if ret != 0:
-            raise Exception(f"移动到预备位置失败，错误码：{ret}")
+        camera_above_pose[0] += config.VISION_PREP_OFFSET_X
+        move(camera_above_pose, MotionMode.JOINT)
         time.sleep(1)
 
-        color_image, depth_image, color_intr = controller.get_frames_from_gui()
-        if color_image is None or depth_image is None or color_intr is None:
-            raise Exception("二次检测：无法获取图像或相机内参")
-
-        mask, bbox, detected = detect_target(
+        color_image, depth_image, color_intrinsics = _wait_for_frames(
+            camera,
+            config.VISION_CAMERA_NAME or None,
+        )
+        mask, _bounding_box, detected = detect_target(
             color_image,
             yolo_model,
             sam_model,
-            controller.process_mask_with_gmm,
-            width,
-            height
+            process_mask_with_gmm,
+            width=width,
+            height=height,
+            confidence_threshold=config.VISION_DEFAULT_CONFIDENCE,
         )
         if not detected:
-            raise Exception("二次检测：未检测到目标")
+            raise RuntimeError("二次检测未发现目标")
 
-        ret, current_state = robot.rm_get_current_arm_state()
-        if ret != 0:
-            raise Exception(f"获取当前状态失败，错误码：{ret}")
-        current_pose = current_state['pose']
-
+        current_pose = robot_system.read_arm_state(arm).pose.to_list()
         _, _, final_pose = vertical_catch(
             mask,
             depth_image,
-            color_intr,
+            color_intrinsics,
             current_pose,
-            _GRIPPER_LENGTH,
-            controller.gripper_offset,
-            controller.rotation_matrix,
-            controller.translation_vector
+            config.VISION_DEFAULT_GRIPPER_LENGTH,
+            calibration["gripper_offset"],
+            calibration["rotation_matrix"],
+            calibration["translation_vector"],
         )
+        final_pose[3:6] = calibration["gripper_offset"]
 
-        final_pose[3] = controller.gripper_offset[0]
-        final_pose[4] = controller.gripper_offset[1]
-        final_pose[5] = controller.gripper_offset[2]
+        above_target = final_pose.copy()
+        above_target[2] = current_pose[2]
+        above_target[0] += config.VISION_BOTTLE_TARGET_OFFSET_X
+        above_target[1] += config.VISION_BOTTLE_TARGET_OFFSET_Y
+        move(above_target, MotionMode.LINEAR)
 
-        above_target_pose = final_pose.copy()
+        grasp_pose = above_target.copy()
+        grasp_pose[2] = config.VISION_GRASP_Z
+        move(grasp_pose, MotionMode.LINEAR)
+        robot_system.close_gripper(arm)
+        move(above_target, MotionMode.LINEAR)
 
-        above_target_pose[2] = current_pose[2]
-        above_target_pose[0] -= 0.025
-        above_target_pose[1] += 0.015
-
-        ret = robot.rm_movel(above_target_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-        if ret != 0:
-            raise Exception(f"移动到目标物体上方失败，错误码：{ret}")
-
-        execute_pick(robot, above_target_pose, drop_height=_cfg.PLACE_DROP_HEIGHT)
-
-        ret = robot.rm_movej_p(initial_pose, v=_VISION_VELOCITY, r=0, connect=0, block=1)
-        if ret != 0:
-            raise Exception(f"回到初始位姿失败，错误码：{ret}")
-
-        place_at_fixed_position(robot)
-
+        move(initial_pose, MotionMode.JOINT)
+        _place_at_fixed_position(
+            robot_system,
+            arm,
+            config,
+            motion_options,
+        )
         return True
     except Exception as exc:
-        print(f"错误: {exc}")
+        print(f"瓶子抓取失败: {exc}")
         return False
 
 
-if __name__ == "__main__":
-    controller = RobotController()
-    robot = controller.init_robot1()
-    try:
-        if robot is None:
-            raise RuntimeError("robot1 初始化失败")
+def _place_at_fixed_position(
+    robot_system: RobotSystem,
+    arm: ArmId,
+    config,
+    motion_options: MotionOptions,
+) -> None:
+    def move(pose: list[float], mode: MotionMode) -> None:
+        robot_system.move_to_pose(
+            arm,
+            CartesianPose.from_iterable(pose),
+            mode,
+            motion_options,
+        )
 
-        success = capture_and_move(controller, robot)
-        print("1")
-        if success:
-            print("抓取执行完成")
-            place_at_fixed_position(robot)
-        else:
-            print("抓取流程失败")
-    finally:
-        controller.shutdown()
+    move(config.PLACE_TRANSFER_POSE, MotionMode.JOINT)
+    above = list(config.PLACE_ABOVE)
+    move(above, MotionMode.LINEAR)
+    below = above.copy()
+    below[2] -= config.PLACE_DROP_HEIGHT
+    move(below, MotionMode.LINEAR)
+    robot_system.open_gripper(arm)
+    move(above, MotionMode.LINEAR)
+    move(config.PLACE_TRANSFER_POSE, MotionMode.LINEAR)
+    move(config.PLACE_POS2, MotionMode.JOINT)
+    move(config.INITIAL_POSE, MotionMode.JOINT)
+
+
+def _wait_for_frames(
+    camera: DepthCameraSource,
+    camera_name: str | None,
+    timeout_seconds: float = 10.0,
+):
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        frames = camera.get_latest_raw_frames(camera_name)
+        if frames is not None and all(value is not None for value in frames):
+            return frames
+        time.sleep(0.2)
+    raise TimeoutError("等待深度相机帧超时")

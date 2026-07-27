@@ -1,17 +1,5 @@
-"""视觉抓取算法"""
+"""Vision algorithms operating on project-level device capabilities."""
 
-try:
-    from .interface import vertical_catch
-except ImportError:
-    vertical_catch = None
+from .interface import vertical_catch
 
-
-def __getattr__(name):
-    if name == "VisionCaptureGUIAction":
-        try:
-            from .capture_gui import VisionCaptureGUIAction
-        except ImportError:
-            VisionCaptureGUIAction = None
-        globals()["VisionCaptureGUIAction"] = VisionCaptureGUIAction
-        return VisionCaptureGUIAction
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__all__ = ["vertical_catch"]

@@ -12,12 +12,21 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer, QMimeData, QEventLoop
 from PyQt6.QtGui import QAction, QPalette, QColor, QDrag, QIcon
 
-from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
+from ..ai_integration.execution_bridge import ExecutionBridge
+from ..application import ApplicationServices
+from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock
+from ..device_runtime.ids import (
+    BODY_AXIS,
+    CAMERA,
+    MOBILE_BASE,
+    PIPETTE,
+    RELAY_BANK,
+    ROBOT_SYSTEM,
+)
 from ..widgets import ActionListWidget, SequenceListWidget, ControlPanel, LogWidget
 from ..widgets.ai_assistant import AIAssistantWidget
 from .dialogs import ActionConfigDialog
 from ..core.storage import StorageManager
-from .execution import ExecutionThread
 from ..core.config_loader import Config
 
 class TaskLibraryListWidget(QListWidget):
@@ -165,29 +174,11 @@ class TaskComposerListWidget(QListWidget):
         if item is None:
             return self.count()
         return self.row(item)
-# 尝试导入机械臂控制模块
-try:
-    from ..arm_sdk import RobotController
-    from ..devices import ModbusMotor, RelayController
-    from ..devices.yiyeqiang_init import init_tip as YIYEQIANG_INIT
-    from ..devices.yiyeqiang_out import eject_tip as YIYEQIANG_EJECT
-    ROBOT_AVAILABLE = RobotController is not None
-    MODBUS_AVAILABLE = ModbusMotor is not None
-    RELAY_AVAILABLE = RelayController is not None
-except ImportError as e:
-    ROBOT_AVAILABLE = False
-    MODBUS_AVAILABLE = False
-    RELAY_AVAILABLE = False
-    RobotController = None
-    ModbusMotor = None
-    RelayController = None
-    YIYEQIANG_INIT = None
-    YIYEQIANG_EJECT = None
-    print(f"机械臂模块导入失败: {e}")
-
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, services: ApplicationServices):
         super().__init__()
+        self._services = services
+        self._execution_bridge = ExecutionBridge(services)
         self.actions: dict[ActionType, list[ActionDefinition]] = {
             ActionType.MOVE: [],
             ActionType.BASE_MOVE: [],
@@ -199,24 +190,12 @@ class MainWindow(QMainWindow):
             ActionType.VISION_RELOCALIZE: [],
             ActionType.TRAJECTORY: []
         }
-        self.execution_thread: ExecutionThread = None
         self.is_paused = False
         self.config = Config.get_instance()
-        # 机械臂控制相关
-        self.robot_controller = None
         self.robot1_connected = False
         self.robot2_connected = False
 
-        # 身体（ModbusMotor）控制相关
-        self.body_controller = None
         self.body_connected = False
-        self.relay_controller = None
-
-        # 底盘移动控制器
-        self.move_controller = None
-
-        # ADP（吸液枪）实例 - 在执行吸液/吐液时才创建
-        self.adp_instance = None
         self.robot_pose_cache = {"robot1": None, "robot2": None}
         self.pose_timer = None
         self._startup_initialization_started = False
@@ -225,6 +204,14 @@ class MainWindow(QMainWindow):
 
         self.init_ui()
         self.load_actions()
+        self._execution_bridge.step_started.connect(self.on_step_started)
+        self._execution_bridge.step_completed.connect(self.on_step_completed)
+        self._execution_bridge.step_failed.connect(self.on_step_failed)
+        self._execution_bridge.log_message.connect(self.log_widget.append_log)
+        self._execution_bridge.loop_progress.connect(self.on_loop_progress)
+        self._execution_bridge.execution_completed.connect(
+            self.on_execution_completed
+        )
 
         # 设置 AI助手的主窗口引用（用于执行桥接器）
         if hasattr(self, 'ai_assistant_widget'):
@@ -233,6 +220,11 @@ class MainWindow(QMainWindow):
                 self.initialize_startup_hardware
             )
         self.start_startup_initialization()
+
+    @property
+    def robot_system(self):
+        """Return the runtime-owned robot system for read/teach diagnostics."""
+        return self._services.device_runtime.get_if_ready(ROBOT_SYSTEM)
 
     def start_startup_initialization(self):
         """启动 GUI 显示前的必要初始化流程。"""
@@ -289,16 +281,14 @@ class MainWindow(QMainWindow):
             self._speech_startup_wait_timer = None
 
         # 自动初始化机械臂和移液枪
-        if ROBOT_AVAILABLE:
-            self.initialize_robots()
+        self.initialize_robots()
 
         # 初始化底盘移动控制器
         if self.config.BODY_DI_PAN:
             self.initialize_move_controller()
 
         # 注释掉下面 2 行，防止启动时升降平台高度变化
-        if MODBUS_AVAILABLE:
-            self.initialize_body()
+        self.initialize_body()
         self.initialize_pipette_on_startup()
 
     def _on_speech_startup_wait_timeout(self):
@@ -544,7 +534,7 @@ class MainWindow(QMainWindow):
         self.action_tabs.addTab(self.vision_capture_list, "视觉类")
 
         # AI助手 Tab
-        self.ai_assistant_widget = AIAssistantWidget()
+        self.ai_assistant_widget = AIAssistantWidget(self._services)
         self.action_tabs.addTab(self.ai_assistant_widget, "🤖 AI助手")
 
         self.action_tabs.addTab(self.trajectory_list, "轨迹类")
@@ -851,46 +841,40 @@ class MainWindow(QMainWindow):
         return panel
 
     def update_basic_control_buttons(self):
-        gripper_ready = self.robot_controller is not None and self.robot1_connected
+        gripper_ready = self.robot_system is not None and self.robot1_connected
         if hasattr(self, "gripper_open_btn"):
             self.gripper_open_btn.setEnabled(gripper_ready)
         if hasattr(self, "gripper_close_btn"):
             self.gripper_close_btn.setEnabled(gripper_ready)
-        relay_ready = RELAY_AVAILABLE
+        relay_ready = RELAY_BANK in self._services.device_runtime.registered_device_ids()
         for attr in ("relay_y1_on_btn", "relay_y1_off_btn", "relay_y2_on_btn", "relay_y2_off_btn"):
             if hasattr(self, attr):
                 getattr(self, attr).setEnabled(relay_ready)
 
-    def _get_relay_controller(self):
-        if not RELAY_AVAILABLE or RelayController is None:
-            raise RuntimeError("继电器模块不可用")
-        if self.relay_controller is None:
-            self.relay_controller = RelayController(
-                port=self.config.RELAY_SERIAL_PORT,
-                baudrate=self.config.RELAY_BAUDRATE,
-                timeout=self.config.RELAY_TIMEOUT,
-            )
-            self.log_widget.append_log("继电器串口已连接")
-        return self.relay_controller
-
     def _set_relay_state(self, channel: str, turn_on: bool):
         action_text = "打开" if turn_on else "关闭"
         try:
-            relay = self._get_relay_controller()
-            method_name = f"turn_{'on' if turn_on else 'off'}_relay_{channel}"
-            getattr(relay, method_name)()
+            self._services.devices.initialize(RELAY_BANK)
+            channel_number = {"Y1": 1, "Y2": 2}[channel]
+            self._services.manual_control.set_relay(
+                channel_number,
+                turn_on,
+            )
             self.log_widget.append_log(f"继电器 {channel} 已{action_text}")
         except Exception as e:
             self.log_widget.append_log(f"继电器 {channel} {action_text}失败: {e}")
             QMessageBox.warning(self, "警告", f"继电器 {channel} {action_text}失败:\n{e}")
 
     def on_gripper_open_clicked(self):
-        if self.robot_controller is None or not self.robot1_connected:
+        if self.robot_system is None or not self.robot1_connected:
             QMessageBox.warning(self, "警告", "Robot1 未连接")
             return
 
         try:
-            success = self.robot_controller.gripper_open_robot1()
+            success = self._services.manual_control.set_gripper(
+                "left",
+                opened=True,
+            )
             if success:
                 self.log_widget.append_log("Robot1 夹爪已打开")
             else:
@@ -901,12 +885,15 @@ class MainWindow(QMainWindow):
             self.log_widget.append_log(f"Robot1 夹爪打开异常: {e}")
 
     def on_gripper_close_clicked(self):
-        if self.robot_controller is None or not self.robot1_connected:
+        if self.robot_system is None or not self.robot1_connected:
             QMessageBox.warning(self, "警告", "Robot1 未连接")
             return
 
         try:
-            success = self.robot_controller.gripper_close_robot1()
+            success = self._services.manual_control.set_gripper(
+                "left",
+                opened=False,
+            )
             if success:
                 self.log_widget.append_log("Robot1 夹爪已关闭")
             else:
@@ -917,8 +904,7 @@ class MainWindow(QMainWindow):
             self.log_widget.append_log(f"Robot1 夹爪关闭异常: {e}")
 
     def record_trajectory(self, robot_name: str):
-        robot = self._get_trajectory_robot(robot_name)
-        if robot is None:
+        if self.robot_system is None:
             QMessageBox.warning(self, "警告", f"{robot_name.upper()} 未连接")
             return
 
@@ -932,13 +918,11 @@ class MainWindow(QMainWindow):
         if not filename:
             return
 
+        teaching_started = False
         try:
             self.log_widget.append_log(f"{robot_name.upper()} 开始拖动示教")
-            result = robot.rm_start_drag_teach(1)
-            if result != 0:
-                QMessageBox.warning(self, "警告", f"拖动示教启动失败，错误码: {result}")
-                self.log_widget.append_log(f"{robot_name.upper()} 拖动示教启动失败: {result}")
-                return
+            self._services.trajectory_teaching.start(robot_name)
+            teaching_started = True
 
             QMessageBox.information(
                 self,
@@ -946,31 +930,36 @@ class MainWindow(QMainWindow):
                 f"{robot_name.upper()} 正在录制。请手动拖动机械臂，完成后点击确定停止并保存。"
             )
 
-            stop_result = robot.rm_stop_drag_teach()
-            if stop_result != 0:
-                QMessageBox.warning(self, "警告", f"拖动示教停止失败，错误码: {stop_result}")
-                self.log_widget.append_log(f"{robot_name.upper()} 拖动示教停止失败: {stop_result}")
-                return
-
             Path(filename).parent.mkdir(parents=True, exist_ok=True)
-            save_result = robot.rm_save_trajectory(filename)
-            if save_result[0] == 0:
-                self.log_widget.append_log(
-                    f"{robot_name.upper()} 轨迹已保存: {filename}, 点数: {save_result[1]}"
-                )
-                QMessageBox.information(self, "轨迹已保存", f"保存到:\n{filename}")
-                return filename
-            else:
-                QMessageBox.warning(self, "警告", f"轨迹保存失败，错误码: {save_result[0]}")
-                self.log_widget.append_log(f"{robot_name.upper()} 轨迹保存失败: {save_result[0]}")
+            save_result = self._services.trajectory_teaching.stop_and_save(
+                filename
+            )
+            teaching_started = False
+            self.log_widget.append_log(
+                f"{robot_name.upper()} 轨迹已保存: "
+                f"{save_result.path}, 点数: {save_result.point_count}"
+            )
+            QMessageBox.information(
+                self,
+                "轨迹已保存",
+                f"保存到:\n{save_result.path}",
+            )
+            return str(save_result.path)
         except Exception as e:
+            if teaching_started:
+                try:
+                    self._services.trajectory_teaching.cancel()
+                except Exception as stop_error:
+                    self.log_widget.append_log(
+                        f"{robot_name.upper()} 停止拖动示教失败: "
+                        f"{stop_error}"
+                    )
             QMessageBox.warning(self, "警告", f"轨迹录制异常: {e}")
             self.log_widget.append_log(f"{robot_name.upper()} 轨迹录制异常: {e}")
         return None
 
     def run_trajectory(self, robot_name: str):
-        robot = self._get_trajectory_robot(robot_name)
-        if robot is None:
+        if self.robot_system is None:
             QMessageBox.warning(self, "警告", f"{robot_name.upper()} 未连接")
             return
 
@@ -1002,14 +991,6 @@ class MainWindow(QMainWindow):
     def on_trajectory_failed(self, message: str):
         self.log_widget.append_log(message)
         QMessageBox.warning(self, "轨迹", message)
-
-    def _get_trajectory_robot(self, robot_name: str):
-        if self.robot_controller is None:
-            return None
-
-        ctrl_name = "robot1_ctrl" if robot_name == "robot1" else "robot2_ctrl"
-        ctrl = getattr(self.robot_controller, ctrl_name, None)
-        return getattr(ctrl, "robot", None)
 
     def _trajectory_dir(self, robot_name: str) -> Path:
         return Path(__file__).resolve().parents[1] / "actions" / "Path" / robot_name
@@ -1120,33 +1101,13 @@ class MainWindow(QMainWindow):
         label.setText(self.format_pose_text(pose))
 
     def _get_current_pose(self, robot_name: str):
-        if self.robot_controller is None:
-            return None
-
-        ctrl = getattr(self.robot_controller, f"{robot_name}_ctrl", None)
-        robot = getattr(ctrl, "robot", None)
-        if robot is None:
-            return None
-
-        lock = getattr(ctrl, "sdk_lock", None)
-        lock_acquired = False
         try:
-            if lock is not None:
-                lock_acquired = lock.acquire(blocking=False)
-                if not lock_acquired:
-                    return self.robot_pose_cache.get(robot_name)
-            ret, state = robot.rm_get_current_arm_state()
-            if ret != 0:
-                return None
-            pose = state.get("pose")
-            if not isinstance(pose, (list, tuple)) or len(pose) < 6:
-                return None
-            return [float(v) for v in pose[:6]]
+            state = self._services.robot_query.try_read_state(robot_name)
+            if state is None:
+                return self.robot_pose_cache.get(robot_name)
+            return state.pose.to_list()
         except Exception:
             return None
-        finally:
-            if lock is not None and lock_acquired:
-                lock.release()
 
     def format_pose_text(self, pose):
         x_mm = pose[0] * 1000
@@ -1249,65 +1210,28 @@ class MainWindow(QMainWindow):
 
     def initialize_robots(self):
         """初始化机械臂"""
-        if not ROBOT_AVAILABLE:
-            self.log_widget.append_log("机械臂模块不可用")
-            return
-
         self.log_widget.append_log("开始初始化机械臂...")
 
         try:
-            # 创建机械臂控制器
-            self.robot_controller = RobotController()
-
-            # 初始化 Robot1
-            self.log_widget.append_log("初始化 Robot1...")
-            robot1 = self.robot_controller.init_robot1()
-            if robot1 is not None:
-                # success1 = self.robot_controller.spawn_robot1(robot1)
-                success1 =True
-                if success1:
-                    self.robot1_connected = True
-                    self.update_robot_status("robot1", True)
-                    
-                    self.log_widget.append_log("Robot1 初始化成功")
-                else:
-                    self.log_widget.append_log("Robot1 移动到初始位置失败")
-            else:
-                self.log_widget.append_log("Robot1 初始化失败")
-
-            # 初始化 Robot2
-            self.log_widget.append_log("初始化 Robot2...")
-            robot2 = self.robot_controller.init_robot2()
-            if robot2 is not None:
-                # success2 = self.robot_controller.spawn_robot2(robot2)
-                success2 =True
-                if success2:
-                    self.robot2_connected = True
-                    self.update_robot_status("robot2", True)
-                    self.log_widget.append_log("Robot2 初始化成功")
-                else:
-                    self.log_widget.append_log("Robot2 移动到初始位置失败")
-            else:
-                self.log_widget.append_log("Robot2 初始化失败")
-
-            # 更新状态
+            self._services.devices.initialize(ROBOT_SYSTEM)
+            self.robot1_connected = True
+            self.robot2_connected = True
+            self.update_robot_status("robot1", True)
+            self.update_robot_status("robot2", True)
             self.refresh_arm_poses()
-
-            if self.robot1_connected and self.robot2_connected:
-                self.log_widget.append_log("机械臂初始化完成")
-            else:
-                self.log_widget.append_log("机械臂初始化部分失败，请检查连接")
-
+            self.log_widget.append_log("机械臂初始化完成")
         except Exception as e:
+            self.robot1_connected = False
+            self.robot2_connected = False
+            self.update_robot_status("robot1", False)
+            self.update_robot_status("robot2", False)
             self.log_widget.append_log(f"机械臂初始化异常: {str(e)}")
 
     def initialize_move_controller(self) -> None:
         """初始化底盘移动控制器"""
         try:
-            from ..base_move.move_controller import RobotMoveController
             self.log_widget.append_log("初始化底盘移动控制器...")
-            self.move_controller = RobotMoveController()
-            self.move_controller.connect()
+            self._services.devices.initialize(MOBILE_BASE)
             self.log_widget.append_log("底盘移动控制器初始化成功")
         except Exception as e:
             self.log_widget.append_log(f"底盘移动控制器初始化失败：{e}")
@@ -1340,17 +1264,12 @@ class MainWindow(QMainWindow):
             self.hand_status_text.setText("未连接")
 
     def initialize_pipette(self):
-        """Initialize pipette by YIYEQIANG_INIT."""
+        """Initialize the runtime-owned pipette."""
         self.log_widget.append_log("开始初始化移液枪...")
-        if YIYEQIANG_INIT is None:
-            self.log_widget.append_log("移液枪初始化模块不可用")
-            QMessageBox.warning(self, "警告", "移液枪初始化模块不可用")
-            self.update_hand_status(False)
-            return
-
         self.init_pipette_btn.setEnabled(False)
         try:
-            success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
+            self._services.devices.initialize(PIPETTE)
+            success = self._services.manual_control.initialize_pipette()
             self.update_hand_status(bool(success))
             if success:
                 self.log_widget.append_log("移液枪初始化成功")
@@ -1367,13 +1286,9 @@ class MainWindow(QMainWindow):
     def initialize_pipette_on_startup(self):
         """Initialize pipette automatically when app starts."""
         self.log_widget.append_log("自动初始化移液枪...")
-        if YIYEQIANG_INIT is None:
-            self.log_widget.append_log("移液枪初始化模块不可用")
-            self.update_hand_status(False)
-            return
-
         try:
-            success = YIYEQIANG_INIT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
+            self._services.devices.initialize(PIPETTE)
+            success = self._services.manual_control.initialize_pipette()
             self.update_hand_status(bool(success))
             if success:
                 self.log_widget.append_log("移液枪初始化成功")
@@ -1385,15 +1300,11 @@ class MainWindow(QMainWindow):
 
     def eject_pipette_tip(self):
         """Eject pipette tip manually."""
-        if YIYEQIANG_EJECT is None:
-            self.log_widget.append_log("退枪头模块不可用")
-            QMessageBox.warning(self, "警告", "退枪头模块不可用")
-            return
-
         self.init_pipette_btn.setEnabled(False)
         try:
             self.log_widget.append_log("正在退枪头...")
-            success = YIYEQIANG_EJECT(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
+            self._services.devices.initialize(PIPETTE)
+            success = self._services.manual_control.eject_pipette_tip()
             if success:
                 self.log_widget.append_log("枪头已退出")
             else:
@@ -1407,14 +1318,10 @@ class MainWindow(QMainWindow):
 
     def initialize_body(self):
         """初始化身体（ModbusMotor）"""
-        if not MODBUS_AVAILABLE:
-            self.log_widget.append_log("身体模块不可用")
-            return
-
         self.log_widget.append_log("开始初始化身体...")
 
         try:
-            self.body_controller = ModbusMotor(port=self.config.BODY_SERIAL_PORT, baudrate=115200, slave_id=1, timeout=1)
+            self._services.devices.initialize(BODY_AXIS)
             self.body_connected = True
             self.update_body_status(True)
             self.log_widget.append_log("身体初始化成功")
@@ -2170,7 +2077,7 @@ class MainWindow(QMainWindow):
 
     def execute_wake_welcome_task(self, task_name: str) -> None:
         """Execute a configured wake lifecycle task without affecting the composer."""
-        if self.execution_thread and self.execution_thread.isRunning():
+        if self._execution_bridge.is_executing():
             self.log_widget.append_log(f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}")
             return
 
@@ -2182,7 +2089,7 @@ class MainWindow(QMainWindow):
         self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务")
 
     def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
-        if self.execution_thread and self.execution_thread.isRunning():
+        if self._execution_bridge.is_executing():
             QMessageBox.warning(self, "警告", "当前已有序列正在执行")
             return
 
@@ -2225,26 +2132,26 @@ class MainWindow(QMainWindow):
                 elif isinstance(entry, SequenceItem):
                     self.sequence_list._update_item_display(tree_item, entry, i)
 
-        self.execution_thread = ExecutionThread(entries, self.robot_controller, self.body_controller, self.move_controller)
-        self.execution_thread.step_started.connect(self.on_step_started)
-        self.execution_thread.step_completed.connect(self.on_step_completed)
-        self.execution_thread.step_failed.connect(self.on_step_failed)
-        self.execution_thread.log_message.connect(self.log_widget.append_log)
-        self.execution_thread.loop_progress.connect(self.on_loop_progress)
-        self.execution_thread.finished.connect(self.on_execution_finished)
-
-        self.execution_thread.start()
+        if not self._execution_bridge.execute_sequence_items(
+            entries,
+            origin="gui",
+        ):
+            self._set_trajectory_buttons_enabled(True)
+            self._resume_pose_refresh()
+            QMessageBox.warning(self, "警告", "提交执行失败")
 
     def toggle_pause(self):
-        if self.execution_thread and self.execution_thread.isRunning():
+        if self._execution_bridge.is_executing():
             if self.is_paused:
-                self.execution_thread.resume()
+                if not self._execution_bridge.resume_execution():
+                    return
                 self.control_panel.pause_btn.setText("⏸ 暂停")
                 if hasattr(self, 'pause_composed_task_btn'):
                     self.pause_composed_task_btn.setText("⏸ 暂停")
                 self.log_widget.append_log("执行继续")
             else:
-                self.execution_thread.pause()
+                if not self._execution_bridge.pause_execution():
+                    return
                 self.control_panel.pause_btn.setText("▶ 继续")
                 if hasattr(self, 'pause_composed_task_btn'):
                     self.pause_composed_task_btn.setText("▶ 继续")
@@ -2252,8 +2159,8 @@ class MainWindow(QMainWindow):
             self.is_paused = not self.is_paused
 
     def stop_execution(self):
-        if self.execution_thread and self.execution_thread.isRunning():
-            self.execution_thread.stop()
+        if self._execution_bridge.is_executing():
+            self._execution_bridge.stop_execution()
             self.log_widget.append_log(
                 "已发送任务停止请求（非硬件急停，将在当前动作可中断点停止）"
             )
@@ -2261,11 +2168,17 @@ class MainWindow(QMainWindow):
             self.log_widget.append_log("当前没有正在执行的任务")
 
     def on_execution_completed(self, success: bool):
-        self.log_widget.append_log("AI 序列执行完成" if success else "AI 序列执行失败")
+        self.log_widget.append_log(
+            "序列执行成功" if success else "序列执行失败或已停止"
+        )
         self.is_paused = False
         self.control_panel.pause_btn.setText("⏸ 暂停")
         if hasattr(self, 'pause_composed_task_btn'):
             self.pause_composed_task_btn.setText("⏸ 暂停")
+        self._execution_display_list = self.sequence_list
+        self._set_trajectory_buttons_enabled(True)
+        self._resume_pose_refresh()
+        self.refresh_arm_poses()
 
     def on_step_started(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.sequence_list)
@@ -2294,17 +2207,6 @@ class MainWindow(QMainWindow):
             if isinstance(entry, LoopBlock):
                 entry.current_iteration = current_iteration
                 self.sequence_list._update_loop_display(tree_item, entry)
-
-    def on_execution_finished(self):
-        self.log_widget.append_log("序列执行完成")
-        self.is_paused = False
-        self.control_panel.pause_btn.setText("⏸ 暂停")
-        if hasattr(self, 'pause_composed_task_btn'):
-            self.pause_composed_task_btn.setText("⏸ 暂停")
-        self._execution_display_list = self.sequence_list
-        self._set_trajectory_buttons_enabled(True)
-        self._resume_pose_refresh()
-        self.refresh_arm_poses()
 
     def move_item_up(self):
         current_row = self.sequence_list.currentRow()
@@ -2502,7 +2404,7 @@ class MainWindow(QMainWindow):
 
     def test_camera(self):
         """
-        通过 camera_factory 统一入口测试相机（与视觉抓取使用同一路径）。
+        通过 DeviceRuntime 测试相机（与视觉抓取使用同一实例）。
         在独立 QThread 中运行，避免阻塞 UI。
         """
         self.test_camera_btn.setEnabled(False)
@@ -2511,18 +2413,20 @@ class MainWindow(QMainWindow):
         class _TestWorker(QThread):
             result = pyqtSignal(bool, str)
 
+            def __init__(self, services: ApplicationServices):
+                super().__init__()
+                self._services = services
+
             def run(self):
                 import time
-                from src.cameras.camera_factory import get_camera_manager, stop_camera_manager
-                from src.cameras.realsense_manager import RealSenseManager
                 from src.core.config_loader import Config
 
                 config = Config.get_instance()
                 camera_name = config.VISION_CAMERA_NAME or None
 
                 try:
-                    # ── 通过 camera_factory 获取管理器（与视觉抓取同一路径）──
-                    mgr = get_camera_manager()
+                    self._services.devices.initialize(CAMERA)
+                    mgr = self._services.device_runtime.get_if_ready(CAMERA)
                     if mgr is None:
                         self.result.emit(False, "相机管理器未启动（请检查 CAMERA_PROVIDER 和设备配置）")
                         return
@@ -2551,7 +2455,7 @@ class MainWindow(QMainWindow):
                     # 尝试取帧
                     deadline = time.time() + 10
                     while time.time() < deadline:
-                        if isinstance(mgr, RealSenseManager):
+                        if hasattr(mgr, "get_latest_raw_frames"):
                             # RealSense：取原始帧（与视觉抓取 executor.py 一致）
                             raw = mgr.get_latest_raw_frames(camera_name)
                             if raw is not None:
@@ -2589,15 +2493,13 @@ class MainWindow(QMainWindow):
 
                 except Exception as e:
                     self.result.emit(False, f"测试异常: {str(e)}")
-                finally:
-                    stop_camera_manager()
 
         def on_result(success, msg):
             self.log_widget.append_log(f"[相机测试] {msg}")
             self.test_camera_btn.setEnabled(True)
             self.test_camera_btn.setText("测试相机")
 
-        self._camera_test_thread = _TestWorker()
+        self._camera_test_thread = _TestWorker(self._services)
         self._camera_test_thread.result.connect(on_result)
         self._camera_test_thread.start()
 
@@ -2605,47 +2507,10 @@ class MainWindow(QMainWindow):
         if self.pose_timer is not None:
             self.pose_timer.stop()
 
-        if self.execution_thread and self.execution_thread.isRunning():
-            self.execution_thread.stop()
-            self.execution_thread.wait()
-
-        # 断开机械臂连接
-        if self.robot_controller is not None:
-            try:
-                self.robot_controller.shutdown()
-                self.log_widget.append_log("机械臂已断开连接")
-            except Exception as e:
-                print(f"断开机械臂连接时出错: {e}")
-
-        # 关闭身体连接
-        if self.body_controller is not None:
-            try:
-                self.body_controller.close()
-                self.log_widget.append_log("身体已断开连接")
-            except Exception as e:
-                print(f"断开身体连接时出错：{e}")
-
-        if self.relay_controller is not None:
-            try:
-                self.relay_controller.close()
-                self.log_widget.append_log("继电器串口已关闭")
-            except Exception as e:
-                print(f"关闭继电器串口时出错: {e}")
-
-        # 关闭底盘移动控制器连接
-        if self.move_controller is not None:
-            try:
-                self.move_controller.close()
-                self.log_widget.append_log("底盘移动控制器已断开连接")
-            except Exception as e:
-                print(f"断开底盘移动控制器连接时出错：{e}")
-
-        # 关闭 ADP 连接
-        if self.adp_instance is not None:
-            try:
-                self.adp_instance.close()
-                self.log_widget.append_log("吸液枪已关闭")
-            except Exception as e:
-                print(f"关闭吸液枪时出错: {e}")
+        try:
+            self._services.devices.shutdown_all()
+            self.log_widget.append_log("设备运行时已关闭")
+        except Exception as e:
+            print(f"关闭设备运行时时出错: {e}")
 
         event.accept()

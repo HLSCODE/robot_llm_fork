@@ -117,6 +117,8 @@ class Config:
     VISION_CAMERA_NAME: str = ""
     VISION_PREP_OFFSET_X: float = -0.07
     VISION_GRASP_Z: float = -0.24
+    VISION_BOTTLE_TARGET_OFFSET_X: float = -0.025
+    VISION_BOTTLE_TARGET_OFFSET_Y: float = 0.015
     VISION_GMM_COMPONENTS: int = 1
 
     # 视觉重定位 / Tag 补偿参数
@@ -147,6 +149,7 @@ class Config:
     ROBOT2_IP: str = "192.168.3.18"
     ROBOT2_PORT: int = 8080
     ROBOT2_INITIAL_POSE: list = None
+    ROBOT_PROVIDER: str = "realman"
     MOVE_CONTROLLER_HOST: str = "192.168.1.216"
     MOVE_CONTROLLER_PORT: int = 12345
     MOVE_CONTROLLER_CLIENT_BIND_PORT: int = None
@@ -252,6 +255,7 @@ class Config:
     PLACE_DROP_HEIGHT: float = 0.06
     PLACE_ABOVE: list = None
     PLACE_POS2: list = None
+    PLACE_TRANSFER_POSE: list = None
     GUN1_POSITIONS: dict = None
     GUN2_POSITIONS: dict = None
 
@@ -442,6 +446,12 @@ class Config:
         instance.VISION_CAMERA_NAME = os.getenv("VISION_CAMERA_NAME", "")
         instance.VISION_PREP_OFFSET_X = float(os.getenv("VISION_PREP_OFFSET_X", "-0.07"))
         instance.VISION_GRASP_Z = float(os.getenv("VISION_GRASP_Z", "-0.24"))
+        instance.VISION_BOTTLE_TARGET_OFFSET_X = float(
+            os.getenv("VISION_BOTTLE_TARGET_OFFSET_X", "-0.025")
+        )
+        instance.VISION_BOTTLE_TARGET_OFFSET_Y = float(
+            os.getenv("VISION_BOTTLE_TARGET_OFFSET_Y", "0.015")
+        )
         instance.VISION_GMM_COMPONENTS = int(os.getenv("VISION_GMM_COMPONENTS", "1"))
 
         # 视觉重定位 / Tag 补偿参数
@@ -525,6 +535,10 @@ class Config:
         )
         
         # 机械臂配置
+        instance.ROBOT_PROVIDER = os.getenv(
+            "ROBOT_PROVIDER",
+            "realman",
+        ).strip().lower()
         instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.19")
         instance.ROBOT1_PORT = int(os.getenv("ROBOT1_PORT", "8080"))
         instance.ROBOT1_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT1_INITIAL_POSE", "-0.04844,-0.269769,-0.101888,3.109,-0.094,-1.592"))
@@ -641,6 +655,12 @@ class Config:
         instance.PLACE_DROP_HEIGHT = float(os.getenv("PLACE_DROP_HEIGHT", "0.06"))
         instance.PLACE_ABOVE = cls._parse_float_list(os.getenv("PLACE_ABOVE", "0.0637,-0.07351,-0.4182,3.15,0,1.617"))
         instance.PLACE_POS2 = cls._parse_float_list(os.getenv("PLACE_POS2", "0.285488,-0.256408,-0.090654,3.14,0,1.5"))
+        instance.PLACE_TRANSFER_POSE = cls._parse_float_list(
+            os.getenv(
+                "PLACE_TRANSFER_POSE",
+                "0.424,-0.092,-0.439,3.15,0,1.618",
+            )
+        )
 
         # 枪头更换位置配置
         instance.GUN1_POSITIONS = {

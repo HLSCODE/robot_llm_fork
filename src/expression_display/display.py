@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
-from threading import RLock
 from typing import Any
 
 from .base import ExpressionDisplayBackend, ExpressionDisplayFactory, ExpressionSpec
@@ -214,35 +213,3 @@ def _load_provider_factory(provider: str) -> ExpressionDisplayFactory:
 def create_backend(settings: ExpressionDisplaySettings) -> ExpressionDisplayBackend:
     factory = _load_provider_factory(settings.provider)
     return factory(settings)
-
-
-_default_lock = RLock()
-_default_display: ExpressionDisplay | None = None
-_default_settings: ExpressionDisplaySettings | None = None
-
-
-def get_expression_display(
-    settings: ExpressionDisplaySettings | None = None,
-) -> ExpressionDisplay:
-    resolved = settings or ExpressionDisplaySettings.from_project_config()
-    global _default_display, _default_settings
-    with _default_lock:
-        if _default_display is None or _default_settings != resolved:
-            if _default_display is not None:
-                _default_display.close()
-            _default_display = ExpressionDisplay(resolved)
-            _default_settings = resolved
-        return _default_display
-
-
-def switch_expression(expression: str | int):
-    return get_expression_display().switch(expression)
-
-
-def close_expression_display() -> None:
-    global _default_display, _default_settings
-    with _default_lock:
-        if _default_display is not None:
-            _default_display.close()
-        _default_display = None
-        _default_settings = None

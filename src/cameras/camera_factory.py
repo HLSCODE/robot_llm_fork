@@ -1,7 +1,7 @@
-"""相机管理器工厂 — 根据配置初始化并返回对应的相机单例。
+"""相机管理器工厂 — 根据配置创建由 DeviceRuntime 持有的相机。
 
 对外只暴露一个入口:
-    get_camera_manager() → RealSenseManager | OpenCVCameraManager | None
+    create_camera_manager() → RealSenseManager | OpenCVCameraManager | None
 
 调用方无需关心具体相机类型，只需调用返回对象的公共接口
 （get_latest_jpegs / get_latest_jpeg / get_cameras_info 等）。
@@ -19,13 +19,12 @@ logger = logging.getLogger(__name__)
 CameraManager = Union[RealSenseManager, OpenCVCameraManager]
 
 
-def get_camera_manager() -> Optional[CameraManager]:
-    """根据 CAMERA_PROVIDER 初始化并返回相机管理器单例。
+def create_camera_manager() -> Optional[CameraManager]:
+    """根据 CAMERA_PROVIDER 创建并启动相机管理器。
 
     CAMERA_PROVIDER=realsense（默认）→ RealSenseManager
     CAMERA_PROVIDER=webcam          → OpenCVCameraManager
 
-    单例已运行时直接返回，不重复启动。
     任何异常均被捕获并记录，返回 None 以保证服务正常启动。
     """
     try:
@@ -41,25 +40,6 @@ def get_camera_manager() -> Optional[CameraManager]:
         return None
 
 
-def stop_camera_manager() -> None:
-    """停止当前配置对应的相机采集线程和设备管道。
-
-    管理器实例会保留，因此下一次 ``get_camera_manager()`` 仍可使用同一套
-    配置重新启动。视觉动作应在拿到所需帧后调用此函数，避免持续占用 CPU、
-    USB 带宽和相机设备。
-    """
-    try:
-        config = Config.get_instance()
-        provider = getattr(config, "CAMERA_PROVIDER", "realsense").lower()
-        manager_cls = OpenCVCameraManager if provider in ("webcam", "opencv") else RealSenseManager
-        manager = manager_cls.peek_instance()
-        if manager is not None and manager.is_running:
-            manager.stop()
-            logger.info("相机管理器已按需停止")
-    except Exception as exc:
-        logger.warning("停止相机管理器失败: %s", exc)
-
-
 # ------------------------------------------------------------------
 # 内部实现
 # ------------------------------------------------------------------
@@ -72,7 +52,7 @@ def _config_int(config, name: str, default: int) -> int:
 
 
 def _get_realsense_manager(config) -> Optional[RealSenseManager]:
-    """初始化 RealSense 相机管理器单例。
+    """初始化 RealSense 相机管理器。
 
     从配置读取 REALSENSE_DEVICE_SN / REALSENSE_DEVICE_NAMES，
     未配置序列号时返回 None。
@@ -110,7 +90,7 @@ def _get_realsense_manager(config) -> Optional[RealSenseManager]:
         fps,
         encode_fps,
     )
-    mgr = RealSenseManager.get_instance(
+    mgr = RealSenseManager(
         cameras=cameras,
         fps=fps,
         width=color_width,
@@ -129,7 +109,7 @@ def _get_realsense_manager(config) -> Optional[RealSenseManager]:
 
 
 def _get_opencv_manager(config) -> OpenCVCameraManager:
-    """初始化 OpenCV 本地摄像头管理器单例。
+    """初始化 OpenCV 本地摄像头管理器。
 
     从配置读取 WEBCAM_DEVICE_INDEXES / WEBCAM_DEVICE_NAMES。
     """
@@ -142,7 +122,7 @@ def _get_opencv_manager(config) -> OpenCVCameraManager:
         {"index": index, "name": names[i] if i < len(names) else f"webcam-{index}"}
         for i, index in enumerate(indexes)
     ]
-    mgr = OpenCVCameraManager.get_instance(
+    mgr = OpenCVCameraManager(
         cameras=cameras,
         fps=_config_int(config, "WEBCAM_FPS", 30),
         width=_config_int(config, "WEBCAM_WIDTH", 640),

@@ -28,15 +28,16 @@ class CameraCaptureError(RuntimeError):
 
 
 class CamerasModuleProvider:
-    """Capture LLM vision images through src.cameras.camera_factory."""
+    """Capture LLM vision images through an injected runtime-owned camera."""
 
     def __init__(
         self,
+        manager_factory: Callable[[], object],
+        *,
         camera_name: Optional[str] = None,
         wait_timeout_s: float = 2.0,
         poll_interval_s: float = 0.1,
         max_frames: Optional[int] = None,
-        manager_factory: Optional[Callable[[], object]] = None,
     ) -> None:
         self.camera_name = (camera_name or "").strip()
         self.wait_timeout_s = max(0.0, float(wait_timeout_s))
@@ -73,12 +74,7 @@ class CamerasModuleProvider:
         return parts
 
     def _get_manager(self):
-        if self._manager_factory is not None:
-            manager = self._manager_factory()
-        else:
-            from ...cameras.camera_factory import get_camera_manager
-
-            manager = get_camera_manager()
+        manager = self._manager_factory()
         if manager is None:
             raise CameraCaptureError(
                 "我现在还没接上摄像头，暂时看不到周围环境。",

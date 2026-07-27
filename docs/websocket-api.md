@@ -527,11 +527,28 @@ ws.onmessage = (event) => {
 {
   "event": "status",
   "devices": {
-    "robot1": false,
-    "robot2": false,
-    "body": false
+    "robot-system": {
+      "state": "ready",
+      "ready": true,
+      "capabilities": ["robot_motion", "gripper"],
+      "error": ""
+    },
+    "body-axis": {
+      "state": "registered",
+      "ready": false,
+      "capabilities": ["body_axis"],
+      "error": ""
+    },
+    "camera": {
+      "state": "registered",
+      "ready": false,
+      "capabilities": ["camera"],
+      "error": ""
+    }
   },
   "executor": {
+    "run_id": null,
+    "state": "idle",
     "running": false,
     "paused": false
   },
@@ -553,9 +570,13 @@ ws.onmessage = (event) => {
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `devices.robot1` | `boolean` | 左机械臂是否已连接 |
-| `devices.robot2` | `boolean` | 右机械臂是否已连接 |
-| `devices.body` | `boolean` | 升降平台是否已连接 |
+| `devices` | `object` | 以规范设备 ID 为键的完整设备状态表；示例仅展示部分设备 |
+| `devices.<device_id>.state` | `string` | 生命周期状态：`registered`、`starting`、`ready`、`stopping`、`stopped` 或 `failed` |
+| `devices.<device_id>.ready` | `boolean` | 设备是否可被应用服务调用 |
+| `devices.<device_id>.capabilities` | `string[]` | 设备提供的能力集合 |
+| `devices.<device_id>.error` | `string` | 最近一次初始化或关闭错误；无错误时为空字符串 |
+| `executor.run_id` | `string \| null` | 当前或最近一次执行的唯一 ID |
+| `executor.state` | `string` | 统一执行状态 |
 | `executor.running` | `boolean` | 是否正在执行 |
 | `executor.paused` | `boolean` | 是否处于暂停状态 |
 | `sequence_length` | `number` | 当前服务端维护的序列长度 |
@@ -565,6 +586,9 @@ ws.onmessage = (event) => {
 | `camera.cameras` | `array` | 相机状态列表 |
 | `minicpm.configured` | `boolean` | 是否已配置 MiniCPM |
 | `minicpm.gateway` | `string \| null` | MiniCPM 网关地址 |
+
+> 此状态结构是统一设备运行时的直接切换契约。服务端不再返回
+> `robot1`、`robot2`、`body` 等旧布尔字段。
 
 ### 6.2 初始化机械臂 `init_robots`
 
@@ -608,9 +632,12 @@ ws.onmessage = (event) => {
 {
   "event": "device_status_changed",
   "devices": {
-    "robot1": true,
-    "robot2": true,
-    "body": false
+    "robot-system": {
+      "state": "ready",
+      "ready": true,
+      "capabilities": ["robot_motion", "gripper"],
+      "error": ""
+    }
   }
 }
 ```
@@ -650,9 +677,12 @@ ws.onmessage = (event) => {
 {
   "event": "device_status_changed",
   "devices": {
-    "robot1": false,
-    "robot2": false,
-    "body": true
+    "body-axis": {
+      "state": "ready",
+      "ready": true,
+      "capabilities": ["body_axis"],
+      "error": ""
+    }
   }
 }
 ```
@@ -672,18 +702,25 @@ ws.onmessage = (event) => {
 ```json
 {
   "event": "disconnected",
-  "messages": [
-    "已停止当前执行",
-    "机械臂已断开",
-    "身体控制器已断开"
-  ],
+  "results": {},
   "devices": {
-    "robot1": false,
-    "robot2": false,
-    "body": false
+    "robot-system": {
+      "state": "stopped",
+      "ready": false,
+      "capabilities": ["robot_motion", "gripper"],
+      "error": ""
+    },
+    "body-axis": {
+      "state": "stopped",
+      "ready": false,
+      "capabilities": ["body_axis"],
+      "error": ""
+    }
   }
 }
 ```
+
+`results` 仅记录关闭失败，键为设备 ID，值为错误消息；全部关闭成功时为空对象。
 
 ### 6.5 测试相机 `test_camera`
 

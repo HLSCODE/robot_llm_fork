@@ -45,8 +45,10 @@ class AIController(QObject):
 
         self._current_sequence: List[SequenceItem] = []
         self._current_skill_info: Dict[str, Any] = {}
-        self._simulation_mode: bool = False
-
+        if self._execution_bridge is not None:
+            self._execution_bridge.execution_completed.connect(
+                self._on_execution_completed
+            )
         self._initialize()
         logger.info("AIController 初始化完成")
 
@@ -110,15 +112,12 @@ class AIController(QObject):
             return
 
         try:
-            success = self._execution_bridge.execute_sequence_items(
+            accepted = self._execution_bridge.execute_sequence_items(
                 self._current_sequence,
-                simulation=self._simulation_mode,
+                origin="ai",
             )
 
-            if success:
-                self.execution_finished.emit(True, "执行成功")
-                self.status_changed.emit("执行完成")
-            else:
+            if not accepted:
                 self.execution_finished.emit(False, "执行失败")
                 self.status_changed.emit("执行失败")
         except Exception as exc:
@@ -137,16 +136,6 @@ class AIController(QObject):
 
         self.status_changed.emit("已取消")
         logger.info("当前任务已取消")
-
-    def set_simulation_mode(self, enabled: bool) -> None:
-        """Set simulation mode for subsequent execution."""
-        self._simulation_mode = enabled
-        if self._execution_bridge:
-            self._execution_bridge.set_simulation_mode(enabled)
-        logger.info("模拟模式: %s", "启用" if enabled else "禁用")
-
-    def is_simulation_mode(self) -> bool:
-        return self._simulation_mode
 
     def get_skill_list(self) -> List[Dict[str, Any]]:
         if self._skill_engine is None:
@@ -184,3 +173,10 @@ class AIController(QObject):
         if self._status_client is None:
             self._status_client = self._llm_registry.get_provider()
         return self._status_client
+
+    def _on_execution_completed(self, success: bool) -> None:
+        message = "执行成功" if success else "执行失败或已停止"
+        self._current_sequence = []
+        self._current_skill_info = {}
+        self.execution_finished.emit(success, message)
+        self.status_changed.emit("执行完成" if success else "执行失败")

@@ -1,72 +1,73 @@
-"""
-纯 Python 动作执行引擎（无 Qt 依赖）
-从 execution.py 中提取核心逻辑，用回调函数替代 pyqtSignal，
-可同时被 GUI 模式和 WebSocket 服务模式复用。
-"""
+"""Synchronous action engine used exclusively by ExecutionManager."""
 
-import time
-import threading
+from collections.abc import Sequence
 import logging
 from pathlib import Path
-from typing import Callable, Optional, List
+import time
+from typing import Any
 
-from ..arm_sdk.controller import RobotController
-from ..core.models import SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
-from ..core.execution_context import ExecutionContext
-from ..core.move_compensation import resolve_robot_target_pose
-from ..devices.modbus_motor import ModbusMotor
-from ..devices.pwm_neck import PWMNeckController
-from ..base_move.move_controller import RobotMoveController
 from ..actions.circle_dispense import execute_right_arm_circle_dispense
+from ..core.execution_context import ExecutionContext
+from ..core.models import (
+    ActionType,
+    LoopBlock,
+    SequenceEntry,
+    SequenceItem,
+    SequenceItemStatus,
+)
+from ..core.move_compensation import resolve_robot_target_pose
+from ..device_runtime import (
+    ArmId,
+    ArmMotion,
+    BodyAxis,
+    CameraSource,
+    CartesianPose,
+    DepthCameraSource,
+    DeviceRuntime,
+    DigitalOutputs,
+    ExpressionDisplay,
+    GripperControl,
+    MobileBase,
+    MotionMode,
+    Pipette,
+    PowderDispenser,
+    RobotSystem,
+    ToolRackControl,
+    ToolChanger,
+    TrajectoryControl,
+)
+from ..device_runtime.ids import (
+    BODY_AXIS,
+    CAMERA,
+    EXPRESSION_DISPLAY,
+    MOBILE_BASE,
+    PIPETTE,
+    POWDER_DISPENSER,
+    RELAY_BANK,
+    ROBOT_SYSTEM,
+    TOOL_CHANGER,
+)
+from .control import ExecutionControl
+from .manager import EngineCallbacks
+from .models import EngineResult
 
 logger = logging.getLogger(__name__)
-from ..core.config_loader import Config
-class ActionExecutor:
-    """
-    动作序列执行器（纯 Python，无 Qt 依赖）
 
-    回调函数签名:
-        on_step_started(index: int, item: SequenceItem)
-        on_step_completed(index: int, item: SequenceItem)
-        on_step_failed(index: int, item: SequenceItem, error: str)
-        on_loop_progress(loop_uuid: str, current_iteration: int, total_iterations: int)
-        on_log(message: str)
-        on_finished()
-    """
+
+class ActionEngine:
+    """Execute one action sequence synchronously against DeviceRuntime."""
 
     def __init__(
         self,
-        robot_controller: RobotController | None = None,
-        body_controller: ModbusMotor | None = None,
-        neck_controller: PWMNeckController | None = None,
-        move_controller: RobotMoveController | None = None,
-        on_step_started: Optional[Callable] = None,
-        on_step_completed: Optional[Callable] = None,
-        on_step_failed: Optional[Callable] = None,
-        on_loop_progress: Optional[Callable] = None,
-        on_log: Optional[Callable] = None,
-        on_finished: Optional[Callable] = None,
-    ):
-        self._robot_controller = robot_controller
-        self._body_controller = body_controller
-        self._neck_controller = neck_controller
-        self._move_controller = move_controller
-        self.config = Config.get_instance()
+        device_runtime: DeviceRuntime,
+        config: Any,
+    ) -> None:
+        self._device_runtime = device_runtime
+        self.config = config
         self.execution_context = ExecutionContext()
-
-        # 回调
-        self._on_step_started = on_step_started or (lambda *a: None)
-        self._on_step_completed = on_step_completed or (lambda *a: None)
-        self._on_step_failed = on_step_failed or (lambda *a: None)
-        self._on_loop_progress = on_loop_progress or (lambda *a: None)
-        self._on_log = on_log or (lambda msg, level="info": logger.info(msg))
-        self._on_finished = on_finished or (lambda: None)
-
-        # 控制状态
-        self._stop_requested = False
-        self._paused = False
-        self._running = False
-        self._thread: Optional[threading.Thread] = None
+        self._control: ExecutionControl | None = None
+        self._callbacks: EngineCallbacks | None = None
+        self._last_error = ""
 
         # 动作类型与执行方法的映射
         self._execute_methods = {
@@ -81,55 +82,34 @@ class ActionExecutor:
             ActionType.TRAJECTORY: self._execute_trajectory,
         }
 
-    # ------------------------------------------------------------------
-    # 公开接口
-    # ------------------------------------------------------------------
+    @property
+    def _stop_requested(self) -> bool:
+        return self._required_control().cancel_requested
 
     @property
-    def is_running(self) -> bool:
-        return self._running
+    def _paused(self) -> bool:
+        return self._required_control().paused
 
     @property
-    def is_paused(self) -> bool:
-        return self._paused
+    def _body_controller(self) -> BodyAxis | None:
+        return self._device_runtime.get_if_ready(BODY_AXIS)
 
-    def execute(self, sequence: List[SequenceEntry]) -> None:
-        """在后台线程中执行动作序列（含 LoopBlock）"""
-        if self._running:
-            self._on_log("已有序列正在执行，请先停止")
-            return
+    @property
+    def _move_controller(self) -> MobileBase | None:
+        return self._device_runtime.get_if_ready(MOBILE_BASE)
 
-        self._stop_requested = False
-        self._paused = False
-        self._running = True
+    def run(
+        self,
+        sequence: Sequence[SequenceEntry],
+        control: ExecutionControl,
+        callbacks: EngineCallbacks,
+    ) -> EngineResult:
+        """Execute a sequence in the current worker thread."""
+        self._control = control
+        self._callbacks = callbacks
         self.execution_context.clear()
-
-        self._thread = threading.Thread(
-            target=self._run, args=(sequence,), daemon=True, name="ActionExecutor"
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        """停止执行"""
-        self._stop_requested = True
-        self._paused = False  # 解除暂停，让线程能退出
-
-    def pause(self) -> None:
-        """暂停执行"""
-        self._paused = True
-
-    def resume(self) -> None:
-        """恢复执行"""
-        self._paused = False
-
-    # ------------------------------------------------------------------
-    # 执行主循环
-    # ------------------------------------------------------------------
-
-    def _run(self, sequence: List[SequenceEntry]) -> None:
-        """执行主循环（运行在后台线程），支持 LoopBlock"""
+        failure = ""
         try:
-            # 构建扁平执行列表
             flat_sequence: list[tuple[SequenceItem, LoopBlock | None]] = []
             for entry in sequence:
                 if isinstance(entry, LoopBlock):
@@ -147,15 +127,10 @@ class ActionExecutor:
             for index, (item, loop) in enumerate(flat_sequence):
                 if self._stop_requested:
                     self._on_log("执行已停止")
-                    break
-
-                while self._paused:
-                    time.sleep(0.1)
-                    if self._stop_requested:
-                        self._on_log("执行已停止")
-                        break
-                if self._stop_requested:
-                    break
+                    return EngineResult(success=False, cancelled=True)
+                if not control.wait_if_paused():
+                    self._on_log("执行已停止")
+                    return EngineResult(success=False, cancelled=True)
 
                 if loop is not None:
                     counter = loop_item_counter.get(loop.uuid, 0)
@@ -168,6 +143,7 @@ class ActionExecutor:
                     loop_item_counter[loop.uuid] = (counter + 1) % iter_size
 
                 item.status = SequenceItemStatus.RUNNING
+                self._last_error = ""
                 self._on_step_started(index, item)
 
                 try:
@@ -175,18 +151,72 @@ class ActionExecutor:
                     if success:
                         item.status = SequenceItemStatus.SUCCESS
                         self._on_step_completed(index, item)
+                    elif control.cancel_requested:
+                        item.status = SequenceItemStatus.PENDING
+                        return EngineResult(success=False, cancelled=True)
                     else:
                         item.status = SequenceItemStatus.FAILED
-                        self._on_step_failed(index, item, "动作执行失败")
+                        failure = (
+                            self._last_error
+                            or f"动作执行失败: {item.definition.name}"
+                        )
+                        self._on_step_failed(index, item, failure)
                         break
                 except Exception as e:
                     item.status = SequenceItemStatus.FAILED
-                    error_msg = f"执行异常: {str(e)}"
-                    self._on_step_failed(index, item, error_msg)
+                    failure = f"执行异常: {str(e)}"
+                    self._on_step_failed(index, item, failure)
                     break
         finally:
-            self._running = False
-            self._on_finished()
+            self._control = None
+            self._callbacks = None
+
+        if control.cancel_requested:
+            return EngineResult(success=False, cancelled=True)
+        if failure:
+            return EngineResult(success=False, error=failure)
+        return EngineResult(success=True)
+
+    def _required_control(self) -> ExecutionControl:
+        if self._control is None:
+            raise RuntimeError("action engine is not running")
+        return self._control
+
+    def _required_callbacks(self) -> EngineCallbacks:
+        if self._callbacks is None:
+            raise RuntimeError("action engine callbacks are unavailable")
+        return self._callbacks
+
+    def _on_step_started(self, index: int, item: SequenceItem) -> None:
+        self._required_callbacks().on_step_started(index, item)
+
+    def _on_step_completed(self, index: int, item: SequenceItem) -> None:
+        self._required_callbacks().on_step_completed(index, item)
+
+    def _on_step_failed(
+        self,
+        index: int,
+        item: SequenceItem,
+        error: str,
+    ) -> None:
+        self._required_callbacks().on_step_failed(index, item, error)
+
+    def _on_loop_progress(
+        self,
+        loop_uuid: str,
+        current_iteration: int,
+        total_iterations: int,
+    ) -> None:
+        self._required_callbacks().on_loop_progress(
+            loop_uuid,
+            current_iteration,
+            total_iterations,
+        )
+
+    def _on_log(self, message: str, level: str = "info") -> None:
+        if level == "error":
+            self._last_error = message
+        self._required_callbacks().on_log(message, level)
 
     # ------------------------------------------------------------------
     # 动作分发（与 execution.py 逻辑一致）
@@ -230,10 +260,6 @@ class ActionExecutor:
 
         self._on_log(f"机械臂移动动作: 臂={arm}, 模式={mode}, 点位={target_pose_str}")
 
-        if self._robot_controller is None:
-            self._on_log("机械臂控制器未初始化", "error")
-            return False
-
         try:
             target_pose = resolve_robot_target_pose(
                 params,
@@ -242,32 +268,29 @@ class ActionExecutor:
                 self._on_log,
             )
 
-            if arm == '左':
-                if mode == 'move_j':
-                    method = self._robot_controller.move_robot1
-                elif mode == 'move_l':
-                    method = self._robot_controller.move_robot1l
-                else:
-                    self._on_log(f"未知的移动模式: {mode}", "error")
-                    return False
-            else:
-                if mode == 'move_j':
-                    method = self._robot_controller.move_robot2
-                elif mode == 'move_l':
-                    method = self._robot_controller.move_robot2l
-                else:
-                    self._on_log(f"未知的移动模式: {mode}", "error")
-                    return False
+            arm_id = ArmId.parse(arm)
+            motion_mode = MotionMode.parse(mode)
+            pose = CartesianPose.from_iterable(target_pose)
+            motion = self._device_runtime.require(ROBOT_SYSTEM, ArmMotion)
 
             # 重试机制：处理通信抖动
             max_retries = 3
             for attempt in range(1, max_retries + 1):
-                success = method(target_pose)
-                if success:
+                try:
+                    motion.move_to_pose(
+                        arm_id,
+                        pose,
+                        motion_mode,
+                    )
                     self._on_log("机械臂移动执行完成")
                     return True
-                self._on_log(f"机械臂移动失败 (第{attempt}次)，重试中...", "warn")
-                time.sleep(0.5)
+                except Exception as exc:
+                    self._on_log(
+                        f"机械臂移动失败 (第{attempt}次): {exc}",
+                        "warn",
+                    )
+                if not self._required_control().sleep(0.5):
+                    return False
 
             self._on_log("机械臂移动重试次数耗尽", "error")
             return False
@@ -301,7 +324,8 @@ class ActionExecutor:
                 if st:
                     self._on_log(f"身体移动完成，位置={position}")
                     return True
-                time.sleep(0.1)
+                if not self._required_control().sleep(0.1):
+                    return False
         except Exception as e:
             self._on_log(f"执行身体移动出错: {str(e)}", "error")
             return False
@@ -377,47 +401,27 @@ class ActionExecutor:
         operation = params.get('操作', '开')
 
         if executor == '快换手':
-            from ..devices import Kuaihuanshou
-            kuaihuanshou = Kuaihuanshou(port=self.config.KUAIHUANSHOU_SERIAL_PORT)
-            try:
-                if operation == '开':
-                    result = kuaihuanshou.send_command('open')
-                elif operation == '关':
-                    result = kuaihuanshou.send_command('close')
-                else:
-                    self._on_log(f"未知的快换手操作: {operation}", "error")
-                    return False
-                if result == "error" or result is False:
-                    self._on_log(f"快换手操作失败: {result}", "error")
-                    return False
-            finally:
-                kuaihuanshou.close()
+            tool_changer = self._device_runtime.require(
+                TOOL_CHANGER,
+                ToolChanger,
+            )
+            if operation == '开':
+                tool_changer.set_locked(False)
+            elif operation == '关':
+                tool_changer.set_locked(True)
+            else:
+                self._on_log(f"未知的快换手操作: {operation}", "error")
+                return False
 
         elif executor == '继电器':
-            from ..devices import RelayController
-            adp = RelayController()
-            try:
-                if operation == '开':
-                    if number == 1:
-                        adp.turn_on_relay_Y1()
-                    elif number == 2:
-                        adp.turn_on_relay_Y2()
-                    else:
-                        self._on_log(f"未知的编号: {number}", "error")
-                        return False
-                elif operation == '关':
-                    if number == 1:
-                        adp.turn_off_relay_Y1()
-                    elif number == 2:
-                        adp.turn_off_relay_Y2()
-                    else:
-                        self._on_log(f"未知的编号: {number}", "error")
-                        return False
-                else:
-                    self._on_log(f"未知的继电器操作: {operation}", "error")
-                    return False
-            finally:
-                adp.close()
+            if number not in (1, 2):
+                self._on_log(f"未知的编号: {number}", "error")
+                return False
+            if operation not in ('开', '关'):
+                self._on_log(f"未知的继电器操作: {operation}", "error")
+                return False
+            relay = self._device_runtime.require(RELAY_BANK, DigitalOutputs)
+            relay.set_channel(number, operation == '开')
 
         elif executor == '夹爪':
             return self._execute_gripper(operation)
@@ -426,10 +430,14 @@ class ActionExecutor:
         elif executor in ('表情屏', '表情', 'expression_display', 'expression'):
             return self._execute_expression_display(params)
         elif executor == '右臂转圈注液':
+            pipette = self._device_runtime.require(PIPETTE, Pipette)
             return execute_right_arm_circle_dispense(
-                robot_controller=self._robot_controller,
+                robot_motion=self._device_runtime.require(
+                    ROBOT_SYSTEM,
+                    ArmMotion,
+                ),
+                pipette=pipette,
                 params=params,
-                default_port=self.config.ADP_SERIAL_PORT,
                 log=self._on_log,
                 stop_requested=lambda: self._stop_requested,
                 paused=lambda: self._paused,
@@ -448,9 +456,7 @@ class ActionExecutor:
     def _execute_expression_display(self, params: dict) -> bool:
         operation = str(params.get('操作', '切换')).lower()
         if operation in ('关闭', 'close'):
-            from ..expression_display import close_expression_display
-
-            close_expression_display()
+            self._device_runtime.shutdown(EXPRESSION_DISPLAY)
             self._on_log("表情屏连接已关闭")
             return True
 
@@ -466,10 +472,13 @@ class ActionExecutor:
 
         self._on_log(f"表情屏切换: {expression}")
         try:
-            from ..expression_display import switch_expression
-
-            switched = switch_expression(str(expression))
-            self._on_log(f"表情屏切换完成: {switched.name}")
+            display = self._device_runtime.require(
+                EXPRESSION_DISPLAY,
+                ExpressionDisplay,
+            )
+            switched = display.switch(str(expression))
+            name = getattr(switched, "name", str(switched))
+            self._on_log(f"表情屏切换完成: {name}")
             return True
         except Exception as e:
             self._on_log(f"表情屏切换失败: {str(e)}", "error")
@@ -479,68 +488,96 @@ class ActionExecutor:
         """执行夹爪动作"""
         self._on_log(f"夹爪动作: {operation}")
 
-        if self._robot_controller is None:
-            self._on_log("机械臂控制器未初始化", "error")
-            return False
-
-        method = (
-            self._robot_controller.gripper_open_robot1
-            if operation == '开'
-            else self._robot_controller.gripper_close_robot1
+        gripper = self._device_runtime.require(
+            ROBOT_SYSTEM,
+            GripperControl,
         )
 
         max_retries = 3
         for attempt in range(1, max_retries + 1):
             try:
-                success = method()
-                if success:
-                    self._on_log(f"夹爪{operation}执行完成")
-                    return True
-                self._on_log(f"夹爪{operation}失败 (第{attempt}次)，重试中...", "warn")
+                if operation == '开':
+                    gripper.open_gripper(ArmId.LEFT)
+                elif operation == '关':
+                    gripper.close_gripper(ArmId.LEFT)
+                else:
+                    self._on_log(f"未知的夹爪操作: {operation}", "error")
+                    return False
+                self._on_log(f"夹爪{operation}执行完成")
+                return True
             except Exception as e:
                 self._on_log(f"执行夹爪出错: {str(e)} (第{attempt}次)", "warn")
-            time.sleep(0.5)
+            if not self._required_control().sleep(0.5):
+                return False
 
         self._on_log("夹爪重试次数耗尽", "error")
         return False
 
     def _execute_tapping(self, params: dict) -> bool:
         """执行加粉装置动作（夹爪/针升降/针旋转）。"""
-        from ..devices.tapping_controller import TappingController, OPERATIONS
-
         operation = params.get('操作', '')
         self._on_log(f"加粉装置动作: {operation}")
 
-        if operation not in OPERATIONS:
+        operations = {
+            "夹爪闭合": lambda ctrl: ctrl.gripper_grip(),
+            "夹爪张开": lambda ctrl: ctrl.gripper_release(),
+            "夹爪移动到": lambda ctrl: ctrl.gripper_move_to(
+                int(params.get("开度", 50))
+            ),
+            "针上升": lambda ctrl: ctrl.lift_up(
+                int(params.get("步数", 5000))
+            ),
+            "针下降": lambda ctrl: ctrl.lift_down(
+                int(params.get("步数", 5000))
+            ),
+            "针停止": lambda ctrl: ctrl.lift_stop(),
+            "针正转": lambda ctrl: ctrl.rotation_cw(
+                int(params.get("步数", 5000))
+            ),
+            "针反转": lambda ctrl: ctrl.rotation_ccw(
+                int(params.get("步数", 5000))
+            ),
+            "针旋转停止": lambda ctrl: ctrl.rotation_stop(),
+            "使能": lambda ctrl: ctrl.enable_all(),
+        }
+        action = operations.get(operation)
+        if action is None:
             self._on_log(f"未知的加粉装置操作: {operation}", "error")
             return False
 
-        ctrl = TappingController.from_config()
+        ctrl = self._device_runtime.require(
+            POWDER_DISPENSER,
+            PowderDispenser,
+        )
         try:
             ctrl.enable_all()
-            OPERATIONS[operation](ctrl, **params)
+            action(ctrl)
             self._on_log(f"加粉装置 {operation} 执行完成")
             return True
         except Exception as e:
             self._on_log(f"加粉装置 {operation} 执行失败: {e}", "error")
             return False
-        finally:
-            ctrl.close()
 
     def _execute_powder_dispense(self, params: dict) -> bool:
         """执行智能闭环加粉动作。"""
         from ..agents.powder_dispense_agent import PowderDispenseAgent, config_from_params
-        from ..devices.tapping_controller import TappingController
         from ..vision.balance_reader_simple import read_balance
 
-        config = config_from_params(params, Config.get_tapping_config())
+        config = config_from_params(
+            params,
+            self.config.get_tapping_config(),
+        )
         self._on_log(
             f"智能加粉动作: 目标={config.target_mg:.1f}mg, "
             f"容差={config.tolerance_mg:.1f}mg, 最大轮次={config.max_rounds}"
         )
 
+        controller = self._device_runtime.require(
+            POWDER_DISPENSER,
+            PowderDispenser,
+        )
         agent = PowderDispenseAgent(
-            TappingController.from_config,
+            controller,
             read_balance,
             log=lambda msg: self._on_log(msg),
             should_stop=lambda: self._stop_requested,
@@ -571,7 +608,6 @@ class ActionExecutor:
         if full_dispense is None:
             full_dispense = operation == '吐' and dispense_mode is None
         full_dispense = bool(full_dispense or dispense_mode == '全吐')
-        port = params.get('端口', self.config.KUAIHUANSHOU_SERIAL_PORT)
 
         self._on_log(
             f"吸液枪动作: 操作={operation}, 容量={capacity}ul, "
@@ -579,44 +615,45 @@ class ActionExecutor:
         )
 
         try:
-            from ..devices import ADP
-            adp = None
+            pipette = self._device_runtime.require(PIPETTE, Pipette)
             if operation == '吸':
-                adp = ADP(port=port)
                 if absorb_speed:
                     self._on_log(f"正在设置吸液速度: {absorb_speed}ul/s")
-                    if not adp.set_absorb_speed(absorb_speed):
+                    if not pipette.set_absorb_speed(int(absorb_speed)):
                         self._on_log("设置吸液速度失败", "error")
                         ret = False
                     else:
                         self._on_log("正在吸液...")
-                        ret = adp.absorb(capacity)
+                        ret = pipette.absorb(int(capacity))
                 else:
                     self._on_log("正在吸液...")
-                    ret = adp.absorb(capacity)
+                    ret = pipette.absorb(int(capacity))
             elif operation == '吐':
-                adp = ADP(port=port)
                 if dispense_speed:
                     self._on_log(f"正在设置吐液速度: {dispense_speed}ul/s")
-                    if not adp.set_dispense_speed(dispense_speed):
+                    if not pipette.set_dispense_speed(int(dispense_speed)):
                         self._on_log("设置吐液速度失败", "error")
                         ret = False
                     else:
                         self._on_log("正在吐液...")
-                        ret = adp.dispense_all() if full_dispense else adp.dispense(capacity)
+                        ret = (
+                            pipette.dispense_all()
+                            if full_dispense
+                            else pipette.dispense(int(capacity))
+                        )
                 else:
                     self._on_log("正在吐液...")
-                    ret = adp.dispense_all() if full_dispense else adp.dispense(capacity)
+                    ret = (
+                        pipette.dispense_all()
+                        if full_dispense
+                        else pipette.dispense(int(capacity))
+                    )
             elif operation == '退枪头':
                 self._on_log("正在退枪头...")
-                from ..devices.yiyeqiang_out import eject_tip
-                ret = eject_tip(port=port)
+                ret = pipette.eject_tip()
             else:
                 self._on_log(f"未知的吸液枪操作: {operation}", "error")
                 return False
-
-            if adp is not None:
-                adp.close()
 
             if ret:
                 self._on_log(f"吸液枪{operation}执行成功")
@@ -637,7 +674,8 @@ class ActionExecutor:
         timeout = params.get('Timeout', 5)
 
         self._on_log(f"读取传感器 {sensor_id}, 阈值: {threshold}, 超时: {timeout}s")
-        time.sleep(0.8)
+        if not self._required_control().sleep(0.8):
+            return False
         self._on_log("检测完成 - 结果: 通过")
         return True
 
@@ -648,18 +686,10 @@ class ActionExecutor:
             return True
 
         self._on_log(f"Waiting: {wait_seconds:.1f}s")
-        deadline = time.time() + wait_seconds
-        while time.time() < deadline:
-            if self._stop_requested:
-                self._on_log("Wait cancelled by stop request")
-                return False
-            while self._paused:
-                if self._stop_requested:
-                    self._on_log("Wait cancelled by stop request")
-                    return False
-                time.sleep(0.1)
-            time.sleep(0.05)
-        return True
+        completed = self._required_control().sleep(wait_seconds)
+        if not completed:
+            self._on_log("Wait cancelled by stop request")
+        return completed
 
     def _execute_trajectory(self, params: dict) -> bool:
         robot_name = params.get("robot", "robot1")
@@ -667,24 +697,17 @@ class ActionExecutor:
 
         self._on_log(f"执行轨迹动作: robot={robot_name}, file={file_path}")
 
-        if self._robot_controller is None:
-            self._on_log("机械臂控制器未初始化", "error")
-            return False
         if not file_path or not Path(file_path).exists():
             self._on_log(f"轨迹文件不存在: {file_path}", "error")
             return False
 
-        ctrl_name = "robot1_ctrl" if robot_name == "robot1" else "robot2_ctrl"
-        ctrl = getattr(self._robot_controller, ctrl_name, None)
-        robot = getattr(ctrl, "robot", None)
-        if robot is None:
-            self._on_log(f"{robot_name} 未连接", "error")
-            return False
-
         try:
-            if not self._robot_controller.demo_send_project(robot, file_path, project_type=1):
-                self._on_log("轨迹发送失败", "error")
-                return False
+            arm = ArmId.parse(robot_name)
+            trajectory = self._device_runtime.require(
+                ROBOT_SYSTEM,
+                TrajectoryControl,
+            )
+            trajectory.send_trajectory(arm, file_path)
 
             start_time = time.time()
             timeout_seconds = float(params.get("timeout_seconds", 600))
@@ -692,11 +715,11 @@ class ActionExecutor:
                 if self._stop_requested:
                     self._on_log("轨迹执行已停止")
                     return False
-                rst = self._robot_controller.demo_get_program_run_state(robot, time_sleep=1, max_retries=1)
-                if rst:
+                if trajectory.is_trajectory_complete(arm):
                     self._on_log("轨迹执行完成")
                     return True
-                time.sleep(0.5)
+                if not self._required_control().sleep(0.5):
+                    return False
 
             self._on_log("轨迹执行超时", "error")
             return False
@@ -715,32 +738,22 @@ class ActionExecutor:
 
         self._on_log(f"换枪动作: 枪位={gun_position}, 操作={operation}")
 
-        if self._robot_controller is None:
-            self._on_log("机械臂控制器未初始化", "error")
-            return False
-
         try:
-            method_map = {
-                (1, '取'): 'pick_gun1',
-                (2, '取'): 'pick_gun2',
-                (1, '放'): 'drop_gun1',
-                (2, '放'): 'drop_gun2',
-            }
-
-            key = (gun_position, operation)
-            if key not in method_map:
+            if gun_position not in (1, 2) or operation not in ('取', '放'):
                 self._on_log(f"未知的换枪参数组合: 枪位={gun_position}, 操作={operation}", "error")
                 return False
-
-            method_name = method_map[key]
-            self._on_log(f"调用: {method_name}()")
-
-            method = getattr(self._robot_controller, method_name)
-            success = method()
-
-            if success:
-                self._on_log(f"{method_name} 执行完成")
-            return success
+            tool_rack = self._device_runtime.require(
+                ROBOT_SYSTEM,
+                ToolRackControl,
+            )
+            tool_rack.change_tool(
+                int(gun_position),
+                attach=operation == '取',
+            )
+            self._on_log(
+                f"工具架操作完成: slot={gun_position}, operation={operation}"
+            )
+            return True
         except Exception as e:
             self._on_log(f"执行换枪出错: {str(e)}", "error")
             return False
@@ -752,7 +765,13 @@ class ActionExecutor:
     def _execute_vision_capture(self, params: dict) -> bool:
         """执行视觉抓取动作（委托共用模块）"""
         from ..vision.executor import execute_vision_capture
-        return execute_vision_capture(self._robot_controller, params, self._on_log)
+        camera = self._device_runtime.require(CAMERA, DepthCameraSource)
+        return execute_vision_capture(
+            self._device_runtime.require(ROBOT_SYSTEM, RobotSystem),
+            camera,
+            params,
+            self._on_log,
+        )
 
     def _execute_vision_relocalize(self, params: dict) -> bool:
         """执行视觉重定位动作。"""
@@ -760,7 +779,8 @@ class ActionExecutor:
 
         try:
             return execute_vision_relocalization(
-                self._robot_controller,
+                self._device_runtime.require(ROBOT_SYSTEM, RobotSystem),
+                self._device_runtime.require(CAMERA, CameraSource),
                 params,
                 self.execution_context,
                 self._on_log,
