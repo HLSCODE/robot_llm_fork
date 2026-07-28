@@ -1,50 +1,107 @@
-"""
-统一启动器 - 根据环境变量选择启动 GUI 或 WebSocket Server
+from __future__ import annotations
 
-环境变量:
-    RUN_MODE=gui    → PyQt6 图形界面
-    RUN_MODE=server → WebSocket 服务（默认）
-
-用法:
-    python run.py
-    RUN_MODE=gui python run.py
-    RUN_MODE=server python run.py --port 9000
-"""
-import sys
-import os
 import argparse
 import logging
-from ..core.config_loader import Config
-from ..device_runtime.ids import BODY_AXIS, MOBILE_BASE, NECK, ROBOT_SYSTEM
+from pathlib import Path
+import sys
+from typing import TYPE_CHECKING, Any
+
+from .auxiliary_services import (
+    AuxiliaryServiceHost,
+    AuxiliaryServiceSnapshot,
+)
+from .config_loader import Config
+
+
+if TYPE_CHECKING:
+    from ..application import ApplicationServices
+
+
+logger = logging.getLogger(__name__)
+
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 def setup_logging(level: str = "INFO") -> None:
-    """配置日志（控制台 + 文件）"""
-    import os
+    """Configure process-level console and daily file logging."""
     from datetime import datetime
-    
-    # 创建 log 文件夹
-    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "log")
-    os.makedirs(log_dir, exist_ok=True)
-    
-    # 日志文件名：按日期
-    log_file = os.path.join(log_dir, f"server_{datetime.now().strftime('%Y%m%d')}.log")
-    
-    # 配置日志
+
+    log_directory = Path(__file__).resolve().parents[2] / "log"
+    log_directory.mkdir(parents=True, exist_ok=True)
+    log_file = (
+        log_directory
+        / f"application_{datetime.now().strftime('%Y%m%d')}.log"
+    )
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
-            logging.StreamHandler(),  # 控制台输出
-            logging.FileHandler(log_file, encoding='utf-8'),  # 文件输出
-        ]
+            logging.StreamHandler(),
+            logging.FileHandler(log_file, encoding="utf-8"),
+        ],
     )
 
 
-def run_gui(args, config):
-    """启动 GUI 模式"""
+def build_auxiliary_service_host(
+    args: argparse.Namespace,
+    config: Any,
+    services: "ApplicationServices",
+) -> AuxiliaryServiceHost:
+    """Compose enabled optional services around the shared application."""
+    auxiliary_services = []
+    websocket_enabled = bool(
+        getattr(config, "WEBSOCKET_ENABLED", True)
+    ) and not args.disable_websocket
+    if websocket_enabled:
+        from ..robot_server.ws_server import RobotWebSocketServer
+
+        websocket_host = (
+            args.websocket_host
+            or str(getattr(config, "WEBSOCKET_HOST", "127.0.0.1"))
+        )
+        websocket_port = (
+            args.websocket_port
+            if args.websocket_port is not None
+            else int(getattr(config, "WEBSOCKET_PORT", 8765))
+        )
+        if websocket_host.strip().lower() not in _LOOPBACK_HOSTS:
+            logger.warning(
+                "WebSocket 正在监听非本机地址 %s；当前写操作尚未实现认证和"
+                "客户端控制租约",
+                websocket_host,
+            )
+        auxiliary_services.append(
+            RobotWebSocketServer(
+                services=services,
+                host=websocket_host,
+                port=websocket_port,
+            )
+        )
+
+    return AuxiliaryServiceHost(
+        tuple(auxiliary_services),
+        start_timeout_seconds=float(
+            getattr(
+                config,
+                "AUXILIARY_SERVICE_START_TIMEOUT_SECONDS",
+                5.0,
+            )
+        ),
+        stop_timeout_seconds=float(
+            getattr(
+                config,
+                "AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS",
+                10.0,
+            )
+        ),
+    )
+
+
+def run_gui(args: argparse.Namespace, config: Any) -> int:
+    """Run the GUI and optional network services in one process."""
     from PyQt6.QtWidgets import QApplication
+
     from ..application import create_application_services
     from ..gui.main_window import MainWindow
 
@@ -52,101 +109,120 @@ def run_gui(args, config):
         config,
         simulation=args.simulation,
     )
-    app = QApplication(sys.argv)
-    app.setStyle('Fusion')
-
-    window = MainWindow(services)
-    window.show()
-
-    sys.exit(app.exec())
-
-
-def run_server(args, config=None):
-    """启动 WebSocket Server 模式"""
-    # 启动 WebSocket 服务
-    from ..application import create_application_services
-    from ..robot_server.ws_server import RobotWebSocketServer
-
-    # 优先使用命令行参数，其次使用 config.env 配置，最后使用默认值
-    host = args.host if args.host != "0.0.0.0" else (config.WEBSOCKET_HOST if config else "0.0.0.0")
-    port = args.port if args.port != 8765 else (config.WEBSOCKET_PORT if config else 8765)
-    services = create_application_services(
+    auxiliary_host = build_auxiliary_service_host(
+        args,
         config,
-        simulation=args.simulation,
+        services,
     )
-
-    server = RobotWebSocketServer(
-        services=services,
-        host=host,
-        port=port,
-    )
-
-    print("=" * 50)
-    print(f"机器人 WebSocket 控制服务")
-    print(f"地址：ws://{host}:{port}")
-    print(f"模式：{'模拟' if args.simulation else '硬件'}")
-    print("=" * 50)
-
     try:
-        for device_id in (ROBOT_SYSTEM, BODY_AXIS, NECK, MOBILE_BASE):
-            try:
-                services.devices.initialize(device_id)
-                print(f"设备初始化成功：{device_id}")
-            except Exception as exc:
-                logging.getLogger(__name__).warning(
-                    "设备初始化失败：%s: %s",
-                    device_id,
-                    exc,
-                )
-        server.run()
-    except KeyboardInterrupt:
-        print("\n服务已停止")
+        app = QApplication([sys.argv[0]])
+        app.setStyle("Fusion")
+        window = MainWindow(services)
+        window.show()
+        _start_auxiliary_services(auxiliary_host)
+        return app.exec()
     finally:
-        services.devices.shutdown_all()
+        _shutdown_application(auxiliary_host, services)
 
 
-def main():
-    """主函数 - 根据环境变量选择运行模式"""
-    parser = argparse.ArgumentParser(description="机器人控制系统")
-    parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认：0.0.0.0)")
-    parser.add_argument("--port", type=int, default=8765, help="监听端口 (默认：8765)")
-    parser.add_argument("--simulation", action="store_true", help="模拟模式，不连接硬件")
-    parser.add_argument("--log-level", default="INFO", help="日志级别 (默认：INFO)")
-    args = parser.parse_args()
-
-    setup_logging(args.log_level)
-
-    # 加载配置
-    run_mode = "server"  # 默认值
-    config = None
+def _start_auxiliary_services(host: AuxiliaryServiceHost) -> None:
     try:
-        from .config_loader import Config
-        config = Config.get_instance()  # 使用 get_instance() 确保实例已创建
-
-        # 从配置加载器读取 RUN_MODE 和 SIMULATION_MODE
-        run_mode = config.RUN_MODE.lower()
-        if config.SIMULATION_MODE:
-            args.simulation = True
-            print("config.env 中 SIMULATION_MODE=True，启用模拟模式")
-
-        print(f"config.env 中 RUN_MODE={run_mode.upper()}")
-    except Exception as e:
-        print(f"加载配置失败：{e}，使用默认值")
-        run_mode = os.environ.get("RUN_MODE", "server").lower()
-
-    env_run_mode = os.environ.get("RUN_MODE")
-    if env_run_mode:
-        run_mode = env_run_mode.lower()
-        print(f"环境变量覆盖 RUN_MODE={run_mode.upper()}")
-
-    # 根据 RUN_MODE 选择运行模式
-    if run_mode == "gui":
-        print("启动模式：GUI")
-        run_gui(args, config)
-    else:
-        print("启动模式：WebSocket Server")
-        run_server(args, config)
+        snapshots = host.start()
+    except Exception:
+        logger.exception(
+            "附加服务宿主启动失败；GUI 将继续运行"
+        )
+        return
+    for snapshot in snapshots:
+        _log_service_snapshot(snapshot)
 
 
-if __name__ == '__main__':
-    main()
+def _log_service_snapshot(snapshot: AuxiliaryServiceSnapshot) -> None:
+    if snapshot.running:
+        logger.info(
+            "附加服务已启动: %s %s",
+            snapshot.name,
+            snapshot.endpoint,
+        )
+        return
+    logger.warning(
+        "附加服务不可用: %s state=%s error=%s",
+        snapshot.name,
+        snapshot.state.value,
+        snapshot.error,
+    )
+
+
+def _shutdown_application(
+    host: AuxiliaryServiceHost,
+    services: "ApplicationServices",
+) -> None:
+    try:
+        snapshots = host.stop()
+        for snapshot in snapshots:
+            if snapshot.error:
+                logger.warning(
+                    "附加服务关闭异常: %s: %s",
+                    snapshot.name,
+                    snapshot.error,
+                )
+    except Exception:
+        logger.exception("附加服务宿主关闭失败")
+
+    try:
+        errors = services.devices.shutdown_all()
+    except Exception:
+        logger.exception("设备运行时关闭失败")
+        return
+    for device_id, error in errors.items():
+        logger.warning("设备关闭异常: %s: %s", device_id, error)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="机器人控制系统")
+    parser.add_argument(
+        "--websocket-host",
+        help="WebSocket 监听地址，默认读取配置",
+    )
+    parser.add_argument(
+        "--websocket-port",
+        type=int,
+        help="WebSocket 监听端口，默认读取配置",
+    )
+    parser.add_argument(
+        "--disable-websocket",
+        action="store_true",
+        help="本次启动不启用 WebSocket 附加服务",
+    )
+    parser.add_argument(
+        "--simulation",
+        action="store_true",
+        help="模拟模式，不连接硬件",
+    )
+    parser.add_argument(
+        "--log-level",
+        help="日志级别，默认读取配置",
+    )
+    return parser
+
+
+def main() -> int:
+    args = _build_parser().parse_args()
+    config = Config.get_instance()
+    if config.SIMULATION_MODE:
+        args.simulation = True
+    setup_logging(args.log_level or config.LOG_LEVEL)
+    logger.info(
+        "启动 GUI 应用: mode=%s websocket=%s",
+        "simulation" if args.simulation else "hardware",
+        (
+            "disabled"
+            if args.disable_websocket or not config.WEBSOCKET_ENABLED
+            else "enabled"
+        ),
+    )
+    return run_gui(args, config)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

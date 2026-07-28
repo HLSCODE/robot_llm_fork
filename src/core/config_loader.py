@@ -76,7 +76,6 @@ class Config:
 
     # 系统配置
     LOG_LEVEL: str = "INFO"
-    RUN_MODE: str = "server"  # gui / server
     SIMULATION_MODE: bool = False
     SKILL_LIBRARY_PATH: str = "data/skills/skill_library.json"
     
@@ -234,8 +233,11 @@ class Config:
     PWM_NECK_V_DEFAULT_TIME: int = 2500
 
     # WebSocket 服务器配置
-    WEBSOCKET_HOST: str = "0.0.0.0"
+    WEBSOCKET_ENABLED: bool = True
+    WEBSOCKET_HOST: str = "127.0.0.1"
     WEBSOCKET_PORT: int = 8765
+    AUXILIARY_SERVICE_START_TIMEOUT_SECONDS: float = 5.0
+    AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS: float = 10.0
 
     # MiniCPM Realtime / 聊天配置
     MINICPM_GATEWAY_HOST: str = "localhost"
@@ -398,7 +400,6 @@ class Config:
         instance.VOICE_OPENWAKEWORD_MODEL_PATHS = os.getenv("VOICE_OPENWAKEWORD_MODEL_PATHS", "")
         instance.VOICE_OPENWAKEWORD_THRESHOLD = float(os.getenv("VOICE_OPENWAKEWORD_THRESHOLD", "0.6"))
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-        instance.RUN_MODE = os.getenv("RUN_MODE", "server")
         instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
         instance.SKILL_LIBRARY_PATH = os.getenv("SKILL_LIBRARY_PATH", "data/skills/skill_library.json")
         instance.CAMERA_PROVIDER = os.getenv("CAMERA_PROVIDER", "auto")
@@ -636,8 +637,21 @@ class Config:
         instance.POWDER_DISPENSE_MICRO_STEP = int(os.getenv("POWDER_DISPENSE_MICRO_STEP", "500"))
         
         # WebSocket 服务器配置
-        instance.WEBSOCKET_HOST = os.getenv("WEBSOCKET_HOST", "0.0.0.0")
+        instance.WEBSOCKET_ENABLED = os.getenv(
+            "WEBSOCKET_ENABLED",
+            "true",
+        ).lower() in ("true", "1", "yes")
+        instance.WEBSOCKET_HOST = os.getenv(
+            "WEBSOCKET_HOST",
+            "127.0.0.1",
+        )
         instance.WEBSOCKET_PORT = int(os.getenv("WEBSOCKET_PORT", "8765"))
+        instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS = float(
+            os.getenv("AUXILIARY_SERVICE_START_TIMEOUT_SECONDS", "5.0")
+        )
+        instance.AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS = float(
+            os.getenv("AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS", "10.0")
+        )
 
         # MiniCPM Realtime / 聊天配置
         instance.MINICPM_GATEWAY_HOST = os.getenv("MINICPM_GATEWAY_HOST", "localhost")
@@ -1026,8 +1040,15 @@ class Config:
         """获取 WebSocket 服务器配置"""
         instance = cls.get_instance()
         return {
+            "enabled": instance.WEBSOCKET_ENABLED,
             "host": instance.WEBSOCKET_HOST,
-            "port": instance.WEBSOCKET_PORT
+            "port": instance.WEBSOCKET_PORT,
+            "start_timeout_seconds": (
+                instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS
+            ),
+            "stop_timeout_seconds": (
+                instance.AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS
+            ),
         }
 
     @classmethod

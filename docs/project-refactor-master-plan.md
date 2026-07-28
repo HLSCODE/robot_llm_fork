@@ -209,9 +209,10 @@ ActionEngine -------- DeviceRuntime ----+
 | A-007 | P1 | DOING | ActionEngine 已唯一化，后续拆分 ActionHandlerRegistry |
 | A-008 | P1 | DOING | WebSocket 已迁移，待协议 contract test |
 | A-009 | P1 | DOING | GUI 手工和 AI 已迁移，待 GUI smoke test |
-| A-010 | P1 | DOING | GUI/Server 语音命令已进入统一服务，待 CommandRuntime 完整状态模型 |
+| A-010 | P1 | DOING | GUI/网络入口语音命令已进入统一服务，待 CommandRuntime 完整状态模型 |
 | A-011 | P1 | DONE | simulation 与真实模式共用状态机和执行入口 |
 | A-012 | P3 | DONE | 删除 legacy executor，未引入 backend 开关 |
+| A-013 | P1 | DONE | GUI 成为唯一桌面应用宿主，附加网络服务与 GUI 共用 ApplicationServices，退出顺序由组合根统一管理 |
 
 ### 6.3 完成标准
 
@@ -225,8 +226,8 @@ ActionEngine -------- DeviceRuntime ----+
 
 ### 7.1 当前问题
 
-- launcher、GUI、WebSocket 分别初始化和关闭设备。
-- WebSocket 会直接替换执行器私有控制器字段。
+- GUI 与 WebSocket 已共用同一个 `DeviceRuntime`，但真实设备仍需逐项验证统一关闭顺序。
+- 部分业务路径仍需确认没有绕过 Application Service 访问 runtime-owned 设备。
 - `src/devices/` 与 `src/device_control_sdk/` 使用不同抽象风格。
 - 串口设备有的每次动作创建，有的长期持有，所有权不清晰。
 - 设备连接状态可能只表示“控制器对象存在”，不表示设备真实在线。
@@ -278,7 +279,7 @@ ActionEngine -------- DeviceRuntime ----+
 
 ### 8.1 当前问题
 
-- 默认监听 `0.0.0.0`，未见认证、权限、Origin 限制或服务端 TLS。
+- 已改为默认监听 `127.0.0.1`，但显式开放远程监听时仍缺少认证、权限、Origin 限制和服务端 TLS。
 - 多客户端共享同一序列、预览和设备状态，没有控制权租约。
 - 执行事件缺少 `request_id`、`run_id` 和稳定错误码。
 - 大部分事件广播给所有客户端，发起者和观察者边界不清晰。
@@ -312,6 +313,8 @@ ActionEngine -------- DeviceRuntime ----+
 | C-011 | P2 | TODO | 增加 Origin/TLS/反向代理部署方案 |
 | C-012 | P2 | TODO | 增加协议 contract tests |
 | C-013 | P3 | TODO | 增加 API 指标和慢客户端监控 |
+| C-014 | P1 | DONE | WebSocket 改为 GUI 同进程的可选附加服务，共用唯一 ApplicationServices 和受管理 asyncio 生命周期 |
+| C-015 | P1 | DONE | 动作库、任务库和当前编排序列已收敛到线程安全 CompositionService；JSON 原子替换并向 GUI/网络入口发布 revision 事件 |
 
 ### 8.4 完成标准
 
@@ -349,7 +352,7 @@ ActionEngine -------- DeviceRuntime ----+
 | D-001 | P0 | DONE | GUI 手工/AI 共用进程级执行互斥 |
 | D-002 | P1 | DONE | ExecutionBridge 已成为纯 Qt 事件 adapter |
 | D-003 | P1 | DONE | ExecutionBridge 不再拥有序列 worker；安全停止仅用短生命周期 I/O 调度线程避免阻塞 Qt 主线程 |
-| D-004 | P1 | DONE | 关闭窗口通过 DeviceManagementService 有序 shutdown |
+| D-004 | P1 | DONE | MainWindow 不再关闭设备；应用宿主先停附加服务，再统一关闭 DeviceRuntime |
 | D-005 | P2 | TODO | 提取 TaskComposerService |
 | D-006 | P2 | TODO | 提取 DeviceViewModel/Service |
 | D-007 | P2 | TODO | 提取 ExecutionViewModel |
@@ -850,6 +853,8 @@ M4 工程治理与清理
 | 2026-07-27 | M1/M2 | A/B/D/F | 统一执行与设备运行时首轮落地 | TODO → DOING | ApplicationServices、ExecutionManager、DeviceRuntime、ResourceArbiter、TeleoperationService；GUI/AI/WS 直接切换并删除旧执行器 | - |
 | 2026-07-27 | M2 | B/D/F | 机械臂供应商边界收敛 | TODO → DONE | 建立核心/可选能力、RealMan adapter、统一状态与错误模型；迁移 GUI/执行/视觉/数据采集并删除直连脚本 | - |
 | 2026-07-28 | M2 | A/B/D/F | 统一安全停止软件链路 | B-001 TODO → DONE；ER-006 保持 DOING | 建立停止能力矩阵、逐设备结果与 SafetyService；RealMan 快停/急停接入 GUI/WS，真实硬件验收待完成 | - |
+| 2026-07-28 | M2 | A/C/D | GUI 与附加服务统一宿主 | A-013/C-014 TODO → DONE | 删除 GUI/Server 二选一组合路径；WebSocket 进入受管理 asyncio 线程并共享唯一 ApplicationServices，默认仅监听本机 | - |
+| 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
 
 ## 22. 建议的首批实施顺序
 

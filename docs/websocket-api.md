@@ -37,8 +37,11 @@
 
 默认监听配置：
 
-- `host = 0.0.0.0`
+- `host = 127.0.0.1`
 - `port = 8765`
+
+WebSocket 作为 GUI 应用的可选附加服务运行，与 GUI 共用同一套
+`ApplicationServices`、执行运行时和设备运行时。
 
 协议基本约定：
 
@@ -50,6 +53,22 @@
 
 - `action`：客户端发起的命令
 - `event`：服务端反馈的结果或状态变化
+
+GUI 或其他客户端修改动作库、任务库或当前序列后，所有已连接客户端会收到：
+
+```json
+{
+  "event": "composition_changed",
+  "change": "actions",
+  "revision": 12,
+  "change_revision": 4,
+  "origin": "gui",
+  "actions": []
+}
+```
+
+`change` 取值为 `actions`、`tasks` 或 `sequence`。`revision` 是全局版本，
+`change_revision` 是该类状态的独立版本，消息中携带对应的最新快照。
 
 ---
 
@@ -79,19 +98,6 @@ cp config.env.example config.env
 python run.py --simulation
 ```
 
-显式指定 server 模式：
-
-```bash
-RUN_MODE=server python run.py --simulation
-```
-
-Windows PowerShell：
-
-```powershell
-$env:RUN_MODE='server'
-.\.venv\Scripts\python.exe run.py --simulation
-```
-
 连接真实硬件：
 
 ```bash
@@ -101,7 +107,13 @@ python run.py
 指定端口：
 
 ```bash
-python run.py --port 9000
+python run.py --websocket-port 9000
+```
+
+本次启动禁用 WebSocket：
+
+```bash
+python run.py --disable-websocket
 ```
 
 ### 2.4 推荐启动方式
@@ -123,11 +135,13 @@ python run.py --simulation
 与接口能力直接相关的配置项如下：
 
 ```env
-RUN_MODE=server
 SIMULATION_MODE=false
 
-WEBSOCKET_HOST=0.0.0.0
+WEBSOCKET_ENABLED=true
+WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
+AUXILIARY_SERVICE_START_TIMEOUT_SECONDS=5.0
+AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=10.0
 
 LLM_DEFAULT_PROVIDER=dashscope
 OPENAI_API_KEY=
@@ -152,10 +166,12 @@ MINICPM_ASK_MODEL=qwen-turbo
 
 | 配置项 | 含义 | 备注 |
 |---|---|---|
-| `RUN_MODE` | 运行模式 | `server` 或 `gui` |
 | `SIMULATION_MODE` | 是否模拟模式 | `true` 时不连接真实硬件 |
-| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `0.0.0.0` |
+| `WEBSOCKET_ENABLED` | 是否随 GUI 启动 WebSocket | 默认 `true` |
+| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `127.0.0.1`；远程监听需评估未认证写接口风险 |
 | `WEBSOCKET_PORT` | WebSocket 监听端口 | 默认 `8765` |
+| `AUXILIARY_SERVICE_START_TIMEOUT_SECONDS` | 单个附加服务启动超时 | 默认 5 秒 |
+| `AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS` | 单个附加服务停止超时 | 默认 10 秒 |
 | `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
 | `OPENAI_API_KEY` | OpenAI-compatible API Key | `openai` / `deepseek` / `dashscope` 使用 |
 | `OPENAI_BASE_URL` | OpenAI-compatible Base URL | 留空时使用 provider 默认值 |
@@ -2730,9 +2746,9 @@ function handleChatData(data) {
 
 ---
 
-## 16. 兼容性与注意事项
+## 16. 运行约束与注意事项
 
-- 旧文档中的 `python run_server.py` 已不适用，当前统一入口是 `python run.py`
+- 当前只使用 `python run.py`；WebSocket 由 GUI 应用宿主管理，不再维护独立 Server 启动入口
 - 仓库不再默认提交 `config.env`
 - 相机和 MiniCPM 功能现在优先走主控制 WebSocket 的 `action` 路由
 - 前端不要假设硬件一定在线

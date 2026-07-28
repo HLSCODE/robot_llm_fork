@@ -153,7 +153,7 @@ class SequenceListWidget(QTreeWidget):
     - 通过 UUID 映射实现 O(1) 的树节点查找
     """
 
-    loop_modified = pyqtSignal()
+    sequence_changed = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -248,6 +248,7 @@ class SequenceListWidget(QTreeWidget):
                 self._add_child_item(target, sequence_item, target_entry)
             else:
                 self.add_sequence_item(sequence_item)
+            self.sequence_changed.emit()
             event.accept()
         else:
             event.ignore()
@@ -309,7 +310,7 @@ class SequenceListWidget(QTreeWidget):
         """将一组 SequenceItem 包裹为 LoopBlock（内部会克隆子项）"""
         loop = LoopBlock.from_sequence_items(items, repeat_count)
         self.add_loop_block(loop)
-        self.loop_modified.emit()
+        self.sequence_changed.emit()
         return loop
 
     def unwrap_loop(self, loop_tree_item: QTreeWidgetItem) -> list[SequenceItem]:
@@ -339,7 +340,7 @@ class SequenceListWidget(QTreeWidget):
             self._register_item(child_tree, child)
             self.insertTopLevelItem(idx + offset, child_tree)
 
-        self.loop_modified.emit()
+        self.sequence_changed.emit()
         return children
 
     def edit_loop_count(self, loop_tree_item: QTreeWidgetItem, new_count: int):
@@ -350,7 +351,7 @@ class SequenceListWidget(QTreeWidget):
         loop_entry.repeat_count = max(1, new_count)
         loop_entry.current_iteration = 0
         self._update_loop_display(loop_tree_item, loop_entry)
-        self.loop_modified.emit()
+        self.sequence_changed.emit()
 
     # ────────────────── Context menu ──────────────────
 
@@ -415,6 +416,7 @@ class SequenceListWidget(QTreeWidget):
         if idx >= 0:
             self._unregister_item(entry)
             self.takeTopLevelItem(idx)
+            self.sequence_changed.emit()
 
     def _remove_loop_block(self, loop_tree_item: QTreeWidgetItem):
         loop_entry = loop_tree_item.data(0, Qt.ItemDataRole.UserRole)
@@ -424,7 +426,7 @@ class SequenceListWidget(QTreeWidget):
             for child in loop_entry.items:
                 self._unregister_item(child)
             self.takeTopLevelItem(idx)
-            self.loop_modified.emit()
+            self.sequence_changed.emit()
 
     def _remove_child_from_loop(self, parent_tree: QTreeWidgetItem,
                                   child_tree: QTreeWidgetItem,
@@ -436,7 +438,7 @@ class SequenceListWidget(QTreeWidget):
             parent_tree.takeChild(idx)
             loop_entry.items = [s for s in loop_entry.items if s.uuid != child_entry.uuid]
             self._update_loop_display(parent_tree, loop_entry)
-            self.loop_modified.emit()
+            self.sequence_changed.emit()
 
     # ────────────────── Display updates ──────────────────
 

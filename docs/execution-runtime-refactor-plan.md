@@ -27,7 +27,13 @@
 ## 2. 当前实现
 
 ```text
-                       GUI / WebSocket / Voice / AI
+                         Desktop Application Host
+                      +-------------+-------------+
+                      |                           |
+                Qt GUI 主线程           AuxiliaryServiceHost
+                                                  |
+                                      WebSocket / future HTTP
+                      \-------------+-------------/
                                     |
                            ApplicationServices
                    +----------------+----------------+----------------+
@@ -50,6 +56,8 @@
 | 模块 | 职责 | 当前状态 |
 |---|---|---|
 | `src/application/` | 应用用例入口和 composition | 已落地 |
+| `AuxiliaryServiceHost` | 独立 asyncio 线程、附加服务状态、启动/逆序停止和超时 | 已落地 |
+| `CompositionService` | 动作库、任务库、当前序列、revision 事件和线程安全持久化事务 | 已落地 |
 | `ExecutionService` | submit/pause/resume/cancel/snapshot/wait | 已落地 |
 | `DeviceManagementService` | initialize/status/shutdown | 已落地 |
 | `ManualControlService` | 夹爪、继电器、移液枪、遥操作初始化 | 已落地 |
@@ -85,7 +93,7 @@
 
 | 入口 | 迁移结果 | 后续工作 |
 |---|---|---|
-| launcher | 每个进程只组装一份 `ApplicationServices` | 增加启动配置校验 |
+| launcher | GUI 是唯一桌面宿主，只组装一份 `ApplicationServices`；WebSocket 作为可选附加服务启动 | 增加 GUI 服务状态展示 |
 | GUI 手工序列 | 通过 Qt `ExecutionBridge` 提交到统一 manager | GUI smoke test |
 | GUI AI/语音序列 | 与手工序列共享 manager 和最终事件 | preview/command 状态模型 |
 | WebSocket execute/task/AI | 通过 `ExecutionService` 提交 | request_id/run_id 协议补强 |
@@ -106,6 +114,17 @@
 - expression display 的进程外全局默认实例入口
 - camera factory 的公开 start/stop 生命周期入口和 manager 全局单例
 - `RobotController` 中未使用的快换手/继电器组合流程和硬编码演示主程序
+
+### 2.5 附加服务生命周期
+
+- GUI 主线程只运行 Qt 事件循环；所有异步附加服务共用一个受管理的后台
+  asyncio 线程。
+- 附加服务实现统一的异步 `start()`/`stop()` 契约。启动失败只影响该服务，
+  不阻止 GUI 和其他附加服务继续运行。
+- 应用退出时先逆序停止 WebSocket/未来 HTTP 等附加服务，再关闭
+  `DeviceRuntime`，避免网络请求在设备释放过程中继续进入。
+- 附加服务只持有共享 `ApplicationServices`，不创建、替换或关闭硬件实例。
+- 远程监听会输出安全警告；认证与客户端控制租约完成前默认只监听本机。
 
 ## 3. 状态与事件语义
 
@@ -261,6 +280,7 @@ git diff --check
 - DeviceRuntime 对停止成功、未就绪、不支持和失败逐项报告，单设备失败不阻断其他设备。
 - RealMan adapter 停止双臂且不等待被阻塞运动持有的普通 SDK 锁。
 - presentation/transport/execution 层不得导入具体硬件。
+- CompositionService 并发动作写入、任务编辑、防御性快照和跨入口事件广播。
 
 下一批测试：
 
@@ -303,7 +323,7 @@ git diff --check
 | 视觉仍依赖 RM 原生对象 | P1 | 提升 RobotSystem 视觉/示教能力 |
 | 相机预览尚无持久 session lease | P1 | CameraSession + ResourceArbiter |
 | ActionEngine 仍为大类 | P1 | 分批迁移 handler registry |
-| GUI/Server 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
+| GUI/WebSocket 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
 | simulation 与真实设备差异 | P1 | 同状态机 + contract + 硬件清单 |
 
 ## 9. 架构决策记录
@@ -327,3 +347,5 @@ git diff --check
 | 2026-07-27 | legacy 清理 | TODO → DONE | 删除两套旧执行器及无引用旧硬件入口 |
 | 2026-07-27 | 机械臂能力收敛 | DOING → DONE | RealMan 进入 adapter 边界；GUI、视觉、示教、轨迹和数据采集切换到厂商无关接口 |
 | 2026-07-28 | 安全停止软件链路 | TODO → DOING | 新增统一停止契约、设备能力矩阵和 SafetyService；RealMan 双臂快停/急停接入 GUI 与 WebSocket，真实硬件验收仍待完成 |
+| 2026-07-28 | 应用与附加服务宿主 | TODO → DONE | GUI/WebSocket 直接切换为单进程共享 ApplicationServices；WebSocket 具备异步 start/stop，网络服务先于设备运行时关闭 |
+| 2026-07-28 | 编排状态服务 | TODO → DONE | 动作库、任务库和当前序列进入线程安全 CompositionService；GUI/WS 删除 StorageManager 直连并通过 revision 事件同步 |

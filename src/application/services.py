@@ -30,6 +30,7 @@ from ..execution import (
     ExecutionSnapshot,
 )
 from .safety import SafetyService
+from .composition import CompositionService
 
 
 class ExecutionService:
@@ -402,6 +403,7 @@ def _arm_id(arm: str | ArmId) -> ArmId:
 
 @dataclass(frozen=True, slots=True)
 class ApplicationServices:
+    composition: CompositionService
     execution: ExecutionService
     devices: DeviceManagementService
     manual_control: ManualControlService

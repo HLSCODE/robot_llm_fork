@@ -1,4 +1,5 @@
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import List
 import math
@@ -13,8 +14,20 @@ from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer, QMimeData, QEve
 from PyQt6.QtGui import QAction, QPalette, QColor, QDrag, QIcon
 
 from ..ai_integration.execution_bridge import ExecutionBridge
-from ..application import ApplicationServices
-from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock
+from ..application import (
+    ApplicationServices,
+    CompositionChangeType,
+    CompositionEvent,
+    CompositionRevisionConflict,
+)
+from ..core.models import (
+    ActionDefinition,
+    ActionType,
+    LoopBlock,
+    SequenceEntry,
+    SequenceItem,
+    SequenceItemStatus,
+)
 from ..device_runtime import StopMode
 from ..device_runtime.ids import (
     BODY_AXIS,
@@ -26,8 +39,8 @@ from ..device_runtime.ids import (
 )
 from ..widgets import ActionListWidget, SequenceListWidget, ControlPanel, LogWidget
 from ..widgets.ai_assistant import AIAssistantWidget
+from .composition_bridge import CompositionBridge
 from .dialogs import ActionConfigDialog
-from ..core.storage import StorageManager
 from ..core.config_loader import Config
 
 class TaskLibraryListWidget(QListWidget):
@@ -204,7 +217,24 @@ class MainWindow(QMainWindow):
         self._speech_startup_wait_timer = None
 
         self.init_ui()
+        self._sequence_revision = (
+            services.composition.sequence_revision
+        )
+        self._composition_bridge = CompositionBridge(
+            services.composition,
+            self,
+        )
+        self._composition_bridge.changed.connect(
+            self._on_composition_changed,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        self.sequence_list.sequence_changed.connect(
+            self._publish_current_sequence
+        )
         self.load_actions()
+        self._render_sequence(
+            self._services.composition.sequence_entries()
+        )
         self._execution_bridge.step_started.connect(self.on_step_started)
         self._execution_bridge.step_completed.connect(self.on_step_completed)
         self._execution_bridge.step_failed.connect(self.on_step_failed)
@@ -1367,9 +1397,10 @@ class MainWindow(QMainWindow):
         dialog = ActionConfigDialog(action_type, existing_names=self._collect_action_names(), move_target=move_target)
         if dialog.exec():
             action = dialog.get_action_definition()
-            self.actions[action.type].append(action)
-            self.refresh_action_list(action.type)
-            self.save_actions()
+            self._services.composition.create_action(
+                action,
+                origin="gui",
+            )
 
     def create_trajectory_action(self):
         options = ["录制 R1", "录制 R2", "使用已有文件"]
@@ -1436,9 +1467,10 @@ class MainWindow(QMainWindow):
                 "file_path": file_path
             }
         )
-        self.actions[ActionType.TRAJECTORY].append(action)
-        self.refresh_action_list(ActionType.TRAJECTORY)
-        self.save_actions()
+        self._services.composition.create_action(
+            action,
+            origin="gui",
+        )
         self.log_widget.append_log(f"轨迹动作已创建: {name}")
 
     def delete_action(self):
@@ -1453,9 +1485,10 @@ class MainWindow(QMainWindow):
             
             action = current_item.data(Qt.ItemDataRole.UserRole)
             if action and action.type in self.actions:
-                self.actions[action.type].remove(action)
-                self.refresh_action_list(action.type)
-                self.save_actions()
+                self._services.composition.delete_action(
+                    action.id,
+                    origin="gui",
+                )
             return
         
         action_type_map = {
@@ -1485,9 +1518,10 @@ class MainWindow(QMainWindow):
 
         action = current_item.data(Qt.ItemDataRole.UserRole)
         if action and action in self.actions[action.type]:
-            self.actions[action.type].remove(action)
-            self.refresh_action_list(action.type)
-            self.save_actions()
+            self._services.composition.delete_action(
+                action.id,
+                origin="gui",
+            )
 
     def edit_action(self):
         action_list = self._get_current_action_list_widget()
@@ -1514,25 +1548,15 @@ class MainWindow(QMainWindow):
             return
 
         updated_action = dialog.get_action_definition()
-        target_actions = self.actions[action.type]
-        replaced = False
-
-        for idx, existing in enumerate(target_actions):
-            if existing.id == action.id:
-                target_actions[idx] = updated_action
-                replaced = True
-                break
-
-        if not replaced and action in target_actions:
-            target_actions[target_actions.index(action)] = updated_action
-            replaced = True
-
-        if not replaced:
+        try:
+            self._services.composition.update_action(
+                action.id,
+                updated_action,
+                origin="gui",
+            )
+        except KeyError:
             QMessageBox.warning(self, "警告", "未找到目标动作")
             return
-
-        self.refresh_action_list(action.type)
-        self.save_actions()
 
     def refresh_action_list(self, action_type: ActionType):
         if action_type in {ActionType.MANIPULATE, ActionType.WAIT}:
@@ -1567,14 +1591,8 @@ class MainWindow(QMainWindow):
         for action in self.actions[action_type]:
             action_list.add_action(action)
 
-    def save_actions(self):
-        all_actions = []
-        for action_type_actions in self.actions.values():
-            all_actions.extend(action_type_actions)
-        StorageManager.save_actions(all_actions)
-
     def load_actions(self):
-        all_actions = StorageManager.load_actions()
+        all_actions = self._services.composition.list_actions()
         for action_type in self.actions:
             self.actions[action_type].clear()
 
@@ -1583,6 +1601,62 @@ class MainWindow(QMainWindow):
 
         for action_type in self.actions:
             self.refresh_action_list(action_type)
+
+    def _on_composition_changed(
+        self,
+        event: CompositionEvent,
+    ) -> None:
+        if event.change_type is CompositionChangeType.ACTIONS:
+            self.load_actions()
+            return
+        if event.change_type is CompositionChangeType.TASKS:
+            self.refresh_task_library()
+            self._refresh_task_composer_display()
+            return
+        if event.change_type is CompositionChangeType.SEQUENCE:
+            self._sequence_revision = (
+                self._services.composition.sequence_revision
+            )
+            self._render_sequence(
+                self._services.composition.sequence_entries()
+            )
+
+    def _publish_current_sequence(self) -> None:
+        try:
+            self._services.composition.replace_sequence(
+                self.sequence_list.get_entries(),
+                origin="gui",
+                expected_revision=self._sequence_revision,
+            )
+        except CompositionRevisionConflict:
+            self._sequence_revision = (
+                self._services.composition.sequence_revision
+            )
+            self._render_sequence(
+                self._services.composition.sequence_entries()
+            )
+            self.log_widget.append_log(
+                "序列已被其他入口修改，本次本地编辑未覆盖远程变更"
+            )
+            return
+        self._sequence_revision = (
+            self._services.composition.sequence_revision
+        )
+
+    def _render_sequence(
+        self,
+        entries: Sequence[SequenceEntry],
+    ) -> None:
+        self.sequence_list.blockSignals(True)
+        try:
+            self.sequence_list.clear_sequence()
+            for entry in entries:
+                if isinstance(entry, LoopBlock):
+                    self.sequence_list.add_loop_block(entry)
+                elif isinstance(entry, SequenceItem):
+                    self.sequence_list.add_sequence_item(entry)
+        finally:
+            self.sequence_list.blockSignals(False)
 
     def _refresh_execute_merged_list(self):
         self.manipulate_list.clear()
@@ -1663,8 +1737,9 @@ class MainWindow(QMainWindow):
             return
 
         self.task_library_list.clear()
-        for task_name in sorted(StorageManager.list_tasks()):
-            step_count = len(StorageManager.load_sequence(task_name))
+        for summary in self._services.composition.list_tasks():
+            task_name = summary.name
+            step_count = summary.step_count
             item = QListWidgetItem(f"{task_name} ({step_count} 步)")
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item.setSizeHint(QSize(100, 36))
@@ -1703,7 +1778,7 @@ class MainWindow(QMainWindow):
         self._add_task_name_to_composer(task_name, self.task_composer_list.count())
 
     def _add_task_name_to_composer(self, task_name: str, insert_row: int | None = None):
-        step_count = len(StorageManager.load_sequence(task_name))
+        step_count = self._task_step_count(task_name)
         item = QListWidgetItem()
         item.setData(Qt.ItemDataRole.UserRole, {"kind": "task", "task_name": task_name})
         if insert_row is None or insert_row >= self.task_composer_list.count():
@@ -1802,10 +1877,15 @@ class MainWindow(QMainWindow):
             return
 
         if replace:
-            self.sequence_list.clear_sequence()
-
-        for item in sequence:
-            self.sequence_list.add_sequence_item(item)
+            self._services.composition.replace_sequence(
+                sequence,
+                origin="gui",
+            )
+        else:
+            self._services.composition.append_sequence(
+                sequence,
+                origin="gui",
+            )
 
         mode = "替换" if replace else "追加"
         self.log_widget.append_log(f"任务组合已{mode}到序列，共 {len(sequence)} 个动作")
@@ -1823,9 +1903,12 @@ class MainWindow(QMainWindow):
             return
 
         task_name = Path(filename).name
-        StorageManager.save_sequence(sequence, task_name)
-        self.refresh_task_library()
-        self.log_widget.append_log(f"组合任务已保存: {task_name}")
+        stored_name = self._services.composition.save_task(
+            task_name,
+            sequence,
+            origin="gui",
+        )
+        self.log_widget.append_log(f"组合任务已保存: {stored_name}")
 
     def _build_composed_task_sequence(self) -> list[SequenceItem]:
         sequence: list[SequenceItem] = []
@@ -1842,7 +1925,15 @@ class MainWindow(QMainWindow):
                 continue
 
             task_name = entry.get("task_name", "")
-            for task_item in StorageManager.load_sequence(task_name):
+            try:
+                task_items = (
+                    self._services.composition.flattened_task(
+                        task_name
+                    )
+                )
+            except FileNotFoundError:
+                task_items = ()
+            for task_item in task_items:
                 cloned_item = SequenceItem(
                     uuid=str(uuid4()),
                     definition=task_item.definition,
@@ -1868,10 +1959,18 @@ class MainWindow(QMainWindow):
                 continue
 
             task_name = entry.get("task_name", "")
-            step_count = len(StorageManager.load_sequence(task_name))
+            step_count = self._task_step_count(task_name)
             item.setText(f"{task_name} ({step_count} 步)")
             item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
             item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖动可调整顺序")
+
+    def _task_step_count(self, task_name: str) -> int:
+        try:
+            return len(
+                self._services.composition.flattened_task(task_name)
+            )
+        except FileNotFoundError:
+            return 0
 
     # ── 动作类型卡片风格（与 widget_components 保持一致）──
     _CARD_STYLE = {
@@ -2046,28 +2145,45 @@ class MainWindow(QMainWindow):
         )
         if filename:
             task_name = Path(filename).name
-            StorageManager.save_entries(entries, task_name)
-            self.refresh_task_library()
-            self.log_widget.append_log(f"任务已保存: {task_name}")
+            self._services.composition.replace_sequence(
+                entries,
+                origin="gui",
+            )
+            stored_name = (
+                self._services.composition.save_current_task(
+                    task_name,
+                    origin="gui",
+                )
+            )
+            self.log_widget.append_log(f"任务已保存: {stored_name}")
 
     def load_task(self):
         filename, _ = QFileDialog.getOpenFileName(
-            self, "加载任务序列", str(StorageManager.TASKS_DIR), "任务文件 (*.task)"
+            self,
+            "加载任务序列",
+            str(self._services.composition.tasks_directory),
+            "任务文件 (*.task)",
         )
         if filename:
             task_name = Path(filename).name
-            entries = StorageManager.load_entries(task_name)
-            self.sequence_list.clear_sequence()
-            for entry in entries:
-                if isinstance(entry, LoopBlock):
-                    self.sequence_list.add_loop_block(entry)
-                elif isinstance(entry, SequenceItem):
-                    self.sequence_list.add_sequence_item(entry)
-            self.refresh_task_library()
+            try:
+                self._services.composition.load_task_into_sequence(
+                    task_name,
+                    origin="gui",
+                )
+            except (FileNotFoundError, ValueError):
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    f"任务不存在: {task_name}",
+                )
+                return
             self.log_widget.append_log(f"任务已加载: {task_name}")
 
     def start_execution(self):
-        sequence = self.sequence_list.get_sequence()
+        sequence = list(
+            self._services.composition.flattened_sequence()
+        )
         if not sequence:
             QMessageBox.warning(self, "警告", "请先添加动作到序列中")
             return
@@ -2088,7 +2204,10 @@ class MainWindow(QMainWindow):
             self.log_widget.append_log(f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}")
             return
 
-        entries = StorageManager.load_entries(task_name)
+        try:
+            entries = self._services.composition.load_task(task_name)
+        except FileNotFoundError:
+            entries = ()
         if not entries:
             self.log_widget.append_log(f"跳过唤醒欢迎任务，任务不存在或为空: {task_name}")
             return
@@ -2108,7 +2227,9 @@ class MainWindow(QMainWindow):
         # 获取执行条目：如果有 display_list（即从序列列表执行），使用树中的 entries
         # 否则（如组合任务执行），使用传入的扁平 sequence
         if display_list is not None:
-            entries = self.sequence_list.get_entries()
+            entries = list(
+                self._services.composition.sequence_entries()
+            )
         else:
             entries = list(sequence)  # 扁平列表，无 LoopBlock
 
@@ -2225,6 +2346,7 @@ class MainWindow(QMainWindow):
             item = self.sequence_list.takeItem(current_row)
             self.sequence_list.insertItem(current_row - 1, item)
             self.refresh_sequence_numbers(selected_row=current_row - 1)
+            self._publish_current_sequence()
 
     def move_item_down(self):
         current_row = self.sequence_list.currentRow()
@@ -2232,6 +2354,7 @@ class MainWindow(QMainWindow):
             item = self.sequence_list.takeItem(current_row)
             self.sequence_list.insertItem(current_row + 1, item)
             self.refresh_sequence_numbers(selected_row=current_row + 1)
+            self._publish_current_sequence()
 
     def delete_item(self):
         current_row = self.sequence_list.currentRow()
@@ -2239,6 +2362,7 @@ class MainWindow(QMainWindow):
             self.sequence_list.takeItem(current_row)
             next_row = min(current_row, self.sequence_list.count() - 1)
             self.refresh_sequence_numbers(selected_row=next_row)
+            self._publish_current_sequence()
 
     def repeat_sequence_selection(self):
         """将选中的连续动作包裹为 LoopBlock 循环容器"""
@@ -2299,6 +2423,7 @@ class MainWindow(QMainWindow):
         self.log_widget.append_log(
             f"已创建循环块: {len(selected_items)}个动作 × {repeat_count}次 = {total_steps}步"
         )
+        self._publish_current_sequence()
 
     def _selected_contiguous_rows(self, list_widget: QListWidget, empty_message: str) -> list[int] | None:
         rows = sorted(index.row() for index in list_widget.selectedIndexes())
@@ -2341,6 +2466,7 @@ class MainWindow(QMainWindow):
         updated_definition = dialog.get_action_definition()
         seq_item.definition = updated_definition
         self.sequence_list.update_item_status(seq_item)
+        self._publish_current_sequence()
         self.log_widget.append_log(f"已更新序列动作: {updated_definition.name}")
 
     def add_ai_sequence(
@@ -2359,18 +2485,26 @@ class MainWindow(QMainWindow):
                 normalized.append(SequenceItem.from_dict(raw))
             else:
                 normalized.append(raw)
-        if replace:
-            self.sequence_list.clear_sequence()
         if stagger_interval_ms <= 0:
-            for item in normalized:
-                self.sequence_list.add_sequence_item(item)
-                item.status = SequenceItemStatus.PENDING
-                self.sequence_list.update_item_status(item)
+            if replace:
+                self._services.composition.replace_sequence(
+                    normalized,
+                    origin="gui-ai",
+                )
+            else:
+                self._services.composition.append_sequence(
+                    normalized,
+                    origin="gui-ai",
+                )
             self.log_widget.append_log(f"已同步执行序列到右侧，共 {len(normalized)} 个动作")
             return
 
         from PyQt6.QtCore import QTimer
 
+        if replace:
+            self._services.composition.clear_sequence(
+                origin="gui-ai",
+            )
         self.log_widget.append_log(
             f"正在将 {len(normalized)} 个动作载入右侧序列区（逐项显示）..."
         )
@@ -2380,8 +2514,10 @@ class MainWindow(QMainWindow):
 
             def make_add(seq_item: SequenceItem):
                 def _add():
-                    self.sequence_list.add_sequence_item(seq_item)
-                    self.sequence_list.update_item_status(seq_item)
+                    self._services.composition.append_sequence(
+                        (seq_item,),
+                        origin="gui-ai",
+                    )
 
                 return _add
 
@@ -2393,7 +2529,9 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.sequence_list.clear_sequence()
+            self._services.composition.clear_sequence(
+                origin="gui",
+            )
             self.log_widget.append_log("序列已清空")
 
     def refresh_sequence_numbers(self, selected_row: int | None = None):
@@ -2517,11 +2655,5 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.pose_timer is not None:
             self.pose_timer.stop()
-
-        try:
-            self._services.devices.shutdown_all()
-            self.log_widget.append_log("设备运行时已关闭")
-        except Exception as e:
-            print(f"关闭设备运行时时出错: {e}")
-
+        self._composition_bridge.close()
         event.accept()

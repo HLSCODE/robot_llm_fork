@@ -4,7 +4,7 @@
 
 ## 功能概览
 
-- 双运行模式：`server` 模式提供 WebSocket API，`gui` 模式提供本地图形界面。
+- 单进程应用宿主：GUI 为主应用，WebSocket 作为可关闭的附加服务随 GUI 启停。
 - 动作编排：支持动作库管理、拖拽/接口式序列编排、任务保存与加载。
 - 执行控制：支持开始、暂停、恢复、停止，以及逐步骤状态和日志事件。
 - AI 规划：可通过自然语言匹配技能，生成可确认执行的动作序列。
@@ -75,10 +75,10 @@ Copy-Item config.env.example config.env
 按实际环境修改 `config.env`。最常用配置项：
 
 ```env
-RUN_MODE=server
 SIMULATION_MODE=false
 
-WEBSOCKET_HOST=0.0.0.0
+WEBSOCKET_ENABLED=true
+WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
 
 OPENAI_API_KEY=
@@ -102,9 +102,9 @@ ROBOT2_PORT=8080
 
 `config.env` 用于本机配置和密钥，默认不应提交到仓库。
 
-### 3. 启动服务
+### 3. 启动应用
 
-默认启动 WebSocket Server：
+默认启动 GUI，并在同一进程内启动 WebSocket 附加服务：
 
 ```bash
 python run.py
@@ -119,27 +119,25 @@ python run.py --simulation
 指定端口：
 
 ```bash
-python run.py --port 9000
+python run.py --websocket-port 9000
 ```
 
-启动 GUI：
+本次启动禁用 WebSocket：
 
 ```bash
-RUN_MODE=gui python run.py
+python run.py --disable-websocket
 ```
 
-Windows PowerShell：
+## 应用宿主
 
-```powershell
-$env:RUN_MODE='gui'
-python run.py
-```
+GUI、WebSocket 以及后续 HTTP 服务共用同一套 `ApplicationServices`、
+`ExecutionManager` 和 `DeviceRuntime`。WebSocket 在受管理的后台 asyncio
+线程中运行，不会在 Qt 主线程执行网络等待。
 
-## 运行模式
+动作库、任务库和当前编排序列由共享的 `CompositionService` 管理。GUI 与
+WebSocket 的修改通过 revision 事件互相同步，JSON 文件使用原子替换写入。
 
-### WebSocket Server
-
-`RUN_MODE=server` 是默认模式。服务启动后监听：
+WebSocket 启用后监听：
 
 ```text
 ws://{host}:{port}/
@@ -148,8 +146,11 @@ ws://{host}:{port}/
 默认地址为：
 
 ```text
-ws://0.0.0.0:8765/
+ws://127.0.0.1:8765/
 ```
+
+出于安全考虑，认证和客户端控制租约落地前默认只监听本机。远程部署必须显式修改
+监听地址，并评估当前未认证写接口的风险。
 
 常用 action：
 
@@ -166,9 +167,7 @@ ws://0.0.0.0:8765/
 
 完整协议见 [docs/websocket-api.md](docs/websocket-api.md)。
 
-### GUI
-
-`RUN_MODE=gui` 启动 PyQt6 图形界面，主要包含：
+GUI 主要包含：
 
 - 设备状态栏
 - 动作库 Tab
@@ -178,13 +177,14 @@ ws://0.0.0.0:8765/
 - 执行控制面板
 - 执行日志
 
-GUI 启动时会按配置初始化硬件；没有真实硬件时，请优先使用 `server --simulation` 做接口和流程联调。
+GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
+`python run.py --simulation` 做界面、接口和流程联调。
 
 ## 项目结构
 
 ```text
 .
-├── run.py                    # 统一入口，根据 RUN_MODE 启动 server 或 gui
+├── run.py                    # GUI 与附加网络服务的统一入口
 ├── config.env.example         # 配置模板
 ├── pyproject.toml             # Python 版本与依赖声明
 ├── requirements.txt           # pip 依赖列表
@@ -297,7 +297,8 @@ python run.py --simulation
 
 ### WebSocket 连不上
 
-确认 `RUN_MODE=server`，并检查 `WEBSOCKET_HOST`、`WEBSOCKET_PORT` 或命令行 `--host`、`--port`。
+确认 `WEBSOCKET_ENABLED=true`，并检查 `WEBSOCKET_HOST`、
+`WEBSOCKET_PORT` 或命令行 `--websocket-host`、`--websocket-port`。
 
 ### AI 规划不可用
 

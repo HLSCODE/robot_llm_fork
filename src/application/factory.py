@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..core.storage import JsonCompositionRepository
 from ..device_runtime import ResourceArbiter
 from ..device_runtime.factory import create_device_runtime
 from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
+from .composition import CompositionService
 from .services import (
     ApplicationServices,
     DeviceManagementService,
@@ -23,6 +25,7 @@ def create_application_services(
     *,
     simulation: bool,
 ) -> ApplicationServices:
+    composition = CompositionService(JsonCompositionRepository())
     device_runtime = create_device_runtime(config, simulation=simulation)
     resources = ResourceArbiter()
     engine = ActionEngine(device_runtime, config)
@@ -53,6 +56,7 @@ def create_application_services(
         safety,
     )
     return ApplicationServices(
+        composition=composition,
         execution=execution,
         devices=devices,
         manual_control=manual_control,

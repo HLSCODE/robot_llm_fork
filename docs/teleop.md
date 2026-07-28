@@ -360,8 +360,8 @@ setTimeout(() => {
 
 ```env
 # config.env
-RUN_MODE=server
-WEBSOCKET_HOST=0.0.0.0
+WEBSOCKET_ENABLED=true
+WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
 ```
 

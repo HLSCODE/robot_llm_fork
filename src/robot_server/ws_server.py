@@ -1,7 +1,6 @@
 """
 WebSocket 服务端
-作为独立服务运行，接受前端 WebSocket 连接，调用机器人控制函数。
-功能与 GUI 模式完全对等。
+作为 GUI 应用的可选附加服务运行，与 GUI 共用 ApplicationServices。
 
 协议说明:
     前端 → 服务端（指令）:
@@ -85,7 +84,7 @@ WebSocket 路径:
         error — 执行失败或硬件异常
 
 启动方式:
-    python run_server.py
+    python run.py
 """
 
 import asyncio
@@ -94,8 +93,9 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Coroutine
 from pathlib import Path
-from typing import Optional, Set, List, Dict, Any
+from typing import TYPE_CHECKING, Optional, Set, List, Dict, Any
 from uuid import uuid4
 
 try:
@@ -103,9 +103,12 @@ try:
 except ImportError:
     websockets = None
 
-from ..application import ApplicationServices
+from ..application import (
+    ApplicationServices,
+    CompositionChangeType,
+    CompositionEvent,
+)
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
-from ..core.storage import StorageManager
 from ..core.config_loader import Config
 from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
 from ..device_runtime import ArmStateReader, DepthCameraSource, StopMode
@@ -116,9 +119,10 @@ from ..execution import (
 )
 from ..llm import LLMCapability, LLMContentPart, LLMMessage, LLMRegistry, LLMStreamEvent
 from ..voice_interaction import CamerasModuleProvider, WakeFeedback, VoiceInteractionController
-from ..data_collection import RLBenchRecorder
-from ..data_collection.config import DataCollectionConfig
 
+
+if TYPE_CHECKING:
+    from ..data_collection import RLBenchRecorder
 
 
 logger = logging.getLogger(__name__)
@@ -208,25 +212,26 @@ class RobotWebSocketServer:
     def __init__(
         self,
         services: ApplicationServices,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         port: int = 8765,
     ):
-        if websockets is None:
-            raise ImportError(
-                "websockets 库未安装，无法启动 WebSocket 服务端"
-            )
+        normalized_host = host.strip()
+        if not normalized_host:
+            raise ValueError("WebSocket host must not be empty")
+        if not 1 <= port <= 65535:
+            raise ValueError("WebSocket port must be in range 1..65535")
 
         self._services = services
-        self._host = host
+        self._host = normalized_host
         self._port = port
+        self._server: Any = None
+        self._composition_unsubscribe = None
 
         # 已连接的客户端集合
         self._clients: Set = set()
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-
-        # 当前编排的序列（对应 GUI 右侧的序列列表）
-        self._current_sequence: List[SequenceEntry] = []
+        self._background_tasks: set[asyncio.Task[Any]] = set()
 
         # AI 相关状态
         self._ai_preview_sequence: List[SequenceItem] = []
@@ -260,7 +265,7 @@ class RobotWebSocketServer:
         self._last_grip = {"左": None, "右": None}  # 夹爪状态跟踪（避免重复执行）
 
         # 数据采集状态
-        self._demo_recorder: Optional[RLBenchRecorder] = None  # 数据采集器（延迟初始化）
+        self._demo_recorder: Optional["RLBenchRecorder"] = None
         self._demo_session = {
             "active": False,
             "task": None,
@@ -280,17 +285,26 @@ class RobotWebSocketServer:
     def _camera_manager(self):
         return self._services.device_runtime.get_if_ready(CAMERA)
 
-    # ------------------------------------------------------------------
-    # 启动服务
-    # ------------------------------------------------------------------
+    @property
+    def name(self) -> str:
+        return "websocket"
 
-    def run(self) -> None:
-        """阻塞运行 WebSocket 服务（主线程调用）"""
-        asyncio.run(self._serve())
+    @property
+    def endpoint(self) -> str:
+        return f"ws://{self._host}:{self._port}/"
 
-    async def _serve(self) -> None:
-        """异步启动 WebSocket 服务"""
+    async def start(self) -> None:
+        """Bind the socket and return after the service is ready."""
+        if websockets is None:
+            raise RuntimeError("websockets 库未安装，无法启动 WebSocket 服务")
+        if self._server is not None:
+            raise RuntimeError("WebSocket service is already running")
         self._loop = asyncio.get_running_loop()
+        self._composition_unsubscribe = (
+            self._services.composition.subscribe(
+                self._on_composition_event
+            )
+        )
 
         # 初始化 AI 组件
         self._init_ai()
@@ -300,11 +314,181 @@ class RobotWebSocketServer:
         # 加载 MiniCPM 代理配置
         self._init_minicpm_config()
 
-        async with websockets.serve(self._handler, self._host, self._port):
-            logger.info("WebSocket 服务已启动: ws://%s:%d", self._host, self._port)
-            print(f"WebSocket 服务已启动: ws://{self._host}:{self._port}")
-            print("等待前端连接...")
-            await asyncio.Future()
+        self._server = await websockets.serve(
+            self._handler,
+            self._host,
+            self._port,
+        )
+        logger.info("WebSocket 服务已启动: %s", self.endpoint)
+
+    async def stop(self) -> None:
+        """Stop accepting clients and release service-owned async resources."""
+        unsubscribe = self._composition_unsubscribe
+        self._composition_unsubscribe = None
+        if unsubscribe is not None:
+            unsubscribe()
+
+        server = self._server
+        self._server = None
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+
+        self._camera_frame_subs.clear()
+        await self._cancel_background_tasks()
+        await self._close_llm_clients()
+        await self._close_demo_recorder()
+        self._clients.clear()
+        self._minicpm_sessions.clear()
+        self._loop = None
+        logger.info("WebSocket 服务已停止")
+
+    def _on_composition_event(
+        self,
+        event: CompositionEvent,
+    ) -> None:
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+
+        def schedule() -> None:
+            self._schedule_background_task(
+                self._broadcast_composition_event(event),
+                name="WebSocketCompositionChanged",
+            )
+
+        try:
+            loop.call_soon_threadsafe(schedule)
+        except RuntimeError:
+            logger.debug(
+                "WebSocket loop closed before composition event scheduling"
+            )
+
+    async def _broadcast_composition_event(
+        self,
+        event: CompositionEvent,
+    ) -> None:
+        payload = await asyncio.to_thread(
+            self._composition_event_payload,
+            event,
+        )
+        await self._broadcast(payload)
+
+    def _composition_event_payload(
+        self,
+        event: CompositionEvent,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "event": "composition_changed",
+            "change": event.change_type.value,
+            "revision": event.revision,
+            "change_revision": event.change_revision,
+            "origin": event.origin,
+        }
+        composition = self._services.composition
+        if event.change_type is CompositionChangeType.SEQUENCE:
+            payload["sequence"] = [
+                entry.to_dict()
+                for entry in composition.sequence_entries()
+            ]
+        elif event.change_type is CompositionChangeType.ACTIONS:
+            payload["actions"] = [
+                action.to_dict()
+                for action in composition.list_actions()
+            ]
+        elif event.change_type is CompositionChangeType.TASKS:
+            payload["tasks"] = [
+                {
+                    "name": summary.name,
+                    "steps": summary.step_count,
+                }
+                for summary in composition.list_tasks()
+            ]
+        return payload
+
+    def _schedule_background_task(
+        self,
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        name: str,
+    ) -> asyncio.Task[Any]:
+        task = asyncio.create_task(coroutine, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_task_finished)
+        return task
+
+    def _background_task_finished(self, task: asyncio.Task[Any]) -> None:
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error(
+                "WebSocket background task %s failed: %s",
+                task.get_name(),
+                error,
+            )
+
+    async def _cancel_background_tasks(self) -> None:
+        tasks = tuple(
+            task
+            for task in self._background_tasks
+            if not task.done()
+        )
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._background_tasks.clear()
+        self._camera_push_task = None
+
+    async def _close_llm_clients(self) -> None:
+        registry = self._llm_registry
+        self._llm_registry = None
+        self._interaction_controller = None
+        self._llm_client = None
+        self._planner_client = None
+        if registry is None:
+            return
+
+        clients = tuple(
+            registry.get_provider(provider_name)
+            for provider_name in registry.loaded_provider_names
+        )
+        results = await asyncio.gather(
+            *(client.close() for client in clients),
+            return_exceptions=True,
+        )
+        for result in results:
+            if isinstance(result, Exception):
+                logger.warning("关闭 WebSocket LLM client 失败: %s", result)
+
+    async def _close_demo_recorder(self) -> None:
+        recorder = self._demo_recorder
+        self._demo_recorder = None
+        if recorder is None:
+            return
+        errors: list[Exception] = []
+        try:
+            await asyncio.to_thread(recorder.stop_recording)
+        except Exception as exc:
+            errors.append(exc)
+        try:
+            recorder.end_session()
+        except Exception as exc:
+            errors.append(exc)
+        finally:
+            self._demo_session = {
+                "active": False,
+                "task": None,
+                "description": None,
+                "next_episode_id": 0,
+            }
+        if errors:
+            detail = "; ".join(str(error) for error in errors)
+            raise RuntimeError(
+                f"failed to close data collection recorder: {detail}"
+            )
 
     # ------------------------------------------------------------------
     # AI 初始化（不依赖 Qt）
@@ -565,7 +749,9 @@ class RobotWebSocketServer:
                 return
         else:
             # 执行当前编排的序列
-            sequence = self._current_sequence
+            sequence = list(
+                self._services.composition.sequence_entries()
+            )
 
         if not sequence:
             await websocket.send(self._json_msg(
@@ -611,7 +797,13 @@ class RobotWebSocketServer:
             ))
             return
 
-        entries = StorageManager.load_entries(task_name)
+        try:
+            entries = await asyncio.to_thread(
+                self._services.composition.load_task,
+                task_name,
+            )
+        except (FileNotFoundError, ValueError):
+            entries = ()
         if not entries:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务 '{task_name}' 不存在或为空"}
@@ -718,22 +910,15 @@ class RobotWebSocketServer:
         返回动作库（按类型分组）
         响应: {"event": "actions_list", "actions": {...按类型分组...}}
         """
-        all_actions = StorageManager.load_actions()
+        all_actions = self._services.composition.list_actions()
 
         # 按类型分组（与 GUI 左侧 Tab 对应）
         grouped = {
-            "MOVE_TO_POINT": [],
-            "ARM_ACTION": [],
-            "INSPECT_AND_OUTPUT": [],
-            "CHANGE_GUN": [],
-            "VISION_CAPTURE": [],
-            "VISION_RELOCALIZE": [],
-            "TRAJECTORY": [],
+            action_type.value: []
+            for action_type in ActionType
         }
         for a in all_actions:
-            type_key = a.type.value
-            if type_key in grouped:
-                grouped[type_key].append(a.to_dict())
+            grouped[a.type.value].append(a.to_dict())
 
         await websocket.send(self._json_msg({
             "event": "actions_list",
@@ -951,10 +1136,17 @@ class RobotWebSocketServer:
             parameters=parameters,
         )
 
-        # 保存到持久化
-        all_actions = StorageManager.load_actions()
-        all_actions.append(action_def)
-        StorageManager.save_actions(all_actions)
+        try:
+            action_def = await asyncio.to_thread(
+                self._services.composition.create_action,
+                action_def,
+                origin=self._composition_origin(websocket),
+            )
+        except (TypeError, ValueError) as exc:
+            await websocket.send(self._json_msg(
+                {"event": "error", "message": str(exc)}
+            ))
+            return
 
         await websocket.send(self._json_msg({
             "event": "action_created",
@@ -974,17 +1166,18 @@ class RobotWebSocketServer:
             ))
             return
 
-        all_actions = StorageManager.load_actions()
-        original_count = len(all_actions)
-        all_actions = [a for a in all_actions if a.id != action_id]
-
-        if len(all_actions) == original_count:
+        try:
+            await asyncio.to_thread(
+                self._services.composition.delete_action,
+                action_id,
+                origin=self._composition_origin(websocket),
+            )
+        except KeyError:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"未找到 id 为 '{action_id}' 的动作"}
             ))
             return
 
-        StorageManager.save_actions(all_actions)
         await websocket.send(self._json_msg({
             "event": "action_deleted",
             "id": action_id,
@@ -1003,14 +1196,9 @@ class RobotWebSocketServer:
             ))
             return
 
-        all_actions = StorageManager.load_actions()
-        target = None
-        for a in all_actions:
-            if a.id == action_id:
-                target = a
-                break
-
-        if target is None:
+        try:
+            target = self._services.composition.get_action(action_id)
+        except KeyError:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"未找到 id 为 '{action_id}' 的动作"}
             ))
@@ -1030,7 +1218,18 @@ class RobotWebSocketServer:
         if "parameters" in data:
             target.parameters = data["parameters"]
 
-        StorageManager.save_actions(all_actions)
+        try:
+            target = await asyncio.to_thread(
+                self._services.composition.update_action,
+                action_id,
+                target,
+                origin=self._composition_origin(websocket),
+            )
+        except (TypeError, ValueError) as exc:
+            await websocket.send(self._json_msg(
+                {"event": "error", "message": str(exc)}
+            ))
+            return
         await websocket.send(self._json_msg({
             "event": "action_updated",
             "action": target.to_dict(),
@@ -1043,9 +1242,10 @@ class RobotWebSocketServer:
 
     async def _handle_get_sequence(self, websocket, data: dict) -> None:
         """获取当前编排的序列"""
+        entries = self._services.composition.sequence_entries()
         await websocket.send(self._json_msg({
             "event": "sequence",
-            "sequence": [item.to_dict() for item in self._current_sequence],
+            "sequence": [entry.to_dict() for entry in entries],
         }))
 
     async def _handle_add_to_sequence(self, websocket, data: dict) -> None:
@@ -1057,36 +1257,49 @@ class RobotWebSocketServer:
         ]}
         也支持传入动作库中的 id: {"action": "add_to_sequence", "action_ids": ["id1", "id2"]}
         """
-        # 方式1: 通过 action_ids 从动作库引用
         action_ids = data.get("action_ids", [])
-        if action_ids:
-            all_actions = StorageManager.load_actions()
-            action_map = {a.id: a for a in all_actions}
-            for aid in action_ids:
-                if aid in action_map:
-                    seq_item = SequenceItem.from_definition(action_map[aid])
-                    self._current_sequence.append(seq_item)
-                else:
-                    await websocket.send(self._json_msg(
-                        {"event": "error", "message": f"动作库中不存在 id: {aid}"}
-                    ))
-                    return
-
-        # 方式2: 直接传入动作数据
         items = data.get("items", [])
-        if items:
-            parsed = self._parse_sequence(items)
-            self._current_sequence.extend(parsed)
-
         if not action_ids and not items:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "请提供 items 或 action_ids"}
             ))
             return
 
+        additions: list[SequenceEntry] = []
+        if action_ids:
+            all_actions = self._services.composition.list_actions()
+            action_map = {a.id: a for a in all_actions}
+            for aid in action_ids:
+                if aid in action_map:
+                    additions.append(
+                        SequenceItem.from_definition(action_map[aid])
+                    )
+                else:
+                    await websocket.send(self._json_msg(
+                        {"event": "error", "message": f"动作库中不存在 id: {aid}"}
+                    ))
+                    return
+
+        if items:
+            try:
+                additions.extend(self._parse_sequence(items))
+            except (KeyError, TypeError, ValueError) as exc:
+                await websocket.send(self._json_msg(
+                    {
+                        "event": "error",
+                        "message": f"动作解析失败: {exc}",
+                    }
+                ))
+                return
+
+        sequence = self._services.composition.append_sequence(
+            additions,
+            origin=self._composition_origin(websocket),
+        )
+
         await websocket.send(self._json_msg({
             "event": "sequence_updated",
-            "sequence": [item.to_dict() for item in self._current_sequence],
+            "sequence": [entry.to_dict() for entry in sequence],
         }))
 
     async def _handle_remove_from_sequence(self, websocket, data: dict) -> None:
@@ -1095,17 +1308,25 @@ class RobotWebSocketServer:
         请求: {"action": "remove_from_sequence", "index": 0}
         """
         index = data.get("index")
-        if index is None or not (0 <= index < len(self._current_sequence)):
+        try:
+            removed = self._services.composition.remove_sequence_entry(
+                index,
+                origin=self._composition_origin(websocket),
+            )
+        except (IndexError, TypeError):
+            sequence_length = len(
+                self._services.composition.sequence_entries()
+            )
             await websocket.send(self._json_msg(
-                {"event": "error", "message": f"无效的索引: {index}，序列长度: {len(self._current_sequence)}"}
+                {"event": "error", "message": f"无效的索引: {index}，序列长度: {sequence_length}"}
             ))
             return
 
-        removed = self._current_sequence.pop(index)
+        sequence = self._services.composition.sequence_entries()
         await websocket.send(self._json_msg({
             "event": "sequence_updated",
             "removed": removed.to_dict(),
-            "sequence": [item.to_dict() for item in self._current_sequence],
+            "sequence": [entry.to_dict() for entry in sequence],
         }))
 
     async def _handle_move_in_sequence(self, websocket, data: dict) -> None:
@@ -1115,7 +1336,6 @@ class RobotWebSocketServer:
         """
         from_idx = data.get("from")
         to_idx = data.get("to")
-        seq_len = len(self._current_sequence)
 
         if from_idx is None or to_idx is None:
             await websocket.send(self._json_msg(
@@ -1123,23 +1343,31 @@ class RobotWebSocketServer:
             ))
             return
 
-        if not (0 <= from_idx < seq_len) or not (0 <= to_idx < seq_len):
+        try:
+            sequence = self._services.composition.move_sequence_entry(
+                from_idx,
+                to_idx,
+                origin=self._composition_origin(websocket),
+            )
+        except (IndexError, TypeError):
+            sequence_length = len(
+                self._services.composition.sequence_entries()
+            )
             await websocket.send(self._json_msg(
-                {"event": "error", "message": f"索引越界，序列长度: {seq_len}"}
+                {"event": "error", "message": f"索引越界，序列长度: {sequence_length}"}
             ))
             return
 
-        item = self._current_sequence.pop(from_idx)
-        self._current_sequence.insert(to_idx, item)
-
         await websocket.send(self._json_msg({
             "event": "sequence_updated",
-            "sequence": [item.to_dict() for item in self._current_sequence],
+            "sequence": [entry.to_dict() for entry in sequence],
         }))
 
     async def _handle_clear_sequence(self, websocket, data: dict) -> None:
         """清空序列"""
-        self._current_sequence.clear()
+        self._services.composition.clear_sequence(
+            origin=self._composition_origin(websocket),
+        )
         await websocket.send(self._json_msg({
             "event": "sequence_updated",
             "sequence": [],
@@ -1151,10 +1379,19 @@ class RobotWebSocketServer:
 
     async def _handle_list_tasks(self, websocket, data: dict) -> None:
         """返回所有已保存的任务文件名"""
-        tasks = StorageManager.list_tasks()
+        summaries = await asyncio.to_thread(
+            self._services.composition.list_tasks
+        )
         await websocket.send(self._json_msg({
             "event": "tasks_list",
-            "tasks": tasks,
+            "tasks": [summary.name for summary in summaries],
+            "summaries": [
+                {
+                    "name": summary.name,
+                    "steps": summary.step_count,
+                }
+                for summary in summaries
+            ],
         }))
 
     async def _handle_save_task(self, websocket, data: dict) -> None:
@@ -1169,19 +1406,26 @@ class RobotWebSocketServer:
             ))
             return
 
-        if not self._current_sequence:
+        try:
+            stored_name = (
+                await asyncio.to_thread(
+                    self._services.composition.save_current_task,
+                    task_name,
+                    origin=self._composition_origin(websocket),
+                )
+            )
+        except ValueError as exc:
             await websocket.send(self._json_msg(
-                {"event": "error", "message": "序列为空，无需保存"}
+                {"event": "error", "message": str(exc)}
             ))
             return
-
-        StorageManager.save_entries(self._current_sequence, task_name)
+        steps = len(self._services.composition.sequence_entries())
         await websocket.send(self._json_msg({
             "event": "task_saved",
-            "name": task_name,
-            "steps": len(self._current_sequence),
+            "name": stored_name,
+            "steps": steps,
         }))
-        logger.info("任务已保存: %s", task_name)
+        logger.info("任务已保存: %s", stored_name)
 
     async def _handle_load_task(self, websocket, data: dict) -> None:
         """
@@ -1195,27 +1439,26 @@ class RobotWebSocketServer:
             ))
             return
 
-        entries = StorageManager.load_entries(task_name)
+        try:
+            entries = (
+                await asyncio.to_thread(
+                    self._services.composition.load_task_into_sequence,
+                    task_name,
+                    origin=self._composition_origin(websocket),
+                )
+            )
+        except (FileNotFoundError, ValueError):
+            entries = ()
         if not entries:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务 '{task_name}' 不存在或为空"}
             ))
             return
 
-        # 加载到当前序列（替换）
-        self._current_sequence = entries
-        for entry in self._current_sequence:
-            if isinstance(entry, LoopBlock):
-                entry.current_iteration = 0
-                for child in entry.items:
-                    child.status = SequenceItemStatus.PENDING
-            elif isinstance(entry, SequenceItem):
-                entry.status = SequenceItemStatus.PENDING
-
         await websocket.send(self._json_msg({
             "event": "task_loaded",
             "name": task_name,
-            "sequence": [entry.to_dict() for entry in self._current_sequence],
+            "sequence": [entry.to_dict() for entry in entries],
         }))
         logger.info("任务已加载: %s", task_name)
 
@@ -1232,24 +1475,23 @@ class RobotWebSocketServer:
             ))
             return
 
-        # 构建文件路径
-        name = Path(task_name).name
-        filepath = StorageManager.TASKS_DIR / name
-        if filepath.suffix != ".task":
-            filepath = filepath.with_suffix(".task")
-
-        if not filepath.is_file():
+        try:
+            deleted_name = await asyncio.to_thread(
+                self._services.composition.delete_task,
+                task_name,
+                origin=self._composition_origin(websocket),
+            )
+        except FileNotFoundError:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务文件 '{task_name}' 不存在"}
             ))
             return
 
-        filepath.unlink()
         await websocket.send(self._json_msg({
             "event": "task_deleted",
-            "name": task_name,
+            "name": deleted_name,
         }))
-        logger.info("任务已删除: %s", task_name)
+        logger.info("任务已删除: %s", deleted_name)
 
     async def _handle_get_task_detail(self, websocket, data: dict) -> None:
         """
@@ -1263,19 +1505,18 @@ class RobotWebSocketServer:
             ))
             return
 
-        entries = StorageManager.load_entries(task_name)
+        try:
+            entries = await asyncio.to_thread(
+                self._services.composition.load_task,
+                task_name,
+            )
+        except FileNotFoundError:
+            entries = ()
         if not entries:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务 '{task_name}' 不存在或为空"}
             ))
             return
-
-        for entry in entries:
-            if isinstance(entry, LoopBlock):
-                for child in entry.items:
-                    child.status = SequenceItemStatus.PENDING
-            elif isinstance(entry, SequenceItem):
-                entry.status = SequenceItemStatus.PENDING
 
         await websocket.send(self._json_msg({
             "event": "task_detail",
@@ -1297,26 +1538,29 @@ class RobotWebSocketServer:
             ))
             return
 
-        old_path = self._resolve_task_path(task_name)
-        new_path = self._resolve_task_path(new_name)
-
-        if not old_path.is_file():
+        try:
+            old_name, stored_new_name = (
+                await asyncio.to_thread(
+                    self._services.composition.rename_task,
+                    task_name,
+                    new_name,
+                    origin=self._composition_origin(websocket),
+                )
+            )
+        except FileNotFoundError:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务文件 '{task_name}' 不存在"}
             ))
             return
-
-        if new_path.is_file() and old_path.resolve() != new_path.resolve():
+        except FileExistsError as exc:
             await websocket.send(self._json_msg(
-                {"event": "error", "message": f"任务文件 '{new_path.name}' 已存在"}
+                {"event": "error", "message": f"任务文件 '{exc.args[0]}' 已存在"}
             ))
             return
-
-        old_path.replace(new_path)
         await websocket.send(self._json_msg({
             "event": "task_renamed",
-            "name": old_path.name,
-            "new_name": new_path.name,
+            "name": old_name,
+            "new_name": stored_new_name,
         }))
 
     async def _handle_add_to_task(self, websocket, data: dict) -> None:
@@ -1333,17 +1577,10 @@ class RobotWebSocketServer:
             ))
             return
 
-        sequence = self._load_task_sequence_for_edit(task_name)
-        if sequence is None:
-            await websocket.send(self._json_msg(
-                {"event": "error", "message": f"任务文件 '{task_name}' 不存在"}
-            ))
-            return
-
-        insert_items = []
+        insert_items: list[SequenceEntry] = []
         action_ids = data.get("action_ids", [])
         if action_ids:
-            all_actions = StorageManager.load_actions()
+            all_actions = self._services.composition.list_actions()
             action_map = {a.id: a for a in all_actions}
             for aid in action_ids:
                 if aid not in action_map:
@@ -1357,9 +1594,9 @@ class RobotWebSocketServer:
         if items:
             try:
                 insert_items.extend(self._parse_sequence(items))
-            except Exception as e:
+            except (KeyError, TypeError, ValueError) as exc:
                 await websocket.send(self._json_msg(
-                    {"event": "error", "message": f"动作解析失败: {str(e)}"}
+                    {"event": "error", "message": f"动作解析失败: {exc}"}
                 ))
                 return
 
@@ -1370,21 +1607,30 @@ class RobotWebSocketServer:
             return
 
         index = data.get("index")
-        if index is None:
-            sequence.extend(insert_items)
-        else:
-            if not isinstance(index, int) or not (0 <= index <= len(sequence)):
-                await websocket.send(self._json_msg(
-                    {"event": "error", "message": f"无效的插入位置: {index}"}
-                ))
-                return
-            for offset, item in enumerate(insert_items):
-                sequence.insert(index + offset, item)
+        try:
+            sequence = (
+                await asyncio.to_thread(
+                    self._services.composition.insert_task_entries,
+                    task_name,
+                    insert_items,
+                    index=index,
+                    origin=self._composition_origin(websocket),
+                )
+            )
+        except FileNotFoundError:
+            await websocket.send(self._json_msg(
+                {"event": "error", "message": f"任务文件 '{task_name}' 不存在"}
+            ))
+            return
+        except (IndexError, TypeError):
+            await websocket.send(self._json_msg(
+                {"event": "error", "message": f"无效的插入位置: {index}"}
+            ))
+            return
 
-        StorageManager.save_entries(sequence, task_name)
         await websocket.send(self._json_msg({
             "event": "task_updated",
-            "name": self._resolve_task_path(task_name).name,
+            "name": Path(task_name).with_suffix(".task").name,
             "sequence": [entry.to_dict() for entry in sequence],
         }))
 
@@ -1402,24 +1648,29 @@ class RobotWebSocketServer:
             ))
             return
 
-        sequence = self._load_task_sequence_for_edit(task_name)
-        if sequence is None:
+        try:
+            removed, sequence = (
+                await asyncio.to_thread(
+                    self._services.composition.remove_task_entry,
+                    task_name,
+                    index,
+                    origin=self._composition_origin(websocket),
+                )
+            )
+        except FileNotFoundError:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务文件 '{task_name}' 不存在"}
             ))
             return
-
-        if index is None or not isinstance(index, int) or not (0 <= index < len(sequence)):
+        except (IndexError, TypeError):
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"无效的索引: {index}"}
             ))
             return
 
-        removed = sequence.pop(index)
-        StorageManager.save_entries(sequence, task_name)
         await websocket.send(self._json_msg({
             "event": "task_updated",
-            "name": self._resolve_task_path(task_name).name,
+            "name": Path(task_name).with_suffix(".task").name,
             "removed": removed.to_dict(),
             "sequence": [entry.to_dict() for entry in sequence],
         }))
@@ -1439,59 +1690,30 @@ class RobotWebSocketServer:
             ))
             return
 
-        sequence = self._load_task_sequence_for_edit(task_name)
-        if sequence is None:
+        try:
+            sequence = await asyncio.to_thread(
+                self._services.composition.move_task_entry,
+                task_name,
+                from_idx,
+                to_idx,
+                origin=self._composition_origin(websocket),
+            )
+        except FileNotFoundError:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": f"任务文件 '{task_name}' 不存在"}
             ))
             return
-
-        if from_idx is None or to_idx is None:
+        except (IndexError, TypeError):
             await websocket.send(self._json_msg(
-                {"event": "error", "message": "需要提供 from 和 to 索引"}
+                {"event": "error", "message": "from/to 索引无效或越界"}
             ))
             return
 
-        if not isinstance(from_idx, int) or not isinstance(to_idx, int):
-            await websocket.send(self._json_msg(
-                {"event": "error", "message": "from 和 to 必须为整数"}
-            ))
-            return
-
-        if not (0 <= from_idx < len(sequence)) or not (0 <= to_idx < len(sequence)):
-            await websocket.send(self._json_msg(
-                {"event": "error", "message": f"索引越界，序列长度: {len(sequence)}"}
-            ))
-            return
-
-        item = sequence.pop(from_idx)
-        sequence.insert(to_idx, item)
-        StorageManager.save_entries(sequence, task_name)
         await websocket.send(self._json_msg({
             "event": "task_updated",
-            "name": self._resolve_task_path(task_name).name,
+            "name": Path(task_name).with_suffix(".task").name,
             "sequence": [entry.to_dict() for entry in sequence],
         }))
-
-    def _resolve_task_path(self, task_name: str) -> Path:
-        name = Path(task_name).name
-        filepath = StorageManager.TASKS_DIR / name
-        if filepath.suffix != ".task":
-            filepath = filepath.with_suffix(".task")
-        return filepath
-
-    def _load_task_sequence_for_edit(self, task_name: str):
-        filepath = self._resolve_task_path(task_name)
-        if not filepath.is_file():
-            return None
-        entries = StorageManager.load_entries(filepath.name)
-        for entry in entries:
-            if isinstance(entry, LoopBlock):
-                for child in entry.items:
-                    child.status = SequenceItemStatus.PENDING
-            elif isinstance(entry, SequenceItem):
-                entry.status = SequenceItemStatus.PENDING
-        return entries
 
     # ==================================================================
     # AI 助手
@@ -1548,8 +1770,10 @@ class RobotWebSocketServer:
         for item in sequence:
             item.status = SequenceItemStatus.PENDING
 
-        # 同步到当前序列
-        self._current_sequence = list(sequence)
+        self._services.composition.replace_sequence(
+            sequence,
+            origin=self._composition_origin(websocket),
+        )
 
         # 标记本次为 AI 触发执行，以便 _on_finished 发送 ai_execution_finished 事件
         self._ai_execution_pending = True
@@ -1824,7 +2048,9 @@ class RobotWebSocketServer:
                 "running": execution.active,
                 "paused": execution.state is ExecutionState.PAUSED,
             },
-            "sequence_length": len(self._current_sequence),
+            "sequence_length": len(
+                self._services.composition.sequence_entries()
+            ),
             "ai_processing": self._ai_processing,
             "camera": {
                 "available": camera is not None and camera.camera_count > 0,
@@ -2140,7 +2366,10 @@ class RobotWebSocketServer:
         await websocket.send(self._json_msg({"event": "camera_subscribed"}))
 
         if self._camera_push_task is None or self._camera_push_task.done():
-            self._camera_push_task = asyncio.ensure_future(self._camera_push_loop())
+            self._camera_push_task = self._schedule_background_task(
+                self._camera_push_loop(),
+                name="WebSocketCameraPush",
+            )
         logger.info("客户端订阅相机帧: %s", websocket.remote_address)
 
     async def _handle_unsubscribe_camera_frames(self, websocket, data: dict) -> None:
@@ -2298,7 +2527,10 @@ class RobotWebSocketServer:
         try:
             user_text = _extract_user_text(payload)
             if user_text and (payload.get("route_to_interaction") or payload.get("robot_interaction")):
-                asyncio.ensure_future(self._on_chat_user_text(user_text))
+                self._schedule_background_task(
+                    self._on_chat_user_text(user_text),
+                    name="WebSocketChatRouting",
+                )
         except Exception:
             pass
 
@@ -2571,12 +2803,20 @@ class RobotWebSocketServer:
 
     def _broadcast_threadsafe(self, data: dict) -> None:
         """从任意线程安全地广播消息到所有客户端"""
-        if self._loop is None:
+        loop = self._loop
+        if loop is None or loop.is_closed():
             return
-        self._loop.call_soon_threadsafe(
-            asyncio.ensure_future,
-            self._broadcast(data),
-        )
+
+        def schedule() -> None:
+            self._schedule_background_task(
+                self._broadcast(data),
+                name="WebSocketBroadcast",
+            )
+
+        try:
+            loop.call_soon_threadsafe(schedule)
+        except RuntimeError:
+            logger.debug("WebSocket loop closed before broadcast scheduling")
 
     async def _broadcast(self, data: dict) -> None:
         """广播消息到所有已连接的客户端"""
@@ -2875,7 +3115,10 @@ class RobotWebSocketServer:
             # 处理夹爪指令（直接传原始位置值，仅在值变化时触发）
             if grip is not None and grip != self._last_grip.get(arm):
                 self._last_grip[arm] = grip
-                asyncio.ensure_future(self._execute_grip_async(arm, grip))
+                self._schedule_background_task(
+                    self._execute_grip_async(arm, grip),
+                    name=f"WebSocketGrip-{arm}",
+                )
 
         else:
             # 双臂模式
@@ -2954,7 +3197,10 @@ class RobotWebSocketServer:
                 for arm_name, grip_val in grip.items():
                     if arm_name in self._last_grip and grip_val is not None and grip_val != self._last_grip.get(arm_name):
                         self._last_grip[arm_name] = grip_val
-                        asyncio.ensure_future(self._execute_grip_async(arm_name, grip_val))
+                        self._schedule_background_task(
+                            self._execute_grip_async(arm_name, grip_val),
+                            name=f"WebSocketGrip-{arm_name}",
+                        )
 
     async def _handle_teleop_stop(self, websocket, data: dict) -> None:
         """
@@ -3031,6 +3277,9 @@ class RobotWebSocketServer:
 
         # 初始化数据采集器（延迟初始化）
         if self._demo_recorder is None:
+            from ..data_collection import RLBenchRecorder
+            from ..data_collection.config import DataCollectionConfig
+
             config = DataCollectionConfig()
             robot_state_reader = self._services.device_runtime.require(
                 ROBOT_SYSTEM,
@@ -3199,3 +3448,7 @@ class RobotWebSocketServer:
     @staticmethod
     def _json_msg(data: dict) -> str:
         return json.dumps(data, ensure_ascii=False)
+
+    @staticmethod
+    def _composition_origin(websocket) -> str:
+        return f"websocket:{id(websocket)}"
