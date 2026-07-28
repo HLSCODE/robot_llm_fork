@@ -403,6 +403,7 @@ ws.onmessage = (event) => {
 | `step_failed` | 某一步执行失败 |
 | `execution_finished` | 整个执行结束 |
 | `stopped` | 已发送任务停止请求（非硬件急停） |
+| `safety_stop_completed` | 软件快停/急停编排结束，结果见 `report`；不代表物理急停回路状态 |
 | `paused` | 已暂停 |
 | `resumed` | 已恢复 |
 
@@ -942,7 +943,68 @@ ws.onmessage = (event) => {
 }
 ```
 
-### 7.4 暂停执行 `pause`
+### 7.4 软件快停与设备急停
+
+两个接口都会先请求取消当前统一执行，再绕过普通资源租约，向所有“已就绪且声明相应能力”的运动设备发送停止命令，并释放遥操作和轨迹教学会话：
+
+```json
+{"action": "quick_stop"}
+```
+
+```json
+{"action": "emergency_stop"}
+```
+
+统一响应示例：
+
+```json
+{
+  "event": "safety_stop_completed",
+  "report": {
+    "mode": "quick",
+    "complete": true,
+    "execution": {
+      "before": "running",
+      "after": "cancelled",
+      "run_id": "4d4acbe0..."
+    },
+    "devices": [
+      {
+        "device_id": "robot-system",
+        "mode": "quick",
+        "status": "stopped",
+        "error": ""
+      },
+      {
+        "device_id": "mobile-base",
+        "mode": "quick",
+        "status": "not_ready",
+        "error": ""
+      }
+    ],
+    "errors": []
+  }
+}
+```
+
+设备结果状态：
+
+| `status` | 含义 |
+|---|---|
+| `stopped` | adapter/SDK 停止调用成功返回；不等同于设备已物理停稳 |
+| `not_ready` | 运行时没有该设备的就绪实例，没有可由运行时停止的活动命令 |
+| `unsupported` | 设备已就绪，但未声明所请求的停止能力 |
+| `failed` | 设备声明了能力，但契约校验或停止调用失败 |
+
+只要仍有 active execution、会话错误、已就绪设备不支持或停止失败，
+`complete` 就是 `false`。当前只有 RealMan 双臂机械臂实现了这两个软件停止能力，
+且真实硬件验收尚未完成。等待统一执行退出的上限由
+`SAFETY_STOP_WAIT_TIMEOUT_SECONDS` 配置，默认 2 秒；该值不是设备 SDK 调用超时。
+
+> `emergency_stop` 是软件命令入口，不能替代安全等级合规的独立物理急停按钮、
+> 断电回路或控制器安全功能。客户端不得把 `stopped` 展示为“已确认物理停稳”。
+
+### 7.5 暂停执行 `pause`
 
 请求：
 
@@ -961,7 +1023,7 @@ ws.onmessage = (event) => {
 }
 ```
 
-### 7.5 恢复执行 `resume`
+### 7.6 恢复执行 `resume`
 
 请求：
 
@@ -3228,7 +3290,7 @@ ws.onopen = () => {
 1. **关节限位检查**：每个关节的角度范围限制
 2. **速度限制检查**：相邻指令的变化率限制
 3. **心跳检测**：超过一定时间未收到指令则自动停止
-4. **紧急停止**：新增 `teleop_emergency_stop` 接口
+4. **停止入口**：遥操作复用全局 `quick_stop` / `emergency_stop`，仍需补充心跳超时自动触发策略
 
 **使用建议**
 

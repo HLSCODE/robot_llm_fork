@@ -795,6 +795,8 @@ class ControlPanel(QWidget):
     start_clicked = pyqtSignal()
     pause_clicked = pyqtSignal()
     stop_clicked = pyqtSignal()
+    quick_stop_clicked = pyqtSignal()
+    emergency_stop_clicked = pyqtSignal()
     move_up_clicked = pyqtSignal()
     move_down_clicked = pyqtSignal()
     edit_clicked = pyqtSignal()
@@ -885,6 +887,36 @@ class ControlPanel(QWidget):
         """)
         self.stop_btn.clicked.connect(self.stop_clicked.emit)
         layout.addWidget(self.stop_btn)
+
+        safety_row = QHBoxLayout()
+        safety_row.setSpacing(4)
+        self.quick_stop_btn = QPushButton("⚡ 快速停止")
+        self.quick_stop_btn.setMinimumHeight(34)
+        self.quick_stop_btn.setToolTip(
+            "向已支持的运动设备发送软件快停；不能替代物理急停"
+        )
+        self.quick_stop_btn.setStyleSheet("""
+            QPushButton { background: #f97316; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #ea580c; }
+            QPushButton:pressed { background: #c2410c; }
+        """)
+        self.quick_stop_btn.clicked.connect(self.quick_stop_clicked.emit)
+        self.emergency_stop_btn = QPushButton("🛑 设备急停")
+        self.emergency_stop_btn.setMinimumHeight(34)
+        self.emergency_stop_btn.setToolTip(
+            "向已支持的运动设备发送软件急停；不能替代物理急停回路"
+        )
+        self.emergency_stop_btn.setStyleSheet("""
+            QPushButton { background: #b91c1c; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
+            QPushButton:hover { background: #991b1b; }
+            QPushButton:pressed { background: #7f1d1d; }
+        """)
+        self.emergency_stop_btn.clicked.connect(
+            self.emergency_stop_clicked.emit
+        )
+        safety_row.addWidget(self.quick_stop_btn)
+        safety_row.addWidget(self.emergency_stop_btn)
+        layout.addLayout(safety_row)
 
         self.setLayout(layout)
 

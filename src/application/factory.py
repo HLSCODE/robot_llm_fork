@@ -15,6 +15,7 @@ from .services import (
     TeleoperationService,
     TrajectoryTeachingService,
 )
+from .safety import SafetyService
 
 
 def create_application_services(
@@ -38,11 +39,18 @@ def create_application_services(
         device_runtime,
         resources,
     )
-    devices = DeviceManagementService(
-        device_runtime,
+    safety = SafetyService(
         execution,
+        device_runtime,
         teleoperation,
         trajectory_teaching,
+        wait_timeout_seconds=float(
+            getattr(config, "SAFETY_STOP_WAIT_TIMEOUT_SECONDS", 2.0)
+        ),
+    )
+    devices = DeviceManagementService(
+        device_runtime,
+        safety,
     )
     return ApplicationServices(
         execution=execution,
@@ -51,6 +59,7 @@ def create_application_services(
         teleoperation=teleoperation,
         robot_query=robot_query,
         trajectory_teaching=trajectory_teaching,
+        safety=safety,
         device_runtime=device_runtime,
         resources=resources,
         simulation=simulation,

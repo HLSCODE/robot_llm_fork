@@ -14,6 +14,9 @@ class DeviceState(str, Enum):
 
 
 class DeviceCapability(str, Enum):
+    MOTION = "motion"
+    QUICK_STOP = "quick_stop"
+    EMERGENCY_STOP = "emergency_stop"
     ARM_MOTION = "arm_motion"
     ARM_STATE = "arm_state"
     GRIPPER = "gripper"
@@ -35,6 +38,28 @@ class StopMode(str, Enum):
     CONTROLLED = "controlled"
     QUICK = "quick"
     EMERGENCY = "emergency"
+
+
+class DeviceStopStatus(str, Enum):
+    STOPPED = "stopped"
+    NOT_READY = "not_ready"
+    UNSUPPORTED = "unsupported"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceStopResult:
+    device_id: str
+    mode: StopMode
+    status: DeviceStopStatus
+    error: str = ""
+
+    @property
+    def successful(self) -> bool:
+        return self.status in {
+            DeviceStopStatus.STOPPED,
+            DeviceStopStatus.NOT_READY,
+        }
 
 
 @dataclass(frozen=True, slots=True)

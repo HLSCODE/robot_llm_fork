@@ -158,6 +158,7 @@ class Config:
     MOVE_RADIUS: int = 0
     MOVE_CONNECT: int = 0
     MOVE_BLOCK: int = 1
+    SAFETY_STOP_WAIT_TIMEOUT_SECONDS: float = 2.0
     MAX_ATTEMPTS: int = 5
     GRIPPER_PICK_SPEED: int = 200
     GRIPPER_PICK_FORCE: int = 1000
@@ -554,6 +555,9 @@ class Config:
         instance.MOVE_RADIUS = int(os.getenv("MOVE_RADIUS", "0"))
         instance.MOVE_CONNECT = int(os.getenv("MOVE_CONNECT", "0"))
         instance.MOVE_BLOCK = int(os.getenv("MOVE_BLOCK", "1"))
+        instance.SAFETY_STOP_WAIT_TIMEOUT_SECONDS = float(
+            os.getenv("SAFETY_STOP_WAIT_TIMEOUT_SECONDS", "2.0")
+        )
         instance.MAX_ATTEMPTS = int(os.getenv("MAX_ATTEMPTS", "5"))
         instance.GRIPPER_PICK_SPEED = int(os.getenv("GRIPPER_PICK_SPEED", "200"))
         instance.GRIPPER_PICK_FORCE = int(os.getenv("GRIPPER_PICK_FORCE", "1000"))

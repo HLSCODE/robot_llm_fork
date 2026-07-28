@@ -12,6 +12,7 @@ from .arm_models import (
     MotionOptions,
     TrajectorySaveResult,
 )
+from .models import StopMode
 
 
 class SimulatedRobotSystem:
@@ -24,6 +25,16 @@ class SimulatedRobotSystem:
         }
         self.gripper_positions = {arm: 1000 for arm in ArmId}
         self.tool_slot: int | None = None
+        self.last_stop_mode: StopMode | None = None
+
+    @property
+    def supported_stop_modes(self) -> frozenset[StopMode]:
+        return frozenset({StopMode.QUICK, StopMode.EMERGENCY})
+
+    def stop(self, mode: StopMode) -> None:
+        if mode not in self.supported_stop_modes:
+            raise ValueError(f"unsupported robot stop mode: {mode}")
+        self.last_stop_mode = mode
 
     def move_to_pose(
         self,

@@ -18,6 +18,7 @@ from ..device_runtime import (
     ResourceArbiter,
     ResourceLease,
     RobotTeleoperation,
+    StopMode,
     TrajectoryControl,
     TrajectorySaveResult,
 )
@@ -27,8 +28,8 @@ from ..execution import (
     ExecutionListener,
     ExecutionManager,
     ExecutionSnapshot,
-    ExecutionStateError,
 )
+from .safety import SafetyService
 
 
 class ExecutionService:
@@ -65,31 +66,16 @@ class ExecutionService:
     def wait(self, timeout: float | None = None) -> ExecutionSnapshot:
         return self._manager.wait(timeout=timeout)
 
-    def cancel_and_wait(self, timeout: float = 10.0) -> ExecutionSnapshot:
-        snapshot = self.snapshot()
-        if not snapshot.active:
-            return snapshot
-        try:
-            self.cancel()
-        except ExecutionStateError:
-            return self.snapshot()
-        return self.wait(timeout)
-
-
 class DeviceManagementService:
     """Application entry for device lifecycle and status."""
 
     def __init__(
         self,
         runtime: DeviceRuntime,
-        execution: ExecutionService,
-        teleoperation: "TeleoperationService",
-        trajectory_teaching: "TrajectoryTeachingService",
+        safety: SafetyService,
     ) -> None:
         self._runtime = runtime
-        self._execution = execution
-        self._teleoperation = teleoperation
-        self._trajectory_teaching = trajectory_teaching
+        self._safety = safety
 
     def initialize(self, device_id: str) -> dict[str, Any]:
         self._runtime.initialize(device_id)
@@ -118,19 +104,18 @@ class DeviceManagementService:
         }
 
     def shutdown_all(self, timeout: float = 10.0) -> dict[str, str]:
-        self._teleoperation.stop()
-        errors: dict[str, str] = {}
-        try:
-            self._trajectory_teaching.cancel()
-        except Exception as exc:
-            errors["trajectory-teaching"] = str(exc)
-        snapshot = self._execution.snapshot()
-        if snapshot.active:
-            final = self._execution.cancel_and_wait(timeout)
-            if final.active:
-                raise TimeoutError(
-                    "execution did not stop before device shutdown"
-                )
+        report = self._safety.stop(
+            StopMode.CONTROLLED,
+            wait_timeout_seconds=timeout,
+        )
+        if report.execution_after.active:
+            raise TimeoutError(
+                "execution did not stop before device shutdown"
+            )
+        errors = {
+            f"safety:{index}": error
+            for index, error in enumerate(report.errors, start=1)
+        }
         errors.update(self._runtime.shutdown_all())
         return errors
 
@@ -226,6 +211,7 @@ class TeleoperationService:
         self._resources = resources
         self._lease: ResourceLease | None = None
         self._lock = RLock()
+        self._operation_lock = RLock()
 
     @property
     def active(self) -> bool:
@@ -252,6 +238,16 @@ class TeleoperationService:
             lease = self._lease
             self._lease = None
         if lease is not None:
+            with self._operation_lock:
+                pass
+            lease.release()
+
+    def release_after_safety_stop(self) -> None:
+        """Release the session without waiting on interrupted device I/O."""
+        with self._lock:
+            lease = self._lease
+            self._lease = None
+        if lease is not None:
             lease.release()
 
     def follow(
@@ -268,20 +264,28 @@ class TeleoperationService:
                 ROBOT_SYSTEM,
                 RobotTeleoperation,
             )
+            self._operation_lock.acquire()
+        try:
             teleoperation.follow_joints(
                 ArmId.parse(arm),
                 JointVector.from_iterable(joints),
                 follow=follow,
                 trajectory_mode=trajectory_mode,
             )
-            return True
+        finally:
+            self._operation_lock.release()
+        return True
 
     def set_gripper(self, arm: str, position: int) -> bool:
         with self._lock:
             self._require_active_unlocked()
             gripper = self._runtime.require(ROBOT_SYSTEM, GripperControl)
+            self._operation_lock.acquire()
+        try:
             gripper.move_gripper(ArmId.parse(arm), int(position))
-            return True
+        finally:
+            self._operation_lock.release()
+        return True
 
     def _require_active_unlocked(self) -> None:
         if self._lease is None:
@@ -375,6 +379,15 @@ class TrajectoryTeachingService:
         finally:
             lease.release()
 
+    def release_after_safety_stop(self) -> None:
+        """Release ownership after the robot adapter already accepted a stop."""
+        with self._lock:
+            lease = self._lease
+            self._arm = None
+            self._lease = None
+        if lease is not None:
+            lease.release()
+
     def _required_session_unlocked(
         self,
     ) -> tuple[ArmId, ResourceLease]:
@@ -395,6 +408,7 @@ class ApplicationServices:
     teleoperation: TeleoperationService
     robot_query: RobotQueryService
     trajectory_teaching: TrajectoryTeachingService
+    safety: SafetyService
     device_runtime: DeviceRuntime
     resources: ResourceArbiter
     simulation: bool

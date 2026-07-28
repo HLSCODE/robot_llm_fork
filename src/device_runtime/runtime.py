@@ -6,6 +6,7 @@ import logging
 from threading import RLock
 from typing import Any, Generic, TypeVar
 
+from .contracts import StoppableDevice
 from .models import (
     DeviceAlreadyRegisteredError,
     DeviceCapability,
@@ -14,6 +15,9 @@ from .models import (
     DeviceNotRegisteredError,
     DeviceSnapshot,
     DeviceState,
+    DeviceStopResult,
+    DeviceStopStatus,
+    StopMode,
 )
 
 
@@ -150,6 +154,24 @@ class DeviceRuntime:
             for device_id in self.registered_device_ids()
         )
 
+    def stop_all(self, mode: StopMode) -> tuple[DeviceStopResult, ...]:
+        """Stop every ready motion device without acquiring execution leases."""
+        if not isinstance(mode, StopMode):
+            raise TypeError("mode must be a StopMode")
+        if mode is StopMode.CONTROLLED:
+            raise ValueError(
+                "controlled cancellation belongs to the application service"
+            )
+        required_capability = {
+            StopMode.QUICK: DeviceCapability.QUICK_STOP,
+            StopMode.EMERGENCY: DeviceCapability.EMERGENCY_STOP,
+        }[mode]
+        motion_device_ids = self.find_by_capability(DeviceCapability.MOTION)
+        return tuple(
+            self._stop_device(device_id, mode, required_capability)
+            for device_id in reversed(motion_device_ids)
+        )
+
     def shutdown(self, device_id: str) -> None:
         record = self._record(device_id)
         with record.lock:
@@ -199,3 +221,64 @@ class DeviceRuntime:
                 raise DeviceNotRegisteredError(
                     f"device '{device_id}' is not registered"
                 ) from exc
+
+    def _stop_device(
+        self,
+        device_id: str,
+        mode: StopMode,
+        required_capability: DeviceCapability,
+    ) -> DeviceStopResult:
+        record = self._record(device_id)
+        with record.lock:
+            if record.state is not DeviceState.READY:
+                return DeviceStopResult(
+                    device_id=device_id,
+                    mode=mode,
+                    status=DeviceStopStatus.NOT_READY,
+                )
+            if required_capability not in record.registration.capabilities:
+                return DeviceStopResult(
+                    device_id=device_id,
+                    mode=mode,
+                    status=DeviceStopStatus.UNSUPPORTED,
+                    error=(
+                        f"device does not advertise "
+                        f"'{required_capability.value}'"
+                    ),
+                )
+
+            instance = record.instance
+            if not isinstance(instance, StoppableDevice):
+                return DeviceStopResult(
+                    device_id=device_id,
+                    mode=mode,
+                    status=DeviceStopStatus.FAILED,
+                    error="advertised stop capability is not implemented",
+                )
+            if mode not in instance.supported_stop_modes:
+                return DeviceStopResult(
+                    device_id=device_id,
+                    mode=mode,
+                    status=DeviceStopStatus.FAILED,
+                    error="adapter stop modes contradict registered capability",
+                )
+            try:
+                instance.stop(mode)
+            except Exception as exc:
+                logger.warning(
+                    "Device %s %s stop failed: %s",
+                    device_id,
+                    mode.value,
+                    exc,
+                )
+                return DeviceStopResult(
+                    device_id=device_id,
+                    mode=mode,
+                    status=DeviceStopStatus.FAILED,
+                    error=str(exc),
+                )
+            return DeviceStopResult(
+                device_id=device_id,
+                mode=mode,
+                status=DeviceStopStatus.STOPPED,
+            )

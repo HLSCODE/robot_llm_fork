@@ -12,11 +12,20 @@ from .arm_models import (
     MotionOptions,
     TrajectorySaveResult,
 )
+from .models import StopMode
 
 
 @runtime_checkable
 class CloseableDevice(Protocol):
     def close(self) -> None: ...
+
+
+@runtime_checkable
+class StoppableDevice(Protocol):
+    @property
+    def supported_stop_modes(self) -> frozenset[StopMode]: ...
+
+    def stop(self, mode: StopMode) -> None: ...
 
 
 @runtime_checkable

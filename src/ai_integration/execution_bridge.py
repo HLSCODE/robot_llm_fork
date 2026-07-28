@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from threading import Lock, Thread
 from typing import Any
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ..application import ApplicationServices
 from ..core.models import SequenceItem
+from ..device_runtime import StopMode
 from ..execution import (
     ExecutionEvent,
     ExecutionEventType,
@@ -23,9 +25,8 @@ logger = logging.getLogger(__name__)
 class ExecutionBridge(QObject):
     """Translate execution-domain events into Qt signals.
 
-    This object does not own a worker thread or any hardware. The application
-    service is the only execution entry and ``ExecutionManager`` owns the only
-    sequence worker.
+    ``ExecutionManager`` owns the only sequence worker. Safety requests use a
+    short-lived dispatch thread so hardware I/O never blocks the Qt UI thread.
     """
 
     execution_status_changed = pyqtSignal(str)
@@ -35,10 +36,15 @@ class ExecutionBridge(QObject):
     loop_progress = pyqtSignal(str, int, int)
     execution_completed = pyqtSignal(bool)
     log_message = pyqtSignal(str)
+    safety_stop_completed = pyqtSignal(object)
+    safety_stop_failed = pyqtSignal(str)
 
     def __init__(self, services: ApplicationServices) -> None:
         super().__init__()
         self._execution = services.execution
+        self._safety = services.safety
+        self._safety_request_lock = Lock()
+        self._safety_request_active = False
 
     def execute_sequence_items(
         self,
@@ -89,6 +95,45 @@ class ExecutionBridge(QObject):
         self.log_message.emit(
             "已发送任务停止请求（非硬件急停，将在当前动作可中断点停止）"
         )
+
+    def request_safety_stop(self, mode: StopMode) -> bool:
+        if mode not in {StopMode.QUICK, StopMode.EMERGENCY}:
+            raise ValueError("Qt safety request must be quick or emergency")
+        with self._safety_request_lock:
+            if self._safety_request_active:
+                return False
+            self._safety_request_active = True
+        thread = Thread(
+            target=self._run_safety_stop,
+            args=(mode,),
+            daemon=True,
+            name=f"SafetyStop-{mode.value}",
+        )
+        try:
+            thread.start()
+        except Exception:
+            with self._safety_request_lock:
+                self._safety_request_active = False
+            raise
+        return True
+
+    def _run_safety_stop(self, mode: StopMode) -> None:
+        try:
+            report = self._safety.stop(mode)
+        except Exception as exc:
+            logger.exception("Safety stop dispatch failed: %s", mode.value)
+            self.safety_stop_failed.emit(str(exc))
+            self.log_message.emit(f"设备停止请求失败: {exc}")
+        else:
+            self.safety_stop_completed.emit(report)
+            outcome = "完成" if report.complete else "未完全停止"
+            self.log_message.emit(
+                f"{mode.value} 软件停止编排{outcome}；"
+                "物理急停回路仍须独立保障"
+            )
+        finally:
+            with self._safety_request_lock:
+                self._safety_request_active = False
 
     def get_execution_status(self) -> str:
         state = self._execution.snapshot().state

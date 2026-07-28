@@ -15,6 +15,7 @@ from PyQt6.QtGui import QAction, QPalette, QColor, QDrag, QIcon
 from ..ai_integration.execution_bridge import ExecutionBridge
 from ..application import ApplicationServices
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock
+from ..device_runtime import StopMode
 from ..device_runtime.ids import (
     BODY_AXIS,
     CAMERA,
@@ -603,6 +604,12 @@ class MainWindow(QMainWindow):
         self.control_panel.start_clicked.connect(self.start_execution)
         self.control_panel.pause_clicked.connect(self.toggle_pause)
         self.control_panel.stop_clicked.connect(self.stop_execution)
+        self.control_panel.quick_stop_clicked.connect(
+            lambda: self.request_safety_stop(StopMode.QUICK)
+        )
+        self.control_panel.emergency_stop_clicked.connect(
+            lambda: self.request_safety_stop(StopMode.EMERGENCY)
+        )
         self.control_panel.move_up_clicked.connect(self.move_item_up)
         self.control_panel.move_down_clicked.connect(self.move_item_down)
         self.control_panel.edit_clicked.connect(self.edit_sequence_item)
@@ -2166,6 +2173,10 @@ class MainWindow(QMainWindow):
             )
         else:
             self.log_widget.append_log("当前没有正在执行的任务")
+
+    def request_safety_stop(self, mode: StopMode) -> None:
+        if not self._execution_bridge.request_safety_stop(mode):
+            self.log_widget.append_log("已有设备停止请求正在处理中")
 
     def on_execution_completed(self, success: bool):
         self.log_widget.append_log(

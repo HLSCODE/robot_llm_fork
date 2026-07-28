@@ -67,6 +67,9 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
         _registration(
             ROBOT_SYSTEM,
             {
+                DeviceCapability.MOTION,
+                DeviceCapability.QUICK_STOP,
+                DeviceCapability.EMERGENCY_STOP,
                 DeviceCapability.ARM_MOTION,
                 DeviceCapability.ARM_STATE,
                 DeviceCapability.GRIPPER,
@@ -78,15 +81,19 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
         ),
         _registration(
             BODY_AXIS,
-            {DeviceCapability.BODY_AXIS},
+            {DeviceCapability.MOTION, DeviceCapability.BODY_AXIS},
             SimulatedBodyAxis,
         ),
         _registration(
             MOBILE_BASE,
-            {DeviceCapability.MOBILE_BASE},
+            {DeviceCapability.MOTION, DeviceCapability.MOBILE_BASE},
             SimulatedMobileBase,
         ),
-        _registration(NECK, {DeviceCapability.NECK_MOTION}, SimulatedNeck),
+        _registration(
+            NECK,
+            {DeviceCapability.MOTION, DeviceCapability.NECK_MOTION},
+            SimulatedNeck,
+        ),
         _registration(
             RELAY_BANK,
             {DeviceCapability.DIGITAL_OUTPUT},
@@ -100,7 +107,10 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
         _registration(PIPETTE, {DeviceCapability.PIPETTE}, SimulatedPipette),
         _registration(
             POWDER_DISPENSER,
-            {DeviceCapability.POWDER_DISPENSER},
+            {
+                DeviceCapability.MOTION,
+                DeviceCapability.POWDER_DISPENSER,
+            },
             SimulatedPowderDispenser,
         ),
         _registration(
@@ -124,6 +134,9 @@ def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
         _registration(
             ROBOT_SYSTEM,
             {
+                DeviceCapability.MOTION,
+                DeviceCapability.QUICK_STOP,
+                DeviceCapability.EMERGENCY_STOP,
                 DeviceCapability.ARM_MOTION,
                 DeviceCapability.ARM_STATE,
                 DeviceCapability.GRIPPER,
@@ -137,21 +150,21 @@ def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
     runtime.register(
         _registration(
             BODY_AXIS,
-            {DeviceCapability.BODY_AXIS},
+            {DeviceCapability.MOTION, DeviceCapability.BODY_AXIS},
             lambda: _body_factory(config),
         )
     )
     runtime.register(
         _registration(
             MOBILE_BASE,
-            {DeviceCapability.MOBILE_BASE},
+            {DeviceCapability.MOTION, DeviceCapability.MOBILE_BASE},
             _mobile_base_factory,
         )
     )
     runtime.register(
         _registration(
             NECK,
-            {DeviceCapability.NECK_MOTION},
+            {DeviceCapability.MOTION, DeviceCapability.NECK_MOTION},
             _neck_factory,
         )
     )
@@ -179,7 +192,10 @@ def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
     runtime.register(
         _registration(
             POWDER_DISPENSER,
-            {DeviceCapability.POWDER_DISPENSER},
+            {
+                DeviceCapability.MOTION,
+                DeviceCapability.POWDER_DISPENSER,
+            },
             _powder_dispenser_factory,
         )
     )

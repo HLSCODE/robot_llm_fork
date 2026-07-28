@@ -18,6 +18,7 @@ from src.device_runtime import (
     ResourceBusyError,
     RobotOperationError,
     RobotSystem,
+    StopMode,
 )
 from src.device_runtime.adapters import RealManRobotAdapter
 from src.device_runtime.factory import create_device_runtime
@@ -29,6 +30,8 @@ class _FakeSdkRobot:
     def __init__(self) -> None:
         self.calls: list[tuple[str, object, dict[str, object]]] = []
         self.state_code = 0
+        self.quick_stop_code = 0
+        self.emergency_stop_code = 0
         self.state = {
             "pose": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
             "joint": [1, 2, 3, 4, 5, 6],
@@ -91,6 +94,14 @@ class _FakeSdkRobot:
         self.calls.append(("save_trajectory", path, {}))
         return 0, 12
 
+    def rm_set_arm_slow_stop(self):
+        self.calls.append(("quick_stop", None, {}))
+        return self.quick_stop_code
+
+    def rm_set_arm_stop(self):
+        self.calls.append(("emergency_stop", None, {}))
+        return self.emergency_stop_code
+
 
 class _FakeArmBackend:
     def __init__(self) -> None:
@@ -125,6 +136,14 @@ class _FakeRealManController:
 
     def shutdown(self):
         self.closed = True
+
+
+class _FailIfEnteredLock:
+    def __enter__(self):
+        raise AssertionError("safety stop acquired the motion SDK lock")
+
+    def __exit__(self, *_args):
+        return False
 
 
 class RobotModelTests(unittest.TestCase):
@@ -217,6 +236,32 @@ class RealManRobotAdapterTests(unittest.TestCase):
 
         self.adapter.close()
         self.assertTrue(self.controller.closed)
+
+    def test_stop_interrupts_both_arms_without_motion_sdk_locks(self):
+        self.controller.robot1_ctrl.sdk_lock = _FailIfEnteredLock()
+        self.controller.robot2_ctrl.sdk_lock = _FailIfEnteredLock()
+
+        self.adapter.stop(StopMode.QUICK)
+        self.adapter.stop(StopMode.EMERGENCY)
+
+        for backend in (
+            self.controller.robot1_ctrl,
+            self.controller.robot2_ctrl,
+        ):
+            calls = [call[0] for call in backend.robot.calls]
+            self.assertIn("quick_stop", calls)
+            self.assertIn("emergency_stop", calls)
+
+    def test_stop_attempts_both_arms_before_reporting_failure(self):
+        self.controller.robot1_ctrl.robot.quick_stop_code = 9
+
+        with self.assertRaisesRegex(RuntimeError, "left: SDK code 9"):
+            self.adapter.stop(StopMode.QUICK)
+
+        self.assertEqual(
+            "quick_stop",
+            self.controller.robot2_ctrl.robot.calls[-1][0],
+        )
 
 
 class RobotProviderTests(unittest.TestCase):

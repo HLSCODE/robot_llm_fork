@@ -10,6 +10,8 @@ WebSocket 服务端
         {"action": "execute",       "sequence": [...]}     执行动作序列
         {"action": "execute_task",  "name": "xxx.task"}    加载并执行已保存的任务
         {"action": "stop"}                                 停止当前执行
+        {"action": "quick_stop"}                           向支持的运动设备发送软件快停
+        {"action": "emergency_stop"}                       向支持的运动设备发送软件急停
         {"action": "pause"}                                暂停执行
         {"action": "resume"}                               恢复执行
 
@@ -106,7 +108,7 @@ from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceIt
 from ..core.storage import StorageManager
 from ..core.config_loader import Config
 from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
-from ..device_runtime import ArmStateReader, DepthCameraSource
+from ..device_runtime import ArmStateReader, DepthCameraSource, StopMode
 from ..execution import (
     ExecutionEvent,
     ExecutionEventType,
@@ -421,6 +423,8 @@ class RobotWebSocketServer:
             "execute":       self._handle_execute,
             "execute_task":  self._handle_execute_task,
             "stop":          self._handle_stop,
+            "quick_stop":    self._handle_quick_stop,
+            "emergency_stop": self._handle_emergency_stop,
             "pause":         self._handle_pause,
             "resume":        self._handle_resume,
             # 动作库管理
@@ -651,6 +655,33 @@ class RobotWebSocketServer:
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "当前没有正在执行的序列"}
             ))
+
+    async def _handle_quick_stop(self, websocket, data: dict) -> None:
+        del data
+        await self._handle_safety_stop(websocket, StopMode.QUICK)
+
+    async def _handle_emergency_stop(self, websocket, data: dict) -> None:
+        del data
+        await self._handle_safety_stop(websocket, StopMode.EMERGENCY)
+
+    async def _handle_safety_stop(
+        self,
+        websocket,
+        mode: StopMode,
+    ) -> None:
+        report = await asyncio.to_thread(self._services.safety.stop, mode)
+        if report.execution_before.active and self._ai_execution_pending:
+            self._execution_had_failure = True
+        for arm_name in self._teleop_modes:
+            self._teleop_modes[arm_name] = False
+        await websocket.send(
+            self._json_msg(
+                {
+                    "event": "safety_stop_completed",
+                    "report": report.to_dict(),
+                }
+            )
+        )
 
     async def _handle_pause(self, websocket, data: dict) -> None:
         """暂停执行"""

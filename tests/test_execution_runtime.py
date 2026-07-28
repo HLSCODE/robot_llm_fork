@@ -9,9 +9,13 @@ from src.device_runtime import (
     DeviceCapability,
     DeviceRegistration,
     DeviceRuntime,
+    DeviceStopStatus,
     ResourceArbiter,
     ResourceBusyError,
+    RobotSystem,
+    StopMode,
 )
+from src.device_runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import (
     EngineCallbacks,
     EngineResult,
@@ -29,6 +33,24 @@ class _CloseTracker:
 
     def close(self) -> None:
         self.closed = True
+
+
+class _StoppableMotion(_CloseTracker):
+    def __init__(
+        self,
+        modes: frozenset[StopMode],
+        *,
+        fail: bool = False,
+    ) -> None:
+        super().__init__()
+        self.supported_stop_modes = modes
+        self.fail = fail
+        self.stops: list[StopMode] = []
+
+    def stop(self, mode: StopMode) -> None:
+        self.stops.append(mode)
+        if self.fail:
+            raise RuntimeError("stop rejected")
 
 
 class _BlockingEngine:
@@ -90,6 +112,76 @@ class DeviceRuntimeTests(unittest.TestCase):
         next_lease = arbiter.acquire("owner-b", ("robot",))
         self.assertEqual("owner-b", arbiter.owner_of("robot"))
         next_lease.release()
+
+    def test_stop_all_reports_each_motion_device_and_continues_on_failure(self):
+        runtime = DeviceRuntime()
+        quick = _StoppableMotion(frozenset({StopMode.QUICK}))
+        failed = _StoppableMotion(
+            frozenset({StopMode.QUICK}),
+            fail=True,
+        )
+        registrations = (
+            ("not-ready", {DeviceCapability.MOTION}, _CloseTracker()),
+            (
+                "unsupported",
+                {DeviceCapability.MOTION},
+                _CloseTracker(),
+            ),
+            (
+                "failed",
+                {
+                    DeviceCapability.MOTION,
+                    DeviceCapability.QUICK_STOP,
+                },
+                failed,
+            ),
+            (
+                "quick",
+                {
+                    DeviceCapability.MOTION,
+                    DeviceCapability.QUICK_STOP,
+                },
+                quick,
+            ),
+        )
+        for device_id, capabilities, instance in registrations:
+            runtime.register(
+                DeviceRegistration(
+                    device_id=device_id,
+                    capabilities=frozenset(capabilities),
+                    factory=lambda instance=instance: instance,
+                    close=lambda device: device.close(),
+                )
+            )
+        for device_id in ("unsupported", "failed", "quick"):
+            runtime.initialize(device_id)
+
+        with self.assertLogs(
+            "src.device_runtime.runtime",
+            level="WARNING",
+        ):
+            results = {
+                result.device_id: result
+                for result in runtime.stop_all(StopMode.QUICK)
+            }
+
+        self.assertEqual(DeviceStopStatus.STOPPED, results["quick"].status)
+        self.assertEqual(DeviceStopStatus.FAILED, results["failed"].status)
+        self.assertEqual(
+            DeviceStopStatus.UNSUPPORTED,
+            results["unsupported"].status,
+        )
+        self.assertEqual(
+            DeviceStopStatus.NOT_READY,
+            results["not-ready"].status,
+        )
+        self.assertEqual([StopMode.QUICK], quick.stops)
+        self.assertEqual([StopMode.QUICK], failed.stops)
+
+    def test_controlled_stop_is_not_a_device_runtime_operation(self):
+        runtime = DeviceRuntime()
+        with self.assertRaises(ValueError):
+            runtime.stop_all(StopMode.CONTROLLED)
 
 
 class ExecutionManagerTests(unittest.TestCase):
@@ -196,6 +288,55 @@ class ApplicationServiceTests(unittest.TestCase):
         services.teleoperation.stop()
         final = services.execution.start([item], origin="test").wait(1)
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
+
+    def test_quick_stop_cancels_execution_and_stops_ready_robot(self):
+        services = create_application_services(object(), simulation=True)
+        robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
+        item = SequenceItem.from_definition(
+            ActionDefinition(
+                id="wait",
+                name="wait",
+                type=ActionType.WAIT,
+                parameters={"wait_seconds": 5},
+            )
+        )
+        services.execution.start([item], origin="test")
+
+        report = services.safety.stop(
+            StopMode.QUICK,
+            wait_timeout_seconds=1,
+        )
+
+        self.assertTrue(report.complete)
+        self.assertEqual(StopMode.QUICK, robot.last_stop_mode)
+        self.assertEqual(ExecutionState.CANCELLED, report.execution_after.state)
+        self.assertIsNone(services.resources.owner_of(ROBOT_SYSTEM))
+
+    def test_quick_stop_exposes_ready_unsupported_motion_device(self):
+        services = create_application_services(object(), simulation=True)
+        services.device_runtime.initialize(BODY_AXIS)
+
+        report = services.safety.stop(StopMode.QUICK)
+
+        body_result = next(
+            result
+            for result in report.devices
+            if result.device_id == BODY_AXIS
+        )
+        self.assertEqual(DeviceStopStatus.UNSUPPORTED, body_result.status)
+        self.assertFalse(report.complete)
+
+    def test_quick_stop_releases_teleoperation_session(self):
+        services = create_application_services(object(), simulation=True)
+        services.teleoperation.start()
+        robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
+
+        report = services.safety.stop(StopMode.QUICK)
+
+        self.assertTrue(report.complete)
+        self.assertFalse(services.teleoperation.active)
+        self.assertIsNone(services.resources.owner_of(ROBOT_SYSTEM))
+        self.assertEqual(StopMode.QUICK, robot.last_stop_mode)
 
 
 if __name__ == "__main__":

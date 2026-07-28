@@ -2,7 +2,7 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-27  
+> 最近更新：2026-07-28
 > 当前里程碑：M1/M2 — 核心 Runtime 已落地，入口迁移与硬件验收进行中  
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
@@ -43,13 +43,13 @@
 GUI / WebSocket / Voice / AI
               |
       ApplicationServices
-       /       |         \
-Execution  Device      Teleoperation
- Service   Service        Service
-    |         |              |
-ExecutionManager       ResourceArbiter
-    |                         |
-ActionEngine -------- DeviceRuntime
+       /       |         |          \
+Execution  Device   Teleoperation   Safety
+ Service   Service     Service       Service
+    |         |           |            |
+ExecutionManager    ResourceArbiter     |
+    |                         |         |
+ActionEngine -------- DeviceRuntime ----+
                               |
                   contracts / adapters / fakes
                               |
@@ -69,6 +69,8 @@ ActionEngine -------- DeviceRuntime
 - 已建立厂商无关的机械臂模型与能力接口，RealMan 仅在 adapter/driver 边界内出现。
 - GUI、执行引擎、视觉、重定位和数据采集均已切换到统一机械臂能力。
 - 轨迹示教和遥操作持有完整会话周期的机械臂资源租约。
+- 受控取消、软件快停和软件急停已由 `SafetyService` 统一编排；GUI 与 WebSocket
+  共用逐设备结果，当前 RealMan 停止链路待真实硬件验收。
 - 已删除无引用的 RealMan 直连动作脚本，不保留兼容转发。
 
 仍需继续收敛的重点：
@@ -246,7 +248,7 @@ ActionEngine -------- DeviceRuntime
 
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
-| B-001 | P0 | TODO | 定义 cancel、quick-stop、emergency-stop 能力矩阵 |
+| B-001 | P0 | DONE | 已定义 cancel、quick-stop、emergency-stop 语义、结果状态和逐设备能力矩阵；真实硬件验收由 ER-006 跟踪 |
 | B-002 | P0 | DOING | 序列、遥操作和直接控制增加资源互斥 |
 | B-003 | P0 | DONE | 设备关闭前取消执行并等待资源释放 |
 | B-004 | P1 | DONE | 建立 DeviceRuntime 和 DeviceSnapshot |
@@ -262,6 +264,7 @@ ActionEngine -------- DeviceRuntime
 | B-014 | P1 | DONE | RealMan adapter 接入统一运行时，业务层移除 `rm_*` 和原生控制器访问 |
 | B-015 | P1 | TODO | 接入第二种机械臂 adapter，并通过同一套硬件契约测试 |
 | B-016 | P1 | TODO | 将工具架点位和厂商/型号差异改为 provider 配置 |
+| B-017 | P1 | TODO | 定义继电器、快换手、移液枪等非连续运动输出的安全态和停机策略 |
 
 ### 7.4 完成标准
 
@@ -345,7 +348,7 @@ ActionEngine -------- DeviceRuntime
 |---|---|---|---|
 | D-001 | P0 | DONE | GUI 手工/AI 共用进程级执行互斥 |
 | D-002 | P1 | DONE | ExecutionBridge 已成为纯 Qt 事件 adapter |
-| D-003 | P1 | DONE | ExecutionBridge 不再创建 worker |
+| D-003 | P1 | DONE | ExecutionBridge 不再拥有序列 worker；安全停止仅用短生命周期 I/O 调度线程避免阻塞 Qt 主线程 |
 | D-004 | P1 | DONE | 关闭窗口通过 DeviceManagementService 有序 shutdown |
 | D-005 | P2 | TODO | 提取 TaskComposerService |
 | D-006 | P2 | TODO | 提取 DeviceViewModel/Service |
@@ -456,7 +459,7 @@ ActionEngine -------- DeviceRuntime
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
 | F-T-001 | P0 | DONE | 遥操作会话租约与序列执行互斥 |
-| F-T-002 | P0 | DOING | 断线释放租约已实现，硬件停止和心跳超时待实现 |
+| F-T-002 | P0 | DOING | 断线释放租约和 RealMan 软件快停/急停链路已实现；心跳超时、其他设备停止和硬件验收待完成 |
 | F-T-003 | P1 | DOING | 已建立 TeleoperationService，会话状态和所有者仍需增强 |
 | F-T-004 | P1 | TODO | 增加控制租约和心跳 |
 | F-T-005 | P1 | TODO | 增加消息频率、背压和丢帧策略 |
@@ -797,7 +800,7 @@ M4 工程治理与清理
 
 ### 安全与协议
 
-- [ ] cancel、quick-stop、emergency-stop 语义和能力明确。
+- [x] cancel、quick-stop、emergency-stop 语义和能力明确。
 - [ ] WebSocket 写操作有认证、权限和审计。
 - [ ] 多客户端有控制权和冲突策略。
 - [ ] 请求、执行、设备错误可通过 ID 关联。
@@ -846,11 +849,12 @@ M4 工程治理与清理
 | 2026-07-27 | M0 | A | 创建执行运行时专项计划 | TODO → DONE | 建立执行重构阶段、验收和回滚计划 | - |
 | 2026-07-27 | M1/M2 | A/B/D/F | 统一执行与设备运行时首轮落地 | TODO → DOING | ApplicationServices、ExecutionManager、DeviceRuntime、ResourceArbiter、TeleoperationService；GUI/AI/WS 直接切换并删除旧执行器 | - |
 | 2026-07-27 | M2 | B/D/F | 机械臂供应商边界收敛 | TODO → DONE | 建立核心/可选能力、RealMan adapter、统一状态与错误模型；迁移 GUI/执行/视觉/数据采集并删除直连脚本 | - |
+| 2026-07-28 | M2 | A/B/D/F | 统一安全停止软件链路 | B-001 TODO → DONE；ER-006 保持 DOING | 建立停止能力矩阵、逐设备结果与 SafetyService；RealMan 快停/急停接入 GUI/WS，真实硬件验收待完成 | - |
 
 ## 22. 建议的首批实施顺序
 
 1. **A-007/B-007**：拆分 ActionHandlerRegistry，并为阻塞硬件动作补齐超时与可取消点。
-2. **B-001/B-002**：完成 quick-stop/emergency-stop 能力矩阵和所有直接控制资源租约。
+2. **B-002/ER-006**：补齐所有直接控制资源租约，并完成 RealMan 及其他运动设备停止能力的真实硬件验收。
 3. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
 4. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。
 5. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。

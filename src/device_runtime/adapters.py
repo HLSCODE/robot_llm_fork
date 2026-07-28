@@ -4,6 +4,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from .arm_models import (
@@ -16,6 +17,7 @@ from .arm_models import (
     RobotOperationError,
     TrajectorySaveResult,
 )
+from .models import StopMode
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +58,41 @@ class RealManRobotAdapter:
         self._default_motion = default_motion
         self._gripper_options = gripper_options or RealManGripperOptions()
         self._eject_tool = eject_tool
+        self._stop_lock = RLock()
+
+    @property
+    def supported_stop_modes(self) -> frozenset[StopMode]:
+        return frozenset({StopMode.QUICK, StopMode.EMERGENCY})
+
+    def stop(self, mode: StopMode) -> None:
+        """Send an interrupting stop to both arms.
+
+        The per-arm SDK lock is intentionally bypassed: a blocking motion call
+        may currently own it, and a safety request must still reach the SDK.
+        """
+        methods = {
+            StopMode.QUICK: "rm_set_arm_slow_stop",
+            StopMode.EMERGENCY: "rm_set_arm_stop",
+        }
+        try:
+            method_name = methods[mode]
+        except KeyError as exc:
+            raise ValueError(f"unsupported robot stop mode: {mode}") from exc
+
+        errors: list[str] = []
+        with self._stop_lock:
+            for arm in ArmId:
+                try:
+                    _arm_controller, robot = self._arm_backend(arm)
+                    code = int(getattr(robot, method_name)())
+                    if code != 0:
+                        errors.append(f"{arm.value}: SDK code {code}")
+                except Exception as exc:
+                    errors.append(f"{arm.value}: {exc}")
+        if errors:
+            raise RuntimeError(
+                f"{mode.value} stop failed for " + "; ".join(errors)
+            )
 
     def move_to_pose(
         self,

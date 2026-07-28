@@ -1,7 +1,7 @@
 # 机械臂供应商适配架构
 
 > 状态：Active  
-> 最近更新：2026-07-27
+> 最近更新：2026-07-28
 
 ## 1. 目标
 
@@ -45,6 +45,7 @@ GUI / WebSocket / Vision / Data Collection
 - `RobotTeleoperation`
 - `TrajectoryControl`
 - `ToolRackControl`
+- `StoppableDevice`：只声明真实实现的 `quick`/`emergency` 模式
 
 上层用例按所需 Protocol 请求能力。新增供应商不支持某项可选能力时，不应返回伪成功，也不应实现空操作；运行时应明确报告能力缺失。
 
@@ -76,5 +77,8 @@ GUI / WebSocket / Vision / Data Collection
 - 当前只实现 RealMan provider；架构已可扩展，但“可替换性”仍需第二种真实机械臂验证。
 - RealMan driver 仍是较大的控制器类，后续应按连接、运动、轨迹和工具工作流拆分。
 - 工具架动作当前绑定右臂和既有点位，需按机械臂型号配置化。
-- quick-stop、emergency-stop、超时和恢复策略尚未形成跨供应商统一能力。
+- 已形成厂商无关的 quick-stop/emergency-stop 契约和逐设备结果；RealMan
+  adapter 已映射到双臂 SDK 停止命令，但真实硬件停机延迟、最终状态和恢复流程尚待验收。
+- 软件 emergency-stop 不能替代独立物理急停回路；当前 `stopped` 仅表示 SDK
+  调用成功返回，不表示控制器或机械臂已经完成物理停稳确认。
 - 真实设备回归尚需覆盖左右臂运动、夹爪、轨迹示教、轨迹下发、视觉抓取和关闭流程。

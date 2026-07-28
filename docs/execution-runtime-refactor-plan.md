@@ -2,7 +2,7 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-27  
+> 最近更新：2026-07-28
 > 当前阶段：核心运行时和主要入口已直接切换，进入安全能力、handler 拆分与硬件验收  
 > 上级计划：[Robot LLM 项目重构总计划](project-refactor-master-plan.md)
 
@@ -30,12 +30,12 @@
                        GUI / WebSocket / Voice / AI
                                     |
                            ApplicationServices
-                   +----------------+----------------+
-                   |                |                |
-           ExecutionService  DeviceManagement  Manual/Teleop
-                   |            Service           Service
-                   |                |                |
-           ExecutionManager        DeviceRuntime    |
+                   +----------------+----------------+----------------+
+                   |                |                |                |
+           ExecutionService  DeviceManagement  Manual/Teleop   SafetyService
+                   |            Service           Service            |
+                   |                |                |                |
+           ExecutionManager        DeviceRuntime --------------------+
             state/run/event          state/lifecycle |
                    |                |                |
               ActionEngine ---------+-------- ResourceArbiter
@@ -56,11 +56,12 @@
 | `TeleoperationService` | 遥操作会话和机械臂资源租约 | 已落地 |
 | `RobotQueryService` | 厂商无关的机械臂状态读取 | 已落地 |
 | `TrajectoryTeachingService` | 拖动示教会话及资源租约 | 已落地 |
+| `SafetyService` | 编排受控取消、软件快停/急停、会话释放和逐设备结果 | 软件链路已落地，待真实硬件验收 |
 | `src/execution/models.py` | 状态、事件、快照、结果、错误 | 已落地 |
 | `ExecutionManager` | 唯一 worker、run_id、终态和事件 | 已落地 |
 | `ActionEngine` | 当前唯一 ActionType 执行分发 | 已落地，待拆 handler |
 | `src/device_runtime/contracts.py` | 设备能力协议 | 已落地 |
-| `DeviceRuntime` | 注册、初始化、查询、重连和关闭 | 已落地 |
+| `DeviceRuntime` | 注册、初始化、查询、停止、重连和关闭 | 已落地 |
 | `ResourceArbiter` | 非阻塞独占资源租约 | 已落地 |
 | `src/device_runtime/adapters.py` | RealMan、继电器、快换手、移液枪协议适配 | 已落地 |
 | `src/device_runtime/fakes.py` | 无硬件 simulation | 已落地 |
@@ -89,7 +90,8 @@
 | GUI AI/语音序列 | 与手工序列共享 manager 和最终事件 | preview/command 状态模型 |
 | WebSocket execute/task/AI | 通过 `ExecutionService` 提交 | request_id/run_id 协议补强 |
 | WebSocket status/init/disconnect | 通过应用服务和 runtime | typed DTO、错误码 |
-| 遥操作 | 持有会话级机械臂资源租约 | 心跳、所有者、硬件停止 |
+| GUI/WebSocket quick-stop/emergency-stop | 通过 `SafetyService`，返回逐设备结果 | RealMan 真实硬件验收、其他运动设备能力补齐 |
+| 遥操作 | 持有会话级机械臂资源租约，软件停止后统一释放 | 心跳、所有者、超时自动停止 |
 | 相机测试/语音视觉/视觉动作 | 使用 runtime-owned camera | 预览 session 和细粒度租约 |
 
 ### 2.4 已删除内容
@@ -134,9 +136,25 @@ IDLE
 |---|---|---|
 | pause/resume | 已实现 | 在引擎安全检查点暂停和恢复 |
 | cancel | 已实现 | 协作式任务取消，不冒充硬件急停 |
-| quick-stop | 未完成 | 调用设备支持的快速停止能力 |
-| emergency-stop | 未完成 | 只暴露经过硬件验证的急停能力 |
+| quick-stop | 软件链路已实现，待硬件验收 | 绕过资源租约，向声明该能力的已就绪运动设备发送快停 |
+| emergency-stop | 软件链路已实现，待硬件验收 | 向声明该能力的已就绪运动设备发送软件急停；不替代物理急停回路 |
 | shutdown | 已实现基础流程 | 取消、等待、释放租约、关闭设备 |
+
+当前设备停止能力矩阵：
+
+| 设备 | quick-stop | emergency-stop | 当前结论 |
+|---|---|---|---|
+| RealMan 双臂机械臂 | 已接入 `rm_set_arm_slow_stop` | 已接入 `rm_set_arm_stop` | adapter、ApplicationService、GUI、WebSocket 和 simulation 测试已完成；真实双臂仍需限速验收 |
+| 身体升降轴 | 不支持 | 不支持 | 现有底层急停会吞掉异常并重新使能，未达到统一停止契约要求 |
+| 移动底盘 | 不支持 | 不支持 | 当前协议未提供经过确认的停止命令，阻塞 TCP 也缺少完整超时 |
+| 颈部舵机 | 不支持 | 不支持 | 当前驱动没有统一停止原语 |
+| 加粉装置 | 不支持 | 不支持 | 只有升降/旋转局部停止，不能保证整个设备停止 |
+
+结果状态统一为 `stopped`、`not_ready`、`unsupported`、`failed`。其中
+`stopped` 只表示 adapter/SDK 调用成功返回，不代表已经完成真实硬件停稳确认；
+`not_ready` 表示运行时没有持有可执行命令的就绪实例。
+本矩阵当前覆盖连续运动设备；继电器、快换手、移液枪等离散输出的断电安全态和
+停机策略由总计划 `B-017` 单独跟踪，不能直接套用“停止运动”语义。
 
 ## 4. 优先级与工作项
 
@@ -169,11 +187,11 @@ IDLE
 
 ### Phase A：安全停止和硬件能力
 
-1. 为 `RobotSystem`、`BodyAxis`、`MobileBase`、`PowderDispenser` 定义 quick-stop 支持。
-2. 区分“不支持”“请求成功”“设备确认停止”。
-3. 为每个阻塞 ActionEngine 路径增加超时和 cooperative cancel。
-4. 在真实设备上验证 cancel、quick-stop、emergency-stop。
-5. 将设备错误关联到 `device_id`、operation 和 `run_id`。
+1. 已定义运动设备的 quick-stop/emergency-stop 能力声明和显式能力矩阵。
+2. 已区分 `not_ready`、`unsupported`、`stopped`、`failed`；不把 SDK 成功返回表述为设备停稳确认。
+3. 待为每个阻塞 ActionEngine 路径增加超时和 cooperative cancel。
+4. 待在真实设备上验证 cancel、quick-stop、emergency-stop。
+5. 待将设备错误进一步关联到 operation 和 `run_id`；当前报告已包含 `device_id`。
 
 完成标准：
 
@@ -239,6 +257,9 @@ git diff --check
 - worker 结束后资源释放。
 - simulation ActionEngine 执行。
 - teleop session 阻止 sequence。
+- quick-stop 取消 active execution、释放 teleop lease 并调用 ready robot。
+- DeviceRuntime 对停止成功、未就绪、不支持和失败逐项报告，单设备失败不阻断其他设备。
+- RealMan adapter 停止双臂且不等待被阻塞运动持有的普通 SDK 锁。
 - presentation/transport/execution 层不得导入具体硬件。
 
 下一批测试：
@@ -305,3 +326,4 @@ git diff --check
 | 2026-07-27 | 入口迁移 | TODO → DOING | GUI、AI、WebSocket、voice 和 teleop 直接切换 |
 | 2026-07-27 | legacy 清理 | TODO → DONE | 删除两套旧执行器及无引用旧硬件入口 |
 | 2026-07-27 | 机械臂能力收敛 | DOING → DONE | RealMan 进入 adapter 边界；GUI、视觉、示教、轨迹和数据采集切换到厂商无关接口 |
+| 2026-07-28 | 安全停止软件链路 | TODO → DOING | 新增统一停止契约、设备能力矩阵和 SafetyService；RealMan 双臂快停/急停接入 GUI 与 WebSocket，真实硬件验收仍待完成 |
