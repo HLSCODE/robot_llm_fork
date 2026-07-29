@@ -43,6 +43,49 @@ class RealManGripperOptions:
             raise ValueError("max_attempts must be positive")
 
 
+@dataclass(frozen=True, slots=True)
+class RealManToolRackSlot:
+    slot_id: int
+    approach_pose: CartesianPose
+    attach_pose: CartesianPose
+    detach_pose: CartesianPose
+    attach_dwell_seconds: float = 0.5
+    detach_dwell_seconds: float = 0.5
+
+    def __post_init__(self) -> None:
+        if self.slot_id <= 0:
+            raise ValueError("tool rack slot_id must be positive")
+        if self.attach_dwell_seconds < 0:
+            raise ValueError(
+                "tool rack attach_dwell_seconds must not be negative"
+            )
+        if self.detach_dwell_seconds < 0:
+            raise ValueError(
+                "tool rack detach_dwell_seconds must not be negative"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class RealManToolRackOptions:
+    arm: ArmId
+    slots: tuple[RealManToolRackSlot, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.arm, ArmId):
+            raise TypeError("tool rack arm must be an ArmId")
+        if not self.slots:
+            raise ValueError("at least one tool rack slot is required")
+        slot_ids = tuple(slot.slot_id for slot in self.slots)
+        if len(set(slot_ids)) != len(slot_ids):
+            raise ValueError("tool rack slot ids must be unique")
+
+    def require_slot(self, slot_id: int) -> RealManToolRackSlot:
+        for slot in self.slots:
+            if slot.slot_id == slot_id:
+                return slot
+        raise ValueError(f"unsupported tool slot: {slot_id}")
+
+
 class RealManRobotAdapter:
     """Translate the RealMan SDK/controller shape into project capabilities."""
 
@@ -51,12 +94,14 @@ class RealManRobotAdapter:
         controller: Any,
         *,
         default_motion: MotionOptions,
+        tool_rack_options: RealManToolRackOptions,
         gripper_options: RealManGripperOptions | None = None,
         eject_tool: Callable[[], bool] | None = None,
     ) -> None:
         self._controller = controller
         self._default_motion = default_motion
         self._gripper_options = gripper_options or RealManGripperOptions()
+        self._tool_rack_options = tool_rack_options
         self._eject_tool = eject_tool
         self._stop_lock = RLock()
 
@@ -258,31 +303,54 @@ class RealManRobotAdapter:
         )
 
     def change_tool(self, slot: int, *, attach: bool) -> None:
-        methods = {
-            (1, True): self._controller.pick_gun1,
-            (2, True): self._controller.pick_gun2,
-            (1, False): self._controller.drop_gun1,
-            (2, False): self._controller.drop_gun2,
-        }
-        try:
-            method = methods[(slot, attach)]
-        except KeyError as exc:
-            raise ValueError(f"unsupported tool slot: {slot}") from exc
-        arm_controller, _robot = self._arm_backend(ArmId.RIGHT)
+        options = self._tool_rack_options
+        slot_config = options.require_slot(slot)
+        arm_controller, robot = self._arm_backend(options.arm)
         with arm_controller.sdk_lock:
+            self._move_tool_rack_pose(
+                robot,
+                options.arm,
+                slot_config.approach_pose,
+            )
             if attach:
-                success = method()
+                self._move_tool_rack_pose(
+                    robot,
+                    options.arm,
+                    slot_config.attach_pose,
+                )
+                time.sleep(slot_config.attach_dwell_seconds)
             else:
+                self._move_tool_rack_pose(
+                    robot,
+                    options.arm,
+                    slot_config.detach_pose,
+                )
                 if self._eject_tool is None:
                     raise RobotOperationError(
                         "detach_tool",
-                        ArmId.RIGHT,
+                        options.arm,
                         detail="tool ejector is not configured",
                     )
-                success = method(self._eject_tool)
-        if not success:
-            operation = "attach_tool" if attach else "detach_tool"
-            raise RobotOperationError(operation, ArmId.RIGHT)
+                try:
+                    ejected = bool(self._eject_tool())
+                except Exception as exc:
+                    raise RobotOperationError(
+                        "detach_tool",
+                        options.arm,
+                        detail=f"tool ejector failed: {exc}",
+                    ) from exc
+                if not ejected:
+                    raise RobotOperationError(
+                        "detach_tool",
+                        options.arm,
+                        detail="tool ejector reported failure",
+                    )
+                time.sleep(slot_config.detach_dwell_seconds)
+            self._move_tool_rack_pose(
+                robot,
+                options.arm,
+                slot_config.approach_pose,
+            )
 
     def close(self) -> None:
         self._controller.shutdown()
@@ -320,6 +388,22 @@ class RealManRobotAdapter:
             if attempt + 1 < self._gripper_options.max_attempts:
                 time.sleep(1)
         raise RobotOperationError(operation, arm, code=last_code)
+
+    def _move_tool_rack_pose(
+        self,
+        robot: Any,
+        arm: ArmId,
+        pose: CartesianPose,
+    ) -> None:
+        options = self._default_motion
+        code = robot.rm_movel(
+            pose.to_list(),
+            v=options.velocity_percent,
+            r=options.blend_radius,
+            connect=int(options.connected),
+            block=int(options.blocking),
+        )
+        self._ensure_success("tool_rack.move", arm, code)
 
     @staticmethod
     def _state_from_response(

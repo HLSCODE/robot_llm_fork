@@ -142,17 +142,28 @@ class Config:
     VISION_RELOCALIZATION_DEBUG_DIR: str = "data/vision_stations/debug"
     
     # 机械臂配置
-    ROBOT1_IP: str = "192.168.3.19"
+    ROBOT1_IP: str = "192.168.3.18"
     ROBOT1_PORT: int = 8080
     ROBOT1_INITIAL_POSE: list = None
-    ROBOT2_IP: str = "192.168.3.18"
+    ROBOT2_IP: str = "192.168.3.19"
     ROBOT2_PORT: int = 8080
     ROBOT2_INITIAL_POSE: list = None
     ROBOT_PROVIDER: str = "realman"
+    ROBOT_MODEL: str = "rm75-dual"
+    ROBOT_TOOL_RACK_ARM: str = "right"
+    ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_1_ATTACH_DWELL_SECONDS: float = 0.5
+    ROBOT_TOOL_RACK_SLOT_1_DETACH_DWELL_SECONDS: float = 1.0
+    ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_2_ATTACH_DWELL_SECONDS: float = 0.5
+    ROBOT_TOOL_RACK_SLOT_2_DETACH_DWELL_SECONDS: float = 0.5
     MOVE_CONTROLLER_HOST: str = "192.168.1.216"
     MOVE_CONTROLLER_PORT: int = 12345
     MOVE_CONTROLLER_CLIENT_BIND_PORT: int = None
-    MOVE_SPEED: int = 10
     MOVE_VELOCITY: int = 10
     MOVE_RADIUS: int = 0
     MOVE_CONNECT: int = 0
@@ -266,8 +277,6 @@ class Config:
     PLACE_ABOVE: list = None
     PLACE_POS2: list = None
     PLACE_TRANSFER_POSE: list = None
-    GUN1_POSITIONS: dict = None
-    GUN2_POSITIONS: dict = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -548,17 +557,84 @@ class Config:
             "ROBOT_PROVIDER",
             "realman",
         ).strip().lower()
-        instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.19")
+        instance.ROBOT_MODEL = os.getenv(
+            "ROBOT_MODEL",
+            "rm75-dual",
+        ).strip()
+        instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.18")
         instance.ROBOT1_PORT = int(os.getenv("ROBOT1_PORT", "8080"))
         instance.ROBOT1_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT1_INITIAL_POSE", "-0.04844,-0.269769,-0.101888,3.109,-0.094,-1.592"))
-        instance.ROBOT2_IP = os.getenv("ROBOT2_IP", "192.168.3.18")
+        instance.ROBOT2_IP = os.getenv("ROBOT2_IP", "192.168.3.19")
         instance.ROBOT2_PORT = int(os.getenv("ROBOT2_PORT", "8080"))
         instance.ROBOT2_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT2_INITIAL_POSE", "-0.053437,0.24741,-0.120801,3.114,-0.032,-2.935"))
+        instance.ROBOT_TOOL_RACK_ARM = os.getenv(
+            "ROBOT_TOOL_RACK_ARM",
+            "right",
+        ).strip()
+        instance.ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE = (
+            cls._parse_float_list(os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE",
+                "-0.119418,-0.088287,-0.380201,3.110000,0.001000,-2.893000",
+            ))
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE = (
+            cls._parse_float_list(os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE",
+                "-0.119418,-0.088287,-0.480201,3.110000,0.001000,-2.893000",
+            ))
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE = (
+            cls._parse_float_list(os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE",
+                "-0.119418,-0.088287,-0.455201,3.110000,0.001000,-2.893000",
+            ))
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_1_ATTACH_DWELL_SECONDS = float(
+            os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_1_ATTACH_DWELL_SECONDS",
+                "0.5",
+            )
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_1_DETACH_DWELL_SECONDS = float(
+            os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_1_DETACH_DWELL_SECONDS",
+                "1.0",
+            )
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE = (
+            cls._parse_float_list(os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE",
+                "-0.117419,-0.066539,-0.380577,3.135000,-0.009000,-2.869000",
+            ))
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE = (
+            cls._parse_float_list(os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE",
+                "-0.117419,-0.066539,-0.480577,3.135000,-0.009000,-2.869000",
+            ))
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE = (
+            cls._parse_float_list(os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE",
+                "-0.117419,-0.066539,-0.465577,3.135000,-0.009000,-2.869000",
+            ))
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_2_ATTACH_DWELL_SECONDS = float(
+            os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_2_ATTACH_DWELL_SECONDS",
+                "0.5",
+            )
+        )
+        instance.ROBOT_TOOL_RACK_SLOT_2_DETACH_DWELL_SECONDS = float(
+            os.getenv(
+                "ROBOT_TOOL_RACK_SLOT_2_DETACH_DWELL_SECONDS",
+                "0.5",
+            )
+        )
         instance.MOVE_CONTROLLER_HOST = os.getenv("MOVE_CONTROLLER_HOST", "192.168.1.216")
         instance.MOVE_CONTROLLER_PORT = int(os.getenv("MOVE_CONTROLLER_PORT", "12345"))
         move_client_bind_port = os.getenv("MOVE_CONTROLLER_CLIENT_BIND_PORT")
         instance.MOVE_CONTROLLER_CLIENT_BIND_PORT = int(move_client_bind_port) if move_client_bind_port else None
-        instance.MOVE_SPEED = int(os.getenv("MOVE_SPEED", "10"))
         instance.MOVE_VELOCITY = int(os.getenv("MOVE_VELOCITY", "10"))
         instance.MOVE_RADIUS = int(os.getenv("MOVE_RADIUS", "0"))
         instance.MOVE_CONNECT = int(os.getenv("MOVE_CONNECT", "0"))
@@ -717,18 +793,6 @@ class Config:
             )
         )
 
-        # 枪头更换位置配置
-        instance.GUN1_POSITIONS = {
-            "1shang": cls._parse_float_list(os.getenv("GUN1_1SHANG", "")),
-            "1xia":   cls._parse_float_list(os.getenv("GUN1_1XIA", "")),
-            "1zhong": cls._parse_float_list(os.getenv("GUN1_1ZHONG", "")),
-        }
-        instance.GUN2_POSITIONS = {
-            "2shang": cls._parse_float_list(os.getenv("GUN2_2SHANG", "")),
-            "2xia":   cls._parse_float_list(os.getenv("GUN2_2XIA", "")),
-            "2zhong": cls._parse_float_list(os.getenv("GUN2_2ZHONG", "")),
-        }
-
         cls._loaded = True
         return instance
 
@@ -815,36 +879,6 @@ class Config:
 
 
     @classmethod
-    def get_robot1_config(cls) -> dict:
-        """获取 Robot1 配置"""
-        instance = cls.get_instance()
-        return {
-            "ip": instance.ROBOT1_IP,
-            "port": instance.ROBOT1_PORT,
-            "initial_pose": instance.ROBOT1_INITIAL_POSE
-        }
-
-    @classmethod
-    def get_robot2_config(cls) -> dict:
-        """获取 Robot2 配置"""
-        instance = cls.get_instance()
-        return {
-            "ip": instance.ROBOT2_IP,
-            "port": instance.ROBOT2_PORT,
-            "initial_pose": instance.ROBOT2_INITIAL_POSE
-        }
-
-    @classmethod
-    def get_move_config(cls) -> dict:
-        """获取机械臂移动配置"""
-        instance = cls.get_instance()
-        return {
-            "velocity": instance.MOVE_VELOCITY,
-            "radius": instance.MOVE_RADIUS,
-            "connect": instance.MOVE_CONNECT,
-            "block": instance.MOVE_BLOCK
-        }
-
     @classmethod
     def get_move_controller_config(cls) -> dict:
         """获取移动控制器TCP连接配置"""
@@ -856,21 +890,6 @@ class Config:
         }
 
     @classmethod
-    def get_gripper_config(cls) -> dict:
-        """获取夹爪配置"""
-        instance = cls.get_instance()
-        return {
-            "pick": {
-                "speed": instance.GRIPPER_PICK_SPEED,
-                "force": instance.GRIPPER_PICK_FORCE,
-                "timeout": instance.GRIPPER_PICK_TIMEOUT
-            },
-            "release": {
-                "speed": instance.GRIPPER_RELEASE_SPEED,
-                "timeout": instance.GRIPPER_RELEASE_TIMEOUT
-            }
-        }
-
     @classmethod
     def get_body_motor_config(cls) -> dict:
         """获取身体控制器（ModbusMotor）配置"""

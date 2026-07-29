@@ -71,6 +71,10 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   纯软件动作可与相机预览并行，视觉动作会与其他相机会话显式互斥。
 - 已删除无引用的 legacy GUI、旧底盘控制器和独立 ADP 控制脚本。
 - 已建立厂商无关的机械臂模型与能力接口，RealMan 仅在 adapter/driver 边界内出现。
+- 已建立机械臂 Provider 注册表、强类型 RealMan 配置和可复用核心契约测试；
+  未知 Provider 在运行时组装阶段直接失败，不会隐式回退。
+- 工具架工作流已从 `RobotController` 收敛到 RealMan adapter；使用的机械臂、
+  槽位位姿和停留时间均由 Provider 配置决定，旧枪头配置键已直接删除。
 - GUI、执行引擎、视觉、重定位和数据采集均已切换到统一机械臂能力。
 - 轨迹示教和遥操作持有完整会话周期的机械臂资源租约。
 - 受控取消、软件快停和软件急停已由 `SafetyService` 统一编排；GUI 与 WebSocket
@@ -278,8 +282,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | B-012 | P3 | TODO | 清理未使用的设备封装和实验脚本 |
 | B-013 | P0 | DONE | 定义厂商无关的机械臂运动、状态、夹爪及可选能力协议 |
 | B-014 | P1 | DONE | RealMan adapter 接入统一运行时，业务层移除 `rm_*` 和原生控制器访问 |
-| B-015 | P1 | TODO | 接入第二种机械臂 adapter，并通过同一套硬件契约测试 |
-| B-016 | P1 | TODO | 将工具架点位和厂商/型号差异改为 provider 配置 |
+| B-015 | P1 | DOING | Provider 注册表和可复用核心契约测试已落地；待明确并接入第二种真实机械臂 adapter，执行软硬件契约验收 |
+| B-016 | P1 | DONE | RealMan 型号、双臂连接、运动/夹爪参数、工具架臂/槽位位姿/停留时间已进入强类型 Provider 配置；删除 controller 硬编码工作流和旧配置入口 |
 | B-017 | P1 | TODO | 定义继电器、快换手、移液枪等非连续运动输出的安全态和停机策略 |
 
 ### 7.4 完成标准
@@ -877,11 +881,13 @@ M4 工程治理与清理
 | 2026-07-29 | M2 | A/B/C | 结构化 handler result | A-007 DOING → DONE | 全部 handler 直接切换为 ActionHandlerResult，不保留 bool 兼容；稳定 code、message、operation、device_id 贯通运行时快照和事件，并由 WebSocket 状态/步骤失败协议输出 | - |
 | 2026-07-29 | M2 | A/B/C | 动作控制策略矩阵 | B-007/ER-011 保持 DOING | 注册表绑定 handler 与不可变控制策略；全部动作参数分支声明取消模式、涉及设备和停止目标，执行前拒绝能力矛盾，并通过 step_started/WebSocket 输出；RealMan 最大停止延迟待硬件验收 | - |
 | 2026-07-29 | M2/M3 | A/B/F | 资源所有权与相机会话收敛 | B-002/F-V-001/F-V-002 DOING/TODO → DONE | 序列按动作策略申请精确设备租约；设备生命周期纳入仲裁；GUI/WS 相机测试、语音视觉、WebSocket 预览和数据采集统一使用 CameraAccessService/CameraSession，采集先取得遥操作租约再启动记录 | - |
+| 2026-07-29 | M2 | B | 机械臂 Provider 与工具架配置收敛 | B-015 TODO → DOING；B-016 TODO → DONE | 建立 Provider 注册表和共享核心契约测试；RealMan 连接、型号、运动/夹爪及工具架参数强类型化，换枪工作流移入 adapter，删除 controller 旧方法与 `arm_sdk/config.py` | - |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-2. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
+2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
+   adapter，并运行同一套核心契约测试和真实硬件验收。
 3. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。
 4. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。
 5. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。

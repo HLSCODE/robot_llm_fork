@@ -5,12 +5,14 @@ import tempfile
 import unittest
 from pathlib import Path
 from threading import RLock
+from types import SimpleNamespace
 
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.device_runtime import (
     ArmId,
     CartesianPose,
+    DeviceCapability,
     DeviceInitializationError,
     JointVector,
     MotionMode,
@@ -20,9 +22,18 @@ from src.device_runtime import (
     RobotSystem,
     StopMode,
 )
-from src.device_runtime.adapters import RealManRobotAdapter
+from src.device_runtime.adapters import (
+    RealManRobotAdapter,
+    RealManToolRackOptions,
+    RealManToolRackSlot,
+)
 from src.device_runtime.factory import create_device_runtime
+from src.device_runtime.fakes import SimulatedRobotSystem
 from src.device_runtime.ids import ROBOT_SYSTEM
+from src.device_runtime.robot_providers import (
+    RealManProviderSettings,
+    resolve_robot_provider,
+)
 from src.execution import ExecutionState
 
 
@@ -122,18 +133,6 @@ class _FakeRealManController:
     def demo_get_program_run_state(self, *_args, **_kwargs):
         return True
 
-    def pick_gun1(self):
-        return True
-
-    def pick_gun2(self):
-        return True
-
-    def drop_gun1(self, eject_tip):
-        return eject_tip()
-
-    def drop_gun2(self, eject_tip):
-        return eject_tip()
-
     def shutdown(self):
         self.closed = True
 
@@ -144,6 +143,78 @@ class _FailIfEnteredLock:
 
     def __exit__(self, *_args):
         return False
+
+
+def _pose(seed: float) -> CartesianPose:
+    return CartesianPose.from_iterable(
+        (seed, seed + 1, seed + 2, seed + 3, seed + 4, seed + 5)
+    )
+
+
+def _tool_rack_options(
+    arm: ArmId = ArmId.RIGHT,
+) -> RealManToolRackOptions:
+    return RealManToolRackOptions(
+        arm=arm,
+        slots=(
+            RealManToolRackSlot(
+                slot_id=1,
+                approach_pose=_pose(10),
+                attach_pose=_pose(20),
+                detach_pose=_pose(30),
+                attach_dwell_seconds=0,
+                detach_dwell_seconds=0,
+            ),
+            RealManToolRackSlot(
+                slot_id=2,
+                approach_pose=_pose(40),
+                attach_pose=_pose(50),
+                detach_pose=_pose(60),
+                attach_dwell_seconds=0,
+                detach_dwell_seconds=0,
+            ),
+        ),
+    )
+
+
+def _provider_config(**overrides: object) -> SimpleNamespace:
+    values: dict[str, object] = {
+        "ROBOT_PROVIDER": "realman",
+        "ROBOT_MODEL": "rm75-dual",
+        "ROBOT1_IP": "192.0.2.1",
+        "ROBOT1_PORT": 8080,
+        "ROBOT1_INITIAL_POSE": _pose(1).to_list(),
+        "ROBOT2_IP": "192.0.2.2",
+        "ROBOT2_PORT": 8080,
+        "ROBOT2_INITIAL_POSE": _pose(2).to_list(),
+        "MOVE_VELOCITY": 20,
+        "MOVE_RADIUS": 0,
+        "MOVE_CONNECT": "0",
+        "MOVE_BLOCK": "true",
+        "GRIPPER_PICK_SPEED": 200,
+        "GRIPPER_PICK_FORCE": 1000,
+        "GRIPPER_PICK_TIMEOUT": 3,
+        "GRIPPER_RELEASE_SPEED": 100,
+        "GRIPPER_RELEASE_TIMEOUT": 3,
+        "MAX_ATTEMPTS": 5,
+        "ROBOT_TOOL_RACK_ARM": "right",
+    }
+    for slot_id in (1, 2):
+        values.update({
+            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_APPROACH_POSE": (
+                _pose(slot_id * 10).to_list()
+            ),
+            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_ATTACH_POSE": (
+                _pose(slot_id * 10 + 1).to_list()
+            ),
+            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_DETACH_POSE": (
+                _pose(slot_id * 10 + 2).to_list()
+            ),
+            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_ATTACH_DWELL_SECONDS": 0,
+            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_DETACH_DWELL_SECONDS": 0,
+        })
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 class RobotModelTests(unittest.TestCase):
@@ -176,6 +247,7 @@ class RealManRobotAdapterTests(unittest.TestCase):
         self.adapter = RealManRobotAdapter(
             self.controller,
             default_motion=MotionOptions(velocity_percent=20),
+            tool_rack_options=_tool_rack_options(),
             eject_tool=lambda: True,
         )
 
@@ -223,6 +295,55 @@ class RealManRobotAdapterTests(unittest.TestCase):
             self.controller.robot2_ctrl.robot.calls[-1][0],
         )
         self.adapter.change_tool(1, attach=False)
+        tool_calls = self.controller.robot2_ctrl.robot.calls[-3:]
+        self.assertEqual(
+            ["movel", "movel", "movel"],
+            [call[0] for call in tool_calls],
+        )
+        self.assertEqual(_pose(10).to_list(), tool_calls[0][1])
+        self.assertEqual(_pose(30).to_list(), tool_calls[1][1])
+        self.assertEqual(_pose(10).to_list(), tool_calls[2][1])
+
+    def test_tool_rack_uses_configured_arm_and_slot_poses(self):
+        adapter = RealManRobotAdapter(
+            self.controller,
+            default_motion=MotionOptions(
+                velocity_percent=25,
+                blend_radius=3,
+                connected=True,
+                blocking=False,
+            ),
+            tool_rack_options=_tool_rack_options(ArmId.LEFT),
+            eject_tool=lambda: True,
+        )
+
+        adapter.change_tool(2, attach=True)
+
+        calls = self.controller.robot1_ctrl.robot.calls
+        self.assertEqual(
+            [_pose(40).to_list(), _pose(50).to_list(), _pose(40).to_list()],
+            [call[1] for call in calls],
+        )
+        self.assertTrue(all(call[0] == "movel" for call in calls))
+        self.assertTrue(all(
+            call[2] == {"v": 25, "r": 3, "connect": 1, "block": 0}
+            for call in calls
+        ))
+        self.assertEqual([], self.controller.robot2_ctrl.robot.calls)
+
+    def test_tool_detach_reports_ejector_failure(self):
+        adapter = RealManRobotAdapter(
+            self.controller,
+            default_motion=MotionOptions(),
+            tool_rack_options=_tool_rack_options(),
+            eject_tool=lambda: False,
+        )
+
+        with self.assertRaisesRegex(
+            RobotOperationError,
+            "tool ejector reported failure",
+        ):
+            adapter.change_tool(1, attach=False)
 
     def test_adapter_normalizes_errors_and_trajectory_results(self):
         self.controller.robot1_ctrl.robot.state_code = 7
@@ -267,12 +388,81 @@ class RealManRobotAdapterTests(unittest.TestCase):
 class RobotProviderTests(unittest.TestCase):
     def test_unknown_provider_fails_explicitly(self):
         config = type("Config", (), {"ROBOT_PROVIDER": "unknown"})()
-        runtime = create_device_runtime(config, simulation=False)
         with self.assertRaisesRegex(
             DeviceInitializationError,
             "unsupported robot provider",
         ):
-            runtime.initialize(ROBOT_SYSTEM)
+            create_device_runtime(config, simulation=False)
+
+    def test_realman_provider_declares_core_and_optional_capabilities(self):
+        provider = resolve_robot_provider(_provider_config())
+
+        self.assertEqual("realman", provider.name)
+        self.assertTrue({
+            DeviceCapability.MOTION,
+            DeviceCapability.ARM_MOTION,
+            DeviceCapability.ARM_STATE,
+            DeviceCapability.GRIPPER,
+            DeviceCapability.TOOL_RACK,
+        }.issubset(provider.capabilities))
+
+    def test_realman_settings_validate_model_specific_configuration(self):
+        settings = RealManProviderSettings.from_config(_provider_config())
+
+        self.assertFalse(settings.motion.connected)
+        self.assertTrue(settings.motion.blocking)
+        self.assertEqual(ArmId.RIGHT, settings.tool_rack.arm)
+        self.assertEqual(2, len(settings.tool_rack.slots))
+
+        with self.assertRaisesRegex(
+            DeviceInitializationError,
+            "MOVE_CONNECT must be a boolean",
+        ):
+            RealManProviderSettings.from_config(
+                _provider_config(MOVE_CONNECT="sometimes")
+            )
+
+        with self.assertRaisesRegex(
+            DeviceInitializationError,
+            "cartesian pose requires 6 values",
+        ):
+            RealManProviderSettings.from_config(
+                _provider_config(ROBOT1_INITIAL_POSE=[1, 2])
+            )
+
+
+class RobotProviderContractTests(unittest.TestCase):
+    def test_core_contract_is_shared_by_realman_and_simulation(self):
+        controller = _FakeRealManController()
+        implementations: tuple[RobotSystem, ...] = (
+            RealManRobotAdapter(
+                controller,
+                default_motion=MotionOptions(),
+                tool_rack_options=_tool_rack_options(),
+                eject_tool=lambda: True,
+            ),
+            SimulatedRobotSystem(),
+        )
+
+        for robot in implementations:
+            with self.subTest(provider=type(robot).__name__):
+                self._assert_core_contract(robot)
+            robot.close()
+
+    def _assert_core_contract(self, robot: RobotSystem) -> None:
+        self.assertIsInstance(robot, RobotSystem)
+        target = _pose(70)
+        for arm in ArmId:
+            robot.move_to_pose(
+                arm,
+                target,
+                MotionMode.LINEAR,
+                MotionOptions(velocity_percent=15),
+            )
+            self.assertEqual(arm, robot.read_arm_state(arm).arm)
+            robot.open_gripper(arm)
+            robot.close_gripper(arm)
+            robot.move_gripper(arm, 500)
 
 
 class RobotApplicationServiceTests(unittest.TestCase):

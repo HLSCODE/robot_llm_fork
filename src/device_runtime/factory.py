@@ -5,12 +5,9 @@ from typing import Any
 
 from .adapters import (
     PipetteAdapter,
-    RealManGripperOptions,
-    RealManRobotAdapter,
     RelayBankAdapter,
     ToolChangerAdapter,
 )
-from .arm_models import ArmId, MotionOptions
 from .fakes import (
     SimulatedBodyAxis,
     SimulatedCamera,
@@ -36,6 +33,7 @@ from .ids import (
     TOOL_CHANGER,
 )
 from .models import DeviceCapability, DeviceInitializationError
+from .robot_providers import resolve_robot_provider
 from .runtime import DeviceRegistration, DeviceRuntime
 
 
@@ -130,21 +128,12 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
 
 
 def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
+    robot_provider = resolve_robot_provider(config)
     runtime.register(
         _registration(
             ROBOT_SYSTEM,
-            {
-                DeviceCapability.MOTION,
-                DeviceCapability.QUICK_STOP,
-                DeviceCapability.EMERGENCY_STOP,
-                DeviceCapability.ARM_MOTION,
-                DeviceCapability.ARM_STATE,
-                DeviceCapability.GRIPPER,
-                DeviceCapability.ROBOT_TELEOPERATION,
-                DeviceCapability.TRAJECTORY,
-                DeviceCapability.TOOL_RACK,
-            },
-            lambda: _robot_factory(config),
+            set(robot_provider.capabilities),
+            lambda: robot_provider.create(config),
         )
     )
     runtime.register(
@@ -214,55 +203,6 @@ def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
             _expression_display_factory,
         )
     )
-
-
-def _robot_factory(config: Any) -> RealManRobotAdapter:
-    provider = str(getattr(config, "ROBOT_PROVIDER", "realman")).strip().lower()
-    if provider != "realman":
-        raise DeviceInitializationError(
-            f"unsupported robot provider: {provider}"
-        )
-
-    from ..arm_sdk import RobotController
-    from ..devices import yiyeqiang_out
-
-    if RobotController is None:
-        raise DeviceInitializationError("RobotController SDK unavailable")
-    move_options = MotionOptions(
-        velocity_percent=int(getattr(config, "MOVE_VELOCITY", 10)),
-        blend_radius=int(getattr(config, "MOVE_RADIUS", 0)),
-        connected=bool(getattr(config, "MOVE_CONNECT", 0)),
-        blocking=bool(getattr(config, "MOVE_BLOCK", 1)),
-    )
-    gripper_options = RealManGripperOptions(
-        pick_speed=int(getattr(config, "GRIPPER_PICK_SPEED", 200)),
-        pick_force=int(getattr(config, "GRIPPER_PICK_FORCE", 1000)),
-        pick_timeout_s=int(getattr(config, "GRIPPER_PICK_TIMEOUT", 3)),
-        release_speed=int(
-            getattr(config, "GRIPPER_RELEASE_SPEED", 100)
-        ),
-        release_timeout_s=int(
-            getattr(config, "GRIPPER_RELEASE_TIMEOUT", 3)
-        ),
-        max_attempts=int(getattr(config, "MAX_ATTEMPTS", 5)),
-    )
-    controller = RobotController()
-    adapter = RealManRobotAdapter(
-        controller,
-        default_motion=move_options,
-        gripper_options=gripper_options,
-        eject_tool=lambda: yiyeqiang_out.eject_tip(
-            port=str(getattr(config, "KUAIHUANSHOU_SERIAL_PORT", "COM4"))
-        ),
-    )
-    try:
-        adapter.read_arm_state(ArmId.LEFT)
-        adapter.read_arm_state(ArmId.RIGHT)
-        return adapter
-    except Exception:
-        adapter.close()
-        raise
-
 
 def _body_factory(config: Any) -> Any:
     from ..devices import ModbusMotor

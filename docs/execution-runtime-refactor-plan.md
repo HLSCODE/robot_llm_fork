@@ -288,7 +288,8 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 2. 已移除业务代码对 `robot1_ctrl/robot2_ctrl` 和 RM SDK 对象的了解。
 3. 相机预览、语音视觉、测试和数据采集已建立 session/lease；序列按动作
    控制策略申请精确设备集合。
-4. 下一步接入第二种供应商 adapter，验证核心能力与可选能力拆分。
+4. Provider 注册表、RealMan 强类型配置和共享核心契约测试已完成；下一步在明确
+   目标厂商/协议后接入第二种真实 adapter，验证核心能力与可选能力拆分。
 5. 统一设备 health、错误码、重试与重连策略。
 6. 清理底层驱动文件中的业务 GUI 和过期演示入口。
 
@@ -429,3 +430,4 @@ RealMan 停止专项验收：
 | 2026-07-29 | 结构化 handler result | ER-010 DOING → DONE | 全部 handler 直接切换为 ActionHandlerResult，不保留 bool 兼容；失败 code、message、operation、device_id 贯通 EngineResult、ExecutionSnapshot 和执行事件 |
 | 2026-07-29 | 动作控制策略矩阵 | ER-011 保持 DOING | 注册表直接绑定 handler 与控制策略；全部动作分支声明取消模式、设备和停止目标，执行前拒绝能力矛盾，并通过运行时事件/WebSocket 输出；RealMan 最大停止延迟仍待硬件验收 |
 | 2026-07-29 | 精确资源租约与相机会话 | ER-012 DOING → DONE | ExecutionManager 按动作策略申请实际设备集合；设备初始化/关闭纳入仲裁；相机测试、语音、WebSocket 预览和数据采集直接切换到 CameraAccessService/CameraSession，不保留 manager_factory 兼容入口 |
+| 2026-07-29 | 机械臂 Provider 配置收敛 | B-015 TODO → DOING；B-016 TODO → DONE | Provider 注册表和共享核心契约测试落地；RealMan 型号、连接、运动/夹爪及工具架参数强类型化，删除 controller 换枪硬编码、旧配置模块和旧环境键 |

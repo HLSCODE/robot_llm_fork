@@ -3,11 +3,6 @@ import os
 import threading
 from Robotic_Arm.rm_robot_interface import *
 
-# 先确保配置已加载，再导入配置值
-from .config import ensure_config_loaded
-ensure_config_loaded()  # 在导入具体配置前确保已加载
-from .config import *  # 导入配置值
-
 
 class SimpleRobotArm:
     def __init__(self, robot_config, robot_name="Robot"):
@@ -75,13 +70,10 @@ class SimpleRobotArm:
 
 class RobotController:
     
-    def __init__(self):
+    def __init__(self, robot1_config, robot2_config):
         # 初始化并连接双机械臂
-        self.robot1_ctrl = SimpleRobotArm(ROBOT1_CONFIG, "Robot1")
-        self.robot2_ctrl = SimpleRobotArm(ROBOT2_CONFIG, "Robot2")
-        print("robot1controller",ROBOT1_CONFIG)
-        
-        #print("robot1controller",)
+        self.robot1_ctrl = SimpleRobotArm(robot1_config, "Robot1")
+        self.robot2_ctrl = SimpleRobotArm(robot2_config, "Robot2")
 
         try:
             self.robot1_ctrl.connect()
@@ -90,142 +82,6 @@ class RobotController:
             self.robot1_ctrl.disconnect()
             self.robot2_ctrl.disconnect()
             raise RuntimeError("机械臂连接失败，请检查网络或供电") from exc
-
-    def pick_gun1(self):
-        """取枪头1（使用Robot2已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        robot = self.robot2_ctrl.robot
-        pos_1shang = GUN1_POSITIONS["1shang"]
-        pos_1xia = GUN1_POSITIONS["1xia"]
-
-        print("取枪头1动作")
-        ret = robot.rm_movel(pos_1shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"移动到1shang失败，错误码: {ret}")
-            return False
-
-        ret = robot.rm_movel(pos_1xia, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到1xia失败，错误码: {ret}")
-            return False
-
-        time.sleep(0.5)
-
-        ret = robot.rm_movel(pos_1shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到1shang失败，错误码: {ret}")
-            return False
-
-        print("取枪头1完成!")
-        return True
-
-    def pick_gun2(self):
-        """取枪头2（使用Robot2已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        robot = self.robot2_ctrl.robot
-        pos_2shang = GUN2_POSITIONS["2shang"]
-        pos_2xia = GUN2_POSITIONS["2xia"]
-
-        print("取枪头2动作")
-        ret = robot.rm_movel(pos_2shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"移动到2shang失败，错误码: {ret}")
-            return False
-
-        ret = robot.rm_movel(pos_2xia, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到2xia失败，错误码: {ret}")
-            return False
-
-        time.sleep(0.5)
-
-        ret = robot.rm_movel(pos_2shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到2shang失败，错误码: {ret}")
-            return False
-
-        print("取枪头2完成!")
-        return True
-
-    def drop_gun1(self, eject_tip):
-        """退枪头1（使用Robot2已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        robot = self.robot2_ctrl.robot
-        pos_1shang = GUN1_POSITIONS["1shang"]
-        pos_1zhong = GUN1_POSITIONS["1zhong"]
-        # pos_1shang = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
-        # pos_1zhong = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
-
-        print("退枪头1动作")
-        ret = robot.rm_movel(pos_1shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"移动到1shang失败，错误码: {ret}")
-            return False
-
-        ret = robot.rm_movel(pos_1zhong, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到1zhong失败，错误码: {ret}")
-            return False
-
-        print(f"\n[4] 退枪头（弹出枪头）...")
-        
-        result = eject_tip()
-        if result:
-            print("退枪头成功!")
-        else:
-            print("退枪头失败!")
-            return False
-
-        time.sleep(1)
-
-        ret = robot.rm_movel(pos_1shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到1shang失败，错误码: {ret}")
-            return False
-
-        print("退枪头1完成!")
-        return True
-
-    def drop_gun2(self, eject_tip):
-        """退枪头2（使用Robot2已连接的实例）"""
-        if self.robot2_ctrl is None or self.robot2_ctrl.robot is None:
-            raise Exception("Robot2未连接")
-        robot = self.robot2_ctrl.robot
-        pos_2shang = GUN2_POSITIONS["2shang"]
-        pos_2zhong = GUN2_POSITIONS["2zhong"]
-        # pos_2shang = [-0.521046,-0.307949,-0.209037,-3.054,-0.002,2.992]
-        # pos_2zhong = [-0.521046,-0.307949,-0.269037,-3.054,-0.002,2.992]
-        print("退枪头2动作")
-        ret = robot.rm_movel(pos_2shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"移动到2shang失败，错误码: {ret}")
-            return False
-
-        ret = robot.rm_movel(pos_2zhong, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到2zhong失败，错误码: {ret}")
-            return False
-        
-        print(f"\n[4] 退枪头（弹出枪头）...")
-        result = eject_tip()
-        if result:
-            print("退枪头成功!")
-        else:
-            print("退枪头失败!")
-            return False
-
-        time.sleep(0.5)
-
-        ret = robot.rm_movel(pos_2shang, MOVE_CONFIG["velocity"], MOVE_CONFIG["radius"], 0, 1)
-        if ret != 0:
-            print(f"movel到2shang失败，错误码: {ret}")
-            return False
-
-        print("退枪头2完成!")
-        return True
 
     def _sdk_lock_for_robot(self, robot):
         for ctrl in (self.robot1_ctrl, self.robot2_ctrl):
