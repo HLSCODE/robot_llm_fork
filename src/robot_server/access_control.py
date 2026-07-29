@@ -57,6 +57,7 @@ class WebSocketAuditEvent:
     request_id: str
     outcome: str
     code: str | None = None
+    run_id: str | None = None
 
     @classmethod
     def create(
@@ -68,6 +69,7 @@ class WebSocketAuditEvent:
         request_id: str,
         outcome: str,
         code: str | None = None,
+        run_id: str | None = None,
     ) -> "WebSocketAuditEvent":
         return cls(
             timestamp_utc=datetime.now(timezone.utc).isoformat(),
@@ -77,6 +79,7 @@ class WebSocketAuditEvent:
             request_id=request_id,
             outcome=outcome,
             code=code,
+            run_id=run_id,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -90,6 +93,8 @@ class WebSocketAuditEvent:
         }
         if self.code is not None:
             payload["code"] = self.code
+        if self.run_id is not None:
+            payload["run_id"] = self.run_id
         return payload
 
 

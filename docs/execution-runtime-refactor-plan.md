@@ -101,7 +101,7 @@
 | launcher | GUI 是唯一桌面宿主，只组装一份 `ApplicationServices`；WebSocket 作为可选附加服务启动 | 增加 GUI 服务状态展示 |
 | GUI 手工序列 | 通过 Qt `ExecutionBridge` 提交到统一 manager | GUI smoke test |
 | GUI AI/语音序列 | 与手工序列共享 manager 和最终事件 | preview/command 状态模型 |
-| WebSocket execute/task/AI | 通过 `ExecutionService` 提交 | request_id/run_id 协议补强 |
+| WebSocket execute/task/AI | 通过 `ExecutionService` 提交，并贯通 request_id/run_id 与业务终态审计 | API version、限流和 handler 拆分 |
 | WebSocket status/init/disconnect | 通过应用服务和 runtime | typed DTO、错误码 |
 | GUI/WebSocket quick-stop/emergency-stop | 通过 `SafetyService`，返回逐设备结果 | RealMan 真实硬件验收、其他运动设备能力补齐 |
 | 遥操作 | 持有会话级机械臂资源租约，软件停止后统一释放 | 心跳、所有者、超时自动停止 |
@@ -229,14 +229,14 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 | ER-004 | P0 | DONE | stop/disconnect 顺序 | worker 结束前不关设备 |
 | ER-005 | P0 | DONE | teleop/sequence 资源互斥 | 会话租约冲突测试通过 |
 | ER-006 | P0 | DOING | quick-stop/emergency-stop 能力矩阵 | 每类设备完成硬件验证 |
-| ER-007 | P0 | TODO | WebSocket 认证和控制租约 | 未授权客户端不能写硬件 |
+| ER-007 | P0 | DONE | WebSocket 认证和控制租约 | 未授权客户端不能写硬件 |
 | ER-008 | P1 | DONE | DeviceRuntime 和 capability | 状态和生命周期唯一 |
 | ER-009 | P1 | DONE | 统一 simulation runtime | 与真实模式共用状态机 |
 | ER-010 | P1 | DONE | ActionHandlerRegistry | 全部具体动作 handler 已迁出 ActionEngine，并统一返回结构化 ActionHandlerResult |
 | ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 全动作控制策略、执行前能力校验和事件输出已落地；待 RealMan 最大停止延迟验收 |
 | ER-012 | P1 | DONE | camera session/resource | 预览、测试、语音、视觉动作和数据采集通过显式租约互斥，非相机序列不被阻塞 |
 | ER-013 | P1 | DONE | 机械臂能力接口补强 | GUI、执行、视觉、示教和数据采集不依赖 RM 原生字段 |
-| ER-014 | P1 | TODO | WebSocket contract tests | 事件顺序、终态和错误稳定 |
+| ER-014 | P1 | DOING | WebSocket contract tests | 请求/执行关联、同步快速终态、权限和错误信封已覆盖；待全 action schema 固化 |
 | ER-015 | P1 | TODO | GUI simulation smoke tests | 按钮和步骤状态正确 |
 | ER-016 | P1 | TODO | 真实设备验收 | 所有设备逐项记录结果 |
 | ER-017 | P2 | TODO | 拆分 WebSocket handler | 协议和应用用例分离 |
@@ -302,8 +302,9 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 
 ### Phase D：协议和界面治理
 
-1. WebSocket 增加认证、控制所有者、`request_id` 和稳定错误码。
-2. `execution_finished` 明确返回 `run_id/state/success/error`。
+1. WebSocket 已增加认证、控制所有者、`request_id` 和稳定错误码。
+2. `execution_finished` 已明确返回 `run_id/state/success/error/failure`，
+   并通过同一 request/run 完成两阶段审计。
 3. 拆分 execution/device/camera/teleop/data-collection handler。
 4. GUI 提取 execution/device view-model。
 5. 建立 WebSocket contract test 和 GUI simulation smoke test。
@@ -394,7 +395,7 @@ RealMan 停止专项验收：
 | 风险 | 优先级 | 处理 |
 |---|---|---|
 | 阻塞 SDK 延迟响应 cancel | P0 | timeout、quick-stop、硬件验收 |
-| WebSocket 无认证和控制所有者 | P0 | 在开放网络部署前完成 |
+| WebSocket 远程暴露缺少 Origin/TLS 部署验收 | P1 | 保持默认仅监听本机；远程部署通过可信反向代理提供 wss 并校验 Origin |
 | 视觉流程内部仍包含长同步调用 | P1 | 标记不可即时取消区段，并通过设备停止能力和硬件测试验证最大延迟 |
 | 底层设备错误尚未统一映射到细分错误码 | P1 | 在 adapter 边界建立厂商错误映射并保留原始诊断上下文 |
 | GUI/WebSocket 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
@@ -431,3 +432,4 @@ RealMan 停止专项验收：
 | 2026-07-29 | 动作控制策略矩阵 | ER-011 保持 DOING | 注册表直接绑定 handler 与控制策略；全部动作分支声明取消模式、设备和停止目标，执行前拒绝能力矛盾，并通过运行时事件/WebSocket 输出；RealMan 最大停止延迟仍待硬件验收 |
 | 2026-07-29 | 精确资源租约与相机会话 | ER-012 DOING → DONE | ExecutionManager 按动作策略申请实际设备集合；设备初始化/关闭纳入仲裁；相机测试、语音、WebSocket 预览和数据采集直接切换到 CameraAccessService/CameraSession，不保留 manager_factory 兼容入口 |
 | 2026-07-29 | 机械臂 Provider 配置收敛 | B-015 TODO → DOING；B-016 TODO → DONE | Provider 注册表和共享核心契约测试落地；RealMan 型号、连接、运动/夹爪及工具架参数强类型化，删除 controller 换枪硬编码、旧配置模块和旧环境键 |
+| 2026-07-29 | WebSocket 安全与执行关联 | ER-007 TODO → DONE；ER-014 TODO → DOING | 写操作认证和单控制租约落地；直接响应、执行事件及业务终态贯通 request_id/action/run_id，错误信封稳定且内部异常不泄露，补充同步快速终态竞态测试 |

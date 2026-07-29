@@ -297,7 +297,9 @@ ws.onerror = (err) => {
 
 ```json
 {
-  "event": "status"
+  "event": "status",
+  "request_id": "status-1",
+  "action": "status"
 }
 ```
 
@@ -306,7 +308,14 @@ ws.onerror = (err) => {
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `event` | `string` | 是 | 事件名 |
+| `request_id` | `string` | 请求直接响应是 | 与发起请求相同；客户端未提供时使用服务端生成值 |
+| `action` | `string` | 请求直接响应是 | 产生当前响应的请求 action |
+| `run_id` | `string` | 执行事件是 | 一次统一执行的唯一 ID；从 `accepted` 贯通到步骤、日志和终态 |
 | 其他字段 | 任意 | 否 | 由具体事件决定 |
+
+控制租约超时、其他客户端发起的广播等非请求型事件可以没有
+`request_id/action`。客户端应优先用 `request_id` 关联直接响应，用 `run_id`
+关联完整执行事件流，不能依赖消息到达顺序猜测归属。
 
 ### 3.5 前端一定要注意的协议特点
 
@@ -337,8 +346,10 @@ const handlers = {
     fn(`[${data.level}] ${data.message}`);
   },
   error(data) {
-    // 请求参数校验错误
-    console.error("请求错误", data.message);
+    console.error(
+      `请求 ${data.request_id} 失败 [${data.code}]`,
+      data.message
+    );
   },
   step_started(data) {
     console.log("步骤开始", data);
@@ -453,7 +464,7 @@ ws.onmessage = (event) => {
 
 | event | 含义 |
 |---|---|
-| `error` | 请求参数校验错误（同步返回给请求方） |
+| `error` | 统一请求错误；包含稳定 `code`、`message`、`request_id` 和 `action` |
 | `access_denied` | 认证失败、未持有控制权、租约过期或控制权冲突 |
 | `authenticated` | 当前连接认证成功 |
 | `control_acquired` | 当前连接取得控制权 |
@@ -481,7 +492,7 @@ ws.onmessage = (event) => {
 
 注意：`error` **事件**（`event: "error"`）与 `log` 事件中 `level: "error"` 的区别：
 
-- `event: "error"` — 针对当前请求的同步校验错误，如"动作 id 不能为空"
+- `event: "error"` — 针对当前请求的同步错误，如校验、相机、遥操作或内部请求处理失败
 - `event: "log", level: "error"` — 执行过程中发生的运行时错误，如"机械臂控制器未初始化"
 
 ### 5.2 执行事件
@@ -497,6 +508,27 @@ ws.onmessage = (event) => {
 | `safety_stop_completed` | 软件快停/急停编排结束，结果见 `report`；不代表物理急停回路状态 |
 | `paused` | 已暂停 |
 | `resumed` | 已恢复 |
+
+执行相关事件统一包含 `run_id` 和 `origin`。由 WebSocket 请求发起的执行还包含
+同一个 `request_id/action`。终态示例：
+
+```json
+{
+  "event": "execution_finished",
+  "run_id": "run-42",
+  "request_id": "execute-42",
+  "action": "execute",
+  "origin": "websocket",
+  "state": "succeeded",
+  "success": true,
+  "error": null,
+  "failure": {
+    "code": null,
+    "operation": null,
+    "device_id": null
+  }
+}
+```
 
 ### 5.3 动作库与序列事件
 
@@ -546,7 +578,7 @@ ws.onmessage = (event) => {
 | `camera_subscribed` | 已订阅相机帧 |
 | `camera_unsubscribed` | 已取消订阅相机帧 |
 | `camera_frames` | 相机帧推送 |
-| `camera_error` | 相机错误 |
+| `error` | 相机请求失败时使用统一错误信封，`error_source` 为 `camera_error` |
 
 ### 5.7 MiniCPM 事件
 
@@ -2378,13 +2410,17 @@ function toImageSrc(frame) {
 }
 ```
 
-### 12.4 相机错误事件 `camera_error`
+### 12.4 相机错误
 
 在未配置相机或相机不可用时，可能收到：
 
 ```json
 {
-  "event": "camera_error",
+  "event": "error",
+  "code": "camera_failed",
+  "error_source": "camera_error",
+  "request_id": "camera-subscribe-1",
+  "action": "subscribe_camera_frames",
   "message": "未配置任何相机",
   "cameras": []
 }
@@ -2611,7 +2647,8 @@ function toImageSrc(frame) {
 
 前端状态管理建议：
 
-- 当前协议的 `chat_data` 不带 `request_id`，因此同一个连接上，建议一轮回复结束前不要并发发送多条 `chat` 请求。
+- `chat_data` 会携带对应 `chat` 请求的 `request_id/action`；当前上游聊天会话
+  仍按单轮串行处理，在收到 `done` 或 `error` 前不要发送下一轮。
 - 最稳妥的做法是：上一轮收到 `type = done` 或 `event = error` 之前，发送按钮置灰，或由前端本地排队串行发送。
 - 前端主业务逻辑应优先消费顶层稳定字段；如需兼容上游新增字段，再读取 `data.packet`。
 - 前端不应只依赖 `data.raw` 做主业务逻辑；当前版本中，`raw` 默认只在 `error` / `unknown` / 非 JSON 兜底场景出现。
@@ -2820,14 +2857,34 @@ function handleChatData(data) {
 
 ## 15. 错误处理手册
 
-现有请求参数错误格式：
+统一请求错误格式：
 
 ```json
 {
   "event": "error",
-  "message": "..."
+  "code": "request_failed",
+  "message": "...",
+  "request_id": "execute-1",
+  "action": "execute"
 }
 ```
+
+相机、遥操作和数据采集原有的专用错误事件会在网络协议边界统一为
+`event: "error"`，同时通过 `error_source` 保留来源，例如
+`camera_error`、`teleop_error`、`demo_record_error`。
+
+稳定通用错误码：
+
+| code | 含义 |
+|---|---|
+| `invalid_request` | 消息不是合法请求对象或 JSON |
+| `invalid_request_id` | 请求 ID 格式或长度不合法 |
+| `unknown_action` | action 不存在 |
+| `request_failed` | 通用校验或业务前置条件失败 |
+| `teleoperation_failed` | 遥操作请求失败 |
+| `camera_failed` | 相机请求失败 |
+| `data_collection_failed` | 数据采集请求失败 |
+| `internal_error` | 未预期的服务端异常；响应不会包含内部异常详情 |
 
 权限拒绝使用独立事件：
 

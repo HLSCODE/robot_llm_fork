@@ -63,6 +63,8 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
                 "name": "wait",
                 "status": "RUNNING",
                 "control_policy": policy,
+                "run_id": "run-1",
+                "origin": "test",
             },
             messages[0],
         )
@@ -109,6 +111,8 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
                     "operation": "robot_system.move_to_pose",
                     "device_id": "robot-system",
                 },
+                "run_id": "run-1",
+                "origin": "test",
             },
             messages[0],
         )
@@ -151,6 +155,73 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
             response["executor"],
         )
 
+    def test_execution_request_is_correlated_through_terminal_audit(self):
+        audit_events = []
+        execution = _ImmediateExecution()
+        services = SimpleNamespace(
+            execution=execution,
+            teleoperation=SimpleNamespace(active=False),
+        )
+        server = RobotWebSocketServer(
+            services=services,
+            auth_token="test-secret",
+            audit_sink=audit_events.append,
+        )
+        websocket = _RecordingWebSocket()
+        client_id = server._register_client(websocket, "local")
+        server._access.authenticate(client_id, "test-secret")
+        server._access.acquire_control(client_id)
+        execution_events: list[dict] = []
+        server._broadcast_threadsafe = execution_events.append
+
+        asyncio.run(server._dispatch(
+            websocket,
+            {
+                "action": "execute",
+                "request_id": "execute-42",
+                "sequence": [{
+                    "id": "wait",
+                    "name": "wait",
+                    "type": ActionType.WAIT.value,
+                    "parameters": {"duration": 0},
+                }],
+            },
+        ))
+
+        accepted = next(
+            payload
+            for payload in websocket.payloads
+            if payload["event"] == "accepted"
+        )
+        self.assertEqual("run-42", accepted["run_id"])
+        self.assertEqual("execute-42", accepted["request_id"])
+        self.assertEqual("execute", accepted["action"])
+
+        terminal = next(
+            payload
+            for payload in execution_events
+            if payload["event"] == "execution_finished"
+        )
+        self.assertEqual("run-42", terminal["run_id"])
+        self.assertEqual("execute-42", terminal["request_id"])
+        self.assertEqual("execute", terminal["action"])
+        self.assertEqual("succeeded", terminal["state"])
+        self.assertTrue(terminal["success"])
+
+        correlated_audits = [
+            event
+            for event in audit_events
+            if event.run_id == "run-42"
+        ]
+        self.assertEqual(
+            ["accepted", "succeeded"],
+            [event.outcome for event in correlated_audits],
+        )
+        self.assertTrue(all(
+            event.request_id == "execute-42"
+            for event in correlated_audits
+        ))
+
 
 class _RecordingWebSocket:
     def __init__(self) -> None:
@@ -158,6 +229,28 @@ class _RecordingWebSocket:
 
     async def send(self, message: str) -> None:
         self.messages.append(message)
+
+    @property
+    def payloads(self) -> list[dict]:
+        return [json.loads(message) for message in self.messages]
+
+
+class _ImmediateExecution:
+    def snapshot(self):
+        return SimpleNamespace(active=False)
+
+    def start(self, _sequence, *, origin, listener):
+        listener(ExecutionEvent(
+            run_id="run-42",
+            event_type=ExecutionEventType.ACCEPTED,
+            origin=origin,
+        ))
+        listener(ExecutionEvent(
+            run_id="run-42",
+            event_type=ExecutionEventType.SUCCEEDED,
+            origin=origin,
+        ))
+        return SimpleNamespace(run_id="run-42")
 
 
 if __name__ == "__main__":

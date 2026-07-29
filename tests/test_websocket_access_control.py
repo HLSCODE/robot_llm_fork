@@ -5,11 +5,16 @@ import json
 import unittest
 from contextlib import suppress
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from src.execution import ExecutionState
 from src.robot_server.access_control import (
     WebSocketAccessController,
     WebSocketAccessError,
+)
+from src.robot_server.protocol import (
+    RequestCorrelation,
+    WebSocketRequestContext,
 )
 from src.robot_server.ws_server import RobotWebSocketServer
 
@@ -38,9 +43,10 @@ class _RecordingWebSocket:
 class _FakeExecution:
     def __init__(self) -> None:
         self.pause_count = 0
+        self.state = ExecutionState.RUNNING
 
     def snapshot(self):
-        return SimpleNamespace(state=ExecutionState.RUNNING)
+        return SimpleNamespace(state=self.state)
 
     def pause(self) -> None:
         self.pause_count += 1
@@ -108,6 +114,27 @@ class WebSocketAccessControllerTests(unittest.TestCase):
             "authentication_not_configured",
             raised.exception.code,
         )
+
+
+class WebSocketRequestContextTests(unittest.TestCase):
+    def test_specialized_errors_are_normalized_at_protocol_boundary(self):
+        context = WebSocketRequestContext(RequestCorrelation(
+            client_id="client-1",
+            principal="api-key",
+            action="start_teleoperation",
+            request_id="teleop-1",
+        ))
+
+        response = context.decorate({
+            "event": "teleop_error",
+            "message": "device rejected command",
+        })
+
+        self.assertEqual("error", response["event"])
+        self.assertEqual("teleop_error", response["error_source"])
+        self.assertEqual("teleoperation_failed", response["code"])
+        self.assertEqual("teleop-1", response["request_id"])
+        self.assertEqual("start_teleoperation", response["action"])
 
 
 class WebSocketDispatchAccessTests(unittest.TestCase):
@@ -186,7 +213,7 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
         )
         self.assertEqual(1, self.execution.pause_count)
         self.assertEqual(
-            "dispatched",
+            "completed",
             self.audit_events[-1].outcome,
         )
         self.assertEqual("pause-2", self.audit_events[-1].request_id)
@@ -195,6 +222,60 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
         )
         self.assertNotIn("correct-secret", serialized_audit)
         self.assertNotIn("wrong-secret", serialized_audit)
+
+    def test_handler_error_uses_correlated_stable_envelope(self):
+        websocket = _RecordingWebSocket()
+        client_id = self.server._register_client(
+            websocket,
+            websocket.remote_address,
+        )
+        self.server._access.authenticate(client_id, "correct-secret")
+        self.server._access.acquire_control(client_id)
+        self.execution.state = ExecutionState.IDLE
+
+        asyncio.run(self.server._dispatch(
+            websocket,
+            {"action": "pause", "request_id": "pause-invalid"},
+        ))
+
+        response = websocket.payloads[-1]
+        self.assertEqual("error", response["event"])
+        self.assertEqual("request_failed", response["code"])
+        self.assertEqual("pause-invalid", response["request_id"])
+        self.assertEqual("pause", response["action"])
+        self.assertEqual("rejected", self.audit_events[-1].outcome)
+        self.assertEqual(
+            "request_failed",
+            self.audit_events[-1].code,
+        )
+
+    def test_unexpected_handler_error_is_isolated_and_not_disclosed(self):
+        websocket = _RecordingWebSocket()
+        client_id = self.server._register_client(
+            websocket,
+            websocket.remote_address,
+        )
+        self.server._access.authenticate(client_id, "correct-secret")
+        self.server._access.acquire_control(client_id)
+
+        def raise_sensitive_error() -> None:
+            raise RuntimeError("sensitive internal detail")
+
+        self.execution.pause = raise_sensitive_error
+        with patch("src.robot_server.ws_server.logger.exception"):
+            asyncio.run(self.server._dispatch(
+                websocket,
+                {"action": "pause", "request_id": "pause-failed"},
+            ))
+
+        response = websocket.payloads[-1]
+        self.assertEqual("error", response["event"])
+        self.assertEqual("internal_error", response["code"])
+        self.assertEqual("pause-failed", response["request_id"])
+        self.assertEqual("pause", response["action"])
+        self.assertNotIn("sensitive internal detail", response["message"])
+        self.assertEqual("failed", self.audit_events[-1].outcome)
+        self.assertEqual("RuntimeError", self.audit_events[-1].code)
 
     def test_non_owner_disconnect_does_not_stop_owner_session(self):
         owner = _RecordingWebSocket()

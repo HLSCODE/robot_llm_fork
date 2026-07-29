@@ -95,6 +95,7 @@ import os
 import re
 import threading
 from collections.abc import Coroutine
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import (
@@ -139,6 +140,11 @@ from .access_control import (
     WebSocketAuditEvent,
     log_websocket_audit_event,
 )
+from .protocol import (
+    RequestCorrelation,
+    WebSocketErrorCode,
+    WebSocketRequestContext,
+)
 
 
 if TYPE_CHECKING:
@@ -148,6 +154,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_CURRENT_REQUEST: ContextVar[WebSocketRequestContext | None] = ContextVar(
+    "websocket_request",
+    default=None,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +278,8 @@ class RobotWebSocketServer:
             control_lease_seconds=control_lease_seconds,
         )
         self._audit_sink = audit_sink or log_websocket_audit_event
+        self._execution_requests: dict[str, RequestCorrelation] = {}
+        self._execution_requests_lock = threading.RLock()
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -652,7 +664,13 @@ class RobotWebSocketServer:
                     data = json.loads(raw)
                 except json.JSONDecodeError:
                     await websocket.send(self._json_msg(
-                        {"event": "error", "message": "无效的 JSON 格式"}
+                        {
+                            "event": "error",
+                            "code": (
+                                WebSocketErrorCode.INVALID_REQUEST.value
+                            ),
+                            "message": "无效的 JSON 格式",
+                        }
                     ))
                     continue
 
@@ -918,7 +936,7 @@ class RobotWebSocketServer:
             await websocket.send(self._json_msg(
                 {
                     "event": "error",
-                    "code": "invalid_request",
+                    "code": WebSocketErrorCode.INVALID_REQUEST.value,
                     "message": "请求必须是 JSON 对象",
                 }
             ))
@@ -928,7 +946,7 @@ class RobotWebSocketServer:
         if request_id is None:
             await websocket.send(self._json_msg({
                 "event": "error",
-                "code": "invalid_request_id",
+                "code": WebSocketErrorCode.INVALID_REQUEST_ID.value,
                 "message": (
                     "request_id 只能包含字母、数字、点、下划线、冒号或连字符，"
                     "长度为 1..128"
@@ -942,26 +960,51 @@ class RobotWebSocketServer:
         if route is None:
             await websocket.send(self._json_msg({
                 "event": "error",
-                "code": "unknown_action",
+                "code": WebSocketErrorCode.UNKNOWN_ACTION.value,
+                "action": action,
                 "request_id": request_id,
                 "message": f"未知的 action: {action}",
             }))
             return
 
         client_id = self._client_id(websocket)
-        expired_client_id = self._access.expire_control()
-        if expired_client_id is not None:
-            await self._release_control_side_effects(
-                expired_client_id,
-                reason="expired",
-            )
-
         request = dict(data)
         request["request_id"] = request_id
+        initial_session = self._access.session(client_id)
+        request_context = WebSocketRequestContext(
+            correlation=RequestCorrelation(
+                client_id=client_id,
+                principal=initial_session.principal,
+                action=action,
+                request_id=request_id,
+            )
+        )
+        context_token = _CURRENT_REQUEST.set(request_context)
         try:
-            self._access.authorize(client_id, route.access_level)
+            expired_client_id = self._access.expire_control()
+            if expired_client_id is not None:
+                await self._release_control_side_effects(
+                    expired_client_id,
+                    reason="expired",
+                )
+
+            session = self._access.authorize(
+                client_id,
+                route.access_level,
+            )
+            request_context.correlation = RequestCorrelation(
+                client_id=client_id,
+                principal=session.principal,
+                action=action,
+                request_id=request_id,
+            )
             await route.handler(websocket, request)
         except WebSocketAccessError as exc:
+            await websocket.send(self._json_msg({
+                "event": "access_denied",
+                "code": exc.code,
+                "message": str(exc),
+            }))
             if route.audited:
                 self._audit(
                     client_id=client_id,
@@ -970,14 +1013,19 @@ class RobotWebSocketServer:
                     outcome="denied",
                     code=exc.code,
                 )
-            await websocket.send(self._json_msg({
-                "event": "access_denied",
-                "code": exc.code,
-                "action": action,
-                "request_id": request_id,
-                "message": str(exc),
-            }))
         except Exception as exc:
+            logger.exception(
+                "WebSocket 请求处理异常: client_id=%s action=%s "
+                "request_id=%s",
+                client_id,
+                action,
+                request_id,
+            )
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": WebSocketErrorCode.INTERNAL_ERROR.value,
+                "message": "请求处理发生内部错误",
+            }))
             if route.audited:
                 self._audit(
                     client_id=client_id,
@@ -986,15 +1034,27 @@ class RobotWebSocketServer:
                     outcome="failed",
                     code=type(exc).__name__,
                 )
-            raise
         else:
-            if route.audited:
+            if route.audited and not request_context.initial_audit_recorded:
+                outcome = (
+                    "accepted"
+                    if request_context.run_id is not None
+                    else (
+                        "rejected"
+                        if request_context.error_code is not None
+                        else "completed"
+                    )
+                )
                 self._audit(
                     client_id=client_id,
                     action=action,
                     request_id=request_id,
-                    outcome="dispatched",
+                    outcome=outcome,
+                    code=request_context.error_code,
+                    run_id=request_context.run_id,
                 )
+        finally:
+            _CURRENT_REQUEST.reset(context_token)
 
     def _register_client(self, websocket: Any, remote: object) -> str:
         client_id = uuid4().hex
@@ -1090,11 +1150,14 @@ class RobotWebSocketServer:
         request_id: str,
         outcome: str,
         code: str | None = None,
+        principal: str | None = None,
+        run_id: str | None = None,
     ) -> None:
-        try:
-            principal = self._access.session(client_id).principal
-        except WebSocketAccessError:
-            principal = None
+        if principal is None:
+            try:
+                principal = self._access.session(client_id).principal
+            except WebSocketAccessError:
+                principal = None
         event = WebSocketAuditEvent.create(
             client_id=client_id,
             principal=principal,
@@ -1102,6 +1165,7 @@ class RobotWebSocketServer:
             request_id=request_id,
             outcome=outcome,
             code=code,
+            run_id=run_id,
         )
         try:
             self._audit_sink(event)
@@ -1218,7 +1282,7 @@ class RobotWebSocketServer:
             self._on_execution_event(event)
 
         try:
-            self._services.execution.start(
+            handle = self._services.execution.start(
                 sequence,
                 origin=origin,
                 listener=listener,
@@ -1229,8 +1293,26 @@ class RobotWebSocketServer:
                 "message": f"提交执行失败: {exc}",
             }))
             return False
+        request_context = _CURRENT_REQUEST.get()
+        if request_context is not None:
+            request_context.run_id = handle.run_id
+            with self._execution_requests_lock:
+                self._execution_requests[handle.run_id] = (
+                    request_context.execution_correlation()
+                )
+            correlation = request_context.correlation
+            self._audit(
+                client_id=correlation.client_id,
+                principal=correlation.principal,
+                action=correlation.action,
+                request_id=correlation.request_id,
+                outcome="accepted",
+                run_id=handle.run_id,
+            )
+            request_context.initial_audit_recorded = True
         await self._broadcast({
             "event": "accepted",
+            "run_id": handle.run_id,
             "message": message,
             "steps": steps,
         })
@@ -3256,45 +3338,71 @@ class RobotWebSocketServer:
     def _on_execution_event(self, event: ExecutionEvent) -> None:
         """Translate execution-domain events to the WebSocket protocol."""
         event_type = event.event_type
+        metadata = self._execution_metadata(event)
         if event_type is ExecutionEventType.STEP_STARTED:
             self._on_step_started(
                 event.index or 0,
                 event.item,
                 event.data,
+                metadata,
             )
         elif event_type is ExecutionEventType.STEP_COMPLETED:
-            self._on_step_completed(event.index or 0, event.item)
+            self._on_step_completed(
+                event.index or 0,
+                event.item,
+                metadata,
+            )
         elif event_type is ExecutionEventType.STEP_FAILED:
             self._on_step_failed(
                 event.index or 0,
                 event.item,
                 event.message,
                 event.data,
+                metadata,
             )
         elif event_type is ExecutionEventType.LOOP_PROGRESS:
             self._on_loop_progress(
                 str(event.data["loop_uuid"]),
                 int(event.data["current_iteration"]),
                 int(event.data["total_iterations"]),
+                metadata,
             )
         elif event_type is ExecutionEventType.LOG:
-            self._on_log(event.message, event.level)
+            self._on_log(event.message, event.level, metadata)
         elif event_type is ExecutionEventType.FAILED:
             self._execution_had_failure = True
             if event.message:
-                self._on_log(event.message, "error")
-            self._on_finished()
+                self._on_log(event.message, "error", metadata)
+            self._on_finished(event, metadata)
         elif event_type is ExecutionEventType.CANCELLED:
             self._execution_had_failure = True
-            self._on_finished()
+            self._on_finished(event, metadata)
         elif event_type is ExecutionEventType.SUCCEEDED:
-            self._on_finished()
+            self._on_finished(event, metadata)
+
+    def _execution_metadata(
+        self,
+        event: ExecutionEvent,
+    ) -> dict[str, Any]:
+        with self._execution_requests_lock:
+            correlation = self._execution_requests.get(event.run_id)
+        metadata: dict[str, Any] = {
+            "run_id": event.run_id,
+            "origin": event.origin,
+        }
+        if correlation is not None:
+            metadata.update({
+                "request_id": correlation.request_id,
+                "action": correlation.action,
+            })
+        return metadata
 
     def _on_step_started(
         self,
         index: int,
         item: SequenceItem,
         control_policy: dict[str, Any],
+        metadata: dict[str, Any],
     ) -> None:
         self._broadcast_threadsafe({
             "event": "step_started",
@@ -3302,13 +3410,20 @@ class RobotWebSocketServer:
             "name": item.definition.name,
             "status": item.status.value,
             "control_policy": control_policy,
+            **metadata,
         })
 
-    def _on_step_completed(self, index: int, item: SequenceItem) -> None:
+    def _on_step_completed(
+        self,
+        index: int,
+        item: SequenceItem,
+        metadata: dict[str, Any],
+    ) -> None:
         self._broadcast_threadsafe({
             "event": "step_completed",
             "index": index,
             "name": item.definition.name,
+            **metadata,
         })
 
     def _on_step_failed(
@@ -3317,6 +3432,7 @@ class RobotWebSocketServer:
         item: SequenceItem,
         error: str,
         failure: dict[str, Any],
+        metadata: dict[str, Any],
     ) -> None:
         self._execution_had_failure = True
         self._broadcast_threadsafe({
@@ -3325,26 +3441,45 @@ class RobotWebSocketServer:
             "name": item.definition.name,
             "error": error,
             "failure": failure,
+            **metadata,
         })
 
-    def _on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int) -> None:
+    def _on_loop_progress(
+        self,
+        loop_uuid: str,
+        current_iteration: int,
+        total_iterations: int,
+        metadata: dict[str, Any],
+    ) -> None:
         self._broadcast_threadsafe({
             "event": "loop_progress",
             "loop_uuid": loop_uuid,
             "current_iteration": current_iteration,
             "total_iterations": total_iterations,
+            **metadata,
         })
 
-    def _on_log(self, message: str, level: str = "info") -> None:
+    def _on_log(
+        self,
+        message: str,
+        level: str = "info",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         log_fn = {"warn": logger.warning, "error": logger.error}.get(level, logger.info)
         log_fn(message)
         self._broadcast_threadsafe({
             "event": "log",
             "level": level,
             "message": message,
+            **(metadata or {}),
         })
 
-    def _on_finished(self) -> None:
+    def _on_finished(
+        self,
+        event: ExecutionEvent,
+        metadata: dict[str, Any],
+    ) -> None:
+        succeeded = event.event_type is ExecutionEventType.SUCCEEDED
         if self._ai_execution_pending:
             self._ai_execution_pending = False
             success = not self._execution_had_failure
@@ -3352,10 +3487,35 @@ class RobotWebSocketServer:
                 "event": "ai_execution_finished",
                 "success": success,
                 "message": "AI 序列执行完成" if success else "AI 序列执行失败",
+                **metadata,
             })
         self._broadcast_threadsafe({
             "event": "execution_finished",
+            "state": event.event_type.value,
+            "success": succeeded,
+            "error": event.message or None,
+            "failure": {
+                "code": event.data.get("code") or None,
+                "operation": event.data.get("operation") or None,
+                "device_id": event.data.get("device_id") or None,
+            },
+            **metadata,
         })
+        with self._execution_requests_lock:
+            correlation = self._execution_requests.pop(
+                event.run_id,
+                None,
+            )
+        if correlation is not None:
+            self._audit(
+                client_id=correlation.client_id,
+                principal=correlation.principal,
+                action=correlation.action,
+                request_id=correlation.request_id,
+                run_id=event.run_id,
+                outcome=event.event_type.value,
+                code=event.data.get("code") or None,
+            )
 
     # ==================================================================
     # 广播工具
@@ -4079,9 +4239,14 @@ class RobotWebSocketServer:
             "message": result["message"] + "（已自动停止遥操作模式）",
         }))
 
-    @staticmethod
-    def _json_msg(data: dict) -> str:
-        return json.dumps(data, ensure_ascii=False)
+    def _json_msg(self, data: dict[str, Any]) -> str:
+        request_context = _CURRENT_REQUEST.get()
+        payload = (
+            request_context.decorate(data)
+            if request_context is not None
+            else data
+        )
+        return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
     def _composition_origin(websocket) -> str:
