@@ -21,6 +21,11 @@
 
 数据采集功能通过WebSocket协议控制，支持以下4个action：
 
+这四个 action 均要求客户端先完成 `authenticate` 和 `acquire_control`，并持续
+发送 `control_heartbeat`。控制租约超时或控制者断线时，服务端会停止 recorder、
+遥操作并释放相机会话；观察者断线不会结束当前采集。认证和租约协议见
+[WebSocket API 文档](websocket-api.md#32-写操作认证与控制权)。
+
 ### 1. 开始采集会话
 
 **请求格式**：

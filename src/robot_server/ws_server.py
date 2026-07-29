@@ -92,10 +92,21 @@ import base64
 import json
 import logging
 import os
+import re
 import threading
 from collections.abc import Coroutine
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Set, List, Dict, Any
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+)
 from uuid import uuid4
 
 try:
@@ -120,6 +131,14 @@ from ..execution import (
 )
 from ..llm import LLMCapability, LLMContentPart, LLMMessage, LLMRegistry, LLMStreamEvent
 from ..voice_interaction import CamerasModuleProvider, WakeFeedback, VoiceInteractionController
+from .access_control import (
+    AuditSink,
+    WebSocketAccessController,
+    WebSocketAccessError,
+    WebSocketAccessLevel,
+    WebSocketAuditEvent,
+    log_websocket_audit_event,
+)
 
 
 if TYPE_CHECKING:
@@ -127,6 +146,15 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+@dataclass(frozen=True, slots=True)
+class _WebSocketRoute:
+    handler: Callable[[Any, dict[str, Any]], Awaitable[None]]
+    access_level: WebSocketAccessLevel
+    audited: bool = True
 
 
 class MiniCPMChatConfig:
@@ -215,7 +243,11 @@ class RobotWebSocketServer:
         services: ApplicationServices,
         host: str = "127.0.0.1",
         port: int = 8765,
-    ):
+        *,
+        auth_token: str = "",
+        control_lease_seconds: float = 30.0,
+        audit_sink: AuditSink | None = None,
+    ) -> None:
         normalized_host = host.strip()
         if not normalized_host:
             raise ValueError("WebSocket host must not be empty")
@@ -230,6 +262,12 @@ class RobotWebSocketServer:
 
         # 已连接的客户端集合
         self._clients: Set = set()
+        self._client_ids: dict[Any, str] = {}
+        self._access = WebSocketAccessController(
+            auth_token,
+            control_lease_seconds=control_lease_seconds,
+        )
+        self._audit_sink = audit_sink or log_websocket_audit_event
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -275,6 +313,7 @@ class RobotWebSocketServer:
             "description": None,
             "next_episode_id": 0,
         }
+        self._routes = self._build_routes()
 
     @property
     def _robot_system(self):
@@ -322,7 +361,15 @@ class RobotWebSocketServer:
             self._host,
             self._port,
         )
-        logger.info("WebSocket 服务已启动: %s", self.endpoint)
+        self._schedule_background_task(
+            self._control_lease_monitor(),
+            name="WebSocketControlLeaseMonitor",
+        )
+        logger.info(
+            "WebSocket 服务已启动: %s, write_auth_configured=%s",
+            self.endpoint,
+            self._access.authentication_configured,
+        )
 
     async def stop(self) -> None:
         """Stop accepting clients and release service-owned async resources."""
@@ -343,6 +390,8 @@ class RobotWebSocketServer:
         await self._close_llm_clients()
         await self._close_demo_recorder()
         self._clients.clear()
+        self._client_ids.clear()
+        self._access.clear()
         self._minicpm_sessions.clear()
         self._loop = None
         logger.info("WebSocket 服务已停止")
@@ -573,15 +622,31 @@ class RobotWebSocketServer:
 
     async def _handle_frontend_ws(self, websocket) -> None:
         """处理前端主控 WebSocket 连接"""
-        self._clients.add(websocket)
-        remote = websocket.remote_address
-        logger.info("前端客户端已连接: %s", remote)
-        print(f"前端客户端已连接: {remote}")
+        remote = getattr(websocket, "remote_address", None)
+        client_id = self._register_client(websocket, remote)
+        logger.info(
+            "前端客户端已连接: client_id=%s remote=%s",
+            client_id,
+            remote,
+        )
+        await websocket.send(self._json_msg({
+            "event": "connected",
+            "client_id": client_id,
+            "authentication_configured": (
+                self._access.authentication_configured
+            ),
+            "control_lease_seconds": (
+                self._access.control_lease_seconds
+            ),
+        }))
 
         try:
             async for raw in websocket:
-                # 调试日志：记录接收的消息（前100字符）
-                logger.debug("收到消息: %s", raw[:100] if len(raw) > 100 else raw)
+                logger.debug(
+                    "收到 WebSocket 消息: client_id=%s bytes=%d",
+                    client_id,
+                    len(raw),
+                )
 
                 try:
                     data = json.loads(raw)
@@ -594,101 +659,538 @@ class RobotWebSocketServer:
                 await self._dispatch(websocket, data)
 
         except websockets.exceptions.ConnectionClosed:
-            logger.info("前端客户端断开: %s", remote)
+            logger.info(
+                "前端客户端断开: client_id=%s remote=%s",
+                client_id,
+                remote,
+            )
         finally:
-            self._clients.discard(websocket)
-            self._camera_frame_subs.discard(websocket)
-            self._stop_camera_if_idle()
-            if self._services.teleoperation.active:
-                self._services.teleoperation.stop()
-                for arm_name in self._teleop_modes:
-                    self._teleop_modes[arm_name] = False
-            await self._close_minicpm_session(websocket)
-            print(f"前端客户端断开: {remote}")
+            await self._unregister_client(
+                websocket,
+                reason="disconnect",
+            )
 
 
     # ------------------------------------------------------------------
     # 指令分发
     # ------------------------------------------------------------------
 
-    async def _dispatch(self, websocket, data: dict) -> None:
-        """根据 action 字段分发到对应处理函数"""
-        action = data.get("action", "")
-
-        # 指令路由表
-        handlers = {
+    def _build_routes(self) -> dict[str, _WebSocketRoute]:
+        public = WebSocketAccessLevel.PUBLIC
+        authenticated = WebSocketAccessLevel.AUTHENTICATED
+        control = WebSocketAccessLevel.CONTROL
+        return {
+            # 安全会话
+            "authenticate": _WebSocketRoute(
+                self._handle_authenticate,
+                public,
+            ),
+            "control_status": _WebSocketRoute(
+                self._handle_control_status,
+                public,
+                audited=False,
+            ),
+            "acquire_control": _WebSocketRoute(
+                self._handle_acquire_control,
+                authenticated,
+            ),
+            "control_heartbeat": _WebSocketRoute(
+                self._handle_control_heartbeat,
+                control,
+            ),
+            "release_control": _WebSocketRoute(
+                self._handle_release_control,
+                control,
+            ),
             # 执行控制
-            "execute":       self._handle_execute,
-            "execute_task":  self._handle_execute_task,
-            "stop":          self._handle_stop,
-            "quick_stop":    self._handle_quick_stop,
-            "emergency_stop": self._handle_emergency_stop,
-            "pause":         self._handle_pause,
-            "resume":        self._handle_resume,
+            "execute": _WebSocketRoute(self._handle_execute, control),
+            "execute_task": _WebSocketRoute(
+                self._handle_execute_task,
+                control,
+            ),
+            "stop": _WebSocketRoute(self._handle_stop, control),
+            "quick_stop": _WebSocketRoute(
+                self._handle_quick_stop,
+                control,
+            ),
+            "emergency_stop": _WebSocketRoute(
+                self._handle_emergency_stop,
+                control,
+            ),
+            "pause": _WebSocketRoute(self._handle_pause, control),
+            "resume": _WebSocketRoute(self._handle_resume, control),
             # 动作库管理
-            "list_actions":  self._handle_list_actions,
-            "get_action_schema": self._handle_get_action_schema,
-            "create_action": self._handle_create_action,
-            "delete_action": self._handle_delete_action,
-            "update_action": self._handle_update_action,
+            "list_actions": _WebSocketRoute(
+                self._handle_list_actions,
+                public,
+                audited=False,
+            ),
+            "get_action_schema": _WebSocketRoute(
+                self._handle_get_action_schema,
+                public,
+                audited=False,
+            ),
+            "create_action": _WebSocketRoute(
+                self._handle_create_action,
+                control,
+            ),
+            "delete_action": _WebSocketRoute(
+                self._handle_delete_action,
+                control,
+            ),
+            "update_action": _WebSocketRoute(
+                self._handle_update_action,
+                control,
+            ),
             # 序列编排
-            "get_sequence":          self._handle_get_sequence,
-            "add_to_sequence":       self._handle_add_to_sequence,
-            "remove_from_sequence":  self._handle_remove_from_sequence,
-            "move_in_sequence":      self._handle_move_in_sequence,
-            "clear_sequence":        self._handle_clear_sequence,
+            "get_sequence": _WebSocketRoute(
+                self._handle_get_sequence,
+                public,
+                audited=False,
+            ),
+            "add_to_sequence": _WebSocketRoute(
+                self._handle_add_to_sequence,
+                control,
+            ),
+            "remove_from_sequence": _WebSocketRoute(
+                self._handle_remove_from_sequence,
+                control,
+            ),
+            "move_in_sequence": _WebSocketRoute(
+                self._handle_move_in_sequence,
+                control,
+            ),
+            "clear_sequence": _WebSocketRoute(
+                self._handle_clear_sequence,
+                control,
+            ),
             # 任务持久化
-            "list_tasks":    self._handle_list_tasks,
-            "save_task":     self._handle_save_task,
-            "load_task":     self._handle_load_task,
-            "delete_task":   self._handle_delete_task,
-            "get_task_detail": self._handle_get_task_detail,
-            "rename_task": self._handle_rename_task,
-            "add_to_task": self._handle_add_to_task,
-            "remove_from_task": self._handle_remove_from_task,
-            "move_in_task": self._handle_move_in_task,
+            "list_tasks": _WebSocketRoute(
+                self._handle_list_tasks,
+                public,
+                audited=False,
+            ),
+            "save_task": _WebSocketRoute(
+                self._handle_save_task,
+                control,
+            ),
+            "load_task": _WebSocketRoute(
+                self._handle_load_task,
+                control,
+            ),
+            "delete_task": _WebSocketRoute(
+                self._handle_delete_task,
+                control,
+            ),
+            "get_task_detail": _WebSocketRoute(
+                self._handle_get_task_detail,
+                public,
+                audited=False,
+            ),
+            "rename_task": _WebSocketRoute(
+                self._handle_rename_task,
+                control,
+            ),
+            "add_to_task": _WebSocketRoute(
+                self._handle_add_to_task,
+                control,
+            ),
+            "remove_from_task": _WebSocketRoute(
+                self._handle_remove_from_task,
+                control,
+            ),
+            "move_in_task": _WebSocketRoute(
+                self._handle_move_in_task,
+                control,
+            ),
             # AI 助手
-            "ai_chat":       self._handle_ai_chat,
-            "ai_confirm":    self._handle_ai_confirm,
-            "ai_cancel":     self._handle_ai_cancel,
-            "ai_status":     self._handle_ai_status,
-            "list_skills":   self._handle_list_skills,
+            "ai_chat": _WebSocketRoute(self._handle_ai_chat, control),
+            "ai_confirm": _WebSocketRoute(
+                self._handle_ai_confirm,
+                control,
+            ),
+            "ai_cancel": _WebSocketRoute(
+                self._handle_ai_cancel,
+                control,
+            ),
+            "ai_status": _WebSocketRoute(
+                self._handle_ai_status,
+                public,
+                audited=False,
+            ),
+            "list_skills": _WebSocketRoute(
+                self._handle_list_skills,
+                public,
+                audited=False,
+            ),
             # 设备管理
-            "status":        self._handle_status,
-            "init_robots":   self._handle_init_robots,
-            "init_body":     self._handle_init_body,
-            "disconnect":    self._handle_disconnect,
-            "test_camera":   self._handle_test_camera,
-            # 相机管理器
-            "camera_status":             self._handle_camera_status,
-            # 相机帧订阅（替代独立 /camera/frames 连接）
-            "subscribe_camera_frames":   self._handle_subscribe_camera_frames,
-            "unsubscribe_camera_frames": self._handle_unsubscribe_camera_frames,
-            # LLM 聊天（底层 provider 可使用 HTTP / WebSocket / 本地模型）
-            "chat_connect":              self._handle_chat_connect,
-            "chat_disconnect":           self._handle_chat_disconnect,
-            "chat":                      self._handle_chat_send,
-            # MiniCPM 代理配置查询
-            "minicpm_status": self._handle_minicpm_status,
-            # 遥操作控制
-            "teleop_init":     self._handle_teleop_init,
-            "teleop_start":    self._handle_teleop_start,
-            "teleop_joint":    self._handle_teleop_joint,
-            "teleop_stop":     self._handle_teleop_stop,
-            # 数据采集控制
-            "demo_session_start": self._handle_demo_session_start,
-            "demo_record_start":  self._handle_demo_record_start,
-            "demo_record_stop":   self._handle_demo_record_stop,
-            "demo_session_end":   self._handle_demo_session_end,
+            "status": _WebSocketRoute(
+                self._handle_status,
+                public,
+                audited=False,
+            ),
+            "init_robots": _WebSocketRoute(
+                self._handle_init_robots,
+                control,
+            ),
+            "init_body": _WebSocketRoute(
+                self._handle_init_body,
+                control,
+            ),
+            "disconnect": _WebSocketRoute(
+                self._handle_disconnect,
+                control,
+            ),
+            "test_camera": _WebSocketRoute(
+                self._handle_test_camera,
+                control,
+            ),
+            # 相机读取会话
+            "camera_status": _WebSocketRoute(
+                self._handle_camera_status,
+                public,
+                audited=False,
+            ),
+            "subscribe_camera_frames": _WebSocketRoute(
+                self._handle_subscribe_camera_frames,
+                authenticated,
+            ),
+            "unsubscribe_camera_frames": _WebSocketRoute(
+                self._handle_unsubscribe_camera_frames,
+                authenticated,
+            ),
+            # LLM 聊天
+            "chat_connect": _WebSocketRoute(
+                self._handle_chat_connect,
+                authenticated,
+            ),
+            "chat_disconnect": _WebSocketRoute(
+                self._handle_chat_disconnect,
+                authenticated,
+            ),
+            "chat": _WebSocketRoute(
+                self._handle_chat_send,
+                authenticated,
+            ),
+            "minicpm_status": _WebSocketRoute(
+                self._handle_minicpm_status,
+                public,
+                audited=False,
+            ),
+            # 遥操作与数据采集
+            "teleop_init": _WebSocketRoute(
+                self._handle_teleop_init,
+                control,
+            ),
+            "teleop_start": _WebSocketRoute(
+                self._handle_teleop_start,
+                control,
+            ),
+            "teleop_joint": _WebSocketRoute(
+                self._handle_teleop_joint,
+                control,
+            ),
+            "teleop_stop": _WebSocketRoute(
+                self._handle_teleop_stop,
+                control,
+            ),
+            "demo_session_start": _WebSocketRoute(
+                self._handle_demo_session_start,
+                control,
+            ),
+            "demo_record_start": _WebSocketRoute(
+                self._handle_demo_record_start,
+                control,
+            ),
+            "demo_record_stop": _WebSocketRoute(
+                self._handle_demo_record_stop,
+                control,
+            ),
+            "demo_session_end": _WebSocketRoute(
+                self._handle_demo_session_end,
+                control,
+            ),
         }
 
-        handler = handlers.get(action)
-        if handler:
-            await handler(websocket, data)
-        else:
+    async def _dispatch(self, websocket, data: object) -> None:
+        """根据 action 字段分发到对应处理函数"""
+        if not isinstance(data, dict):
             await websocket.send(self._json_msg(
-                {"event": "error", "message": f"未知的 action: {action}"}
+                {
+                    "event": "error",
+                    "code": "invalid_request",
+                    "message": "请求必须是 JSON 对象",
+                }
             ))
+            return
+
+        request_id = self._request_id(data)
+        if request_id is None:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": "invalid_request_id",
+                "message": (
+                    "request_id 只能包含字母、数字、点、下划线、冒号或连字符，"
+                    "长度为 1..128"
+                ),
+            }))
+            return
+
+        action_value = data.get("action")
+        action = action_value if isinstance(action_value, str) else ""
+        route = self._routes.get(action)
+        if route is None:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": "unknown_action",
+                "request_id": request_id,
+                "message": f"未知的 action: {action}",
+            }))
+            return
+
+        client_id = self._client_id(websocket)
+        expired_client_id = self._access.expire_control()
+        if expired_client_id is not None:
+            await self._release_control_side_effects(
+                expired_client_id,
+                reason="expired",
+            )
+
+        request = dict(data)
+        request["request_id"] = request_id
+        try:
+            self._access.authorize(client_id, route.access_level)
+            await route.handler(websocket, request)
+        except WebSocketAccessError as exc:
+            if route.audited:
+                self._audit(
+                    client_id=client_id,
+                    action=action,
+                    request_id=request_id,
+                    outcome="denied",
+                    code=exc.code,
+                )
+            await websocket.send(self._json_msg({
+                "event": "access_denied",
+                "code": exc.code,
+                "action": action,
+                "request_id": request_id,
+                "message": str(exc),
+            }))
+        except Exception as exc:
+            if route.audited:
+                self._audit(
+                    client_id=client_id,
+                    action=action,
+                    request_id=request_id,
+                    outcome="failed",
+                    code=type(exc).__name__,
+                )
+            raise
+        else:
+            if route.audited:
+                self._audit(
+                    client_id=client_id,
+                    action=action,
+                    request_id=request_id,
+                    outcome="dispatched",
+                )
+
+    def _register_client(self, websocket: Any, remote: object) -> str:
+        client_id = uuid4().hex
+        self._clients.add(websocket)
+        self._client_ids[websocket] = client_id
+        self._access.register(client_id, str(remote or "unknown"))
+        return client_id
+
+    async def _unregister_client(
+        self,
+        websocket: Any,
+        *,
+        reason: str,
+    ) -> None:
+        self._clients.discard(websocket)
+        self._camera_frame_subs.discard(websocket)
+        self._stop_camera_if_idle()
+        client_id = self._client_ids.pop(websocket, None)
+        if client_id is not None and self._access.unregister(client_id):
+            await self._release_control_side_effects(
+                client_id,
+                reason=reason,
+            )
+        await self._close_minicpm_session(websocket)
+
+    async def _release_control_side_effects(
+        self,
+        client_id: str,
+        *,
+        reason: str,
+    ) -> None:
+        try:
+            if (
+                self._demo_recorder is not None
+                or self._demo_camera_session is not None
+            ):
+                await self._close_demo_recorder()
+            elif self._services.teleoperation.active:
+                self._services.teleoperation.stop()
+        except Exception as exc:
+            logger.error(
+                "释放控制客户端会话失败: client_id=%s reason=%s error=%s",
+                client_id,
+                reason,
+                exc,
+            )
+        finally:
+            for arm_name in self._teleop_modes:
+                self._teleop_modes[arm_name] = False
+        await self._broadcast({
+            "event": "control_released",
+            "client_id": client_id,
+            "reason": reason,
+        })
+
+    async def _control_lease_monitor(self) -> None:
+        interval_seconds = max(
+            0.1,
+            min(1.0, self._access.control_lease_seconds / 4),
+        )
+        while True:
+            await asyncio.sleep(interval_seconds)
+            expired_client_id = self._access.expire_control()
+            if expired_client_id is not None:
+                await self._release_control_side_effects(
+                    expired_client_id,
+                    reason="expired",
+                )
+
+    def _client_id(self, websocket: Any) -> str:
+        try:
+            return self._client_ids[websocket]
+        except KeyError as exc:
+            raise WebSocketAccessError(
+                "unknown_client",
+                "WebSocket 客户端尚未注册",
+            ) from exc
+
+    @staticmethod
+    def _request_id(data: dict[str, Any]) -> str | None:
+        value = data.get("request_id")
+        if value is None:
+            return uuid4().hex
+        if not isinstance(value, str):
+            return None
+        return value if _REQUEST_ID_PATTERN.fullmatch(value) else None
+
+    def _audit(
+        self,
+        *,
+        client_id: str,
+        action: str,
+        request_id: str,
+        outcome: str,
+        code: str | None = None,
+    ) -> None:
+        try:
+            principal = self._access.session(client_id).principal
+        except WebSocketAccessError:
+            principal = None
+        event = WebSocketAuditEvent.create(
+            client_id=client_id,
+            principal=principal,
+            action=action,
+            request_id=request_id,
+            outcome=outcome,
+            code=code,
+        )
+        try:
+            self._audit_sink(event)
+        except Exception as exc:
+            logger.error(
+                "WebSocket 安全审计写入失败: %s",
+                type(exc).__name__,
+            )
+
+    async def _handle_authenticate(
+        self,
+        websocket: Any,
+        data: dict[str, Any],
+    ) -> None:
+        session = self._access.authenticate(
+            self._client_id(websocket),
+            data.get("token"),
+        )
+        await websocket.send(self._json_msg({
+            "event": "authenticated",
+            "client_id": session.client_id,
+            "principal": session.principal,
+            "request_id": data["request_id"],
+        }))
+
+    async def _handle_control_status(
+        self,
+        websocket: Any,
+        data: dict[str, Any],
+    ) -> None:
+        client_id = self._client_id(websocket)
+        session = self._access.session(client_id)
+        lease = self._access.control_snapshot()
+        await websocket.send(self._json_msg({
+            "event": "control_status",
+            "client_id": client_id,
+            "authenticated": session.authenticated,
+            "authentication_configured": (
+                self._access.authentication_configured
+            ),
+            "control_lease": lease.to_dict() if lease else None,
+            "request_id": data["request_id"],
+        }))
+
+    async def _handle_acquire_control(
+        self,
+        websocket: Any,
+        data: dict[str, Any],
+    ) -> None:
+        lease = self._access.acquire_control(
+            self._client_id(websocket)
+        )
+        await websocket.send(self._json_msg({
+            "event": "control_acquired",
+            "control_lease": lease.to_dict(),
+            "request_id": data["request_id"],
+        }))
+
+    async def _handle_control_heartbeat(
+        self,
+        websocket: Any,
+        data: dict[str, Any],
+    ) -> None:
+        lease = self._access.renew_control(
+            self._client_id(websocket)
+        )
+        await websocket.send(self._json_msg({
+            "event": "control_heartbeat",
+            "control_lease": lease.to_dict(),
+            "request_id": data["request_id"],
+        }))
+
+    async def _handle_release_control(
+        self,
+        websocket: Any,
+        data: dict[str, Any],
+    ) -> None:
+        client_id = self._client_id(websocket)
+        released = self._access.release_control(client_id)
+        if released:
+            await self._release_control_side_effects(
+                client_id,
+                reason="released",
+            )
+        await websocket.send(self._json_msg({
+            "event": "control_release_completed",
+            "released": released,
+            "request_id": data["request_id"],
+        }))
 
     # ==================================================================
     # 执行控制
@@ -2888,7 +3390,10 @@ class RobotWebSocketServer:
             except Exception:
                 disconnected.append(client)
         for client in disconnected:
-            self._clients.discard(client)
+            await self._unregister_client(
+                client,
+                reason="send_failed",
+            )
 
     # ==================================================================
     # 遥操作控制

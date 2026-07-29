@@ -254,6 +254,8 @@ class Config:
     WEBSOCKET_ENABLED: bool = True
     WEBSOCKET_HOST: str = "127.0.0.1"
     WEBSOCKET_PORT: int = 8765
+    WEBSOCKET_AUTH_TOKEN: str = ""
+    WEBSOCKET_CONTROL_LEASE_SECONDS: float = 30.0
     AUXILIARY_SERVICE_START_TIMEOUT_SECONDS: float = 5.0
     AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS: float = 10.0
 
@@ -759,6 +761,13 @@ class Config:
             "127.0.0.1",
         )
         instance.WEBSOCKET_PORT = int(os.getenv("WEBSOCKET_PORT", "8765"))
+        instance.WEBSOCKET_AUTH_TOKEN = os.getenv(
+            "WEBSOCKET_AUTH_TOKEN",
+            "",
+        )
+        instance.WEBSOCKET_CONTROL_LEASE_SECONDS = float(
+            os.getenv("WEBSOCKET_CONTROL_LEASE_SECONDS", "30.0")
+        )
         instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS = float(
             os.getenv("AUXILIARY_SERVICE_START_TIMEOUT_SECONDS", "5.0")
         )
@@ -1099,6 +1108,10 @@ class Config:
             "enabled": instance.WEBSOCKET_ENABLED,
             "host": instance.WEBSOCKET_HOST,
             "port": instance.WEBSOCKET_PORT,
+            "auth_token": instance.WEBSOCKET_AUTH_TOKEN,
+            "control_lease_seconds": (
+                instance.WEBSOCKET_CONTROL_LEASE_SECONDS
+            ),
             "start_timeout_seconds": (
                 instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS
             ),

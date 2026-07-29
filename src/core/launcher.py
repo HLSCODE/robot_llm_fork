@@ -65,10 +65,18 @@ def build_auxiliary_service_host(
             if args.websocket_port is not None
             else int(getattr(config, "WEBSOCKET_PORT", 8765))
         )
+        auth_token = str(
+            getattr(config, "WEBSOCKET_AUTH_TOKEN", "")
+        )
+        if not auth_token:
+            logger.warning(
+                "未配置 WEBSOCKET_AUTH_TOKEN；WebSocket 仅提供公开只读接口，"
+                "所有写操作均会被拒绝"
+            )
         if websocket_host.strip().lower() not in _LOOPBACK_HOSTS:
             logger.warning(
-                "WebSocket 正在监听非本机地址 %s；当前写操作尚未实现认证和"
-                "客户端控制租约",
+                "WebSocket 正在监听非本机地址 %s；使用 ws:// 时认证凭据和"
+                "业务数据不会由 TLS 加密，请通过可信反向代理提供 wss://",
                 websocket_host,
             )
         auxiliary_services.append(
@@ -76,6 +84,14 @@ def build_auxiliary_service_host(
                 services=services,
                 host=websocket_host,
                 port=websocket_port,
+                auth_token=auth_token,
+                control_lease_seconds=float(
+                    getattr(
+                        config,
+                        "WEBSOCKET_CONTROL_LEASE_SECONDS",
+                        30.0,
+                    )
+                ),
             )
         )
 

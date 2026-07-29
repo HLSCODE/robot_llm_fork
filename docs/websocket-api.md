@@ -140,6 +140,8 @@ SIMULATION_MODE=false
 WEBSOCKET_ENABLED=true
 WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
+WEBSOCKET_AUTH_TOKEN=
+WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
 AUXILIARY_SERVICE_START_TIMEOUT_SECONDS=5.0
 AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=10.0
 
@@ -168,8 +170,10 @@ MINICPM_ASK_MODEL=qwen-turbo
 |---|---|---|
 | `SIMULATION_MODE` | 是否模拟模式 | `true` 时不连接真实硬件 |
 | `WEBSOCKET_ENABLED` | 是否随 GUI 启动 WebSocket | 默认 `true` |
-| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `127.0.0.1`；远程监听需评估未认证写接口风险 |
+| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `127.0.0.1`；远程监听必须使用可信反向代理提供 `wss://` |
 | `WEBSOCKET_PORT` | WebSocket 监听端口 | 默认 `8765` |
+| `WEBSOCKET_AUTH_TOKEN` | 写操作共享认证密钥 | 留空时服务保持可读，但所有写操作均被拒绝；不得提交真实值 |
+| `WEBSOCKET_CONTROL_LEASE_SECONDS` | 单一控制客户端租约时长 | 默认 30 秒；控制指令或心跳会续期 |
 | `AUXILIARY_SERVICE_START_TIMEOUT_SECONDS` | 单个附加服务启动超时 | 默认 5 秒 |
 | `AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS` | 单个附加服务停止超时 | 默认 10 秒 |
 | `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
@@ -214,13 +218,68 @@ ws.onerror = (err) => {
 };
 ```
 
-### 3.2 请求消息格式
+连接建立后，服务端首先发送：
+
+```json
+{
+  "event": "connected",
+  "client_id": "6cbd...",
+  "authentication_configured": true,
+  "control_lease_seconds": 30.0
+}
+```
+
+### 3.2 写操作认证与控制权
+
+公开查询不要求认证。执行、设备、编排、AI 规划、遥操作和数据采集等写操作
+必须依次完成认证和控制权申请：
+
+```json
+{"action": "authenticate", "token": "<运行时注入的密钥>", "request_id": "auth-1"}
+{"action": "acquire_control", "request_id": "control-1"}
+```
+
+认证成功返回 `authenticated`，取得控制权返回 `control_acquired`。同一时刻只有
+一个客户端能够持有控制权；另一个客户端申请时收到
+`access_denied / control_busy`，不会抢占现有控制者。
+
+控制客户端应在租约过期前发送心跳：
+
+```json
+{"action": "control_heartbeat", "request_id": "heartbeat-1"}
+```
+
+主动释放：
+
+```json
+{"action": "release_control", "request_id": "release-1"}
+```
+
+租约到期、持有者断线或发送失败都会释放控制权，并停止该控制者持有的遥操作或
+数据采集会话。观察者断线不会停止其他客户端的控制会话。已经提交到统一执行
+运行时的普通序列不会因为网络控制租约释放而被隐式中断；需要停止时应在租约
+有效期间显式调用 `stop`、`quick_stop` 或 `emergency_stop`。
+
+权限分级：
+
+| 级别 | action |
+|---|---|
+| 公开只读 | `status`、动作/序列/任务查询、`ai_status`、`list_skills`、`camera_status`、`minicpm_status`、`control_status` |
+| 仅需认证 | 相机帧订阅、LLM 聊天会话 |
+| 认证并持有控制权 | 其余执行、设备、编排、AI 规划、遥操作和数据采集 action |
+
+`WEBSOCKET_AUTH_TOKEN` 未配置时，`authenticate` 返回
+`authentication_not_configured`，所有非公开操作保持锁定。密钥不会写入安全
+审计，但在远程 `ws://` 连接中仍会以明文传输，因此远程部署必须使用 `wss://`。
+
+### 3.3 请求消息格式
 
 客户端请求统一为 JSON 对象：
 
 ```json
 {
-  "action": "status"
+  "action": "status",
+  "request_id": "status-1"
 }
 ```
 
@@ -229,9 +288,10 @@ ws.onerror = (err) => {
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `action` | `string` | 是 | 接口动作名 |
+| `request_id` | `string` | 否 | 1..128 位字母、数字、`.`、`_`、`:`、`-`；缺省时由服务端生成 |
 | 其他字段 | 任意 | 否 | 由具体接口决定 |
 
-### 3.3 响应/事件消息格式
+### 3.4 响应/事件消息格式
 
 服务端消息统一为 JSON 对象：
 
@@ -248,7 +308,7 @@ ws.onerror = (err) => {
 | `event` | `string` | 是 | 事件名 |
 | 其他字段 | 任意 | 否 | 由具体事件决定 |
 
-### 3.4 前端一定要注意的协议特点
+### 3.5 前端一定要注意的协议特点
 
 这套协议不是严格的一问一答 RPC，而是“命令 + 事件流”模型。
 
@@ -298,6 +358,16 @@ ws.onmessage = (event) => {
 ---
 
 ## 4. action 总表
+
+### 4.0 安全会话
+
+| action | 权限 | 含义 |
+|---|---|---|
+| `authenticate` | 公开 | 使用 `WEBSOCKET_AUTH_TOKEN` 认证当前连接 |
+| `control_status` | 公开 | 查询当前连接认证状态和控制租约 |
+| `acquire_control` | 已认证 | 申请唯一控制权 |
+| `control_heartbeat` | 控制者 | 续期控制租约 |
+| `release_control` | 控制者 | 主动释放控制权及其会话资源 |
 
 ### 4.1 执行控制
 
@@ -384,6 +454,11 @@ ws.onmessage = (event) => {
 | event | 含义 |
 |---|---|
 | `error` | 请求参数校验错误（同步返回给请求方） |
+| `access_denied` | 认证失败、未持有控制权、租约过期或控制权冲突 |
+| `authenticated` | 当前连接认证成功 |
+| `control_acquired` | 当前连接取得控制权 |
+| `control_heartbeat` | 控制租约续期成功 |
+| `control_released` | 控制权因主动释放、超时、断线或发送失败而释放 |
 | `log` | 执行日志（含 `level` 字段） |
 
 `log` 事件结构：
@@ -2692,54 +2767,60 @@ function handleChatData(data) {
 推荐流程：
 
 1. 建立连接
-2. 调用 `status`
-3. 按需调用 `init_robots`、`init_body`
-4. 通过 `add_to_sequence` 组装序列，或 `load_task`
-5. 调用 `execute`
-6. 监听 `step_started`、`step_completed`、`step_failed`、`execution_finished`
+2. 调用 `authenticate`，成功后调用 `acquire_control`
+3. 启动间隔小于控制租约的 `control_heartbeat`
+4. 调用 `status`
+5. 按需调用 `init_robots`、`init_body`
+6. 通过 `add_to_sequence` 组装序列，或 `load_task`
+7. 调用 `execute`
+8. 监听 `step_started`、`step_completed`、`step_failed`、`execution_finished`
+9. 页面退出时调用 `release_control`
 
 ### 14.3 AI 规划页面
 
 推荐流程：
 
-1. 页面初始化时先调用 `ai_status`，确认 `llm_available`、`api_key_set`、`processing`、`has_preview`
-2. 用户输入自然语言后调用 `ai_chat`
-3. 收到 `ai_status_changed(status = "分析中...")` 后进入 loading 状态
-4. 收到 `ai_skill_matched` 后展示“已匹配技能”和参数摘要
-5. 收到 `ai_preview_ready` 后展示任务序列预览，并启用“确认执行”按钮
-6. 若收到 `ai_skill_not_matched` 或 `error`，则结束本轮规划并给出失败提示
-7. 用户确认后调用 `ai_confirm`
-8. 执行阶段继续监听 `accepted`、`step_started`、`step_completed`、`step_failed`、`ai_execution_finished`、`execution_finished`
-9. 用户取消预览则调用 `ai_cancel`
+1. 先完成 `authenticate` 和 `acquire_control`
+2. 页面初始化时调用 `ai_status`，确认 `llm_available`、`api_key_set`、`processing`、`has_preview`
+3. 用户输入自然语言后调用 `ai_chat`
+4. 收到 `ai_status_changed(status = "分析中...")` 后进入 loading 状态
+5. 收到 `ai_skill_matched` 后展示“已匹配技能”和参数摘要
+6. 收到 `ai_preview_ready` 后展示任务序列预览，并启用“确认执行”按钮
+7. 若收到 `ai_skill_not_matched` 或 `error`，则结束本轮规划并给出失败提示
+8. 用户确认后调用 `ai_confirm`
+9. 执行阶段继续监听 `accepted`、`step_started`、`step_completed`、`step_failed`、`ai_execution_finished`、`execution_finished`
+10. 用户取消预览则调用 `ai_cancel`
 
 ### 14.4 相机预览页面
 
 推荐流程：
 
-1. 调用 `camera_status`
-2. 若 `available = true`，调用 `subscribe_camera_frames`
-3. 将 `camera_frames` 渲染为图片
-4. 页面销毁时调用 `unsubscribe_camera_frames`
+1. 调用 `authenticate`（相机帧订阅不要求控制权）
+2. 调用 `camera_status`
+3. 若 `available = true`，调用 `subscribe_camera_frames`
+4. 将 `camera_frames` 渲染为图片
+5. 页面销毁时调用 `unsubscribe_camera_frames`
 
 ### 14.5 MiniCPM 聊天页面
 
 推荐流程：
 
-1. 调用 `minicpm_status`
-2. 调用 `chat_connect`
-3. 用户发送消息时，先在本地插入用户气泡，再创建一条空的助手占位气泡
-4. 调用 `chat`
-5. 监听 `chat_data`
-6. 对 `prefill_done`、`chunk`、`done`、`error`、`unknown` 按协议分别处理
-7. 只有收到 `done` 或 `error` 后，才允许开始下一轮发送
-8. 若同时收到 `minicpm_instruction`，应将其视为“指令识别提示”或“规划入口”，不要当聊天正文显示
-9. 不再使用时调用 `chat_disconnect`
+1. 调用 `authenticate`（聊天会话不要求控制权）
+2. 调用 `minicpm_status`
+3. 调用 `chat_connect`
+4. 用户发送消息时，先在本地插入用户气泡，再创建一条空的助手占位气泡
+5. 调用 `chat`
+6. 监听 `chat_data`
+7. 对 `prefill_done`、`chunk`、`done`、`error`、`unknown` 按协议分别处理
+8. 只有收到 `done` 或 `error` 后，才允许开始下一轮发送
+9. 若同时收到 `minicpm_instruction`，应将其视为“指令识别提示”或“规划入口”，不要当聊天正文显示
+10. 不再使用时调用 `chat_disconnect`
 
 ---
 
 ## 15. 错误处理手册
 
-服务端统一错误格式：
+现有请求参数错误格式：
 
 ```json
 {
@@ -2747,6 +2828,23 @@ function handleChatData(data) {
   "message": "..."
 }
 ```
+
+权限拒绝使用独立事件：
+
+```json
+{
+  "event": "access_denied",
+  "code": "authentication_required",
+  "action": "execute",
+  "request_id": "execute-1",
+  "message": "此操作需要先完成认证"
+}
+```
+
+常见权限错误码为 `authentication_not_configured`、
+`invalid_credentials`、`authentication_required`、`control_required`、
+`control_busy` 和 `control_lease_expired`。前端不得在日志或错误上报中附带
+认证 token。
 
 前端建议：
 
@@ -2787,16 +2885,36 @@ function handleChatData(data) {
 
 ```javascript
 const ws = new WebSocket("ws://localhost:8765");
+const websocketToken = window.runtimeConfig.websocketToken;
+let hasControl = false;
 
-ws.onopen = () => {
-  ws.send(JSON.stringify({ action: "status" }));
-  ws.send(JSON.stringify({ action: "list_actions" }));
-};
+ws.onopen = () => console.log("WebSocket 已连接");
 
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
 
   switch (data.event) {
+    case "connected":
+      ws.send(JSON.stringify({
+        action: "authenticate",
+        token: websocketToken,
+        request_id: "auth-1"
+      }));
+      break;
+    case "authenticated":
+      ws.send(JSON.stringify({
+        action: "acquire_control",
+        request_id: "control-1"
+      }));
+      break;
+    case "control_acquired":
+      hasControl = true;
+      ws.send(JSON.stringify({ action: "status" }));
+      ws.send(JSON.stringify({ action: "list_actions" }));
+      break;
+    case "control_released":
+      hasControl = false;
+      break;
     case "status":
       console.log("服务状态", data);
       break;
@@ -2814,14 +2932,19 @@ ws.onmessage = (event) => {
     case "error":
       console.error("错误", data.message);
       break;
+    case "access_denied":
+      console.error(`权限错误 ${data.code}`, data.message);
+      break;
     default:
       console.log("其他事件", data);
   }
 };
 
 function executeDemo() {
+  if (!hasControl) throw new Error("当前客户端没有控制权");
   ws.send(JSON.stringify({
     action: "execute",
+    request_id: "execute-demo-1",
     sequence: [
       {
         name: "移动到A点",

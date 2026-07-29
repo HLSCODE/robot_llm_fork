@@ -272,6 +272,8 @@ class ApplicationHostCompositionTests(unittest.TestCase):
             WEBSOCKET_ENABLED=True,
             WEBSOCKET_HOST="0.0.0.0",
             WEBSOCKET_PORT=8765,
+            WEBSOCKET_AUTH_TOKEN="test-token",
+            WEBSOCKET_CONTROL_LEASE_SECONDS=30,
             AUXILIARY_SERVICE_START_TIMEOUT_SECONDS=0.5,
             AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=0.5,
         )
@@ -289,8 +291,42 @@ class ApplicationHostCompositionTests(unittest.TestCase):
                 services=object(),
             )
 
-        self.assertIn("尚未实现认证", "\n".join(logs.output))
+        self.assertIn("wss://", "\n".join(logs.output))
         self.assertEqual("websocket", host.snapshots()[0].name)
+
+    def test_missing_websocket_token_warns_that_writes_are_locked(self):
+        args = SimpleNamespace(
+            disable_websocket=False,
+            websocket_host=None,
+            websocket_port=None,
+        )
+        config = SimpleNamespace(
+            WEBSOCKET_ENABLED=True,
+            WEBSOCKET_HOST="127.0.0.1",
+            WEBSOCKET_PORT=8765,
+            WEBSOCKET_AUTH_TOKEN="",
+            WEBSOCKET_CONTROL_LEASE_SECONDS=30,
+            AUXILIARY_SERVICE_START_TIMEOUT_SECONDS=0.5,
+            AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=0.5,
+        )
+
+        with (
+            patch(
+                "src.robot_server.ws_server.RobotWebSocketServer",
+                return_value=_FakeAsyncService("websocket", []),
+            ),
+            self.assertLogs("src.core.launcher", level="WARNING") as logs,
+        ):
+            build_auxiliary_service_host(
+                args,
+                config,
+                services=object(),
+            )
+
+        self.assertIn(
+            "所有写操作均会被拒绝",
+            "\n".join(logs.output),
+        )
 
 
 if __name__ == "__main__":

@@ -26,6 +26,12 @@
 
 ## WebSocket 协议
 
+所有 `teleop_*` action 都是控制写操作。客户端必须先发送 `authenticate`，
+再发送 `acquire_control`，并在会话期间持续发送 `control_heartbeat`。控制租约
+超时、控制者断线或发送失败会自动停止其遥操作并释放设备资源；其他观察者断线
+不会影响当前控制者。完整安全会话格式见
+[WebSocket 接口手册](websocket-api.md#32-写操作认证与控制权)。
+
 ### 1. 遥操作初始化（可选）
 
 在启动遥操作前，可以将机械臂移动到指定的初始关节姿态。通常用于将从臂移动到与主臂相同的起始位置。
@@ -356,13 +362,15 @@ setTimeout(() => {
 
 ## 配置说明
 
-遥操作功能无需额外配置，使用现有的 WebSocket 服务配置：
+遥操作使用 WebSocket 认证和控制租约配置：
 
 ```env
 # config.env
 WEBSOCKET_ENABLED=true
 WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
+WEBSOCKET_AUTH_TOKEN=<运行时强随机密钥>
+WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
 ```
 
 启动服务：
@@ -375,9 +383,11 @@ python run.py
 ### 测试步骤
 1. 启动 WebSocket 服务
 2. 连接 WebSocket 客户端
-3. 发送 `teleop_start` 启动遥操作
-4. 发送关节指令流（50Hz）
-5. 发送 `teleop_stop` 停止遥操作
+3. 发送 `authenticate` 和 `acquire_control`
+4. 启动 `control_heartbeat`
+5. 发送 `teleop_start` 启动遥操作
+6. 发送关节指令流（50Hz）
+7. 发送 `teleop_stop`，再发送 `release_control`
 
 ### 日志查看
 服务端会输出遥操作相关日志：
