@@ -3,14 +3,27 @@ Skill 解析引擎
 核心业务逻辑：将 LLM 解析结果展开为可执行的 SequenceItem 列表
 """
 import logging
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
 
 from ..core.models import SequenceItem, SequenceItemStatus, ActionDefinition, ActionType
-from .models import Skill, SkillMatchResult, ValidationResult
+from .models import (
+    Skill,
+    SkillMatchResult,
+    ValidationCode,
+    ValidationResult,
+)
 from .skill_registry import SkillRegistry
 
 logger = logging.getLogger(__name__)
+
+_ACTION_TYPES_BY_ALIAS: Mapping[str, ActionType] = MappingProxyType({
+    alias.upper(): action_type
+    for action_type in ActionType
+    for alias in (action_type.name, action_type.value)
+})
 
 
 class SkillEngine:
@@ -30,15 +43,6 @@ class SkillEngine:
             registry: 可选，技能注册表实例。默认为单例
         """
         self._registry = registry or SkillRegistry()
-        self._action_type_map = {
-            "MOVE": ActionType.MOVE,
-            "MOVE_TO_POINT": ActionType.MOVE,
-            "MANIPULATE": ActionType.MANIPULATE,
-            "ARM_ACTION": ActionType.MANIPULATE,
-            "INSPECT": ActionType.INSPECT,
-            "INSPECT_AND_OUTPUT": ActionType.INSPECT,
-            "CHANGE_GUN": ActionType.CHANGE_GUN,
-        }
         logger.info("SkillEngine 初始化完成")
 
     def load_skills(self, json_path: Optional[str] = None) -> int:
@@ -81,22 +85,24 @@ class SkillEngine:
             (动作序列, 验证结果) 元组
         """
         if not llm_result.is_valid():
-            validation = ValidationResult(
-                is_valid=False,
-                message=f"无效的技能匹配: {llm_result.error or '置信度过低'}",
-                warnings=[]
+            validation = ValidationResult.failed(
+                ValidationCode.INVALID_SKILL_MATCH,
+                f"无效的技能匹配: {llm_result.error or '置信度过低'}",
             )
             return [], validation
 
         # 获取技能定义
         skill = self._registry.get_skill(llm_result.skill_id)
         if skill is None:
-            validation = ValidationResult(
-                is_valid=False,
-                message=f"技能 {llm_result.skill_id} 不存在",
-                warnings=[]
+            validation = ValidationResult.failed(
+                ValidationCode.SKILL_NOT_FOUND,
+                f"技能 {llm_result.skill_id} 不存在",
             )
             return [], validation
+
+        action_type_validation = self._validate_action_types(skill)
+        if action_type_validation is not None:
+            return [], action_type_validation
 
         # 展开技能步骤为 SequenceItem
         items = self._expand_skill(skill, llm_result.extracted_params)
@@ -124,12 +130,12 @@ class SkillEngine:
         items = []
 
         for step in skill.steps:
-            # 将 action_type 字符串映射到 ActionType 枚举
-            action_type_str = step.action_type.upper()
-            action_type = self._action_type_map.get(
-                action_type_str,
-                ActionType.MOVE  # 默认值
-            )
+            action_type = self._resolve_action_type(step.action_type)
+            if action_type is None:
+                raise ValueError(
+                    f"技能 {skill.id} 的步骤 {step.step_id} 包含"
+                    f"不支持的动作类型: {step.action_type!r}"
+                )
 
             # 合并参数：技能定义的参数 + 用户提供的参数
             merged_params = {**step.parameters}
@@ -161,6 +167,33 @@ class SkillEngine:
         logger.debug(f"展开技能 {skill.id} 为 {len(items)} 个动作")
         return items
 
+    @staticmethod
+    def _resolve_action_type(raw_action_type: object) -> ActionType | None:
+        if not isinstance(raw_action_type, str):
+            return None
+        return _ACTION_TYPES_BY_ALIAS.get(raw_action_type.strip().upper())
+
+    def _validate_action_types(
+        self,
+        skill: Skill,
+    ) -> ValidationResult | None:
+        unsupported_steps = [
+            f"{step.step_id}={step.action_type!r}"
+            for step in skill.steps
+            if self._resolve_action_type(step.action_type) is None
+        ]
+        if not unsupported_steps:
+            return None
+
+        supported_types = ", ".join(
+            action_type.name for action_type in ActionType
+        )
+        return ValidationResult.failed(
+            ValidationCode.UNSUPPORTED_ACTION_TYPE,
+            f"技能 {skill.id} 包含不支持的动作类型: "
+            f"{', '.join(unsupported_steps)}；支持类型: {supported_types}",
+        )
+
     def _validate_sequence(
         self,
         items: List[SequenceItem],
@@ -179,10 +212,9 @@ class SkillEngine:
         warnings = []
 
         if not items:
-            return ValidationResult(
-                is_valid=False,
-                message="动作序列为空",
-                warnings=[]
+            return ValidationResult.failed(
+                ValidationCode.EMPTY_SEQUENCE,
+                "动作序列为空",
             )
 
         # 检查是否有连续操作同一执行器的动作
@@ -212,10 +244,9 @@ class SkillEngine:
         if len(items) > 20:
             warnings.append(f"动作序列较长（{len(items)}步），执行时间可能较长")
 
-        return ValidationResult(
-            is_valid=True,
-            message=f"动作序列验证通过，共 {len(items)} 个动作",
-            warnings=warnings
+        return ValidationResult.succeeded(
+            f"动作序列验证通过，共 {len(items)} 个动作",
+            warnings=tuple(warnings),
         )
 
     def get_skill_preview(

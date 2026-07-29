@@ -8,6 +8,8 @@ from .models import (
     SkillStep,
     Skill,
     SkillMatchResult,
+    ValidationCode,
+    ValidationResult,
 )
 from .skill_registry import SkillRegistry
 from .skill_engine import SkillEngine
@@ -18,6 +20,8 @@ __all__ = [
     "SkillStep",
     "Skill",
     "SkillMatchResult",
+    "ValidationCode",
+    "ValidationResult",
     "SkillRegistry",
     "SkillEngine",
 ]

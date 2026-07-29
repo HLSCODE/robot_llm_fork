@@ -410,7 +410,6 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - GUI 创建了语音和文本两个 `VoiceInteractionController`，会话上下文边界不清晰。
 - session pause 和 execution pause 容易混淆。
 - 预览没有统一 `preview_id`、版本和过期策略。
-- SkillEngine 对未知 action type 静默回退为 MOVE。
 - 技能参数只做少量手工映射，缺少强类型、单位、范围和安全规则。
 - provider/task 的取消、超时和资源关闭策略不完全统一。
 - Prompt、模型配置和规划结果缺少版本化回归基线。
@@ -432,7 +431,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | E-002 | P1 | TODO | Voice CommandRuntime 接入 |
 | E-003 | P1 | TODO | 区分 session control 和 execution control |
 | E-004 | P1 | TODO | 预览增加 preview_id、版本和过期状态 |
-| E-005 | P1 | TODO | 未知 action type 改为显式失败 |
+| E-005 | P1 | DONE | Skill action type 由 `ActionType` 单一映射解析；未知或非字符串类型返回 `unsupported_action_type`，不生成动作预览 |
 | E-006 | P1 | TODO | 技能参数接入统一 action schema |
 | E-007 | P1 | TODO | 定义高风险动作审批策略 |
 | E-008 | P2 | TODO | 明确 GUI 文本/语音会话共享策略 |
@@ -893,14 +892,15 @@ M4 工程治理与清理
 | 2026-07-29 | M3 | A/C | WebSocket 请求与执行关联 | C-003/C-004/C-005 DOING/TODO → DONE | 新增请求上下文和统一错误信封；直接响应与执行 accepted/step/log/terminal 贯通 request_id/action/run_id，执行接受及最终成功/失败/取消形成两阶段审计；未预期异常被连接边界隔离 | - |
 | 2026-07-29 | M3 | C | WebSocket 版本、流控与投递语义 | C-006/C-007/C-008 TODO → DONE；C-012 TODO → DOING | 强制 api_version=1.0 且不保留旧协议；配置消息/频率/并发/队列/发送超时，明确请求单播、系统广播和相机订阅投递并增加协议契约测试 | - |
 | 2026-07-29 | M3 | E/F | AI 执行审批与加粉终态收敛 | E-001/F-P-001 TODO → DONE | 删除自动执行配置和死事件；预览必须通过校验并由 GUI/WebSocket 显式确认；加粉最大轮次未达标改为显式失败并输出 `target_not_reached` | - |
+| 2026-07-29 | M3 | E | Skill action type 显式校验 | E-005 TODO → DONE | 删除未知类型回退 MOVE；映射从 `ActionType` 自动生成，校验结果增加稳定 `ValidationCode`，非法技能不会生成预览 | - |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **E-004/E-005/E-006**：为预览增加 ID、版本和过期状态；未知 action
-   type 显式失败；技能参数接入统一 action schema。
+3. **E-004/E-006**：为预览增加 ID、版本和过期状态；技能参数接入统一
+   action schema。
 4. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
    typed DTO，继续固化全部 action 的协议契约。
 5. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。

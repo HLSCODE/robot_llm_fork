@@ -827,7 +827,10 @@ class AIAssistantWidget(QWidget):
             sequence = data.get("sequence") or []
             skill_info = data.get("skill_info") or {}
             validation = data.get("validation") or {}
-            validation_passed = validation.get("is_valid") is True
+            validation_passed = (
+                validation.get("is_valid") is True
+                and validation.get("code") == "valid"
+            )
             confirmation_required = data.get("requires_confirmation") is True
             try:
                 self._ai_controller.set_current_preview_from_dicts(

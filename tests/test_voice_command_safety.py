@@ -7,7 +7,7 @@ import unittest
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.llm import LLMPlanResult
 from src.robot_server.ws_server import RobotWebSocketServer
-from src.skill_system.models import ValidationResult
+from src.skill_system.models import ValidationCode, ValidationResult
 from src.voice_interaction.core.router import VoiceIntentRouter
 from src.voice_interaction.core.session import VoiceSession
 
@@ -40,9 +40,14 @@ class _SkillEngine:
         return {"id": "safe-skill"}
 
     def parse_and_expand(self, _match):
-        return [self._item], ValidationResult(
-            is_valid=True,
-            message="valid",
+        return [self._item], ValidationResult.succeeded("valid")
+
+
+class _RejectedSkillEngine(_SkillEngine):
+    def parse_and_expand(self, _match):
+        return [], ValidationResult.failed(
+            ValidationCode.UNSUPPORTED_ACTION_TYPE,
+            "unsupported action type",
         )
 
 
@@ -92,11 +97,44 @@ class VoiceCommandSafetyTests(unittest.TestCase):
         )
 
         self.assertTrue(preview.data["validation"]["is_valid"])
+        self.assertEqual("valid", preview.data["validation"]["code"])
         self.assertIs(True, preview.data["requires_confirmation"])
         self.assertNotIn("auto_execute", preview.data)
         self.assertNotIn(
             "command_started",
             [event.type for event in events],
+        )
+
+    def test_invalid_action_type_never_produces_a_preview(self):
+        registry = SimpleNamespace(
+            skill_planner=_Planner(),
+            task_runner=_TaskRunner(),
+        )
+        router = VoiceIntentRouter(
+            registry,
+            VoiceSession(),
+            skill_engine=_RejectedSkillEngine(_sequence_item()),
+        )
+
+        async def scenario():
+            return [
+                event
+                async for event in router.route(
+                    "run unsafe skill",
+                    {"intent": "command"},
+                )
+            ]
+
+        events = asyncio.run(scenario())
+
+        self.assertNotIn(
+            "command_preview",
+            [event.type for event in events],
+        )
+        feedback = next(event for event in events if event.type == "done")
+        self.assertEqual(
+            "unsupported_action_type",
+            feedback.data["validation"]["code"],
         )
 
     def test_websocket_rejects_preview_without_confirmation_policy(self):
@@ -112,7 +150,34 @@ class VoiceCommandSafetyTests(unittest.TestCase):
             "text": "preview",
             "data": {
                 "sequence": [_sequence_item().to_dict()],
-                "validation": {"is_valid": True},
+                "validation": {"is_valid": True, "code": "valid"},
+            },
+        }
+
+        asyncio.run(server._emit_interaction_event(event))
+
+        self.assertFalse(server._ai_preview_sequence)
+        self.assertFalse(server._ai_preview_validated)
+        self.assertEqual("error", broadcasts[0]["event"])
+
+    def test_websocket_rejects_inconsistent_validation_code(self):
+        server = RobotWebSocketServer(services=SimpleNamespace())
+        broadcasts: list[dict] = []
+
+        async def record(payload: dict) -> None:
+            broadcasts.append(payload)
+
+        server._broadcast = record
+        event = {
+            "type": "command_preview",
+            "text": "preview",
+            "data": {
+                "sequence": [_sequence_item().to_dict()],
+                "validation": {
+                    "is_valid": True,
+                    "code": "unsupported_action_type",
+                },
+                "requires_confirmation": True,
             },
         }
 

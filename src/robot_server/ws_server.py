@@ -72,7 +72,8 @@ WebSocket 路径:
         {"event": "ai_status_changed",  "status": "分析中..."}
         {"event": "ai_skill_matched",   "skill_id": "...", "skill_name": "...", "params": {...}}
         {"event": "ai_preview_ready",   "sequence": [...], "skill_info": {...},
-         "validation": {"is_valid": true}, "requires_confirmation": true}
+         "validation": {"is_valid": true, "code": "valid"},
+         "requires_confirmation": true}
         {"event": "ai_execution_finished", "success": true, "message": "..."}
         {"event": "chat_connected"}                                    # 聊天会话已建立
         {"event": "chat_disconnected"}                                 # 聊天会话已断开
@@ -2648,7 +2649,10 @@ class RobotWebSocketServer:
                 return
 
             validation = data.get("validation") or {}
-            validation_passed = validation.get("is_valid") is True
+            validation_passed = (
+                validation.get("is_valid") is True
+                and validation.get("code") == "valid"
+            )
             confirmation_required = data.get("requires_confirmation") is True
             if not sequence or not validation_passed or not confirmation_required:
                 await self._broadcast({

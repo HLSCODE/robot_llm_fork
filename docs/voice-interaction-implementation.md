@@ -346,7 +346,7 @@ async def _handle_command(self, text: str):
         data={
             "plan": plan,
             "sequence": sequence,
-            "validation": {"is_valid": True},
+            "validation": {"is_valid": True, "code": "valid"},
             "requires_confirmation": True,
         },
     )
@@ -355,6 +355,8 @@ async def _handle_command(self, text: str):
 执行策略：
 
 - 只有通过技能和动作序列校验的结果才能生成预览。
+- 校验结果包含稳定 `code`；未知或非字符串 action type 返回
+  `unsupported_action_type`，不会静默转换成 MOVE。
 - 所有预览都带有 `requires_confirmation=true`，GUI 必须由用户点击执行或确认，
   WebSocket 必须收到独立的 `ai_confirm` 请求后才能进入统一执行运行时。
 - 接受新的文本或语音输入前会清除上一份待确认预览，避免误确认旧规划。

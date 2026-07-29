@@ -125,7 +125,10 @@ class VoiceIntentRouter:
             if not validation.is_valid:
                 async for event in self._stream_feedback(
                     validation.message or "动作参数校验未通过，暂时不能执行。",
-                    data={"plan": plan.__dict__, "warnings": validation.warnings},
+                    data={
+                        "plan": plan.__dict__,
+                        "validation": validation.to_dict(),
+                    },
                 ):
                     yield event
                 return
@@ -138,11 +141,7 @@ class VoiceIntentRouter:
                     "plan": plan.__dict__,
                     "skill_info": skill_info or {},
                     "sequence": [item.to_dict() for item in sequence],
-                    "validation": {
-                        "is_valid": validation.is_valid,
-                        "message": validation.message,
-                        "warnings": validation.warnings,
-                    },
+                    "validation": validation.to_dict(),
                     "requires_confirmation": True,
                     "suppress_message": True,
                 },

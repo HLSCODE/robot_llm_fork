@@ -1991,6 +1991,7 @@ ws.onmessage = (event) => {
   },
   "validation": {
     "is_valid": true,
+    "code": "valid",
     "message": "校验通过",
     "warnings": []
   },
@@ -2009,7 +2010,8 @@ ws.onmessage = (event) => {
 
 - `ai_chat` 没有单独的“提交成功”响应包；前端要把后续收到的事件流当作这次请求的结果。
 - `ai_preview_ready.sequence` 才是最终给前端展示、确认、执行的任务序列。
-- 服务端只发布通过校验且 `requires_confirmation=true` 的预览；缺少任一条件时预览会被拒绝。
+- 服务端只发布 `validation.code=valid` 且 `requires_confirmation=true`
+  的预览；未知 action type 会返回 `unsupported_action_type`，不会生成或缓存预览。
 - `ai_preview_ready` 到来前，前端不应认为规划已经成功。
 
 #### 11.0.2 MiniCPM 聊天触发路径
@@ -2159,7 +2161,7 @@ ws.onmessage = (event) => {
   "event": "ai_preview_ready",
   "sequence": [],
   "skill_info": {},
-  "validation": {"is_valid": true},
+  "validation": {"is_valid": true, "code": "valid"},
   "requires_confirmation": true
 }
 ```

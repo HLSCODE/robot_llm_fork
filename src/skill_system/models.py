@@ -193,16 +193,62 @@ class SkillMatchResult:
         }
 
 
-@dataclass
+class ValidationCode(str, Enum):
+    """Stable reason codes for skill expansion and sequence validation."""
+
+    VALID = "valid"
+    INVALID_SKILL_MATCH = "invalid_skill_match"
+    SKILL_NOT_FOUND = "skill_not_found"
+    UNSUPPORTED_ACTION_TYPE = "unsupported_action_type"
+    EMPTY_SEQUENCE = "empty_sequence"
+
+
+@dataclass(frozen=True, slots=True)
 class ValidationResult:
     """动作序列验证结果"""
     is_valid: bool
+    code: ValidationCode
     message: str
-    warnings: List[str] = field(default_factory=list)
+    warnings: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.is_valid and self.code is not ValidationCode.VALID:
+            raise ValueError("valid result must use ValidationCode.VALID")
+        if not self.is_valid and self.code is ValidationCode.VALID:
+            raise ValueError("invalid result must include a failure code")
+
+    @classmethod
+    def succeeded(
+        cls,
+        message: str,
+        *,
+        warnings: tuple[str, ...] = (),
+    ) -> "ValidationResult":
+        return cls(
+            is_valid=True,
+            code=ValidationCode.VALID,
+            message=message,
+            warnings=warnings,
+        )
+
+    @classmethod
+    def failed(
+        cls,
+        code: ValidationCode,
+        message: str,
+    ) -> "ValidationResult":
+        if code is ValidationCode.VALID:
+            raise ValueError("failed result requires a failure code")
+        return cls(
+            is_valid=False,
+            code=code,
+            message=message,
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "is_valid": self.is_valid,
+            "code": self.code.value,
             "message": self.message,
-            "warnings": self.warnings,
+            "warnings": list(self.warnings),
         }
