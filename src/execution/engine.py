@@ -5,7 +5,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ..actions.circle_dispense import execute_right_arm_circle_dispense
 from ..core.execution_context import ExecutionContext
 from ..core.models import (
     ActionType,
@@ -16,28 +15,16 @@ from ..core.models import (
 )
 from ..device_runtime import (
     ArmId,
-    ArmMotion,
     CameraSource,
     DepthCameraSource,
     DeviceRuntime,
-    DigitalOutputs,
-    ExpressionDisplay,
-    GripperControl,
-    Pipette,
-    PowderDispenser,
     RobotSystem,
     ToolRackControl,
-    ToolChanger,
     TrajectoryControl,
 )
 from ..device_runtime.ids import (
     CAMERA,
-    EXPRESSION_DISPLAY,
-    PIPETTE,
-    POWDER_DISPENSER,
-    RELAY_BANK,
     ROBOT_SYSTEM,
-    TOOL_CHANGER,
 )
 from .action_handlers import (
     ActionCancelledError,
@@ -52,9 +39,11 @@ from .control import ExecutionControl
 from .handlers import (
     BaseMoveActionHandler,
     BodyMoveActionHandler,
+    ManipulationHandlerOptions,
     MotionHandlerOptions,
     MoveActionHandler,
     RobotMoveActionHandler,
+    create_manipulation_handler,
 )
 from .manager import EngineCallbacks
 from .models import EngineResult
@@ -71,7 +60,6 @@ class ActionEngine:
         config: Any,
     ) -> None:
         self._device_runtime = device_runtime
-        self.config = config
         self.execution_context = ExecutionContext()
         self._callbacks: EngineCallbacks | None = None
         self._last_error = ""
@@ -105,6 +93,32 @@ class ActionEngine:
                 )
             ),
         )
+        self._manipulation_handler_options = ManipulationHandlerOptions(
+            gripper_max_attempts=int(
+                getattr(
+                    config,
+                    "EXECUTION_GRIPPER_MAX_ATTEMPTS",
+                    3,
+                )
+            ),
+            gripper_retry_delay_seconds=float(
+                getattr(
+                    config,
+                    "EXECUTION_GRIPPER_RETRY_DELAY_SECONDS",
+                    0.5,
+                )
+            ),
+        )
+        tapping_config_getter = getattr(
+            config,
+            "get_tapping_config",
+            None,
+        )
+        self._tapping_config_provider = (
+            tapping_config_getter
+            if callable(tapping_config_getter)
+            else lambda: {}
+        )
         self._handler_registry = self._create_handler_registry()
 
     def _create_handler_registry(self) -> ActionHandlerRegistry:
@@ -127,7 +141,14 @@ class ActionEngine:
             ActionType.BASE_MOVE,
             BaseMoveActionHandler(self._device_runtime),
         )
-        registry.register(ActionType.MANIPULATE, self._execute_manipulate)
+        registry.register(
+            ActionType.MANIPULATE,
+            create_manipulation_handler(
+                self._device_runtime,
+                self._manipulation_handler_options,
+                self._tapping_config_provider,
+            ),
+        )
         registry.register(ActionType.INSPECT, InspectActionHandler())
         registry.register(ActionType.WAIT, WaitActionHandler())
         registry.register(ActionType.CHANGE_GUN, self._execute_change_gun)
@@ -302,302 +323,6 @@ class ActionEngine:
             return False
         except Exception as exc:
             self._on_log(f"执行错误: {str(exc)}", "error")
-            return False
-
-    # ------------------------------------------------------------------
-    # 操作类动作
-    # ------------------------------------------------------------------
-
-    def _execute_manipulate(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        executor = params.get('执行器', '快换手')
-        number = params.get('编号', 1)
-        operation = params.get('操作', '开')
-
-        if executor == '快换手':
-            tool_changer = self._device_runtime.require(
-                TOOL_CHANGER,
-                ToolChanger,
-            )
-            if operation == '开':
-                tool_changer.set_locked(False)
-            elif operation == '关':
-                tool_changer.set_locked(True)
-            else:
-                self._on_log(f"未知的快换手操作: {operation}", "error")
-                return False
-
-        elif executor == '继电器':
-            if number not in (1, 2):
-                self._on_log(f"未知的编号: {number}", "error")
-                return False
-            if operation not in ('开', '关'):
-                self._on_log(f"未知的继电器操作: {operation}", "error")
-                return False
-            relay = self._device_runtime.require(RELAY_BANK, DigitalOutputs)
-            relay.set_channel(number, operation == '开')
-
-        elif executor == '夹爪':
-            return self._execute_gripper(operation, context)
-        elif executor == '吸液枪':
-            return self._execute_pipette(params, context)
-        elif executor in ('表情屏', '表情', 'expression_display', 'expression'):
-            return self._execute_expression_display(params, context)
-        elif executor == '右臂转圈注液':
-            pipette = self._device_runtime.require(PIPETTE, Pipette)
-            return execute_right_arm_circle_dispense(
-                robot_motion=self._device_runtime.require(
-                    ROBOT_SYSTEM,
-                    ArmMotion,
-                ),
-                pipette=pipette,
-                params=params,
-                log=self._on_log,
-                stop_requested=lambda: context.stop_requested,
-                paused=lambda: context.paused,
-            )
-        elif executor == '智能加粉':
-            return self._execute_powder_dispense(params, context)
-        elif executor == '加粉装置':
-            return self._execute_tapping(params, context)
-        else:
-            self._on_log(f"未知的执行器: {executor}", "error")
-            return False
-
-        self._on_log(f"执行器: {executor}, 编号: {number}, 操作: {operation}")
-        return True
-
-    def _execute_expression_display(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        operation = str(params.get('操作', '切换')).lower()
-        if operation in ('关闭', 'close'):
-            self._device_runtime.shutdown(EXPRESSION_DISPLAY)
-            self._on_log("表情屏连接已关闭")
-            return True
-
-        expression = (
-            params.get('表情')
-            or params.get('表情名称')
-            or params.get('expression')
-            or params.get('name')
-        )
-        if expression is None or str(expression).strip() == "":
-            self._on_log("表情屏动作缺少表情名称", "error")
-            return False
-
-        self._on_log(f"表情屏切换: {expression}")
-        try:
-            display = self._device_runtime.require(
-                EXPRESSION_DISPLAY,
-                ExpressionDisplay,
-            )
-            switched = display.switch(str(expression))
-            name = getattr(switched, "name", str(switched))
-            self._on_log(f"表情屏切换完成: {name}")
-            return True
-        except Exception as e:
-            self._on_log(f"表情屏切换失败: {str(e)}", "error")
-            return False
-
-    def _execute_gripper(
-        self,
-        operation: str,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行夹爪动作"""
-        self._on_log(f"夹爪动作: {operation}")
-
-        gripper = self._device_runtime.require(
-            ROBOT_SYSTEM,
-            GripperControl,
-        )
-
-        max_retries = 3
-        for attempt in range(1, max_retries + 1):
-            try:
-                if operation == '开':
-                    gripper.open_gripper(ArmId.LEFT)
-                elif operation == '关':
-                    gripper.close_gripper(ArmId.LEFT)
-                else:
-                    self._on_log(f"未知的夹爪操作: {operation}", "error")
-                    return False
-                self._on_log(f"夹爪{operation}执行完成")
-                return True
-            except Exception as e:
-                self._on_log(f"执行夹爪出错: {str(e)} (第{attempt}次)", "warn")
-            context.sleep(0.5)
-
-        self._on_log("夹爪重试次数耗尽", "error")
-        return False
-
-    def _execute_tapping(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行加粉装置动作（夹爪/针升降/针旋转）。"""
-        operation = params.get('操作', '')
-        self._on_log(f"加粉装置动作: {operation}")
-
-        operations = {
-            "夹爪闭合": lambda ctrl: ctrl.gripper_grip(),
-            "夹爪张开": lambda ctrl: ctrl.gripper_release(),
-            "夹爪移动到": lambda ctrl: ctrl.gripper_move_to(
-                int(params.get("开度", 50))
-            ),
-            "针上升": lambda ctrl: ctrl.lift_up(
-                int(params.get("步数", 5000))
-            ),
-            "针下降": lambda ctrl: ctrl.lift_down(
-                int(params.get("步数", 5000))
-            ),
-            "针停止": lambda ctrl: ctrl.lift_stop(),
-            "针正转": lambda ctrl: ctrl.rotation_cw(
-                int(params.get("步数", 5000))
-            ),
-            "针反转": lambda ctrl: ctrl.rotation_ccw(
-                int(params.get("步数", 5000))
-            ),
-            "针旋转停止": lambda ctrl: ctrl.rotation_stop(),
-            "使能": lambda ctrl: ctrl.enable_all(),
-        }
-        action = operations.get(operation)
-        if action is None:
-            self._on_log(f"未知的加粉装置操作: {operation}", "error")
-            return False
-
-        ctrl = self._device_runtime.require(
-            POWDER_DISPENSER,
-            PowderDispenser,
-        )
-        try:
-            ctrl.enable_all()
-            action(ctrl)
-            self._on_log(f"加粉装置 {operation} 执行完成")
-            return True
-        except Exception as e:
-            self._on_log(f"加粉装置 {operation} 执行失败: {e}", "error")
-            return False
-
-    def _execute_powder_dispense(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行智能闭环加粉动作。"""
-        from ..agents.powder_dispense_agent import PowderDispenseAgent, config_from_params
-        from ..vision.balance_reader_simple import read_balance
-
-        config = config_from_params(
-            params,
-            self.config.get_tapping_config(),
-        )
-        self._on_log(
-            f"智能加粉动作: 目标={config.target_mg:.1f}mg, "
-            f"容差={config.tolerance_mg:.1f}mg, 最大轮次={config.max_rounds}"
-        )
-
-        controller = self._device_runtime.require(
-            POWDER_DISPENSER,
-            PowderDispenser,
-        )
-        agent = PowderDispenseAgent(
-            controller,
-            read_balance,
-            log=lambda msg: self._on_log(msg),
-            should_stop=lambda: context.stop_requested,
-        )
-        try:
-            result = agent.run(config)
-        except Exception as e:
-            self._on_log(f"智能加粉执行失败: {e}", "error")
-            return False
-
-        level = "info" if result.success else "error"
-        self._on_log(
-            f"智能加粉结束: {result.message}, "
-            f"已加={result.added_mg:.1f}mg/{result.target_mg:.1f}mg, "
-            f"轮次={result.rounds}, 终值={result.final_g:.4f}g",
-            level,
-        )
-        return result.success
-
-    def _execute_pipette(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行吸液枪动作（吸/吐）"""
-        operation = params.get('操作', '吸')
-        capacity = params.get('容量', 500)
-        absorb_speed = params.get('吸液速度')
-        dispense_speed = params.get('吐液速度')
-        dispense_mode = params.get('吐液容量模式')
-        full_dispense = params.get('全吐')
-        if full_dispense is None:
-            full_dispense = operation == '吐' and dispense_mode is None
-        full_dispense = bool(full_dispense or dispense_mode == '全吐')
-
-        self._on_log(
-            f"吸液枪动作: 操作={operation}, 容量={capacity}ul, "
-            f"吸液速度={absorb_speed or '-'}ul/s, 吐液速度={dispense_speed or '-'}ul/s"
-        )
-
-        try:
-            pipette = self._device_runtime.require(PIPETTE, Pipette)
-            if operation == '吸':
-                if absorb_speed:
-                    self._on_log(f"正在设置吸液速度: {absorb_speed}ul/s")
-                    if not pipette.set_absorb_speed(int(absorb_speed)):
-                        self._on_log("设置吸液速度失败", "error")
-                        ret = False
-                    else:
-                        self._on_log("正在吸液...")
-                        ret = pipette.absorb(int(capacity))
-                else:
-                    self._on_log("正在吸液...")
-                    ret = pipette.absorb(int(capacity))
-            elif operation == '吐':
-                if dispense_speed:
-                    self._on_log(f"正在设置吐液速度: {dispense_speed}ul/s")
-                    if not pipette.set_dispense_speed(int(dispense_speed)):
-                        self._on_log("设置吐液速度失败", "error")
-                        ret = False
-                    else:
-                        self._on_log("正在吐液...")
-                        ret = (
-                            pipette.dispense_all()
-                            if full_dispense
-                            else pipette.dispense(int(capacity))
-                        )
-                else:
-                    self._on_log("正在吐液...")
-                    ret = (
-                        pipette.dispense_all()
-                        if full_dispense
-                        else pipette.dispense(int(capacity))
-                    )
-            elif operation == '退枪头':
-                self._on_log("正在退枪头...")
-                ret = pipette.eject_tip()
-            else:
-                self._on_log(f"未知的吸液枪操作: {operation}", "error")
-                return False
-
-            if ret:
-                self._on_log(f"吸液枪{operation}执行成功")
-            else:
-                self._on_log(f"吸液枪{operation}执行失败", "error")
-            return ret
-        except Exception as e:
-            self._on_log(f"执行吸液枪出错: {str(e)}", "error")
             return False
 
     def _execute_trajectory(

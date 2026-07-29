@@ -69,7 +69,7 @@
 | `ExecutionManager` | 唯一 worker、run_id、终态和事件 | 已落地 |
 | `ActionHandlerRegistry` | 唯一 ActionType 分发、重复注册拒绝和完整性校验 | 已落地 |
 | `ActionExecutionContext` | 单动作 deadline、暂停、协作取消和阻塞调用边界 | 已落地，待逐设备补强 |
-| `ActionEngine` | 序列编排及尚未迁出的领域 handler | WAIT/INSPECT/机械臂/身体/底盘已拆，其他 handler 迁移中 |
+| `ActionEngine` | 序列编排及尚未迁出的领域 handler | WAIT/INSPECT/motion/manipulation 已拆，仅换枪、视觉和轨迹待迁移 |
 | `src/device_runtime/contracts.py` | 设备能力协议 | 已落地 |
 | `DeviceRuntime` | 注册、初始化、查询、停止、重连和关闭 | 已落地 |
 | `ResourceArbiter` | 非阻塞独占资源租约 | 已落地 |
@@ -192,7 +192,7 @@ IDLE
 | ER-007 | P0 | TODO | WebSocket 认证和控制租约 | 未授权客户端不能写硬件 |
 | ER-008 | P1 | DONE | DeviceRuntime 和 capability | 状态和生命周期唯一 |
 | ER-009 | P1 | DONE | 统一 simulation runtime | 与真实模式共用状态机 |
-| ER-010 | P1 | DOING | ActionHandlerRegistry | 唯一注册表及 WAIT/INSPECT/motion handlers 已落地，继续拆除末端操作和领域 handler |
+| ER-010 | P1 | DOING | ActionHandlerRegistry | 唯一注册表及 WAIT/INSPECT/motion/manipulation handlers 已落地，继续拆除换枪、视觉和轨迹 handler |
 | ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 统一 deadline/cancel 已落地，继续补齐设备级停止声明与验证 |
 | ER-012 | P1 | DOING | camera session/resource | 预览和视觉任务不争用 |
 | ER-013 | P1 | DONE | 机械臂能力接口补强 | GUI、执行、视觉、示教和数据采集不依赖 RM 原生字段 |
@@ -227,9 +227,10 @@ IDLE
 
 1. 已定义 typed `ActionHandler` 协议、`ActionHandlerRegistry` 和统一执行上下文；
    结构化 handler result 仍待接入。
-2. 已拆 WAIT、INSPECT；表达屏及其他低耦合操作待迁移。
-3. 机械臂、身体和底盘已拆为组合式 motion handlers；末端执行器待迁移。
-4. 最后拆视觉、轨迹、智能加粉等领域 flow。
+2. 已拆 WAIT、INSPECT 和表达屏。
+3. 机械臂、身体和底盘已拆为组合式 motion handlers；末端执行器已拆为
+   二级执行器注册表。
+4. 智能加粉和转圈注液已迁出；视觉、轨迹和换枪待迁移。
 5. ActionType 缺少 handler 时在 submit 前显式失败。
 
 完成标准：
@@ -327,7 +328,7 @@ git diff --check
 | WebSocket 无认证和控制所有者 | P0 | 在开放网络部署前完成 |
 | 视觉仍依赖 RM 原生对象 | P1 | 提升 RobotSystem 视觉/示教能力 |
 | 相机预览尚无持久 session lease | P1 | CameraSession + ResourceArbiter |
-| ActionEngine 仍包含多数领域 handler | P1 | 注册表已唯一化，继续按运动、操作、视觉和领域 flow 分批迁移 |
+| ActionEngine 仍包含换枪、视觉和轨迹 handler | P1 | 注册表已唯一化，完成最后三类 handler 迁移 |
 | GUI/WebSocket 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
 | simulation 与真实设备差异 | P1 | 同状态机 + contract + 硬件清单 |
 
@@ -356,3 +357,4 @@ git diff --check
 | 2026-07-28 | 编排状态服务 | TODO → DONE | 动作库、任务库和当前序列进入线程安全 CompositionService；GUI/WS 删除 StorageManager 直连并通过 revision 事件同步 |
 | 2026-07-29 | handler 与动作控制首批收敛 | ER-010/ER-011 保持 DOING | 唯一 ActionHandlerRegistry、注册完整性校验和动作 deadline/cancel 上下文落地；WAIT/INSPECT 拆出，阻塞调用超时后仍等待真实返回并保留资源租约 |
 | 2026-07-29 | motion handlers 收敛 | ER-010/ER-011 保持 DOING | 机械臂、身体、底盘从 ActionEngine 拆出；设备 I/O 接入统一 invoke/checkpoint，重试和轮询配置化，取消/超时不再被设备异常边界吞掉 |
+| 2026-07-29 | manipulation handlers 收敛 | ER-010/ER-011 保持 DOING | MANIPULATE 使用二级执行器注册表；末端执行器、智能加粉和转圈注液移出引擎；移液 typed command 在设备初始化前校验，智能加粉等待可取消且 finally 安全回位 |

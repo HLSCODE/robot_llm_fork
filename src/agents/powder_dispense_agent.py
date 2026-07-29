@@ -41,6 +41,7 @@ class PowderDispenseConfig:
     small_step: int = 2000
     micro_step: int = 500
     max_read_failures: int = 3
+    read_retry_delay_seconds: float = 0.5
     max_drop_mg: float = 10.0
 
 
@@ -54,11 +55,13 @@ class PowderDispenseAgent:
         *,
         log: Callable[[str], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
         self._controller = controller
         self._read_balance = read_balance
         self._log = log or (lambda _msg: None)
         self._should_stop = should_stop or (lambda: False)
+        self._sleep = sleep or time.sleep
 
     def run(self, config: PowderDispenseConfig) -> PowderDispenseResult:
         if config.target_mg <= 0:
@@ -67,6 +70,8 @@ class PowderDispenseAgent:
             raise ValueError("容差mg必须大于0")
         if config.max_rounds <= 0:
             raise ValueError("最大轮次必须大于0")
+        if config.read_retry_delay_seconds < 0:
+            raise ValueError("读数重试等待秒数不能小于0")
 
         ctrl = self._controller
         initial_g = 0.0
@@ -103,7 +108,7 @@ class PowderDispenseAgent:
                     f"已加={added_mg:.1f}mg, 剩余={remaining_mg:.1f}mg, 旋转={step}步"
                 )
                 ctrl.rotation_move_relative(step)
-                time.sleep(config.settle_seconds)
+                self._sleep(config.settle_seconds)
 
                 previous_g = current_g
                 current_g = self._read_balance_retry(config)
@@ -123,7 +128,7 @@ class PowderDispenseAgent:
             except Exception as exc:
                 last_error = exc
                 self._log(f"天平读数失败 ({attempt}/{config.max_read_failures}): {exc}")
-                time.sleep(0.5)
+                self._sleep(config.read_retry_delay_seconds)
         raise RuntimeError(f"连续读取天平失败: {last_error}")
 
     @staticmethod
@@ -181,4 +186,7 @@ def config_from_params(params: dict, tapping_config: dict | None = None) -> Powd
         medium_step=int(params.get("中步步数", cfg.get("powder_medium_step", 8000))),
         small_step=int(params.get("小步步数", cfg.get("powder_small_step", 2000))),
         micro_step=int(params.get("微步步数", cfg.get("powder_micro_step", 500))),
+        read_retry_delay_seconds=float(
+            params.get("读数重试等待秒数", 0.5)
+        ),
     )

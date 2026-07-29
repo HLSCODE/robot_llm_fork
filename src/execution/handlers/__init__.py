@@ -1,3 +1,17 @@
+from .manipulation import (
+    CircleDispenseActionHandler,
+    ExpressionDisplayActionHandler,
+    GripperActionHandler,
+    ManipulateActionHandler,
+    ManipulationHandlerOptions,
+    PipetteCommand,
+    PipetteActionHandler,
+    PowderDispenseActionHandler,
+    RelayActionHandler,
+    TappingActionHandler,
+    ToolChangerActionHandler,
+    create_manipulation_handler,
+)
 from .motion import (
     BaseMoveActionHandler,
     BodyMoveActionHandler,
@@ -9,7 +23,19 @@ from .motion import (
 __all__ = [
     "BaseMoveActionHandler",
     "BodyMoveActionHandler",
+    "CircleDispenseActionHandler",
+    "ExpressionDisplayActionHandler",
+    "GripperActionHandler",
+    "ManipulateActionHandler",
+    "ManipulationHandlerOptions",
     "MotionHandlerOptions",
     "MoveActionHandler",
+    "PipetteCommand",
+    "PipetteActionHandler",
+    "PowderDispenseActionHandler",
+    "RelayActionHandler",
     "RobotMoveActionHandler",
+    "TappingActionHandler",
+    "ToolChangerActionHandler",
+    "create_manipulation_handler",
 ]

@@ -74,7 +74,7 @@ ActionEngine -------- DeviceRuntime ----+
 - 已删除无引用的 RealMan 直连动作脚本，不保留兼容转发。
 - `ActionHandlerRegistry` 已成为唯一动作类型分发入口，全部现有 `ActionType`
   在执行引擎构造时完成注册完整性校验；`WAIT`、`INSPECT`、机械臂移动、
-  身体升降和底盘移动已迁出引擎。
+  身体升降、底盘移动及全部 `MANIPULATE` 执行器已迁出引擎。
 - 所有动作已接入统一硬 deadline、暂停和协作取消上下文；阻塞 SDK 调用返回前
   不释放执行资源，设备级即时停止能力仍需逐路径补齐并完成硬件验收。
 
@@ -211,7 +211,7 @@ ActionEngine -------- DeviceRuntime ----+
 | A-004 | P0 | DROPPED | 不保留旧执行链路；改为新 runtime 单元和边界测试 |
 | A-005 | P1 | DONE | 实现 execution models/events/handle |
 | A-006 | P1 | DOING | 实现唯一 ExecutionManager；待硬件验收和更多竞态测试 |
-| A-007 | P1 | DOING | 唯一注册表及 WAIT/INSPECT/motion handlers 已落地；待迁移末端操作、视觉、轨迹和领域 flow handler |
+| A-007 | P1 | DOING | 唯一注册表及 WAIT/INSPECT/motion/manipulation handlers 已落地；待迁移换枪、视觉和轨迹 handler |
 | A-008 | P1 | DOING | WebSocket 已迁移，待协议 contract test |
 | A-009 | P1 | DOING | GUI 手工和 AI 已迁移，待 GUI smoke test |
 | A-010 | P1 | DOING | GUI/网络入口语音命令已进入统一服务，待 CommandRuntime 完整状态模型 |
@@ -504,7 +504,7 @@ ActionEngine -------- DeviceRuntime ----+
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
 | F-P-001 | P0 | TODO | 明确“最大轮次仍返回成功”的业务语义 |
-| F-P-002 | P1 | TODO | 加粉流程接入统一取消、安全返回和执行结果 |
+| F-P-002 | P1 | DOING | 加粉流程已接入统一取消、可取消等待和安全回位；待结构化执行结果与硬件验收 |
 | F-P-003 | P1 | TODO | 记录每轮读数、动作、阈值和结果 |
 | F-P-004 | P2 | TODO | 为规则策略建立离线回归测试 |
 | F-P-005 | P2 | TODO | 区分当前规则 Agent 与未来四 Agent 方案文档 |
@@ -862,10 +862,11 @@ M4 工程治理与清理
 | 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
 | 2026-07-29 | M2 | A/B | 动作 handler 与执行控制首批收敛 | B-007 TODO → DOING；A-007 保持 DOING | 建立唯一 ActionHandlerRegistry、注册完整性校验和统一动作 deadline/cancel 上下文；首批拆出 WAIT/INSPECT，阻塞调用不使用脱离资源租约的后台超时线程 | - |
 | 2026-07-29 | M2 | A/B | motion handlers 收敛 | A-007/B-007 保持 DOING | 机械臂、身体和底盘动作从 ActionEngine 物理拆分；设备调用统一经过 deadline/cancel 边界，重试与轮询参数配置化，并增加 fake capability 测试 | - |
+| 2026-07-29 | M2 | A/B/F | manipulation handlers 收敛 | A-007/B-007/F-P-002 保持 DOING | MANIPULATE 改为执行器子注册表；快换手、继电器、夹爪、移液枪、表情屏、加粉及转圈注液移出 ActionEngine；非法参数在设备初始化前拒绝，智能加粉等待支持取消并保留安全回位 | - |
 
 ## 22. 建议的首批实施顺序
 
-1. **A-007/B-007**：继续拆分末端操作、视觉、轨迹和领域 handler，并为每条阻塞硬件路径声明及验证设备级停止能力。
+1. **A-007/B-007**：继续拆分换枪、视觉和轨迹 handler，接入结构化 handler result，并为每条阻塞硬件路径声明及验证设备级停止能力。
 2. **B-002/ER-006**：补齐所有直接控制资源租约，并完成 RealMan 及其他运动设备停止能力的真实硬件验收。
 3. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
 4. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。
