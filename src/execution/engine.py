@@ -14,20 +14,15 @@ from ..core.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ..core.move_compensation import resolve_robot_target_pose
 from ..device_runtime import (
     ArmId,
     ArmMotion,
-    BodyAxis,
     CameraSource,
-    CartesianPose,
     DepthCameraSource,
     DeviceRuntime,
     DigitalOutputs,
     ExpressionDisplay,
     GripperControl,
-    MobileBase,
-    MotionMode,
     Pipette,
     PowderDispenser,
     RobotSystem,
@@ -36,10 +31,8 @@ from ..device_runtime import (
     TrajectoryControl,
 )
 from ..device_runtime.ids import (
-    BODY_AXIS,
     CAMERA,
     EXPRESSION_DISPLAY,
-    MOBILE_BASE,
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
@@ -56,6 +49,13 @@ from .action_handlers import (
     WaitActionHandler,
 )
 from .control import ExecutionControl
+from .handlers import (
+    BaseMoveActionHandler,
+    BodyMoveActionHandler,
+    MotionHandlerOptions,
+    MoveActionHandler,
+    RobotMoveActionHandler,
+)
 from .manager import EngineCallbacks
 from .models import EngineResult
 
@@ -82,12 +82,51 @@ class ActionEngine:
             raise ValueError(
                 "EXECUTION_ACTION_TIMEOUT_SECONDS must be positive"
             )
+        self._motion_handler_options = MotionHandlerOptions(
+            arm_move_max_attempts=int(
+                getattr(
+                    config,
+                    "EXECUTION_ARM_MOVE_MAX_ATTEMPTS",
+                    3,
+                )
+            ),
+            arm_move_retry_delay_seconds=float(
+                getattr(
+                    config,
+                    "EXECUTION_ARM_MOVE_RETRY_DELAY_SECONDS",
+                    0.5,
+                )
+            ),
+            body_poll_interval_seconds=float(
+                getattr(
+                    config,
+                    "EXECUTION_BODY_POLL_INTERVAL_SECONDS",
+                    0.1,
+                )
+            ),
+        )
         self._handler_registry = self._create_handler_registry()
 
     def _create_handler_registry(self) -> ActionHandlerRegistry:
         registry = ActionHandlerRegistry()
-        registry.register(ActionType.MOVE, self._execute_move)
-        registry.register(ActionType.BASE_MOVE, self._execute_base_move)
+        registry.register(
+            ActionType.MOVE,
+            MoveActionHandler(
+                RobotMoveActionHandler(
+                    self._device_runtime,
+                    self.execution_context,
+                    self._motion_handler_options,
+                ),
+                BodyMoveActionHandler(
+                    self._device_runtime,
+                    self._motion_handler_options,
+                ),
+            ),
+        )
+        registry.register(
+            ActionType.BASE_MOVE,
+            BaseMoveActionHandler(self._device_runtime),
+        )
         registry.register(ActionType.MANIPULATE, self._execute_manipulate)
         registry.register(ActionType.INSPECT, InspectActionHandler())
         registry.register(ActionType.WAIT, WaitActionHandler())
@@ -103,14 +142,6 @@ class ActionEngine:
         registry.register(ActionType.TRAJECTORY, self._execute_trajectory)
         registry.validate_complete()
         return registry
-
-    @property
-    def _body_controller(self) -> BodyAxis | None:
-        return self._device_runtime.get_if_ready(BODY_AXIS)
-
-    @property
-    def _move_controller(self) -> MobileBase | None:
-        return self._device_runtime.get_if_ready(MOBILE_BASE)
 
     def run(
         self,
@@ -271,187 +302,6 @@ class ActionEngine:
             return False
         except Exception as exc:
             self._on_log(f"执行错误: {str(exc)}", "error")
-            return False
-
-    # ------------------------------------------------------------------
-    # 移动类动作
-    # ------------------------------------------------------------------
-
-    def _execute_move(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        target = params.get('目标', '机械臂')
-        if target == '身体':
-            return self._execute_body_move(params, context)
-        else:
-            return self._execute_robot_move(params, context)
-
-    def _execute_robot_move(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行机械臂移动"""
-        arm = params.get('臂', '左')
-        target_pose_str = params.get('点位', '')
-        mode = params.get('模式', '')
-
-        self._on_log(f"机械臂移动动作: 臂={arm}, 模式={mode}, 点位={target_pose_str}")
-
-        try:
-            target_pose = resolve_robot_target_pose(
-                params,
-                arm,
-                self.execution_context,
-                self._on_log,
-            )
-
-            arm_id = ArmId.parse(arm)
-            motion_mode = MotionMode.parse(mode)
-            pose = CartesianPose.from_iterable(target_pose)
-            motion = self._device_runtime.require(ROBOT_SYSTEM, ArmMotion)
-
-            # 重试机制：处理通信抖动
-            max_retries = 3
-            for attempt in range(1, max_retries + 1):
-                try:
-                    motion.move_to_pose(
-                        arm_id,
-                        pose,
-                        motion_mode,
-                    )
-                    self._on_log("机械臂移动执行完成")
-                    return True
-                except Exception as exc:
-                    self._on_log(
-                        f"机械臂移动失败 (第{attempt}次): {exc}",
-                        "warn",
-                    )
-                context.sleep(0.5)
-
-            self._on_log("机械臂移动重试次数耗尽", "error")
-            return False
-        except Exception as e:
-            self._on_log(f"执行机械臂移动出错: {str(e)}", "error")
-            return False
-
-    def _execute_body_move(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行身体移动（ModbusMotor）"""
-        position = params.get('位置', 0)
-
-        self._on_log(f"身体移动动作: 目标位置={position}")
-
-        if self._body_controller is None:
-            self._on_log("身体控制器未初始化", "error")
-            return False
-
-        try:
-            self._on_log(f"正在移动身体到位置 {position}...")
-            self._body_controller.move_to(position)
-
-            # 等待到达目标位置
-            while True:
-                if context.stop_requested:
-                    self._on_log("身体移动已停止")
-                    return False
-                st = self._body_controller.is_reached()
-                if st is None:
-                    self._on_log("身体通信异常", "error")
-                    return False
-                if st:
-                    self._on_log(f"身体移动完成，位置={position}")
-                    return True
-                context.sleep(0.1)
-        except Exception as e:
-            self._on_log(f"执行身体移动出错: {str(e)}", "error")
-            return False
-
-    def _execute_base_move(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行底盘移动（统一入口，根据 move_mode 区分）"""
-        move_mode = params.get('move_mode', 'position')
-        
-        if move_mode == 'position':
-            return self._execute_base_move_position(params, context)
-        elif move_mode == 'distance':
-            return self._execute_base_move_distance(params, context)
-        else:
-            self._on_log(f"未知的移动方式：{move_mode}", "error")
-            return False
-
-    def _execute_base_move_position(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行底盘位置移动"""
-        id_value = params.get('id', 0)
-        cid = params.get('cid', 0)
-        
-        self._on_log(f"底盘位置移动：ID={id_value}, CID={cid}")
-        
-        if self._move_controller is None:
-            self._on_log("底盘移动控制器未初始化", "error")
-            return False
-        
-        try:
-            success = context.invoke(
-                "mobile_base.move_to_position",
-                lambda: self._move_controller.move_to_position(
-                    id_value,
-                    cid,
-                ),
-            )
-            
-            if success:
-                self._on_log(f"底盘位置移动完成：ID={id_value}, CID={cid}")
-            else:
-                self._on_log(f"底盘位置移动失败：ID={id_value}, CID={cid}", "error")
-            
-            return success
-        except Exception as e:
-            self._on_log(f"执行底盘位置移动出错：{str(e)}", "error")
-            return False
-
-    def _execute_base_move_distance(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行底盘距离移动"""
-        x = params.get('x', 0.0)
-        y = params.get('y', 0.0)
-        angle = params.get('angle', 0.0)
-
-        self._on_log(f"底盘距离移动：x={x}cm, y={y}cm, angle={angle}°")
-
-        if self._move_controller is None:
-            self._on_log("底盘移动控制器未初始化", "error")
-            return False
-
-        try:
-            success = context.invoke(
-                "mobile_base.move_slowly",
-                lambda: self._move_controller.move_slowly(x, y, angle),
-            )
-
-            if success:
-                self._on_log(f"底盘距离移动完成：x={x}cm, y={y}cm, angle={angle}°")
-            else:
-                self._on_log(f"底盘距离移动失败：x={x}cm, y={y}cm, angle={angle}°", "error")
-
-            return success
-        except Exception as e:
-            self._on_log(f"执行底盘距离移动出错：{str(e)}", "error")
             return False
 
     # ------------------------------------------------------------------

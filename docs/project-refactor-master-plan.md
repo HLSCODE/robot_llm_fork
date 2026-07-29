@@ -73,7 +73,8 @@ ActionEngine -------- DeviceRuntime ----+
   共用逐设备结果，当前 RealMan 停止链路待真实硬件验收。
 - 已删除无引用的 RealMan 直连动作脚本，不保留兼容转发。
 - `ActionHandlerRegistry` 已成为唯一动作类型分发入口，全部现有 `ActionType`
-  在执行引擎构造时完成注册完整性校验；`WAIT`、`INSPECT` 已迁出引擎。
+  在执行引擎构造时完成注册完整性校验；`WAIT`、`INSPECT`、机械臂移动、
+  身体升降和底盘移动已迁出引擎。
 - 所有动作已接入统一硬 deadline、暂停和协作取消上下文；阻塞 SDK 调用返回前
   不释放执行资源，设备级即时停止能力仍需逐路径补齐并完成硬件验收。
 
@@ -210,7 +211,7 @@ ActionEngine -------- DeviceRuntime ----+
 | A-004 | P0 | DROPPED | 不保留旧执行链路；改为新 runtime 单元和边界测试 |
 | A-005 | P1 | DONE | 实现 execution models/events/handle |
 | A-006 | P1 | DOING | 实现唯一 ExecutionManager；待硬件验收和更多竞态测试 |
-| A-007 | P1 | DOING | ActionHandlerRegistry 已成为唯一分发入口，WAIT/INSPECT 已拆分；待迁移运动、操作、视觉和领域 flow handler |
+| A-007 | P1 | DOING | 唯一注册表及 WAIT/INSPECT/motion handlers 已落地；待迁移末端操作、视觉、轨迹和领域 flow handler |
 | A-008 | P1 | DOING | WebSocket 已迁移，待协议 contract test |
 | A-009 | P1 | DOING | GUI 手工和 AI 已迁移，待 GUI smoke test |
 | A-010 | P1 | DOING | GUI/网络入口语音命令已进入统一服务，待 CommandRuntime 完整状态模型 |
@@ -860,10 +861,11 @@ M4 工程治理与清理
 | 2026-07-28 | M2 | A/C/D | GUI 与附加服务统一宿主 | A-013/C-014 TODO → DONE | 删除 GUI/Server 二选一组合路径；WebSocket 进入受管理 asyncio 线程并共享唯一 ApplicationServices，默认仅监听本机 | - |
 | 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
 | 2026-07-29 | M2 | A/B | 动作 handler 与执行控制首批收敛 | B-007 TODO → DOING；A-007 保持 DOING | 建立唯一 ActionHandlerRegistry、注册完整性校验和统一动作 deadline/cancel 上下文；首批拆出 WAIT/INSPECT，阻塞调用不使用脱离资源租约的后台超时线程 | - |
+| 2026-07-29 | M2 | A/B | motion handlers 收敛 | A-007/B-007 保持 DOING | 机械臂、身体和底盘动作从 ActionEngine 物理拆分；设备调用统一经过 deadline/cancel 边界，重试与轮询参数配置化，并增加 fake capability 测试 | - |
 
 ## 22. 建议的首批实施顺序
 
-1. **A-007/B-007**：继续拆分运动、操作、视觉和领域 handler，并为每条阻塞硬件路径声明及验证设备级停止能力。
+1. **A-007/B-007**：继续拆分末端操作、视觉、轨迹和领域 handler，并为每条阻塞硬件路径声明及验证设备级停止能力。
 2. **B-002/ER-006**：补齐所有直接控制资源租约，并完成 RealMan 及其他运动设备停止能力的真实硬件验收。
 3. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
 4. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。

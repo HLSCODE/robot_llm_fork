@@ -75,6 +75,21 @@ class ActionExecutionContextTests(unittest.TestCase):
 
         self.assertTrue(returned)
 
+    def test_invoke_does_not_hide_timeout_behind_device_failure(self):
+        context = ActionExecutionContext(
+            action_name="failed blocking device call",
+            control=ExecutionControl(),
+            timeout_seconds=0.01,
+            log=lambda _message, _level: None,
+        )
+
+        def operation() -> None:
+            time.sleep(0.03)
+            raise RuntimeError("late device failure")
+
+        with self.assertRaises(ActionTimeoutError):
+            context.invoke("fake.block", operation)
+
     def test_pause_does_not_disable_hard_action_deadline(self):
         control = ExecutionControl()
         control.pause()

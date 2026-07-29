@@ -110,7 +110,14 @@ class ActionExecutionContext:
         call is still active.
         """
         self.checkpoint()
-        result = callback()
+        try:
+            result = callback()
+        except Exception:
+            # Cancellation or timeout takes precedence when it happened while
+            # the external call was in flight; otherwise preserve the original
+            # device exception and traceback for the handler to classify.
+            self.checkpoint()
+            raise
         if self.timed_out:
             raise ActionTimeoutError(
                 f"{self._timeout_message()}; device operation "

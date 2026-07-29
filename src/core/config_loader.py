@@ -158,6 +158,9 @@ class Config:
     MOVE_CONNECT: int = 0
     MOVE_BLOCK: int = 1
     EXECUTION_ACTION_TIMEOUT_SECONDS: float = 600.0
+    EXECUTION_ARM_MOVE_MAX_ATTEMPTS: int = 3
+    EXECUTION_ARM_MOVE_RETRY_DELAY_SECONDS: float = 0.5
+    EXECUTION_BODY_POLL_INTERVAL_SECONDS: float = 0.1
     SAFETY_STOP_WAIT_TIMEOUT_SECONDS: float = 2.0
     MAX_ATTEMPTS: int = 5
     GRIPPER_PICK_SPEED: int = 200
@@ -559,6 +562,18 @@ class Config:
         instance.MOVE_BLOCK = int(os.getenv("MOVE_BLOCK", "1"))
         instance.EXECUTION_ACTION_TIMEOUT_SECONDS = float(
             os.getenv("EXECUTION_ACTION_TIMEOUT_SECONDS", "600.0")
+        )
+        instance.EXECUTION_ARM_MOVE_MAX_ATTEMPTS = int(
+            os.getenv("EXECUTION_ARM_MOVE_MAX_ATTEMPTS", "3")
+        )
+        instance.EXECUTION_ARM_MOVE_RETRY_DELAY_SECONDS = float(
+            os.getenv(
+                "EXECUTION_ARM_MOVE_RETRY_DELAY_SECONDS",
+                "0.5",
+            )
+        )
+        instance.EXECUTION_BODY_POLL_INTERVAL_SECONDS = float(
+            os.getenv("EXECUTION_BODY_POLL_INTERVAL_SECONDS", "0.1")
         )
         instance.SAFETY_STOP_WAIT_TIMEOUT_SECONDS = float(
             os.getenv("SAFETY_STOP_WAIT_TIMEOUT_SECONDS", "2.0")
