@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from enum import Enum
 import time
 from typing import Any, Protocol, TypeVar
 
@@ -24,6 +25,97 @@ class ActionTimeoutError(RuntimeError):
 
 class ActionHandlerNotFoundError(LookupError):
     """Raised when no handler is registered for an action type."""
+
+
+class ActionResultStatus(str, Enum):
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class ActionResultCode(str, Enum):
+    SUCCESS = "success"
+    INVALID_PARAMETERS = "invalid_parameters"
+    UNSUPPORTED_OPERATION = "unsupported_operation"
+    RESOURCE_NOT_FOUND = "resource_not_found"
+    DEVICE_UNAVAILABLE = "device_unavailable"
+    DEVICE_OPERATION_FAILED = "device_operation_failed"
+    OPERATION_REJECTED = "operation_rejected"
+    ACTION_TIMEOUT = "action_timeout"
+    INTERNAL_ERROR = "internal_error"
+
+
+@dataclass(frozen=True, slots=True)
+class ActionHandlerResult:
+    """Stable outcome returned by every action handler."""
+
+    status: ActionResultStatus
+    code: ActionResultCode
+    message: str = ""
+    operation: str = ""
+    device_id: str = ""
+
+    def __post_init__(self) -> None:
+        if self.status is ActionResultStatus.SUCCEEDED:
+            if self.code is not ActionResultCode.SUCCESS:
+                raise ValueError(
+                    "successful action result must use SUCCESS code"
+                )
+            return
+        if self.code is ActionResultCode.SUCCESS:
+            raise ValueError("failed action result cannot use SUCCESS code")
+        if not self.message.strip():
+            raise ValueError("failed action result must include a message")
+
+    @property
+    def successful(self) -> bool:
+        return self.status is ActionResultStatus.SUCCEEDED
+
+    @classmethod
+    def succeeded(
+        cls,
+        *,
+        message: str = "",
+        operation: str = "",
+        device_id: str = "",
+    ) -> ActionHandlerResult:
+        return cls(
+            status=ActionResultStatus.SUCCEEDED,
+            code=ActionResultCode.SUCCESS,
+            message=message,
+            operation=operation,
+            device_id=device_id,
+        )
+
+    @classmethod
+    def failed(
+        cls,
+        code: ActionResultCode,
+        message: str,
+        *,
+        operation: str = "",
+        device_id: str = "",
+    ) -> ActionHandlerResult:
+        return cls(
+            status=ActionResultStatus.FAILED,
+            code=code,
+            message=message,
+            operation=operation,
+            device_id=device_id,
+        )
+
+    def to_event_data(self) -> dict[str, str]:
+        return {
+            "status": self.status.value,
+            "code": self.code.value,
+            "operation": self.operation,
+            "device_id": self.device_id,
+        }
+
+    def __bool__(self) -> bool:
+        raise TypeError(
+            "ActionHandlerResult has no boolean compatibility; "
+            "use '.successful'"
+        )
 
 
 @dataclass(slots=True)
@@ -126,6 +218,37 @@ class ActionExecutionContext:
         self.checkpoint()
         return result
 
+    def success(
+        self,
+        *,
+        message: str = "",
+        operation: str = "",
+        device_id: str = "",
+    ) -> ActionHandlerResult:
+        return ActionHandlerResult.succeeded(
+            message=message,
+            operation=operation,
+            device_id=device_id,
+        )
+
+    def failure(
+        self,
+        code: ActionResultCode,
+        message: str,
+        *,
+        operation: str = "",
+        device_id: str = "",
+        log: bool = True,
+    ) -> ActionHandlerResult:
+        if log:
+            self.log(message, "error")
+        return ActionHandlerResult.failed(
+            code,
+            message,
+            operation=operation,
+            device_id=device_id,
+        )
+
     def _timeout_message(self) -> str:
         return (
             f"action timed out after {self.timeout_seconds:g}s: "
@@ -138,7 +261,7 @@ class ActionHandler(Protocol):
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool: ...
+    ) -> ActionHandlerResult: ...
 
 
 class ActionHandlerRegistry:
@@ -178,7 +301,7 @@ class ActionHandlerRegistry:
         action_type: ActionType,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         try:
             handler = self._handlers[action_type]
         except KeyError as exc:
@@ -188,6 +311,11 @@ class ActionHandlerRegistry:
 
         context.checkpoint()
         result = handler(parameters, context)
+        if not isinstance(result, ActionHandlerResult):
+            raise TypeError(
+                f"handler for {action_type.value} returned "
+                f"{type(result).__name__}, expected ActionHandlerResult"
+            )
         context.checkpoint()
         return result
 
@@ -197,28 +325,40 @@ class ActionHandlerRegistry:
 
 
 class WaitActionHandler:
+    _OPERATION = "wait"
+
     def __call__(
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
-        wait_seconds = float(parameters.get("wait_seconds", 1.0))
+    ) -> ActionHandlerResult:
+        try:
+            wait_seconds = float(parameters.get("wait_seconds", 1.0))
+        except (TypeError, ValueError) as exc:
+            message = f"等待时间无效: {exc}"
+            return context.failure(
+                ActionResultCode.INVALID_PARAMETERS,
+                message,
+                operation=self._OPERATION,
+            )
         if wait_seconds <= 0:
-            return True
+            return context.success(operation=self._OPERATION)
 
         context.log(f"Waiting: {wait_seconds:.1f}s", "info")
         context.sleep(wait_seconds)
-        return True
+        return context.success(operation=self._OPERATION)
 
 
 class InspectActionHandler:
     """Current simulated inspection handler, isolated for later replacement."""
 
+    _OPERATION = "inspect"
+
     def __call__(
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         sensor_id = parameters.get("Sensor_ID", "")
         threshold = parameters.get("Threshold", 0)
         sensor_timeout = parameters.get("Timeout", 5)
@@ -229,4 +369,4 @@ class InspectActionHandler:
         )
         context.sleep(0.8)
         context.log("检测完成 - 结果: 通过", "info")
-        return True
+        return context.success(operation=self._OPERATION)

@@ -16,7 +16,9 @@ from ..device_runtime import DeviceRuntime
 from .action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,
+    ActionHandlerResult,
     ActionHandlerRegistry,
+    ActionResultCode,
     ActionTimeoutError,
     InspectActionHandler,
     WaitActionHandler,
@@ -45,6 +47,10 @@ logger = logging.getLogger(__name__)
 class ActionEngine:
     """Execute one action sequence synchronously against DeviceRuntime."""
 
+    _ACTION_OPERATION = "action.execute"
+    _RUN_STEP_OPERATION = "action_engine.run_step"
+    _TIMEOUT_CONFIGURATION_OPERATION = "action.configure_timeout"
+
     def __init__(
         self,
         device_runtime: DeviceRuntime,
@@ -53,7 +59,6 @@ class ActionEngine:
         self._device_runtime = device_runtime
         self.execution_context = ExecutionContext()
         self._callbacks: EngineCallbacks | None = None
-        self._last_error = ""
         self._default_action_timeout_seconds = float(
             getattr(config, "EXECUTION_ACTION_TIMEOUT_SECONDS", 600.0)
         )
@@ -185,7 +190,7 @@ class ActionEngine:
         """Execute a sequence in the current worker thread."""
         self._callbacks = callbacks
         self.execution_context.clear()
-        failure = ""
+        failure: ActionHandlerResult | None = None
         try:
             flat_sequence: list[tuple[SequenceItem, LoopBlock | None]] = []
             for entry in sequence:
@@ -220,12 +225,11 @@ class ActionEngine:
                     loop_item_counter[loop.uuid] = (counter + 1) % iter_size
 
                 item.status = SequenceItemStatus.RUNNING
-                self._last_error = ""
                 self._on_step_started(index, item)
 
                 try:
-                    success = self._execute_action(item, control)
-                    if success:
+                    result = self._execute_action(item, control)
+                    if result.successful:
                         item.status = SequenceItemStatus.SUCCESS
                         self._on_step_completed(index, item)
                     elif control.cancel_requested:
@@ -233,15 +237,19 @@ class ActionEngine:
                         return EngineResult(success=False, cancelled=True)
                     else:
                         item.status = SequenceItemStatus.FAILED
-                        failure = (
-                            self._last_error
-                            or f"动作执行失败: {item.definition.name}"
-                        )
-                        self._on_step_failed(index, item, failure)
+                        failure = result
+                        self._on_step_failed(index, item, result)
                         break
-                except Exception as e:
+                except ActionCancelledError:
+                    item.status = SequenceItemStatus.PENDING
+                    return EngineResult(success=False, cancelled=True)
+                except Exception as exc:
                     item.status = SequenceItemStatus.FAILED
-                    failure = f"执行异常: {str(e)}"
+                    failure = ActionHandlerResult.failed(
+                        ActionResultCode.INTERNAL_ERROR,
+                        f"执行异常: {exc}",
+                        operation=self._RUN_STEP_OPERATION,
+                    )
                     self._on_step_failed(index, item, failure)
                     break
         finally:
@@ -249,8 +257,14 @@ class ActionEngine:
 
         if control.cancel_requested:
             return EngineResult(success=False, cancelled=True)
-        if failure:
-            return EngineResult(success=False, error=failure)
+        if failure is not None:
+            return EngineResult(
+                success=False,
+                error=failure.message,
+                error_code=failure.code.value,
+                error_operation=failure.operation,
+                error_device_id=failure.device_id,
+            )
         return EngineResult(success=True)
 
     def _required_callbacks(self) -> EngineCallbacks:
@@ -268,9 +282,9 @@ class ActionEngine:
         self,
         index: int,
         item: SequenceItem,
-        error: str,
+        failure: ActionHandlerResult,
     ) -> None:
-        self._required_callbacks().on_step_failed(index, item, error)
+        self._required_callbacks().on_step_failed(index, item, failure)
 
     def _on_loop_progress(
         self,
@@ -285,8 +299,6 @@ class ActionEngine:
         )
 
     def _on_log(self, message: str, level: str = "info") -> None:
-        if level == "error":
-            self._last_error = message
         self._required_callbacks().on_log(message, level)
 
     # ------------------------------------------------------------------
@@ -297,7 +309,7 @@ class ActionEngine:
         self,
         item: SequenceItem,
         control: ExecutionControl,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         definition = item.definition
         params = definition.parameters
 
@@ -318,8 +330,13 @@ class ActionEngine:
                 log=self._on_log,
             )
         except (TypeError, ValueError) as exc:
-            self._on_log(f"动作超时配置无效: {exc}", "error")
-            return False
+            message = f"动作超时配置无效: {exc}"
+            self._on_log(message, "error")
+            return ActionHandlerResult.failed(
+                ActionResultCode.INVALID_PARAMETERS,
+                message,
+                operation=self._TIMEOUT_CONFIGURATION_OPERATION,
+            )
 
         try:
             return self._handler_registry.execute(
@@ -329,10 +346,20 @@ class ActionEngine:
             )
         except ActionCancelledError:
             self._on_log(f"动作已取消: {definition.name}")
-            return False
+            raise
         except ActionTimeoutError as exc:
-            self._on_log(str(exc), "error")
-            return False
+            message = str(exc)
+            self._on_log(message, "error")
+            return ActionHandlerResult.failed(
+                ActionResultCode.ACTION_TIMEOUT,
+                message,
+                operation=self._ACTION_OPERATION,
+            )
         except Exception as exc:
-            self._on_log(f"执行错误: {str(exc)}", "error")
-            return False
+            message = f"执行错误: {exc}"
+            self._on_log(message, "error")
+            return ActionHandlerResult.failed(
+                ActionResultCode.INTERNAL_ERROR,
+                message,
+                operation=self._ACTION_OPERATION,
+            )

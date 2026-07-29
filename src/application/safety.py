@@ -58,6 +58,14 @@ class SafetyStopReport:
                 "before": self.execution_before.state.value,
                 "after": self.execution_after.state.value,
                 "run_id": self.execution_after.run_id,
+                "error": self.execution_after.error,
+                "error_code": self.execution_after.error_code,
+                "error_operation": (
+                    self.execution_after.error_operation
+                ),
+                "error_device_id": (
+                    self.execution_after.error_device_id
+                ),
             },
             "devices": [
                 {

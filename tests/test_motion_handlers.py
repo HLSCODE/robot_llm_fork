@@ -17,6 +17,7 @@ from src.device_runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,
+    ActionResultCode,
     ExecutionControl,
     ExecutionState,
 )
@@ -153,7 +154,7 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
         )
         context, logs = _action_context()
 
-        success = handler(
+        result = handler(
             {
                 "臂": "左",
                 "模式": "move_j",
@@ -162,7 +163,7 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
             context,
         )
 
-        self.assertTrue(success)
+        self.assertTrue(result.successful)
         self.assertEqual(3, len(arm_motion.calls))
         arm, pose, mode = arm_motion.calls[-1]
         self.assertEqual(ArmId.LEFT, arm)
@@ -184,12 +185,15 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
         )
         context, logs = _action_context()
 
-        success = handler(
+        result = handler(
             {"臂": "unknown", "模式": "move_j", "点位": [0] * 6},
             context,
         )
 
-        self.assertFalse(success)
+        self.assertFalse(result.successful)
+        self.assertEqual(ActionResultCode.INVALID_PARAMETERS, result.code)
+        self.assertEqual("robot_system.move_to_pose", result.operation)
+        self.assertEqual(ROBOT_SYSTEM, result.device_id)
         self.assertEqual([], arm_motion.calls)
         self.assertEqual("error", logs[-1][1])
 
@@ -209,7 +213,7 @@ class BodyMoveActionHandlerTests(unittest.TestCase):
         )
         context, _logs = _action_context()
 
-        self.assertTrue(handler({"位置": "42"}, context))
+        self.assertTrue(handler({"位置": "42"}, context).successful)
         self.assertEqual([42], body.positions)
 
     def test_body_move_does_not_swallow_cancellation(self):
@@ -248,7 +252,7 @@ class BaseMoveActionHandlerTests(unittest.TestCase):
             self.handler(
                 {"move_mode": "position", "id": "2", "cid": "3"},
                 context,
-            )
+            ).successful
         )
         self.assertTrue(
             self.handler(
@@ -259,7 +263,7 @@ class BaseMoveActionHandlerTests(unittest.TestCase):
                     "angle": "-3.5",
                 },
                 context,
-            )
+            ).successful
         )
 
         self.assertEqual([(2, 3)], self.base.position_calls)
@@ -282,9 +286,14 @@ class BaseMoveActionHandlerTests(unittest.TestCase):
             ),
         )
 
-        self.assertFalse(move_handler({"目标": "头部"}, context))
         self.assertFalse(
-            self.handler({"move_mode": "teleport"}, context)
+            move_handler({"目标": "头部"}, context).successful
+        )
+        self.assertFalse(
+            self.handler(
+                {"move_mode": "teleport"},
+                context,
+            ).successful
         )
         self.assertEqual(
             ["未知的移动目标: 头部", "未知的移动方式: teleport"],

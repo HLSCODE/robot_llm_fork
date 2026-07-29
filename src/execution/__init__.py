@@ -3,7 +3,10 @@ from .action_handlers import (
     ActionExecutionContext,
     ActionHandler,
     ActionHandlerNotFoundError,
+    ActionHandlerResult,
     ActionHandlerRegistry,
+    ActionResultCode,
+    ActionResultStatus,
     ActionTimeoutError,
 )
 from .control import ExecutionControl
@@ -30,7 +33,10 @@ __all__ = [
     "ActionExecutionContext",
     "ActionHandler",
     "ActionHandlerNotFoundError",
+    "ActionHandlerResult",
     "ActionHandlerRegistry",
+    "ActionResultCode",
+    "ActionResultStatus",
     "ActionTimeoutError",
     "EngineCallbacks",
     "EngineResult",

@@ -32,7 +32,9 @@ from ..action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,
     ActionHandler,
+    ActionHandlerResult,
     ActionParameters,
+    ActionResultCode,
     ActionTimeoutError,
 )
 
@@ -110,6 +112,8 @@ class PipetteCommand:
 class ManipulateActionHandler:
     """Dispatch one ARM_ACTION to its explicitly registered executor."""
 
+    _OPERATION = "manipulate.route"
+
     def __init__(self, handlers: Mapping[str, ActionHandler]) -> None:
         self._handlers = dict(handlers)
         if not self._handlers:
@@ -119,16 +123,22 @@ class ManipulateActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         executor = str(parameters.get("执行器", "快换手")).strip()
         handler = self._handlers.get(executor)
         if handler is None:
-            context.log(f"未知的执行器: {executor}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.UNSUPPORTED_OPERATION,
+                f"未知的执行器: {executor}",
+                operation=self._OPERATION,
+            )
         return handler(parameters, context)
 
 
 class ToolChangerActionHandler:
+    _OPERATION = "tool_changer.set_locked"
+
     def __init__(self, device_runtime: DeviceRuntime) -> None:
         self._device_runtime = device_runtime
 
@@ -136,20 +146,34 @@ class ToolChangerActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         operation = str(parameters.get("操作", "开")).strip()
         locked_by_operation = {"开": False, "关": True}
         if operation not in locked_by_operation:
-            context.log(f"未知的快换手操作: {operation}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.UNSUPPORTED_OPERATION,
+                f"未知的快换手操作: {operation}",
+                operation=self._OPERATION,
+                device_id=TOOL_CHANGER,
+            )
 
-        tool_changer = self._device_runtime.require(
-            TOOL_CHANGER,
-            ToolChanger,
-        )
+        try:
+            tool_changer = self._device_runtime.require(
+                TOOL_CHANGER,
+                ToolChanger,
+            )
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"快换手设备不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=TOOL_CHANGER,
+            )
         try:
             context.invoke(
-                "tool_changer.set_locked",
+                self._OPERATION,
                 lambda: tool_changer.set_locked(
                     locked_by_operation[operation]
                 ),
@@ -157,14 +181,24 @@ class ToolChangerActionHandler:
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:
-            context.log(f"快换手{operation}执行失败: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"快换手{operation}执行失败: {exc}",
+                operation=self._OPERATION,
+                device_id=TOOL_CHANGER,
+            )
 
         context.log(f"快换手{operation}执行完成", "info")
-        return True
+        return context.success(
+            operation=self._OPERATION,
+            device_id=TOOL_CHANGER,
+        )
 
 
 class RelayActionHandler:
+    _OPERATION = "relay.set_channel"
+
     def __init__(self, device_runtime: DeviceRuntime) -> None:
         self._device_runtime = device_runtime
 
@@ -172,47 +206,78 @@ class RelayActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         try:
             channel = int(parameters.get("编号", 1))
         except (TypeError, ValueError) as exc:
-            context.log(f"继电器编号无效: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                f"继电器编号无效: {exc}",
+                operation=self._OPERATION,
+                device_id=RELAY_BANK,
+            )
 
         operation = str(parameters.get("操作", "开")).strip()
         if channel not in (1, 2):
-            context.log(f"未知的继电器编号: {channel}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                f"未知的继电器编号: {channel}",
+                operation=self._OPERATION,
+                device_id=RELAY_BANK,
+            )
         if operation not in ("开", "关"):
-            context.log(f"未知的继电器操作: {operation}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.UNSUPPORTED_OPERATION,
+                f"未知的继电器操作: {operation}",
+                operation=self._OPERATION,
+                device_id=RELAY_BANK,
+            )
 
-        relay = self._device_runtime.require(
-            RELAY_BANK,
-            DigitalOutputs,
-        )
+        try:
+            relay = self._device_runtime.require(
+                RELAY_BANK,
+                DigitalOutputs,
+            )
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"继电器设备不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=RELAY_BANK,
+            )
         try:
             context.invoke(
-                "relay.set_channel",
+                self._OPERATION,
                 lambda: relay.set_channel(channel, operation == "开"),
             )
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:
-            context.log(
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
                 f"继电器{channel}{operation}执行失败: {exc}",
-                "error",
+                operation=self._OPERATION,
+                device_id=RELAY_BANK,
             )
-            return False
 
         context.log(
             f"继电器{channel}{operation}执行完成",
             "info",
         )
-        return True
+        return context.success(
+            operation=self._OPERATION,
+            device_id=RELAY_BANK,
+        )
 
 
 class GripperActionHandler:
+    _OPERATION = "gripper.execute"
+
     def __init__(
         self,
         device_runtime: DeviceRuntime,
@@ -225,16 +290,30 @@ class GripperActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         operation = str(parameters.get("操作", "开")).strip()
         if operation not in ("开", "关"):
-            context.log(f"未知的夹爪操作: {operation}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.UNSUPPORTED_OPERATION,
+                f"未知的夹爪操作: {operation}",
+                operation=self._OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
 
-        gripper = self._device_runtime.require(
-            ROBOT_SYSTEM,
-            GripperControl,
-        )
+        try:
+            gripper = self._device_runtime.require(
+                ROBOT_SYSTEM,
+                GripperControl,
+            )
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"夹爪设备不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
         if operation == "开":
             action = lambda: gripper.open_gripper(ArmId.LEFT)
         else:
@@ -243,7 +322,7 @@ class GripperActionHandler:
         context.log(f"夹爪动作: {operation}", "info")
         for attempt in range(1, self._options.gripper_max_attempts + 1):
             try:
-                context.invoke("gripper.execute", action)
+                context.invoke(self._OPERATION, action)
             except (ActionCancelledError, ActionTimeoutError):
                 raise
             except Exception as exc:
@@ -255,18 +334,28 @@ class GripperActionHandler:
                 )
             else:
                 context.log(f"夹爪{operation}执行完成", "info")
-                return True
+                return context.success(
+                    operation=self._OPERATION,
+                    device_id=ROBOT_SYSTEM,
+                )
 
             if attempt < self._options.gripper_max_attempts:
                 context.sleep(
                     self._options.gripper_retry_delay_seconds
                 )
 
-        context.log("夹爪重试次数耗尽", "error")
-        return False
+        return _failed_result(
+            context,
+            ActionResultCode.DEVICE_OPERATION_FAILED,
+            "夹爪重试次数耗尽",
+            operation=self._OPERATION,
+            device_id=ROBOT_SYSTEM,
+        )
 
 
 class PipetteActionHandler:
+    _OPERATION = "pipette.execute"
+
     def __init__(self, device_runtime: DeviceRuntime) -> None:
         self._device_runtime = device_runtime
 
@@ -274,14 +363,28 @@ class PipetteActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         try:
             command = PipetteCommand.from_parameters(parameters)
         except (TypeError, ValueError) as exc:
-            context.log(f"吸液枪参数无效: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                f"吸液枪参数无效: {exc}",
+                operation=self._OPERATION,
+                device_id=PIPETTE,
+            )
 
-        pipette = self._device_runtime.require(PIPETTE, Pipette)
+        try:
+            pipette = self._device_runtime.require(PIPETTE, Pipette)
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"吸液枪设备不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=PIPETTE,
+            )
         try:
             if command.operation == "退枪头":
                 success = context.invoke(
@@ -303,8 +406,13 @@ class PipetteActionHandler:
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:
-            context.log(f"执行吸液枪出错: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"执行吸液枪出错: {exc}",
+                operation=self._OPERATION,
+                device_id=PIPETTE,
+            )
 
         level = "info" if success else "error"
         context.log(
@@ -312,7 +420,18 @@ class PipetteActionHandler:
             f"{'成功' if success else '失败'}",
             level,
         )
-        return success
+        if success:
+            return context.success(
+                operation=self._OPERATION,
+                device_id=PIPETTE,
+            )
+        return context.failure(
+            ActionResultCode.OPERATION_REJECTED,
+            f"吸液枪{command.operation}执行失败",
+            operation=self._OPERATION,
+            device_id=PIPETTE,
+            log=False,
+        )
 
     @staticmethod
     def _absorb(
@@ -378,6 +497,8 @@ class PipetteActionHandler:
 
 class ExpressionDisplayActionHandler:
     _CLOSE_OPERATIONS = frozenset({"关闭", "close"})
+    _SHUTDOWN_OPERATION = "expression_display.shutdown"
+    _SWITCH_OPERATION = "expression_display.switch"
 
     def __init__(self, device_runtime: DeviceRuntime) -> None:
         self._device_runtime = device_runtime
@@ -386,12 +507,12 @@ class ExpressionDisplayActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         operation = str(parameters.get("操作", "切换")).strip().lower()
         if operation in self._CLOSE_OPERATIONS:
             try:
                 context.invoke(
-                    "expression_display.shutdown",
+                    self._SHUTDOWN_OPERATION,
                     lambda: self._device_runtime.shutdown(
                         EXPRESSION_DISPLAY
                     ),
@@ -399,41 +520,73 @@ class ExpressionDisplayActionHandler:
             except (ActionCancelledError, ActionTimeoutError):
                 raise
             except Exception as exc:
-                context.log(f"表情屏关闭失败: {exc}", "error")
-                return False
+                return _failed_result(
+                    context,
+                    ActionResultCode.DEVICE_OPERATION_FAILED,
+                    f"表情屏关闭失败: {exc}",
+                    operation=self._SHUTDOWN_OPERATION,
+                    device_id=EXPRESSION_DISPLAY,
+                )
             context.log("表情屏连接已关闭", "info")
-            return True
+            return context.success(
+                operation=self._SHUTDOWN_OPERATION,
+                device_id=EXPRESSION_DISPLAY,
+            )
 
         expression = _first_non_empty(
             parameters,
             ("表情", "表情名称", "expression", "name"),
         )
         if expression is None:
-            context.log("表情屏动作缺少表情名称", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                "表情屏动作缺少表情名称",
+                operation=self._SWITCH_OPERATION,
+                device_id=EXPRESSION_DISPLAY,
+            )
 
-        display = self._device_runtime.require(
-            EXPRESSION_DISPLAY,
-            ExpressionDisplay,
-        )
+        try:
+            display = self._device_runtime.require(
+                EXPRESSION_DISPLAY,
+                ExpressionDisplay,
+            )
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"表情屏设备不可用: {exc}",
+                operation=self._SWITCH_OPERATION,
+                device_id=EXPRESSION_DISPLAY,
+            )
         context.log(f"表情屏切换: {expression}", "info")
         try:
             switched = context.invoke(
-                "expression_display.switch",
+                self._SWITCH_OPERATION,
                 lambda: display.switch(expression),
             )
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:
-            context.log(f"表情屏切换失败: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"表情屏切换失败: {exc}",
+                operation=self._SWITCH_OPERATION,
+                device_id=EXPRESSION_DISPLAY,
+            )
 
         name = getattr(switched, "name", str(switched))
         context.log(f"表情屏切换完成: {name}", "info")
-        return True
+        return context.success(
+            operation=self._SWITCH_OPERATION,
+            device_id=EXPRESSION_DISPLAY,
+        )
 
 
 class TappingActionHandler:
+    _OPERATION = "powder_dispenser.execute"
+    _ENABLE_OPERATION = "powder_dispenser.enable_all"
     _SIMPLE_OPERATIONS = frozenset(
         {
             "夹爪闭合",
@@ -459,21 +612,40 @@ class TappingActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         operation = str(parameters.get("操作", "")).strip()
         if operation not in self._SUPPORTED_OPERATIONS:
-            context.log(f"未知的加粉装置操作: {operation}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.UNSUPPORTED_OPERATION,
+                f"未知的加粉装置操作: {operation}",
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
+            )
         try:
             argument = self._parse_argument(operation, parameters)
         except (TypeError, ValueError) as exc:
-            context.log(f"加粉装置参数无效: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                f"加粉装置参数无效: {exc}",
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
+            )
 
-        controller = self._device_runtime.require(
-            POWDER_DISPENSER,
-            PowderDispenser,
-        )
+        try:
+            controller = self._device_runtime.require(
+                POWDER_DISPENSER,
+                PowderDispenser,
+            )
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"加粉装置不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
+            )
         action = self._resolve_action(
             controller,
             operation,
@@ -483,7 +655,7 @@ class TappingActionHandler:
         context.log(f"加粉装置动作: {operation}", "info")
         try:
             context.invoke(
-                "powder_dispenser.enable_all",
+                self._ENABLE_OPERATION,
                 controller.enable_all,
             )
             if operation != "使能":
@@ -494,14 +666,19 @@ class TappingActionHandler:
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:
-            context.log(
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
                 f"加粉装置 {operation} 执行失败: {exc}",
-                "error",
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
             )
-            return False
 
         context.log(f"加粉装置 {operation} 执行完成", "info")
-        return True
+        return context.success(
+            operation=self._OPERATION,
+            device_id=POWDER_DISPENSER,
+        )
 
     @staticmethod
     def _resolve_action(
@@ -554,6 +731,8 @@ class TappingActionHandler:
 
 
 class CircleDispenseActionHandler:
+    _OPERATION = "circle_dispense.execute"
+
     def __init__(self, device_runtime: DeviceRuntime) -> None:
         self._device_runtime = device_runtime
 
@@ -561,23 +740,68 @@ class CircleDispenseActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
-        motion = self._device_runtime.require(ROBOT_SYSTEM, ArmMotion)
-        pipette = self._device_runtime.require(PIPETTE, Pipette)
-        return context.invoke(
-            "circle_dispense.execute",
-            lambda: execute_right_arm_circle_dispense(
-                robot_motion=motion,
-                pipette=pipette,
-                params=dict(parameters),
-                log=context.log,
-                stop_requested=lambda: context.stop_requested,
-                paused=lambda: context.paused,
-            ),
+    ) -> ActionHandlerResult:
+        try:
+            motion = self._device_runtime.require(
+                ROBOT_SYSTEM,
+                ArmMotion,
+            )
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"转圈注液机械臂不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
+        try:
+            pipette = self._device_runtime.require(PIPETTE, Pipette)
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"转圈注液吸液枪不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=PIPETTE,
+            )
+
+        try:
+            success = context.invoke(
+                self._OPERATION,
+                lambda: execute_right_arm_circle_dispense(
+                    robot_motion=motion,
+                    pipette=pipette,
+                    params=dict(parameters),
+                    log=context.log,
+                    stop_requested=lambda: context.stop_requested,
+                    paused=lambda: context.paused,
+                ),
+            )
+        except (ActionCancelledError, ActionTimeoutError):
+            raise
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"转圈注液执行失败: {exc}",
+                operation=self._OPERATION,
+            )
+
+        if success:
+            return context.success(
+                operation=self._OPERATION,
+            )
+        return _failed_result(
+            context,
+            ActionResultCode.OPERATION_REJECTED,
+            "转圈注液执行失败",
+            operation=self._OPERATION,
         )
 
 
 class PowderDispenseActionHandler:
+    _OPERATION = "powder_dispense.run"
+
     def __init__(
         self,
         device_runtime: DeviceRuntime,
@@ -593,15 +817,20 @@ class PowderDispenseActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         try:
             config = config_from_params(
                 dict(parameters),
                 dict(self._tapping_config_provider()),
             )
         except (TypeError, ValueError) as exc:
-            context.log(f"智能加粉参数无效: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                f"智能加粉参数无效: {exc}",
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
+            )
 
         context.log(
             f"智能加粉动作: 目标={config.target_mg:.1f}mg, "
@@ -609,13 +838,23 @@ class PowderDispenseActionHandler:
             f"最大轮次={config.max_rounds}",
             "info",
         )
-        controller = self._device_runtime.require(
-            POWDER_DISPENSER,
-            PowderDispenser,
-        )
+        try:
+            controller = self._device_runtime.require(
+                POWDER_DISPENSER,
+                PowderDispenser,
+            )
+            balance_reader = self._resolve_balance_reader()
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"智能加粉依赖不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
+            )
         agent = PowderDispenseAgent(
             controller,
-            self._resolve_balance_reader(),
+            balance_reader,
             log=lambda message: context.log(message, "info"),
             should_stop=lambda: context.stop_requested,
             sleep=context.sleep,
@@ -626,17 +865,34 @@ class PowderDispenseActionHandler:
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:
-            context.log(f"智能加粉执行失败: {exc}", "error")
-            return False
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"智能加粉执行失败: {exc}",
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
+            )
 
         level = "info" if result.success else "error"
-        context.log(
+        message = (
             f"智能加粉结束: {result.message}, "
             f"已加={result.added_mg:.1f}mg/{result.target_mg:.1f}mg, "
-            f"轮次={result.rounds}, 终值={result.final_g:.4f}g",
-            level,
+            f"轮次={result.rounds}, 终值={result.final_g:.4f}g"
         )
-        return result.success
+        context.log(message, level)
+        if result.success:
+            return context.success(
+                message=result.message,
+                operation=self._OPERATION,
+                device_id=POWDER_DISPENSER,
+            )
+        return context.failure(
+            ActionResultCode.OPERATION_REJECTED,
+            message,
+            operation=self._OPERATION,
+            device_id=POWDER_DISPENSER,
+            log=False,
+        )
 
     def _resolve_balance_reader(self) -> BalanceReader:
         if self._read_balance is not None:
@@ -719,3 +975,19 @@ def _first_non_empty(
         if value is not None and str(value).strip():
             return str(value).strip()
     return None
+
+
+def _failed_result(
+    context: ActionExecutionContext,
+    code: ActionResultCode,
+    message: str,
+    *,
+    operation: str,
+    device_id: str = "",
+) -> ActionHandlerResult:
+    return context.failure(
+        code,
+        message,
+        operation=operation,
+        device_id=device_id,
+    )

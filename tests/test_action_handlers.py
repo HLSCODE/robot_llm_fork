@@ -8,9 +8,13 @@ from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.execution import (
     ActionExecutionContext,
     ActionHandlerNotFoundError,
+    ActionHandlerResult,
     ActionHandlerRegistry,
+    ActionResultCode,
+    ActionResultStatus,
     ActionTimeoutError,
     ExecutionControl,
+    ExecutionEventType,
     ExecutionState,
 )
 
@@ -18,7 +22,9 @@ from src.execution import (
 class ActionHandlerRegistryTests(unittest.TestCase):
     def test_registry_rejects_duplicate_registration(self):
         registry = ActionHandlerRegistry()
-        handler = lambda _parameters, _context: True
+        handler = lambda _parameters, _context: (
+            ActionHandlerResult.succeeded()
+        )
         registry.register(ActionType.WAIT, handler)
 
         with self.assertRaisesRegex(
@@ -31,7 +37,9 @@ class ActionHandlerRegistryTests(unittest.TestCase):
         registry = ActionHandlerRegistry()
         registry.register(
             ActionType.WAIT,
-            lambda _parameters, _context: True,
+            lambda _parameters, _context: (
+                ActionHandlerResult.succeeded()
+            ),
         )
 
         with self.assertRaises(ActionHandlerNotFoundError) as raised:
@@ -42,7 +50,9 @@ class ActionHandlerRegistryTests(unittest.TestCase):
 
     def test_complete_registry_is_frozen_before_execution(self):
         registry = ActionHandlerRegistry()
-        handler = lambda _parameters, _context: True
+        handler = lambda _parameters, _context: (
+            ActionHandlerResult.succeeded()
+        )
         for action_type in ActionType:
             registry.register(action_type, handler)
 
@@ -50,6 +60,59 @@ class ActionHandlerRegistryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "registry is frozen"):
             registry.register(ActionType.WAIT, handler)
+
+    def test_registry_rejects_legacy_boolean_result(self):
+        registry = ActionHandlerRegistry()
+        registry.register(
+            ActionType.WAIT,
+            lambda _parameters, _context: True,
+        )
+        context = ActionExecutionContext(
+            action_name="legacy handler",
+            control=ExecutionControl(),
+            timeout_seconds=1,
+            log=lambda _message, _level: None,
+        )
+
+        with self.assertRaisesRegex(
+            TypeError,
+            "expected ActionHandlerResult",
+        ):
+            registry.execute(ActionType.WAIT, {}, context)
+
+
+class ActionHandlerResultTests(unittest.TestCase):
+    def test_failure_exposes_stable_code_and_operation_context(self):
+        result = ActionHandlerResult.failed(
+            ActionResultCode.DEVICE_OPERATION_FAILED,
+            "device call failed",
+            operation="robot.move",
+            device_id="robot-system",
+        )
+
+        self.assertEqual(ActionResultStatus.FAILED, result.status)
+        self.assertFalse(result.successful)
+        self.assertEqual(
+            {
+                "status": "failed",
+                "code": "device_operation_failed",
+                "operation": "robot.move",
+                "device_id": "robot-system",
+            },
+            result.to_event_data(),
+        )
+        with self.assertRaisesRegex(TypeError, "no boolean compatibility"):
+            bool(result)
+
+    def test_result_rejects_contradictory_status_and_code(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "successful action result",
+        ):
+            ActionHandlerResult(
+                status=ActionResultStatus.SUCCEEDED,
+                code=ActionResultCode.INTERNAL_ERROR,
+            )
 
 
 class ActionExecutionContextTests(unittest.TestCase):
@@ -124,10 +187,30 @@ class ActionTimeoutIntegrationTests(unittest.TestCase):
             )
         )
 
-        final = services.execution.start([item], origin="test").wait(1)
+        events = []
+        final = services.execution.start(
+            [item],
+            origin="test",
+            listener=events.append,
+        ).wait(1)
 
         self.assertEqual(ExecutionState.FAILED, final.state)
         self.assertIn("action timed out after 0.02s", final.error)
+        self.assertEqual("action_timeout", final.error_code)
+        self.assertEqual("action.execute", final.error_operation)
+        step_failed = next(
+            event
+            for event in events
+            if event.event_type is ExecutionEventType.STEP_FAILED
+        )
+        self.assertEqual("action_timeout", step_failed.data["code"])
+        self.assertEqual("action.execute", step_failed.data["operation"])
+        terminal = next(
+            event
+            for event in events
+            if event.event_type is ExecutionEventType.FAILED
+        )
+        self.assertEqual("action_timeout", terminal.data["code"])
         self.assertFalse(services.devices.shutdown_all())
 
 

@@ -47,6 +47,9 @@ class ExecutionSnapshot:
     state: ExecutionState
     origin: str = ""
     error: str = ""
+    error_code: str = ""
+    error_operation: str = ""
+    error_device_id: str = ""
     started_at: float | None = None
     finished_at: float | None = None
 
@@ -78,6 +81,9 @@ class EngineResult:
     success: bool
     cancelled: bool = False
     error: str = ""
+    error_code: str = ""
+    error_operation: str = ""
+    error_device_id: str = ""
 
 
 class ExecutionRuntimeError(RuntimeError):

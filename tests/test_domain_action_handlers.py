@@ -20,6 +20,7 @@ from src.device_runtime.ids import CAMERA, ROBOT_SYSTEM
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,
+    ActionResultCode,
     ExecutionControl,
     ExecutionState,
 )
@@ -116,14 +117,14 @@ class TrajectoryActionHandlerTests(unittest.TestCase):
             path = Path(directory) / "trajectory.txt"
             path.write_text("trajectory", encoding="utf-8")
 
-            success = handler(
+            result = handler(
                 {"robot": "robot2", "file_path": str(path)},
                 context,
             )
 
-        self.assertTrue(success)
-        self.assertEqual([(ArmId.RIGHT, path)], robot.sent)
-        self.assertIn(("轨迹执行完成", "info"), logs)
+            self.assertTrue(result.successful)
+            self.assertEqual([(ArmId.RIGHT, path)], robot.sent)
+            self.assertIn(("轨迹执行完成", "info"), logs)
 
     def test_invalid_file_does_not_initialize_robot(self):
         created = 0
@@ -148,9 +149,14 @@ class TrajectoryActionHandlerTests(unittest.TestCase):
             TrajectoryHandlerOptions(),
         )
 
-        self.assertFalse(
-            handler({"file_path": "missing-trajectory.txt"}, context)
+        result = handler(
+            {"file_path": "missing-trajectory.txt"},
+            context,
         )
+        self.assertFalse(result.successful)
+        self.assertEqual(ActionResultCode.RESOURCE_NOT_FOUND, result.code)
+        self.assertEqual("trajectory.load_file", result.operation)
+        self.assertEqual(ROBOT_SYSTEM, result.device_id)
         self.assertEqual(0, created)
         self.assertEqual(
             DeviceState.REGISTERED,
@@ -192,7 +198,7 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
             handler(
                 {"Gun_Position": "2", "Operation": " 放 "},
                 context,
-            )
+            ).successful
         )
         self.assertEqual([(2, False)], tool_rack.calls)
 
@@ -220,7 +226,7 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
             handler(
                 {"Gun_Position": "3", "Operation": "取"},
                 context,
-            )
+            ).successful
         )
         self.assertEqual(0, created)
 
@@ -243,7 +249,12 @@ class VisionActionHandlerTests(unittest.TestCase):
 
         handler = VisionCaptureActionHandler(self.runtime, executor)
 
-        self.assertTrue(handler({"workflow": "bottle"}, self.context))
+        self.assertTrue(
+            handler(
+                {"workflow": "bottle"},
+                self.context,
+            ).successful
+        )
         robot, camera, parameters = received[0]
         self.assertIs(
             robot,
@@ -274,7 +285,12 @@ class VisionActionHandlerTests(unittest.TestCase):
             executor,
         )
 
-        self.assertTrue(handler({"station_id": "A"}, self.context))
+        self.assertTrue(
+            handler(
+                {"station_id": "A"},
+                self.context,
+            ).successful
+        )
         self.assertEqual([domain_context], received_contexts)
         self.assertIn(
             ("relocalization executor called", "info"),

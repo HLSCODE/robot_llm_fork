@@ -22,6 +22,8 @@ from src.device_runtime.ids import (
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,
+    ActionHandlerResult,
+    ActionResultCode,
     ExecutionControl,
     ExecutionState,
 )
@@ -239,13 +241,13 @@ class DiscreteOutputHandlerTests(unittest.TestCase):
             ToolChangerActionHandler(tool_runtime)(
                 {"操作": "开"},
                 context,
-            )
+            ).successful
         )
         self.assertTrue(
             RelayActionHandler(relay_runtime)(
                 {"编号": "2", "操作": "关"},
                 context,
-            )
+            ).successful
         )
 
         self.assertFalse(tool.locked)
@@ -254,10 +256,20 @@ class DiscreteOutputHandlerTests(unittest.TestCase):
     def test_unknown_executor_is_rejected_by_nested_registry(self):
         context, logs = _context()
         handler = ManipulateActionHandler(
-            {"known": lambda _parameters, _context: True}
+            {
+                "known": lambda _parameters, _context: (
+                    ActionHandlerResult.succeeded()
+                )
+            }
         )
 
-        self.assertFalse(handler({"执行器": "unknown"}, context))
+        result = handler({"执行器": "unknown"}, context)
+        self.assertFalse(result.successful)
+        self.assertEqual(
+            ActionResultCode.UNSUPPORTED_OPERATION,
+            result.code,
+        )
+        self.assertEqual("manipulate.route", result.operation)
         self.assertEqual(("未知的执行器: unknown", "error"), logs[-1])
 
 
@@ -278,7 +290,9 @@ class GripperActionHandlerTests(unittest.TestCase):
         )
         context, _logs = _context()
 
-        self.assertTrue(handler({"操作": "关"}, context))
+        self.assertTrue(
+            handler({"操作": "关"}, context).successful
+        )
         self.assertEqual(
             [("close", ArmId.LEFT)] * 3,
             gripper.calls,
@@ -305,7 +319,7 @@ class PipetteActionHandlerTests(unittest.TestCase):
                     "全吐": "false",
                 },
                 context,
-            )
+            ).successful
         )
 
         self.assertEqual(
@@ -326,7 +340,7 @@ class PipetteActionHandlerTests(unittest.TestCase):
             PipetteActionHandler(runtime)(
                 {"操作": "吸", "容量": 0},
                 context,
-            )
+            ).successful
         )
         self.assertEqual([], pipette.calls)
         self.assertEqual(
@@ -347,8 +361,12 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
         handler = ExpressionDisplayActionHandler(runtime)
         context, _logs = _context()
 
-        self.assertTrue(handler({"expression": "happy"}, context))
-        self.assertTrue(handler({"操作": "close"}, context))
+        self.assertTrue(
+            handler({"expression": "happy"}, context).successful
+        )
+        self.assertTrue(
+            handler({"操作": "close"}, context).successful
+        )
 
         self.assertEqual(["happy"], display.expressions)
         self.assertTrue(display.closed)
@@ -366,7 +384,7 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
             TappingActionHandler(runtime)(
                 {"操作": "针上升", "步数": "12"},
                 context,
-            )
+            ).successful
         )
         self.assertEqual(
             [("enable", None), ("lift_up", 12)],
@@ -384,7 +402,10 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
         handler = TappingActionHandler(runtime)
 
         self.assertFalse(
-            handler({"操作": "针上升", "步数": 0}, context)
+            handler(
+                {"操作": "针上升", "步数": 0},
+                context,
+            ).successful
         )
         self.assertEqual([], powder.calls)
         self.assertEqual(

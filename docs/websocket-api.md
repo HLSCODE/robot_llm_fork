@@ -567,7 +567,11 @@ ws.onmessage = (event) => {
     "run_id": null,
     "state": "idle",
     "running": false,
-    "paused": false
+    "paused": false,
+    "error": "",
+    "error_code": "",
+    "error_operation": "",
+    "error_device_id": ""
   },
   "sequence_length": 0,
   "ai_processing": false,
@@ -596,6 +600,10 @@ ws.onmessage = (event) => {
 | `executor.state` | `string` | 统一执行状态 |
 | `executor.running` | `boolean` | 是否正在执行 |
 | `executor.paused` | `boolean` | 是否处于暂停状态 |
+| `executor.error` | `string` | 最近一次执行的用户可见失败消息；无失败时为空 |
+| `executor.error_code` | `string` | 稳定执行错误码；无失败时为空 |
+| `executor.error_operation` | `string` | 失败的规范操作标识 |
+| `executor.error_device_id` | `string` | 失败关联的规范设备 ID |
 | `sequence_length` | `number` | 当前服务端维护的序列长度 |
 | `ai_processing` | `boolean` | AI 是否正在处理中 |
 | `camera.available` | `boolean` | 是否有可用相机 |
@@ -897,9 +905,28 @@ ws.onmessage = (event) => {
   "event": "step_failed",
   "index": 0,
   "name": "移动到A点",
-  "error": "动作执行失败"
+  "error": "机械臂移动重试次数耗尽",
+  "failure": {
+    "status": "failed",
+    "code": "device_operation_failed",
+    "operation": "robot_system.move_to_pose",
+    "device_id": "robot-system"
+  }
 }
 ```
+
+`failure.code` 当前稳定取值：
+
+- `invalid_parameters`
+- `unsupported_operation`
+- `resource_not_found`
+- `device_unavailable`
+- `device_operation_failed`
+- `operation_rejected`
+- `action_timeout`
+- `internal_error`
+
+取消使用独立的 `cancelled` 终态，不映射成上述普通失败码。
 
 执行结束：
 

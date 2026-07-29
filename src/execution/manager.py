@@ -9,6 +9,10 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from ..device_runtime import ResourceArbiter, ResourceLease
+from .action_handlers import (
+    ActionHandlerResult,
+    ActionResultCode,
+)
 from .control import ExecutionControl
 from .models import (
     EngineResult,
@@ -29,7 +33,7 @@ ExecutionListener = Callable[[ExecutionEvent], None]
 class EngineCallbacks:
     on_step_started: Callable[[int, Any], None]
     on_step_completed: Callable[[int, Any], None]
-    on_step_failed: Callable[[int, Any, str], None]
+    on_step_failed: Callable[[int, Any, ActionHandlerResult], None]
     on_loop_progress: Callable[[str, int, int], None]
     on_log: Callable[[str, str], None]
 
@@ -81,6 +85,9 @@ class ExecutionManager:
         self._origin = ""
         self._state = ExecutionState.IDLE
         self._error = ""
+        self._error_code = ""
+        self._error_operation = ""
+        self._error_device_id = ""
         self._started_at: float | None = None
         self._finished_at: float | None = None
         self._control: ExecutionControl | None = None
@@ -117,6 +124,9 @@ class ExecutionManager:
             self._origin = origin
             self._state = ExecutionState.STARTING
             self._error = ""
+            self._error_code = ""
+            self._error_operation = ""
+            self._error_device_id = ""
             self._started_at = None
             self._finished_at = None
             self._control = control
@@ -137,6 +147,8 @@ class ExecutionManager:
             with self._lock:
                 self._state = ExecutionState.FAILED
                 self._error = "failed to start execution worker"
+                self._error_code = ActionResultCode.INTERNAL_ERROR.value
+                self._error_operation = "execution.worker.start"
                 self._finished_at = time.time()
             raise
         return ExecutionHandle(run_id, self)
@@ -223,13 +235,14 @@ class ExecutionManager:
                 index=index,
                 item=item,
             ),
-            on_step_failed=lambda index, item, error: self._emit(
+            on_step_failed=lambda index, item, failure: self._emit(
                 run_id,
                 ExecutionEventType.STEP_FAILED,
                 index=index,
                 item=item,
-                message=error,
+                message=failure.message,
                 level="error",
+                data=failure.to_event_data(),
             ),
             on_loop_progress=lambda loop_uuid, current, total: self._emit(
                 run_id,
@@ -252,7 +265,12 @@ class ExecutionManager:
             result = self._engine.run(sequence, control, callbacks)
         except Exception as exc:
             logger.exception("Unhandled execution engine error: run_id=%s", run_id)
-            result = EngineResult(success=False, error=str(exc))
+            result = EngineResult(
+                success=False,
+                error=str(exc),
+                error_code=ActionResultCode.INTERNAL_ERROR.value,
+                error_operation="execution.engine.run",
+            )
         finally:
             lease.release()
 
@@ -270,12 +288,20 @@ class ExecutionManager:
             if self._run_id == run_id:
                 self._state = final_state
                 self._error = result.error
+                self._error_code = result.error_code
+                self._error_operation = result.error_operation
+                self._error_device_id = result.error_device_id
                 self._finished_at = time.time()
         self._emit(
             run_id,
             final_event,
             message=result.error,
             level="error" if final_state is ExecutionState.FAILED else "info",
+            data={
+                "code": result.error_code,
+                "operation": result.error_operation,
+                "device_id": result.error_device_id,
+            },
         )
 
     def _emit(
@@ -337,6 +363,9 @@ class ExecutionManager:
             state=self._state,
             origin=self._origin,
             error=self._error,
+            error_code=self._error_code,
+            error_operation=self._error_operation,
+            error_device_id=self._error_device_id,
             started_at=self._started_at,
             finished_at=self._finished_at,
         )

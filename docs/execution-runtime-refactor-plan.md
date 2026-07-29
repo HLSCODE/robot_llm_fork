@@ -3,7 +3,7 @@
 > 文档状态：Active  
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-29
-> 当前阶段：核心运行时、入口和 handler 已收敛，进入结构化结果、安全能力与硬件验收
+> 当前阶段：核心运行时、入口、handler 和结果协议已收敛，进入安全能力与硬件验收
 > 上级计划：[Robot LLM 项目重构总计划](project-refactor-master-plan.md)
 
 ## 1. 范围与决策
@@ -192,7 +192,7 @@ IDLE
 | ER-007 | P0 | TODO | WebSocket 认证和控制租约 | 未授权客户端不能写硬件 |
 | ER-008 | P1 | DONE | DeviceRuntime 和 capability | 状态和生命周期唯一 |
 | ER-009 | P1 | DONE | 统一 simulation runtime | 与真实模式共用状态机 |
-| ER-010 | P1 | DOING | ActionHandlerRegistry | 全部具体动作 handler 已物理迁出 ActionEngine；待接入结构化 handler result |
+| ER-010 | P1 | DONE | ActionHandlerRegistry | 全部具体动作 handler 已迁出 ActionEngine，并统一返回结构化 ActionHandlerResult |
 | ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 统一 deadline/cancel 已落地，继续补齐设备级停止声明与验证 |
 | ER-012 | P1 | DOING | camera session/resource | 预览和视觉任务不争用 |
 | ER-013 | P1 | DONE | 机械臂能力接口补强 | GUI、执行、视觉、示教和数据采集不依赖 RM 原生字段 |
@@ -214,7 +214,8 @@ IDLE
    上下文；deadline 不会通过脱离资源租约的后台线程伪中断 SDK 调用。
    待逐路径增加更细的检查点、设备级停止能力和最大取消延迟测试。
 4. 待在真实设备上验证 cancel、quick-stop、emergency-stop。
-5. 待将设备错误进一步关联到 operation 和 `run_id`；当前报告已包含 `device_id`。
+5. handler 失败已关联稳定 code、operation、device_id，并通过带 `run_id`
+   的执行事件和快照向入口传播；待底层设备错误进一步细分。
 
 完成标准：
 
@@ -225,8 +226,8 @@ IDLE
 
 ### Phase B：ActionHandlerRegistry
 
-1. 已定义 typed `ActionHandler` 协议、`ActionHandlerRegistry` 和统一执行上下文；
-   结构化 handler result 仍待接入。
+1. 已定义 typed `ActionHandler` 协议、`ActionHandlerRegistry`、统一执行上下文和
+   `ActionHandlerResult`；注册表拒绝旧 `bool` 返回。
 2. 已拆 WAIT、INSPECT、表达屏、换枪、轨迹和视觉动作。
 3. 机械臂、身体和底盘已拆为组合式 motion handlers；末端执行器已拆为
    二级执行器注册表。
@@ -329,7 +330,7 @@ git diff --check
 | WebSocket 无认证和控制所有者 | P0 | 在开放网络部署前完成 |
 | 视觉流程内部仍包含长同步调用 | P1 | 标记不可即时取消区段，并通过设备停止能力和硬件测试验证最大延迟 |
 | 相机预览尚无持久 session lease | P1 | CameraSession + ResourceArbiter |
-| handler 仍使用 bool 表达业务失败 | P1 | 引入结构化结果，保留稳定错误码、消息和设备操作信息 |
+| 底层设备错误尚未统一映射到细分错误码 | P1 | 在 adapter 边界建立厂商错误映射并保留原始诊断上下文 |
 | GUI/WebSocket 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
 | simulation 与真实设备差异 | P1 | 同状态机 + contract + 硬件清单 |
 
@@ -360,3 +361,4 @@ git diff --check
 | 2026-07-29 | motion handlers 收敛 | ER-010/ER-011 保持 DOING | 机械臂、身体、底盘从 ActionEngine 拆出；设备 I/O 接入统一 invoke/checkpoint，重试和轮询配置化，取消/超时不再被设备异常边界吞掉 |
 | 2026-07-29 | manipulation handlers 收敛 | ER-010/ER-011 保持 DOING | MANIPULATE 使用二级执行器注册表；末端执行器、智能加粉和转圈注液移出引擎；移液 typed command 在设备初始化前校验，智能加粉等待可取消且 finally 安全回位 |
 | 2026-07-29 | domain handlers 收敛 | ER-010/ER-011 保持 DOING | 换枪、轨迹、视觉抓取和视觉重定位移出 ActionEngine；轨迹轮询配置化，参数校验前置，视觉流程改为可注入 executor，四类调用统一透传取消与超时 |
+| 2026-07-29 | 结构化 handler result | ER-010 DOING → DONE | 全部 handler 直接切换为 ActionHandlerResult，不保留 bool 兼容；失败 code、message、operation、device_id 贯通 EngineResult、ExecutionSnapshot 和执行事件 |

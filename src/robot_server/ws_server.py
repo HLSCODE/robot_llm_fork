@@ -65,7 +65,7 @@ WebSocket 路径:
     服务端 → 前端（事件推送）:
         {"event": "step_started",       "index": 0, "name": "...", "status": "RUNNING"}
         {"event": "step_completed",     "index": 0, "name": "..."}
-        {"event": "step_failed",        "index": 0, "name": "...", "error": "..."}
+        {"event": "step_failed",        "index": 0, "name": "...", "error": "...", "failure": {...}}
         {"event": "log",                "level": "info|warn|error", "message": "..."}
         {"event": "execution_finished"}
         {"event": "error",              "message": "..."}              # 请求参数校验错误
@@ -2047,6 +2047,10 @@ class RobotWebSocketServer:
                 "state": execution.state.value,
                 "running": execution.active,
                 "paused": execution.state is ExecutionState.PAUSED,
+                "error": execution.error,
+                "error_code": execution.error_code,
+                "error_operation": execution.error_operation,
+                "error_device_id": execution.error_device_id,
             },
             "sequence_length": len(
                 self._services.composition.sequence_entries()
@@ -2723,6 +2727,7 @@ class RobotWebSocketServer:
                 event.index or 0,
                 event.item,
                 event.message,
+                event.data,
             )
         elif event_type is ExecutionEventType.LOOP_PROGRESS:
             self._on_loop_progress(
@@ -2758,13 +2763,20 @@ class RobotWebSocketServer:
             "name": item.definition.name,
         })
 
-    def _on_step_failed(self, index: int, item: SequenceItem, error: str) -> None:
+    def _on_step_failed(
+        self,
+        index: int,
+        item: SequenceItem,
+        error: str,
+        failure: dict[str, Any],
+    ) -> None:
         self._execution_had_failure = True
         self._broadcast_threadsafe({
             "event": "step_failed",
             "index": index,
             "name": item.definition.name,
             "error": error,
+            "failure": failure,
         })
 
     def _on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int) -> None:

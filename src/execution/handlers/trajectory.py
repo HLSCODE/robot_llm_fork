@@ -8,7 +8,9 @@ from ...device_runtime.ids import ROBOT_SYSTEM
 from ..action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,
+    ActionHandlerResult,
     ActionParameters,
+    ActionResultCode,
     ActionTimeoutError,
 )
 
@@ -25,6 +27,10 @@ class TrajectoryHandlerOptions:
 class TrajectoryActionHandler:
     """Send a trajectory through the vendor-neutral robot capability."""
 
+    _LOAD_OPERATION = "trajectory.load_file"
+    _SEND_OPERATION = "trajectory.send"
+    _READ_OPERATION = "trajectory.is_complete"
+
     def __init__(
         self,
         device_runtime: DeviceRuntime,
@@ -37,15 +43,20 @@ class TrajectoryActionHandler:
         self,
         parameters: ActionParameters,
         context: ActionExecutionContext,
-    ) -> bool:
+    ) -> ActionHandlerResult:
         robot_name = str(parameters.get("robot", "robot1")).strip()
         raw_file_path = parameters.get("file_path", "")
         try:
             arm = ArmId.parse(robot_name)
             file_path = Path(raw_file_path)
         except (TypeError, ValueError) as exc:
-            context.log(f"轨迹参数无效: {exc}", "error")
-            return False
+            message = f"轨迹参数无效: {exc}"
+            return context.failure(
+                ActionResultCode.INVALID_PARAMETERS,
+                message,
+                operation=self._SEND_OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
 
         context.log(
             f"执行轨迹动作: robot={robot_name}, file={file_path}",
@@ -54,32 +65,60 @@ class TrajectoryActionHandler:
         try:
             is_file = file_path.is_file()
         except OSError as exc:
-            context.log(f"无法访问轨迹文件 {file_path}: {exc}", "error")
-            return False
+            message = f"无法访问轨迹文件 {file_path}: {exc}"
+            return context.failure(
+                ActionResultCode.RESOURCE_NOT_FOUND,
+                message,
+                operation=self._LOAD_OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
         if not is_file:
-            context.log(f"轨迹文件不存在: {file_path}", "error")
-            return False
+            message = f"轨迹文件不存在: {file_path}"
+            return context.failure(
+                ActionResultCode.RESOURCE_NOT_FOUND,
+                message,
+                operation=self._LOAD_OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
 
         try:
             trajectory = self._device_runtime.require(
                 ROBOT_SYSTEM,
                 TrajectoryControl,
             )
+        except Exception as exc:
+            message = f"轨迹设备不可用: {exc}"
+            return context.failure(
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                message,
+                operation=self._SEND_OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
+
+        try:
             context.invoke(
-                "trajectory.send",
+                self._SEND_OPERATION,
                 lambda: trajectory.send_trajectory(arm, file_path),
             )
             while True:
                 complete = context.invoke(
-                    "trajectory.is_complete",
+                    self._READ_OPERATION,
                     lambda: trajectory.is_trajectory_complete(arm),
                 )
                 if complete:
                     context.log("轨迹执行完成", "info")
-                    return True
+                    return context.success(
+                        operation=self._SEND_OPERATION,
+                        device_id=ROBOT_SYSTEM,
+                    )
                 context.sleep(self._options.poll_interval_seconds)
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:
-            context.log(f"轨迹执行异常: {exc}", "error")
-            return False
+            message = f"轨迹执行异常: {exc}"
+            return context.failure(
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                message,
+                operation=self._SEND_OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
