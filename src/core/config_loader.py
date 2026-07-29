@@ -5,6 +5,7 @@
 import os
 from pathlib import Path
 from typing import Optional
+
 from dotenv import load_dotenv
 
 
@@ -25,6 +26,8 @@ class Config:
     LLM_DEFAULT_TEMPERATURE: float = 0.3
     LLM_DEFAULT_MAX_TOKENS: int = 512
     LLM_REQUEST_TIMEOUT_S: float = 60.0
+    INTERACTION_TURN_TIMEOUT_S: float = 90.0
+    COMMAND_PREVIEW_TTL_SECONDS: float = 120.0
     VOICE_SESSION_TIMEOUT_S: float = 30.0
     VOICE_SESSION_HISTORY_TURNS: int = 6
     VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S: float = 30.0
@@ -329,6 +332,12 @@ class Config:
         instance.LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.3"))
         instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
         instance.LLM_REQUEST_TIMEOUT_S = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "60"))
+        instance.INTERACTION_TURN_TIMEOUT_S = float(os.getenv(
+            "INTERACTION_TURN_TIMEOUT_S", "90"
+        ))
+        instance.COMMAND_PREVIEW_TTL_SECONDS = float(os.getenv(
+            "COMMAND_PREVIEW_TTL_SECONDS", "120"
+        ))
         instance.VOICE_SESSION_TIMEOUT_S = float(os.getenv("VOICE_SESSION_TIMEOUT_S", "30"))
         instance.VOICE_SESSION_HISTORY_TURNS = int(os.getenv(
             "VOICE_SESSION_HISTORY_TURNS", "6"

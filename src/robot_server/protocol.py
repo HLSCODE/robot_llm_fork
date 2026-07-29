@@ -4,8 +4,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
-
-WEBSOCKET_API_VERSION = "1.0"
+WEBSOCKET_API_VERSION = "2.0"
 
 
 class WebSocketErrorCode(str, Enum):

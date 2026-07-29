@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 from src.robot_server.protocol import WEBSOCKET_API_VERSION
 from src.robot_server.request_limits import WebSocketRequestLimiter
@@ -110,7 +110,7 @@ class WebSocketProtocolContractTests(unittest.TestCase):
             await server._dispatch(
                 websocket,
                 {
-                    "api_version": "2.0",
+                    "api_version": "1.0",
                     "action": "control_status",
                     "request_id": "wrong-version",
                 },

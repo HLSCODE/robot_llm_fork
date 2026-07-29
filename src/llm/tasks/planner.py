@@ -6,13 +6,13 @@ client 完成。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from ..base import BaseLLMClient, LLMPlanResult
 from ..errors import LLMError
-from ..sync_utils import run_coro_sync
 from ..types import LLMCapability, LLMMessage
 from .profiles import TaskProfile
 
@@ -104,6 +104,10 @@ class SkillPlanner:
             )
             logger.debug("LLM 规划原始响应: %s", result.text)
             return self._parse_response(result.text)
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            raise
         except LLMError as exc:
             logger.error("LLM 规划调用失败: %s", exc)
             return LLMPlanResult(
@@ -124,27 +128,6 @@ class SkillPlanner:
                 confidence=0.0,
                 error=f"LLM 调用失败: {str(exc)}",
             )
-
-    def plan_sync(
-        self,
-        user_text: str,
-        skill_summaries: List[Dict[str, Any]],
-        system_prompt: str | None = None,
-        profile: TaskProfile | None = None,
-        provider: str | None = None,
-        **chat_options: Any,
-    ) -> LLMPlanResult:
-        """同步规划入口，用于兼容 GUI 后台线程和旧调用点。"""
-        return run_coro_sync(
-            self.plan(
-                user_text,
-                skill_summaries,
-                system_prompt=system_prompt,
-                profile=profile,
-                provider=provider,
-                **chat_options,
-            )
-        )
 
     def _resolve_llm(
         self,

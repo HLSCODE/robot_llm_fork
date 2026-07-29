@@ -2,7 +2,7 @@
 
 ## 1. 背景
 
-当前 `src/llm/` 的职责较窄，主要服务于 AI 技能规划：
+重构前 `src/llm/` 的职责较窄，主要服务于 AI 技能规划：
 
 - `LLMClient.plan(user_text, skill_summaries) -> LLMPlanResult`
 - OpenAI-compatible 客户端曾把模型调用、规划 prompt 构造和 JSON 解析混在一起
@@ -16,10 +16,10 @@
 
 1. 统一模型能力入口，收敛 OpenAI、DeepSeek、DashScope、MiniCPM 等调用。
 2. 将“模型调用”和“机器人规划业务”解耦。
-3. 支持同步/异步文本对话、流式对话、规划、图文理解和后续音频能力扩展。
+3. 支持异步文本对话、流式对话、规划、图文理解和后续音频能力扩展。
 4. MiniCPM Realtime Chat 的上游 WebSocket 由 MiniCPM provider 内部维护。
 5. 外部 WebSocket 服务仍由 `robot_server/ws_server.py` 维护，只负责客户端连接、鉴权、事件转发和业务编排。
-6. 保持现有 `ai_chat`、`ai_status` 和聊天 action 等功能可平滑迁移。
+6. `ai_chat`、`ai_status` 和聊天 action 直接切换到新能力层，不保留旧接口适配。
 
 ## 3. 非目标
 
@@ -114,7 +114,7 @@ provider strategy            current robot process
 ```text
 前端 WebSocket 由 ws_server.py 维护
 模型上游 WebSocket 由 provider 内部维护
-业务层只消费 chat / stream_chat / plan 等能力
+业务层只消费 task 层的 chat / stream_chat / plan 等异步能力
 ```
 
 ## 6. 目标目录结构
@@ -128,7 +128,6 @@ src/llm/
   types.py
   errors.py
   registry.py
-  sync_utils.py
   providers/
     __init__.py
     openai_compatible.py
@@ -312,29 +311,16 @@ class BaseLLMClient(ABC):
         pass
 ```
 
-### 8.2 兼容旧同步 `plan()` 的过渡方案
-
-当前代码大量同步调用：
-
-```python
-llm_result = self._llm_client.plan(text, skill_summaries)
-```
-
-可以保留短期兼容接口：
-
-```python
-class LegacyPlanningMixin:
-    def plan(self, user_text: str, skill_summaries: list[dict]) -> LLMPlanResult:
-        planner = SkillPlanner(self)
-        return run_async_blocking(planner.plan(user_text, skill_summaries))
-```
-
-但长期建议把调用点迁移到异步：
+### 8.2 异步 task 边界
 
 ```python
 planner = SkillPlanner(llm)
 result = await planner.plan(user_text, skill_summaries)
 ```
+
+当前实现已删除 `sync_utils.py`、`plan_sync()`、`chat_sync()` 和 provider
+`plan()`。Qt 后台工作线程使用 `asyncio.run()` 驱动完整异步交互轮次，不保留同步
+兼容入口。
 
 ## 9. TaskProfile 场景封装设计
 
@@ -701,40 +687,19 @@ def map_llm_event_to_frontend(event: LLMStreamEvent) -> dict:
 class LLMRegistry:
     @classmethod
     def from_config(cls, config) -> "LLMRegistry":
-        registry = cls()
-        provider = config.LLM_DEFAULT_PROVIDER.lower()
+        return cls(
+            config=config,
+            default_provider=config.LLM_DEFAULT_PROVIDER,
+        )
 
-        if provider == "minicpm":
-            registry.default_chat = MiniCPMRealtimeClient(
-                gateway_host=config.MINICPM_GATEWAY_HOST,
-                gateway_port=config.MINICPM_GATEWAY_PORT,
-                ws_scheme=config.MINICPM_WS_SCHEME,
-                gateway_path_prefix=config.MINICPM_GATEWAY_PATH_PREFIX,
-            )
-        elif provider == "deepseek":
-            registry.default_chat = OpenAICompatibleClient(
-                provider_name="deepseek",
-                api_key=config.OPENAI_API_KEY,
-                model=config.OPENAI_MODEL or "deepseek-reasoner",
-                base_url=config.OPENAI_BASE_URL or "https://api.deepseek.com/v1",
-            )
-        elif provider == "dashscope":
-            registry.default_chat = OpenAICompatibleClient(
-                provider_name="dashscope",
-                api_key=config.OPENAI_API_KEY,
-                model=config.OPENAI_MODEL or "qwen-plus",
-                base_url=config.OPENAI_BASE_URL or "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            )
-        else:
-            registry.default_chat = OpenAICompatibleClient(
-                provider_name="openai",
-                api_key=config.OPENAI_API_KEY,
-                model=config.OPENAI_MODEL or "gpt-4o",
-                base_url=config.OPENAI_BASE_URL,
-            )
+    def get_provider(self, provider: str | None = None) -> BaseLLMClient:
+        # 按 provider 名称懒加载并缓存；TaskProfile 通过
+        # get_client_for_profile() 复用同一解析规则。
+        ...
 
-        registry.skill_planner = SkillPlanner(registry.default_chat)
-        return registry
+    async def close(self) -> None:
+        # 幂等关闭全部已加载 provider。
+        ...
 ```
 
 后续通过 `TaskProfile.default_provider` 和调用时 `provider` 覆盖选择不同模型：
@@ -804,14 +769,13 @@ await registry.chat(
 - `src/llm/errors.py`
 - 扩展 `src/llm/base.py`
 
-保留旧：
+当前结果：
 
-- `LLMPlanResult`
-- `LLMClient.plan()`
+- `LLMPlanResult` 作为 task 规划结果保留。
+- Provider 只实现 `BaseLLMClient` 异步能力，不再实现 `plan()`。
 
 目标：
 
-- 不改变现有行为
 - 允许新 provider 实现 `chat()` 和 `stream_chat()`
 
 ### 阶段 2：提取 TaskProfile、TaskRunner、InstructionClassifier 和 SkillPlanner
@@ -908,7 +872,7 @@ await registry.chat(
 
 在所有调用点迁移后：
 
-- 弱化或删除 `LLMClient.plan()`
+- 已删除 `LLMClient.plan()` 和同步 wrapper
 - 统一改用 `SkillPlanner.plan()`
 - README 和 `docs/websocket-api.md` 更新配置说明
 
@@ -918,7 +882,7 @@ await registry.chat(
 
 ```python
 registry = LLMRegistry.from_config(config)
-llm = registry.default_chat
+llm = registry.get_chat_client()
 
 result = await registry.chat(
     user_text="你好",
@@ -947,12 +911,16 @@ planner = registry.skill_planner
 result = await planner.plan(user_text, skill_summaries)
 
 if result.is_valid():
-    sequence = skill_engine.plan_skill_execution(
-        skill_id=result.skill_id,
-        skill_name=result.skill_name,
-        confidence=result.confidence,
-        extracted_params=result.parameters,
-        reasoning=result.reasoning,
+    preparation = command_runtime.prepare(
+        SkillMatchResult(
+            skill_id=result.skill_id,
+            skill_name=result.skill_name,
+            confidence=result.confidence,
+            extracted_params=result.parameters,
+            reasoning=result.reasoning,
+        ),
+        source="websocket-ai",
+        plan=result.__dict__,
     )
 ```
 
@@ -961,7 +929,7 @@ if result.is_valid():
 ```python
 async def _handle_chat_send(self, websocket, data: dict) -> None:
     messages = parse_frontend_messages(data)
-    llm = self._llm_registry.default_chat
+    llm = self._llm_registry.get_chat_client()
 
     async for event in llm.stream_chat(messages):
         frontend_event = map_llm_event_to_frontend(event)
@@ -1080,22 +1048,13 @@ fake = FakeRealtimeTransport([
 - `ai_chat` 能正常生成规划预览
 - MiniCPM `chat` 能返回 `chat_data` chunk/done
 
-## 21. 向后兼容策略
+## 21. 版本切换策略
 
-短期保留：
-
-- `LLMClient`
-- `LLMPlanResult`
-- `plan()`
-
-OpenAI-compatible 服务不再保留独立 wrapper 类，统一由 `LLMRegistry` 创建 `OpenAICompatibleClient`。
-
-迁移完成后再逐步把调用点替换为：
-
-```python
-planner = SkillPlanner(llm)
-result = await planner.plan(...)
-```
+- 不保留同步 LLM 或旧 provider 规划兼容入口。
+- Provider 直接实现 `BaseLLMClient`，规划统一由 `SkillPlanner` 异步执行。
+- OpenAI-compatible 服务统一由 `LLMRegistry` 创建
+  `OpenAICompatibleClient`。
+- 调用方必须直接迁移到 async task API。
 
 ## 22. 文档与状态接口更新
 
@@ -1147,7 +1106,7 @@ README 建议更新：
 ```python
 registry = LLMRegistry.from_config(config)
 
-chat_model = registry.default_chat
+chat_model = registry.get_chat_client()
 planner = registry.skill_planner
 
 reply = await chat_model.chat(messages)

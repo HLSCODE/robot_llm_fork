@@ -1,17 +1,32 @@
+import json
+import math
 import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import List
-import math
-import json
 from uuid import uuid4
-from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-                            QSplitter, QMessageBox, QFileDialog, QMenu,
-                            QTabWidget, QPushButton, QLabel, QFrame, QApplication,
-                            QInputDialog, QGroupBox, QListWidget, QListWidgetItem,
-                            QTreeWidget, QTreeWidgetItem)
-from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QTimer, QMimeData, QEventLoop
-from PyQt6.QtGui import QAction, QPalette, QColor, QDrag, QIcon
+
+from PyQt6.QtCore import QEventLoop, QMimeData, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QDrag, QIcon
+from PyQt6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTabWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..ai_integration.execution_bridge import ExecutionBridge
 from ..application import (
@@ -20,6 +35,7 @@ from ..application import (
     CompositionEvent,
     CompositionRevisionConflict,
 )
+from ..core.config_loader import Config
 from ..core.models import (
     ActionDefinition,
     ActionType,
@@ -35,11 +51,11 @@ from ..device_runtime.ids import (
     RELAY_BANK,
     ROBOT_SYSTEM,
 )
-from ..widgets import ActionListWidget, SequenceListWidget, ControlPanel, LogWidget
+from ..widgets import ActionListWidget, ControlPanel, LogWidget, SequenceListWidget
 from ..widgets.ai_assistant import AIAssistantWidget
 from .composition_bridge import CompositionBridge
 from .dialogs import ActionConfigDialog
-from ..core.config_loader import Config
+
 
 class TaskLibraryListWidget(QListWidget):
     def __init__(self, parent=None):
@@ -1743,7 +1759,7 @@ class MainWindow(QMainWindow):
             self.task_library_list.addItem(item)
 
     def _create_task_list_icon(self) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter, QFont
+        from PyQt6.QtGui import QFont, QPainter, QPixmap
 
         pixmap = QPixmap(28, 28)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -1992,8 +2008,8 @@ class MainWindow(QMainWindow):
     }
 
     def _create_task_card_icon(self, task_name: str, step_count: int, title: str | None = None):
-        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
         from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
 
         width, height = 130, 88
         pixmap = QPixmap(width, height)
@@ -2057,8 +2073,8 @@ class MainWindow(QMainWindow):
         return QIcon(pixmap)
 
     def _create_action_card_icon(self, action: ActionDefinition):
-        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
         from PyQt6.QtCore import QRectF
+        from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
 
         width, height = 130, 88
         pixmap = QPixmap(width, height)
@@ -2562,6 +2578,7 @@ class MainWindow(QMainWindow):
 
             def run(self):
                 import time
+
                 from src.core.config_loader import Config
 
                 config = Config.get_instance()
@@ -2652,5 +2669,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if self.pose_timer is not None:
             self.pose_timer.stop()
+        if hasattr(self, "ai_assistant_widget"):
+            self.ai_assistant_widget.shutdown()
         self._composition_bridge.close()
         event.accept()

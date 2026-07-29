@@ -10,11 +10,9 @@ from collections.abc import AsyncIterator
 from typing import Any, Callable, List, Optional, Sequence, Union
 
 from ..base import BaseLLMClient
-from ..sync_utils import run_coro_sync
 from ..types import LLMChatResult, LLMContentPart, LLMMessage, LLMStreamEvent
 from .profiles import GENERAL_CHAT_PROFILE, TaskProfile
 from .repeat import RepeatTask
-
 
 MessageContent = Union[str, List[LLMContentPart]]
 ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
@@ -58,29 +56,6 @@ class TaskRunner:
         return await llm.chat(
             final_messages,
             **active_profile.chat_options(**chat_options),
-        )
-
-    def chat_sync(
-        self,
-        user_text: Optional[MessageContent] = None,
-        messages: Optional[Sequence[LLMMessage]] = None,
-        system_prompt: Optional[str] = None,
-        profile: Optional[TaskProfile] = None,
-        prompt_context: Optional[dict[str, Any]] = None,
-        provider: Optional[str] = None,
-        **chat_options: Any,
-    ) -> LLMChatResult:
-        """Synchronous wrapper for normal chat tasks."""
-        return run_coro_sync(
-            self.chat(
-                user_text=user_text,
-                messages=messages,
-                system_prompt=system_prompt,
-                profile=profile,
-                prompt_context=prompt_context,
-                provider=provider,
-                **chat_options,
-            )
         )
 
     async def stream_chat(

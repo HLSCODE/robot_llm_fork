@@ -25,7 +25,8 @@
    - `vision_question`：通过 `src/cameras/` 采集相机画面并做视觉融合问答。
    - `session_control`：结束、暂停、取消任务等。
 5. 支持流式文本和语音回复；纯语音对话类 task 使用流式语音响应，结构化 task 使用文本响应。
-6. GUI 底部文本框是通用对话入口，不需要唤醒；真实语音链路由 `VoiceSpeechRuntime` 独立启动并维护语音 session。
+6. GUI 底部文本框不需要唤醒；真实语音 IO 由 `VoiceSpeechRuntime` 独立启动，
+   但文本与语音共享 GUI 的 controller、session 和历史。
 
 ## 3. 非目标
 
@@ -71,7 +72,8 @@ src/voice_interaction/
 - `speech/utterance.py`：VAD 事件与 RMS 静音兜底组合成一句完整 utterance。
 - `speech/runtime.py`：真实语音运行时，将麦克风 -> 唤醒词 -> VAD -> ASR -> `VoiceInteractionController.handle_text()` 串起来。
 
-GUI 仍可用手动文本直接对话；真实语音输入通过 `VoiceSpeechRuntime` 单独启动，避免 GUI、WebSocket 和测试互相耦合。
+GUI 仍可用手动文本直接对话；真实语音 IO 通过 `VoiceSpeechRuntime` 单独启动，
+两者在 interaction 层共享会话策略，WebSocket 保持独立会话历史。
 
 ## 5. 总体流程
 
@@ -196,12 +198,15 @@ class VoiceInteractionController:
     def __init__(
         self,
         llm_registry,
-        skill_engine=None,
+        command_runtime: CommandRuntime,
+        source: str,
         camera_provider=None,
         session: VoiceSession | None = None,
+        turn_timeout_s: float = 90.0,
     ) -> None:
         self.llm_registry = llm_registry
-        self.skill_engine = skill_engine
+        self.command_runtime = command_runtime
+        self.source = source
         self.camera_provider = camera_provider
         self.session = session or VoiceSession()
 
@@ -209,26 +214,14 @@ class VoiceInteractionController:
         self.session.wake()
         return VoiceEvent(type="session_started")
 
-    async def handle_text(self, text: str):
-        if self.session.state == VoiceSessionState.SLEEPING:
-            yield VoiceEvent(type="error", text="机器人未唤醒")
-            return
-
-        if self.session.is_expired():
-            self.session.sleep()
-            yield VoiceEvent(type="session_ended", text="会话已超时")
-            return
-
-        self.session.touch()
-
-        intent = await self.llm_registry.instruction_classifier.classify(text)
-        yield VoiceEvent(type="intent", intent=intent)
-
-        async for event in self._route(text, intent):
-            yield event
+    async def handle_text(self, text: str, *, require_awake: bool = True):
+        # 非阻塞单轮互斥 + asyncio.timeout；当前 task 可由
+        # cancel_active_turn() 从 Qt/服务线程安全取消。
+        ...
 ```
 
-`handle_text()` 第一阶段由 GUI 输入框调用；未来由 ASR 文本回调调用。
+GUI 文本、ASR 和 WebSocket 均调用 `handle_text()`；前两者共享 GUI controller，
+WebSocket 使用独立 controller。
 
 ## 9. Intent 路由规则
 
@@ -236,10 +229,11 @@ class VoiceInteractionController:
 
 ```json
 {
-  "intent": "chat | command | vision_question | session_control",
+  "intent": "chat | command | vision_question | session_control | execution_control",
   "is_addressed_to_robot": true,
   "should_end_session": false,
-  "session_action": "none | end_session | cancel_task | pause"
+  "session_action": "none | end_session | pause_session | resume_session",
+  "execution_action": "none | cancel | pause | resume"
 }
 ```
 
@@ -250,25 +244,9 @@ async def _route(self, text: str, intent: dict):
     if not intent.get("is_addressed_to_robot", True):
         return
 
-    if intent["intent"] == "session_control":
-        async for event in self._handle_session_control(intent):
-            yield event
-        return
-
-    if intent["intent"] == "chat":
-        async for event in self._handle_chat(text):
-            yield event
-        return
-
-    if intent["intent"] == "command":
-        async for event in self._handle_command(text):
-            yield event
-        return
-
-    if intent["intent"] == "vision_question":
-        async for event in self._handle_vision(text):
-            yield event
-        return
+    handler = handlers[intent["intent"]]
+    async for event in handler():
+        yield event
 ```
 
 ## 10. 响应模式
@@ -278,7 +256,8 @@ async def _route(self, text: str, intent: dict):
 - `response_mode="voice_stream"`：用户可听见的任务，例如普通聊天、复述、视觉问答。语音会话中传 `voice_response=True` 时，MiniCPM 等支持 TTS 的 provider 会返回 `audio_delta`。
 - `response_mode="text"`：结构化或内部任务，例如 `InstructionClassifier`、`SkillPlanner`。这类任务始终走文本结果，并会剔除误传的 TTS 选项，避免语音模板污染 JSON 或规划格式。
 - `enable_thinking=False`：推荐用于 JSON、原样返回、视觉融合观察等格式敏感任务，避免模型输出推理过程或影响固定响应格式。
-- `command` 和 `session_control` 虽然内部会执行规划、取消、暂停、结束等控制逻辑，但仍应返回一段用户可听见的反馈；固定反馈文本优先通过 `RepeatTask.stream_repeat(voice_response=True)` 播报，未启用 TTS 时直接返回文本反馈。
+- `command`、`session_control` 和 `execution_control` 仍应返回可理解的控制结果；
+  固定反馈文本在启用 TTS 时可通过 `RepeatTask.stream_repeat()` 播报。
 
 推荐默认划分：
 
@@ -312,45 +291,22 @@ async for event in self.llm_registry.task_runner.stream_chat(user_text=text):
 
 ## 12. Command 处理
 
-命令走两步：
+命令统一走三层：
 
-1. `SkillPlanner` 将自然语言转成技能调用。
-2. `skill_engine` 将技能调用转成动作序列或预览。
+1. `SkillPlanner` 只把自然语言转换为 `SkillMatchResult`。
+2. 进程级 `ApplicationServices.commands` 调用唯一 `SkillEngine` 展开和校验动作，
+   并注册版本化预览。
+3. GUI 或 WebSocket 使用 `preview_id + version` 显式确认后，才能把一次性
+   `ConfirmedCommand` 交给 `ExecutionService`。
 
-```python
-async def _handle_command(self, text: str):
-    if self.skill_engine is None:
-        yield VoiceEvent(type="error", text="技能系统未初始化")
-        return
+`command_preview.data` 包含：
 
-    skill_summaries = self.skill_engine.get_skill_summaries()
-    plan = await self.llm_registry.skill_planner.plan(text, skill_summaries)
-
-    if not plan.is_valid():
-        yield VoiceEvent(
-            type="error",
-            text=plan.error or "没有匹配到可执行技能",
-        )
-        return
-
-    sequence = self.skill_engine.plan_skill_execution(
-        skill_id=plan.skill_id,
-        skill_name=plan.skill_name,
-        confidence=plan.confidence,
-        extracted_params=plan.parameters,
-        reasoning=plan.reasoning,
-    )
-
-    yield VoiceEvent(
-        type="command_preview",
-        data={
-            "plan": plan,
-            "sequence": sequence,
-            "validation": {"is_valid": True, "code": "valid"},
-            "requires_confirmation": True,
-        },
-    )
-```
+- 唯一 `preview_id` 和单调递增 `version`；
+- `created_at`、`expires_at` 和 `state=pending`；
+- `source`，防止 GUI 与 WebSocket 交叉确认对方的预览；
+- `validation`、`sequence`、`skill_info` 和 `plan`；
+- `risk.level/reasons/requires_acknowledgement`；
+- `requires_confirmation=true`。
 
 执行策略：
 
@@ -364,9 +320,38 @@ async def _handle_command(self, text: str):
   `invalid_action_parameters`。
 - 所有预览都带有 `requires_confirmation=true`，GUI 必须由用户点击执行或确认，
   WebSocket 必须收到独立的 `ai_confirm` 请求后才能进入统一执行运行时。
-- 接受新的文本或语音输入前会清除上一份待确认预览，避免误确认旧规划。
+- 新规划会使旧预览进入 `superseded`；主动取消进入 `cancelled`；TTL 到期进入
+  `expired`；成功确认进入 `confirmed` 且不可重复消费。
+- MOVE、BASE_MOVE、MANIPULATE、CHANGE_GUN、VISION_RELOCALIZE 和
+  TRAJECTORY 属于高风险动作，除普通确认外还必须提交独立风险确认。
 - 项目不提供自动执行配置，也不保留绕过确认的兼容路径。
 - 执行动作时必须支持取消。
+
+## 12.1 会话控制与执行控制
+
+分类结果不再复用一个含糊的“暂停/取消”字段：
+
+- `session_control.session_action`：`end_session`、`pause_session`、
+  `resume_session`，只影响对话状态。
+- `execution_control.execution_action`：`cancel`、`pause`、`resume`，只进入
+  `CommandRuntime.control_execution()`。
+
+因此“先别说话”不会暂停机械臂，“暂停动作”也不会结束语音会话。
+
+## 12.2 GUI 文本与语音共享策略
+
+GUI 文本框和真实语音共享同一个 `VoiceInteractionController`、`VoiceSession`
+和历史记录，并通过非阻塞单轮互斥避免两个线程同时修改会话或调用模型。
+WebSocket 使用独立会话历史，但与 GUI 复用相同的 CommandRuntime 校验、风险和
+执行控制策略。
+
+## 12.3 LLM 生命周期
+
+- `LLM_REQUEST_TIMEOUT_S` 约束 provider 网络请求。
+- `INTERACTION_TURN_TIMEOUT_S` 约束分类、规划、聊天或视觉的一整轮交互。
+- `cancel_active_turn()` 使用事件循环线程安全取消当前 async task。
+- GUI 关闭和 WebSocket 附加服务停止时调用幂等 `LLMRegistry.close()`，关闭所有
+  已懒加载 provider。
 
 ## 13. Vision 处理
 
@@ -431,23 +416,22 @@ async def _handle_session_control(self, intent: dict):
         yield VoiceEvent(type="session_ended")
         return
 
-    if action == "cancel_task":
-        await self._cancel_current_task()
-        yield VoiceEvent(type="done", text="已取消当前任务")
+    if action == "pause_session":
+        self.session.pause()
+        yield VoiceEvent(type="session_paused")
         return
 
-    if action == "pause":
-        self.session.state = VoiceSessionState.PAUSED
-        yield VoiceEvent(type="done", text="我先暂停")
+    if action == "resume_session":
+        self.session.resume()
+        yield VoiceEvent(type="session_resumed")
         return
 ```
 
 注意：
 
-- “停下”通常是 `command`，不是结束 session。
+- “停下”“取消刚才那个”属于 `execution_control/cancel`，不是 session control。
 - “没事了”“不用了”“先这样”通常结束 session。
-- “取消刚才那个”通常取消任务，但不一定结束 session。
-- 会话控制类意图需要先反馈“已取消”“会话已结束”等可听响应，再更新最终 session 状态，避免用户听不到控制结果。
+- “先别说话”属于 `session_control/pause_session`，不会暂停设备。
 
 ## 15. 语音能力适配层
 
@@ -642,8 +626,8 @@ class FakeClassifier:
 - “抓瓶子” -> command。
 - “你看到什么” -> vision_question。
 - “没事了” -> session_control/end_session。
-- “取消刚才那个” -> session_control/cancel_task。
-- “停下” -> command。
+- “取消刚才那个” -> execution_control/cancel。
+- “停下” -> execution_control/cancel。
 
 ## 20. 推荐实施顺序
 
@@ -671,7 +655,7 @@ class FakeClassifier:
 4. 输入“抓瓶子”能走 command 并生成技能规划或失败说明。
 5. 输入“你看到什么”能走 vision_question。
 6. 输入“没事了”能结束 session。
-7. 输入“取消刚才那个”能触发 cancel_task。
+7. 输入“取消刚才那个”能触发 execution_control/cancel。
 8. LLM 或相机不可用时 GUI 不崩溃，有明确错误事件。
 
 ## 22. 后续扩展

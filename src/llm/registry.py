@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator
+from threading import RLock
 from typing import Any, Dict, Optional, Sequence
 
 from .base import BaseLLMClient
@@ -19,7 +20,6 @@ from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
 from .tasks import (
     GENERAL_CHAT_PROFILE,
-    INSTRUCTION_CLASSIFIER_PROFILE,
     REPEAT_PROFILE,
     ROBOT_PLANNER_PROFILE,
     VISION_FUSION_PROFILE,
@@ -52,6 +52,8 @@ class LLMRegistry:
         self._config = config
         self.default_provider = self._normalize_provider(default_provider)
         self._providers: Dict[str, BaseLLMClient] = {}
+        self._lock = RLock()
+        self._closed = False
 
         if providers:
             self._providers.update(
@@ -126,6 +128,7 @@ class LLMRegistry:
                 or getattr(config, "OPENAI_BASE_URL", "")
                 or DEEPSEEK_BASE_URL,
                 default_model="deepseek-reasoner",
+                timeout_s=timeout_s,
             )
 
         if provider == "dashscope":
@@ -140,6 +143,7 @@ class LLMRegistry:
                 or getattr(config, "OPENAI_BASE_URL", "")
                 or DASHSCOPE_BASE_URL,
                 default_model="qwen-plus",
+                timeout_s=timeout_s,
             )
 
         return OpenAICompatibleClient(
@@ -148,6 +152,7 @@ class LLMRegistry:
             model=getattr(config, "OPENAI_MODEL", "") or "gpt-4o",
             base_url=getattr(config, "OPENAI_BASE_URL", ""),
             default_model="gpt-4o",
+            timeout_s=timeout_s,
         )
 
     @staticmethod
@@ -169,31 +174,23 @@ class LLMRegistry:
 
     @property
     def provider_names(self) -> tuple[str, ...]:
-        return tuple(dict.fromkeys((*SUPPORTED_PROVIDERS, *self._providers.keys())))
+        with self._lock:
+            loaded = tuple(self._providers)
+        return tuple(dict.fromkeys((*SUPPORTED_PROVIDERS, *loaded)))
 
     @property
     def loaded_provider_names(self) -> tuple[str, ...]:
-        return tuple(self._providers.keys())
-
-    @property
-    def default_chat(self) -> BaseLLMClient:
-        """Compatibility accessor for the default provider client."""
-        return self.get_provider(self.default_provider)
-
-    @property
-    def planner_client(self) -> BaseLLMClient:
-        """Compatibility accessor for the planner profile client."""
-        return self.get_planner_client()
-
-    @property
-    def vision_client(self) -> BaseLLMClient:
-        """Compatibility accessor for the vision profile client."""
-        return self.get_vision_client()
+        with self._lock:
+            return tuple(self._providers)
 
     def describe_providers(self) -> str:
         parts = []
-        for name in self.provider_names:
-            client = self._providers.get(name)
+        with self._lock:
+            providers = dict(self._providers)
+        for name in tuple(
+            dict.fromkeys((*SUPPORTED_PROVIDERS, *providers))
+        ):
+            client = providers.get(name)
             if client is None:
                 parts.append(f"{name}:lazy")
                 continue
@@ -203,17 +200,22 @@ class LLMRegistry:
 
     def get_provider(self, provider: Optional[str] = None) -> BaseLLMClient:
         provider_name = self._normalize_provider(provider or self.default_provider)
-        if provider_name in self._providers:
-            return self._providers[provider_name]
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("LLMRegistry is closed")
+            if provider_name in self._providers:
+                return self._providers[provider_name]
 
-        if provider_name not in SUPPORTED_PROVIDERS:
-            supported = ", ".join(SUPPORTED_PROVIDERS)
-            raise ValueError(f"未知 LLM provider: {provider_name}，支持: {supported}")
+            if provider_name not in SUPPORTED_PROVIDERS:
+                supported = ", ".join(SUPPORTED_PROVIDERS)
+                raise ValueError(
+                    f"未知 LLM provider: {provider_name}，支持: {supported}"
+                )
 
-        logger.info("懒加载 LLM provider: %s", provider_name)
-        client = self._create_provider(self._config, provider_name)
-        self._providers[provider_name] = client
-        return client
+            logger.info("懒加载 LLM provider: %s", provider_name)
+            client = self._create_provider(self._config, provider_name)
+            self._providers[provider_name] = client
+            return client
 
     def get_client_for_profile(
         self,
@@ -224,6 +226,23 @@ class LLMRegistry:
         client = self.get_provider(provider_name)
         self._warn_if_capabilities_missing(profile, client)
         return client
+
+    async def close(self) -> None:
+        """Close every loaded provider and clear the registry."""
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            providers = tuple(self._providers.values())
+            self._providers.clear()
+        for provider in providers:
+            try:
+                await provider.close()
+            except Exception:
+                logger.exception(
+                    "failed to close LLM provider %s",
+                    provider.get_provider_name(),
+                )
 
     def _warn_if_capabilities_missing(
         self,
@@ -274,27 +293,6 @@ class LLMRegistry:
     ) -> LLMChatResult:
         """Run a generic chat task through the selected provider."""
         return await self.task_runner.chat(
-            user_text=user_text,
-            messages=messages,
-            system_prompt=system_prompt,
-            profile=profile,
-            prompt_context=prompt_context,
-            provider=provider,
-            **chat_options,
-        )
-
-    def chat_sync(
-        self,
-        user_text: str | list[LLMContentPart] | None = None,
-        messages: Optional[Sequence[LLMMessage]] = None,
-        system_prompt: Optional[str] = None,
-        profile: Optional[TaskProfile] = None,
-        prompt_context: Optional[dict[str, Any]] = None,
-        provider: Optional[str] = None,
-        **chat_options: Any,
-    ) -> LLMChatResult:
-        """Synchronous generic chat task through the selected provider."""
-        return self.task_runner.chat_sync(
             user_text=user_text,
             messages=messages,
             system_prompt=system_prompt,

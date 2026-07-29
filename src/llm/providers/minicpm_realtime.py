@@ -19,9 +19,8 @@ try:
 except ImportError:
     websockets = None
 
-from ..base import LLMClient, LLMPlanResult
+from ..base import BaseLLMClient
 from ..errors import LLMProviderError
-from ..tasks import SkillPlanner
 from ..types import (
     LLMCapability,
     LLMChatResult,
@@ -39,7 +38,7 @@ DEFAULT_REF_AUDIO_PATH = (
 )
 
 
-class MiniCPMRealtimeClient(LLMClient):
+class MiniCPMRealtimeClient(BaseLLMClient):
     """MiniCPM-o Realtime Chat 客户端。"""
 
     def __init__(
@@ -166,9 +165,6 @@ class MiniCPMRealtimeClient(LLMClient):
             )
             logger.warning(message)
             yield LLMStreamEvent(type="error", error=message)
-
-    def plan(self, user_text: str, skill_summaries: List[Dict[str, Any]]) -> LLMPlanResult:
-        return SkillPlanner(self).plan_sync(user_text, skill_summaries)
 
     def _build_realtime_url(self) -> str:
         ws_scheme = self._ws_scheme

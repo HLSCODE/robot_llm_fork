@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Callable, Dict, Optional
@@ -30,9 +31,10 @@ INSTRUCTION_CLASSIFIER_PROFILE = TaskProfile(
 
 请判断用户输入属于以下哪类：
 - chat：正常聊天、问候、闲聊、普通问答，不需要机器人执行动作，也不需要视觉。
-- command：要求机器人执行动作、控制设备、移动、停止、转向、播放内容、切换状态、调整参数等。
+- command：要求机器人创建新的动作计划、控制设备、移动、转向、播放内容、切换状态、调整参数等。
 - vision_question：询问机器人看到什么，或询问环境中的人、物体、障碍物、位置、数量、颜色等视觉信息。
-- session_control：用户在控制当前对话 session，例如结束对话、取消任务、暂停响应、让机器人退下等。
+- session_control：用户只控制对话 session，例如结束、暂停或恢复对话。
+- execution_control：用户取消、暂停或恢复动作预览或正在执行的机器人任务。
 
 is_addressed_to_robot 判断规则：
 1. GUI 文本框输入和唤醒后的语音输入，默认 is_addressed_to_robot 为 true。
@@ -42,9 +44,9 @@ is_addressed_to_robot 判断规则：
 session 判断规则：
 1. 如果用户说“没事了”“不用了”“算了”“先这样”“退下吧”“结束吧”“不聊了”“可以了”“好了不用回答了”等，通常表示结束当前 session。
 2. 这类话应归类为 session_control。
-3. 如果用户只是取消当前任务，但仍可能继续对话，例如“取消刚才那个”“别执行了”，session_action 为 cancel_task，should_end_session 根据语义判断。
-4. 如果用户只是让机器人暂停说话，例如“先别说话”“等一下”，session_action 为 pause，不一定结束 session。
-5. 如果用户说“停下”，通常是 command，表示停止运动或停止当前动作，不一定结束 session。
+3. “取消刚才那个”“别执行了”“暂停动作”“继续执行”属于 execution_control，不得归为 session_control。
+4. 如果用户只是让机器人暂停说话，例如“先别说话”，session_action 为 pause_session，不结束 session。
+5. 如果用户说“停下”“停止动作”，应归类为 execution_control，execution_action 为 cancel，不结束 session。
 6. 如果用户说“没事了，但是你帮我看看前面”，不要结束 session，应根据后半句判断为 vision_question。
 7. 如果一句话只有“没事了”“不用了”“先这样”等结束性表达，should_end_session 为 true。
 
@@ -57,10 +59,11 @@ session 判断规则：
 
 输出格式：
 {
-  "intent": "chat | command | vision_question | session_control",
+  "intent": "chat | command | vision_question | session_control | execution_control",
   "is_addressed_to_robot": true,
   "should_end_session": false,
-  "session_action": "none | end_session | cancel_task | pause"
+  "session_action": "none | end_session | pause_session | resume_session",
+  "execution_action": "none | cancel | pause | resume"
 }
 """,
 )
@@ -89,13 +92,13 @@ class InstructionClassifier:
         **chat_options: Any,
     ) -> Dict[str, Any]:
         if not enabled:
-            return _fallback_result(user_input)
+            return _fallback_result()
 
         active_profile = profile or self._profile
         llm = self._resolve_llm(active_profile, provider)
         if not llm.is_available():
             logger.info("指令分类 LLM 不可用，跳过分类")
-            return _fallback_result(user_input)
+            return _fallback_result()
 
         try:
             result = await llm.chat(
@@ -109,10 +112,14 @@ class InstructionClassifier:
                 **active_profile.chat_options(**chat_options),
             )
             data = json.loads(_strip_json_text(result.text))
-            return _normalize_result(user_input, data)
+            return _normalize_result(data)
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            raise
         except Exception as exc:
             logger.warning("指令分类失败 (%s)，按非指令处理", exc)
-            return _fallback_result(user_input)
+            return _fallback_result()
 
     def _resolve_llm(
         self,
@@ -126,42 +133,57 @@ class InstructionClassifier:
         return self._llm
 
 
-def _normalize_result(user_input: str, data: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_result(data: Dict[str, Any]) -> Dict[str, Any]:
     intent = str(data.get("intent", "chat") or "chat").strip()
-    if intent not in {"chat", "command", "vision_question", "session_control"}:
+    if intent not in {
+        "chat",
+        "command",
+        "vision_question",
+        "session_control",
+        "execution_control",
+    }:
         intent = "chat"
 
     session_action = str(data.get("session_action", "none") or "none").strip()
-    if session_action not in {"none", "end_session", "cancel_task", "pause"}:
+    if session_action not in {
+        "none",
+        "end_session",
+        "pause_session",
+        "resume_session",
+    }:
         session_action = "none"
+    execution_action = str(
+        data.get("execution_action", "none") or "none"
+    ).strip()
+    if execution_action not in {"none", "cancel", "pause", "resume"}:
+        execution_action = "none"
 
     is_addressed_to_robot = bool(data.get("is_addressed_to_robot", True))
     should_end_session = bool(data.get("should_end_session", False))
-    is_instruction = (
-        intent == "command"
-        and is_addressed_to_robot
-        and not should_end_session
-    )
-
+    if should_end_session:
+        intent = "session_control"
+        session_action = "end_session"
+    if intent != "session_control":
+        session_action = "none"
+        should_end_session = False
+    if intent != "execution_control":
+        execution_action = "none"
     return {
         "intent": intent,
         "is_addressed_to_robot": is_addressed_to_robot,
         "should_end_session": should_end_session,
         "session_action": session_action,
-        # Compatibility for older planning trigger code.
-        "Instruction": user_input,
-        "is_Instruction": is_instruction,
+        "execution_action": execution_action,
     }
 
 
-def _fallback_result(user_input: str) -> Dict[str, Any]:
+def _fallback_result() -> Dict[str, Any]:
     return {
         "intent": "chat",
         "is_addressed_to_robot": True,
         "should_end_session": False,
         "session_action": "none",
-        "Instruction": user_input,
-        "is_Instruction": False,
+        "execution_action": "none",
     }
 
 

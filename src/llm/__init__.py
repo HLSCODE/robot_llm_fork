@@ -2,9 +2,9 @@
 LLM 大模型模块
 提供统一的大模型能力层，用于对话、流式对话、指令分类和动作规划。
 """
-from .base import BaseLLMClient, LLMClient, LLMPlanResult
-from .providers.openai_compatible import OpenAICompatibleClient
+from .base import BaseLLMClient, LLMPlanResult
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
+from .providers.openai_compatible import OpenAICompatibleClient
 from .registry import LLMRegistry
 from .tasks import (
     GENERAL_CHAT_PROFILE,
@@ -33,7 +33,6 @@ from .types import (
 
 __all__ = [
     "BaseLLMClient",
-    "LLMClient",
     "LLMPlanResult",
     "LLMCapability",
     "LLMChatResult",

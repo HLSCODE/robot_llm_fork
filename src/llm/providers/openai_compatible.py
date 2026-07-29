@@ -3,13 +3,14 @@ OpenAI-compatible HTTP provider。
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional
 
-from ..base import LLMClient, LLMPlanResult
+from ..base import BaseLLMClient
 from ..errors import LLMConfigError, LLMProviderError
-from ..tasks import SkillPlanner
 from ..types import (
     LLMCapability,
     LLMChatResult,
@@ -21,7 +22,7 @@ from ..types import (
 logger = logging.getLogger(__name__)
 
 
-class OpenAICompatibleClient(LLMClient):
+class OpenAICompatibleClient(BaseLLMClient):
     """OpenAI Chat Completions 兼容 provider。"""
 
     def __init__(
@@ -31,6 +32,7 @@ class OpenAICompatibleClient(LLMClient):
         model: str = "",
         base_url: str = "",
         default_model: str = "gpt-4o",
+        timeout_s: float = 60.0,
     ) -> None:
         self._provider_name = provider_name
         self._api_key = api_key or ""
@@ -46,7 +48,10 @@ class OpenAICompatibleClient(LLMClient):
         try:
             from openai import AsyncOpenAI
 
-            kwargs: Dict[str, Any] = {"api_key": self._api_key}
+            kwargs: Dict[str, Any] = {
+                "api_key": self._api_key,
+                "timeout": float(timeout_s),
+            }
             if self._base_url:
                 kwargs["base_url"] = self._base_url
             self._async_client = AsyncOpenAI(**kwargs)
@@ -100,6 +105,8 @@ class OpenAICompatibleClient(LLMClient):
                 raw=_model_dump(response),
                 usage=_model_dump(getattr(response, "usage", None)),
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             raise LLMProviderError(str(exc)) from exc
 
@@ -118,6 +125,7 @@ class OpenAICompatibleClient(LLMClient):
         request = self._build_chat_request(messages, options, stream=True)
         text_parts: List[str] = []
 
+        stream = None
         try:
             stream = await self._async_client.chat.completions.create(**request)
             async for chunk in stream:
@@ -136,11 +144,23 @@ class OpenAICompatibleClient(LLMClient):
                 text="".join(text_parts),
                 raw=None,
             )
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             yield LLMStreamEvent(type="error", error=str(exc))
+        finally:
+            close = getattr(stream, "close", None)
+            if close is not None:
+                result = close()
+                if inspect.isawaitable(result):
+                    await result
 
-    def plan(self, user_text: str, skill_summaries: List[Dict[str, Any]]) -> LLMPlanResult:
-        return SkillPlanner(self).plan_sync(user_text, skill_summaries)
+    async def close(self) -> None:
+        client = self._async_client
+        self._async_client = None
+        self._available = False
+        if client is not None:
+            await client.close()
 
     def _build_chat_request(
         self,

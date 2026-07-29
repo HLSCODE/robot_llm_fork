@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
+import json
 import unittest
+from types import SimpleNamespace
 
+from src.application import CommandRuntime
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.execution import ExecutionSnapshot, ExecutionState
 from src.llm import LLMPlanResult
 from src.robot_server.ws_server import RobotWebSocketServer
 from src.skill_system.models import ValidationCode, ValidationResult
@@ -30,8 +33,13 @@ class _TaskRunner:
 
 
 class _SkillEngine:
-    def __init__(self, item: SequenceItem) -> None:
+    def __init__(
+        self,
+        item: SequenceItem,
+        validation: ValidationResult | None = None,
+    ) -> None:
         self._item = item
+        self._validation = validation or ValidationResult.succeeded("valid")
 
     def list_all_skills(self) -> list[dict]:
         return [{"id": "safe-skill"}]
@@ -40,15 +48,14 @@ class _SkillEngine:
         return {"id": "safe-skill"}
 
     def parse_and_expand(self, _match):
-        return [self._item], ValidationResult.succeeded("valid")
+        if not self._validation.is_valid:
+            return [], self._validation
+        return [self._item], self._validation
 
 
-class _RejectedSkillEngine(_SkillEngine):
-    def parse_and_expand(self, _match):
-        return [], ValidationResult.failed(
-            ValidationCode.UNSUPPORTED_ACTION_TYPE,
-            "unsupported action type",
-        )
+class _Execution:
+    def snapshot(self) -> ExecutionSnapshot:
+        return ExecutionSnapshot(None, ExecutionState.IDLE)
 
 
 class _RecordingWebSocket:
@@ -59,19 +66,36 @@ class _RecordingWebSocket:
         self.messages.append(message)
 
 
-def _sequence_item() -> SequenceItem:
+def _sequence_item(
+    action_type: ActionType = ActionType.WAIT,
+) -> SequenceItem:
+    parameters = (
+        {"seconds": 0}
+        if action_type is ActionType.WAIT
+        else {"position_name": "home"}
+    )
     return SequenceItem.from_definition(
         ActionDefinition(
-            id="wait",
-            name="wait",
-            type=ActionType.WAIT,
-            parameters={"seconds": 0},
+            id="action",
+            name="action",
+            type=action_type,
+            parameters=parameters,
         )
     )
 
 
+def _runtime(
+    item: SequenceItem,
+    validation: ValidationResult | None = None,
+) -> CommandRuntime:
+    return CommandRuntime(
+        execution=_Execution(),
+        skill_engine=_SkillEngine(item, validation),
+    )
+
+
 class VoiceCommandSafetyTests(unittest.TestCase):
-    def test_valid_command_only_emits_confirmable_preview(self):
+    def test_valid_command_emits_versioned_confirmable_preview(self):
         registry = SimpleNamespace(
             skill_planner=_Planner(),
             task_runner=_TaskRunner(),
@@ -79,7 +103,8 @@ class VoiceCommandSafetyTests(unittest.TestCase):
         router = VoiceIntentRouter(
             registry,
             VoiceSession(),
-            skill_engine=_SkillEngine(_sequence_item()),
+            command_runtime=_runtime(_sequence_item()),
+            source="test",
         )
 
         async def scenario():
@@ -96,16 +121,18 @@ class VoiceCommandSafetyTests(unittest.TestCase):
             event for event in events if event.type == "command_preview"
         )
 
+        self.assertTrue(preview.data["preview_id"])
+        self.assertEqual(1, preview.data["version"])
         self.assertTrue(preview.data["validation"]["is_valid"])
-        self.assertEqual("valid", preview.data["validation"]["code"])
         self.assertIs(True, preview.data["requires_confirmation"])
-        self.assertNotIn("auto_execute", preview.data)
-        self.assertNotIn(
-            "command_started",
-            [event.type for event in events],
-        )
+        self.assertEqual("low", preview.data["risk"]["level"])
+        self.assertNotIn("command_started", [event.type for event in events])
 
-    def test_invalid_action_type_never_produces_a_preview(self):
+    def test_invalid_action_never_becomes_a_preview(self):
+        validation = ValidationResult.failed(
+            ValidationCode.UNSUPPORTED_ACTION_TYPE,
+            "unsupported action type",
+        )
         registry = SimpleNamespace(
             skill_planner=_Planner(),
             task_runner=_TaskRunner(),
@@ -113,7 +140,8 @@ class VoiceCommandSafetyTests(unittest.TestCase):
         router = VoiceIntentRouter(
             registry,
             VoiceSession(),
-            skill_engine=_RejectedSkillEngine(_sequence_item()),
+            command_runtime=_runtime(_sequence_item(), validation),
+            source="test",
         )
 
         async def scenario():
@@ -137,66 +165,60 @@ class VoiceCommandSafetyTests(unittest.TestCase):
             feedback.data["validation"]["code"],
         )
 
-    def test_websocket_rejects_preview_without_confirmation_policy(self):
-        server = RobotWebSocketServer(services=SimpleNamespace())
+    def test_websocket_rejects_preview_without_identity(self):
+        server = RobotWebSocketServer(
+            services=SimpleNamespace(commands=_runtime(_sequence_item()))
+        )
         broadcasts: list[dict] = []
 
         async def record(payload: dict) -> None:
             broadcasts.append(payload)
 
         server._broadcast = record
-        event = {
+        asyncio.run(server._emit_interaction_event({
             "type": "command_preview",
             "text": "preview",
-            "data": {
-                "sequence": [_sequence_item().to_dict()],
-                "validation": {"is_valid": True, "code": "valid"},
-            },
-        }
+            "data": {"sequence": [_sequence_item().to_dict()]},
+        }))
 
-        asyncio.run(server._emit_interaction_event(event))
-
-        self.assertFalse(server._ai_preview_sequence)
-        self.assertFalse(server._ai_preview_validated)
         self.assertEqual("error", broadcasts[0]["event"])
+        self.assertIn("ID", broadcasts[0]["message"])
 
-    def test_websocket_rejects_inconsistent_validation_code(self):
-        server = RobotWebSocketServer(services=SimpleNamespace())
-        broadcasts: list[dict] = []
-
-        async def record(payload: dict) -> None:
-            broadcasts.append(payload)
-
-        server._broadcast = record
-        event = {
-            "type": "command_preview",
-            "text": "preview",
-            "data": {
-                "sequence": [_sequence_item().to_dict()],
-                "validation": {
-                    "is_valid": True,
-                    "code": "unsupported_action_type",
-                },
-                "requires_confirmation": True,
-            },
-        }
-
-        asyncio.run(server._emit_interaction_event(event))
-
-        self.assertFalse(server._ai_preview_sequence)
-        self.assertFalse(server._ai_preview_validated)
-        self.assertEqual("error", broadcasts[0]["event"])
-
-    def test_websocket_confirm_rejects_unvalidated_sequence(self):
-        server = RobotWebSocketServer(services=SimpleNamespace())
-        server._ai_preview_sequence = [_sequence_item()]
-        server._ai_preview_validated = False
+    def test_websocket_confirm_requires_exact_reference(self):
+        server = RobotWebSocketServer(
+            services=SimpleNamespace(commands=_runtime(_sequence_item()))
+        )
         websocket = _RecordingWebSocket()
 
         asyncio.run(server._handle_ai_confirm(websocket, {}))
 
-        self.assertEqual(1, len(websocket.messages))
-        self.assertIn("未通过校验", websocket.messages[0])
+        payload = json.loads(websocket.messages[0])
+        self.assertEqual("invalid_preview_reference", payload["code"])
+
+    def test_websocket_requires_high_risk_acknowledgement(self):
+        runtime = _runtime(_sequence_item(ActionType.MOVE))
+        preview = runtime.register(
+            [_sequence_item(ActionType.MOVE)],
+            source="websocket-ai",
+            plan={},
+            skill_info={},
+            validation=ValidationResult.succeeded("valid"),
+        )
+        server = RobotWebSocketServer(
+            services=SimpleNamespace(commands=runtime)
+        )
+        websocket = _RecordingWebSocket()
+
+        asyncio.run(server._handle_ai_confirm(websocket, {
+            "preview_id": preview.preview_id,
+            "version": preview.version,
+        }))
+
+        payload = json.loads(websocket.messages[0])
+        self.assertEqual(
+            "risk_acknowledgement_required",
+            payload["code"],
+        )
 
 
 if __name__ == "__main__":

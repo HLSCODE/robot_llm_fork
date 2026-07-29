@@ -376,7 +376,7 @@ WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
 ```
 
 当前 WebSocket API 版本为 `1.0`。包括 50Hz 关节指令在内的每个请求都必须
-携带 `api_version: "1.0"` 和唯一 `request_id`；默认每客户端上限为每秒
+携带 `api_version: "2.0"` 和唯一 `request_id`；默认每客户端上限为每秒
 120 个请求。
 
 启动服务：

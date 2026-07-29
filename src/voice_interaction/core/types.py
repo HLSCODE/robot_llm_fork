@@ -34,13 +34,15 @@ VoiceEventType = Literal[
     "text_delta",
     "audio_delta",
     "command_preview",
+    "preview_cancelled",
+    "execution_controlled",
     "vision_started",
     "error",
     "done",
 ]
 
 
-@dataclass
+@dataclass(slots=True)
 class VoiceEvent:
     """Unified output event for GUI, WebSocket, and tests."""
 

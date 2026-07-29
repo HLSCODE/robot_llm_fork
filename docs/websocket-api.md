@@ -233,7 +233,7 @@ ws.onerror = (err) => {
 ```json
 {
   "event": "connected",
-  "api_version": "1.0",
+  "api_version": "2.0",
   "api_version_required": true,
   "client_id": "6cbd...",
   "authentication_configured": true,
@@ -247,8 +247,8 @@ ws.onerror = (err) => {
 必须依次完成认证和控制权申请：
 
 ```json
-{"api_version": "1.0", "action": "authenticate", "token": "<运行时注入的密钥>", "request_id": "auth-1"}
-{"api_version": "1.0", "action": "acquire_control", "request_id": "control-1"}
+{"api_version": "2.0", "action": "authenticate", "token": "<运行时注入的密钥>", "request_id": "auth-1"}
+{"api_version": "2.0", "action": "acquire_control", "request_id": "control-1"}
 ```
 
 认证成功返回 `authenticated`，取得控制权返回 `control_acquired`。同一时刻只有
@@ -258,13 +258,13 @@ ws.onerror = (err) => {
 控制客户端应在租约过期前发送心跳：
 
 ```json
-{"api_version": "1.0", "action": "control_heartbeat", "request_id": "heartbeat-1"}
+{"api_version": "2.0", "action": "control_heartbeat", "request_id": "heartbeat-1"}
 ```
 
 主动释放：
 
 ```json
-{"api_version": "1.0", "action": "release_control", "request_id": "release-1"}
+{"api_version": "2.0", "action": "release_control", "request_id": "release-1"}
 ```
 
 租约到期、持有者断线或发送失败都会释放控制权，并停止该控制者持有的遥操作或
@@ -290,7 +290,7 @@ ws.onerror = (err) => {
 
 ```json
 {
-  "api_version": "1.0",
+  "api_version": "2.0",
   "action": "status",
   "request_id": "status-1"
 }
@@ -300,7 +300,7 @@ ws.onerror = (err) => {
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `api_version` | `string` | 是 | 当前只接受 `1.0`；缺失或不支持的版本会被直接拒绝 |
+| `api_version` | `string` | 是 | 当前只接受 `2.0`；缺失或不支持的版本会被直接拒绝 |
 | `action` | `string` | 是 | 接口动作名 |
 | `request_id` | `string` | 否 | 1..128 位字母、数字、`.`、`_`、`:`、`-`；缺省时由服务端生成 |
 | 其他字段 | 任意 | 否 | 由具体接口决定 |
@@ -312,7 +312,7 @@ ws.onerror = (err) => {
 ```json
 {
   "event": "status",
-  "api_version": "1.0",
+  "api_version": "2.0",
   "request_id": "status-1",
   "action": "status"
 }
@@ -335,7 +335,9 @@ ws.onerror = (err) => {
 
 版本策略：
 
-- 当前协议版本是 `1.0`，所有请求必须显式声明完全相同的版本。
+- 当前协议版本是 `2.0`，所有请求必须显式声明完全相同的版本。
+- 2.0 将 AI 预览确认改为强制 `preview_id + version`，并增加高风险确认；
+  不提供 1.0 兼容适配。
 - 本项目不维护旧协议兼容适配器；协议字段、事件或语义发生破坏性变化时，
   服务端和客户端必须同步升级到新的版本值。
 - 仅增加可选字段且不改变已有语义时可以保持当前版本。
@@ -1975,6 +1977,12 @@ ws.onmessage = (event) => {
 ```json
 {
   "event": "ai_preview_ready",
+  "preview_id": "5d66bc2f-23e4-44f5-9159-49235fc8b5d4",
+  "version": 12,
+  "source": "websocket-ai",
+  "created_at": "2026-07-29T03:20:00Z",
+  "expires_at": "2026-07-29T03:22:00Z",
+  "state": "pending",
   "sequence": [
     {
       "uuid": "seq-item-id",
@@ -2001,7 +2009,13 @@ ws.onmessage = (event) => {
     "message": "校验通过",
     "warnings": []
   },
-  "requires_confirmation": true
+  "risk": {
+    "level": "high",
+    "reasons": ["physical_action:MOVE"],
+    "requires_acknowledgement": true
+  },
+  "requires_confirmation": true,
+  "requires_risk_acknowledgement": true
 }
 ```
 
@@ -2016,6 +2030,9 @@ ws.onmessage = (event) => {
 
 - `ai_chat` 没有单独的“提交成功”响应包；前端要把后续收到的事件流当作这次请求的结果。
 - `ai_preview_ready.sequence` 才是最终给前端展示、确认、执行的任务序列。
+- 前端必须同时保存 `preview_id` 和 `version`，不得只凭“最近一次预览”确认。
+- `expires_at` 到期、版本被替换、预览已取消或已确认后，旧确认请求都会失败。
+- `requires_risk_acknowledgement=true` 时必须展示风险原因并要求用户独立确认。
 - 服务端只发布 `validation.code=valid` 且 `requires_confirmation=true`
   的预览；未知 action type 会返回 `unsupported_action_type`，不会生成或缓存预览。
 - Skill 输入参数会先检查声明类型、必填项和未知参数，再按显式字段绑定检查单位；
@@ -2169,10 +2186,19 @@ ws.onmessage = (event) => {
 ```json
 {
   "event": "ai_preview_ready",
+  "preview_id": "5d66bc2f-23e4-44f5-9159-49235fc8b5d4",
+  "version": 12,
+  "expires_at": "2026-07-29T03:22:00Z",
   "sequence": [],
   "skill_info": {},
   "validation": {"is_valid": true, "code": "valid"},
-  "requires_confirmation": true
+  "risk": {
+    "level": "low",
+    "reasons": [],
+    "requires_acknowledgement": false
+  },
+  "requires_confirmation": true,
+  "requires_risk_acknowledgement": false
 }
 ```
 
@@ -2190,7 +2216,7 @@ ws.onmessage = (event) => {
 - `ai_chat` 只负责规划，不直接执行
 - 真正执行要靠 `ai_confirm`
 - 项目不存在自动执行配置，前端不得将预览事件本身视为执行授权
-- `sequence` 会写入服务端的“AI 待确认预览区”，但此时还不会覆盖当前执行序列
+- `sequence` 会注册到进程级 `CommandRuntime`，但此时还不会覆盖当前执行序列
 - 前端应以 `ai_preview_ready.sequence` 作为唯一权威预览数据源
 - 如果收到 `ai_skill_not_matched` 或 `error`，则视为本轮规划失败
 
@@ -2200,14 +2226,26 @@ ws.onmessage = (event) => {
 
 ```json
 {
-  "action": "ai_confirm"
+  "action": "ai_confirm",
+  "preview_id": "5d66bc2f-23e4-44f5-9159-49235fc8b5d4",
+  "version": 12,
+  "risk_acknowledged": true
 }
 ```
 
 效果：
 
-- 将最近一次 AI 预览结果写入当前序列
+- 精确消费 `preview_id + version` 对应的预览并写入当前序列
 - 立即开始执行
+
+请求参数：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `action` | `string` | 是 | 固定值 `ai_confirm` |
+| `preview_id` | `string` | 是 | `ai_preview_ready.preview_id` |
+| `version` | `integer` | 是 | `ai_preview_ready.version` |
+| `risk_acknowledged` | `boolean` | 高风险时是 | 高风险动作必须严格为 `true` |
 
 成功后典型事件流：
 
@@ -2239,9 +2277,10 @@ AI 执行流程结束示例：
 
 说明：
 
-- `ai_confirm` 只能确认“最近一次尚未取消的 AI 预览序列”。
-- 如果当前没有待确认预览，或预览未通过服务端校验，服务端会返回 `error`。
-- `ai_confirm` 成功后，预览缓存会被清空。
+- `ai_confirm` 只确认 ID、版本、来源均匹配且仍处于 `pending` 的 WebSocket 预览。
+- 过期返回 `preview_expired`；版本错误返回 `preview_version_conflict`；重复确认返回
+  `preview_state_error`；缺少高风险确认返回 `risk_acknowledgement_required`。
+- 预览确认采用单次消费；成功后相同引用不能再次执行。
 - 执行进度事件与普通 `execute` 共用同一套 `step_started` / `step_completed` / `step_failed` / `execution_finished`。
 
 ### 11.3 取消 AI 规划 `ai_cancel`
@@ -2250,7 +2289,9 @@ AI 执行流程结束示例：
 
 ```json
 {
-  "action": "ai_cancel"
+  "action": "ai_cancel",
+  "preview_id": "5d66bc2f-23e4-44f5-9159-49235fc8b5d4",
+  "version": 12
 }
 ```
 
@@ -2265,7 +2306,8 @@ AI 执行流程结束示例：
 
 说明：
 
-- `ai_cancel` 只会清空最近一次待确认的 AI 预览结果。
+- `preview_id` 和 `version` 可省略；提供时必须精确匹配当前 WebSocket 预览。
+- `ai_cancel` 只取消 WebSocket 来源且处于 `pending` 的预览，不会取消 GUI 来源的预览。
 - 它不会终止已经开始执行的动作序列。
 - 取消后，前端应清空本地的 AI 预览面板和“确认执行”按钮状态。
 
@@ -2299,6 +2341,20 @@ AI 执行流程结束示例：
   "planner_provider": "dashscope",
   "planner_model": "qwen-turbo",
   "processing": false,
+  "command_runtime": {
+    "preview": {
+      "preview_id": "5d66bc2f-23e4-44f5-9159-49235fc8b5d4",
+      "version": 12,
+      "state": "pending",
+      "expires_at": "2026-07-29T03:22:00Z"
+    },
+    "execution": {
+      "run_id": null,
+      "state": "idle",
+      "active": false,
+      "origin": ""
+    }
+  },
   "has_preview": true
 }
 ```
@@ -2316,12 +2372,13 @@ AI 执行流程结束示例：
 | `loaded_providers` | `array` | 当前进程已经懒加载实例化的 provider 名称 |
 | `capabilities` | `array` | 聊天 provider 支持的能力 |
 | `chat_available` | `boolean` | 聊天 provider 是否可用 |
-| `chat_provider` | `string` | 当前聊天 profile 解析到的 provider，兼容观察字段 |
+| `chat_provider` | `string` | 当前聊天 profile 解析到的 provider |
 | `chat_model` | `string` | 聊天模型 |
 | `planner_available` | `boolean` | 规划 provider 是否可用 |
-| `planner_provider` | `string` | 当前规划 profile 解析到的 provider，兼容观察字段 |
+| `planner_provider` | `string` | 当前规划 profile 解析到的 provider |
 | `planner_model` | `string` | 规划模型 |
 | `processing` | `boolean` | 是否正在处理中 |
+| `command_runtime` | `object` | WebSocket 来源的预览与统一执行状态；不会暴露 GUI 来源预览 |
 | `has_preview` | `boolean` | 是否存在待确认预览 |
 
 推荐用途：
@@ -2922,7 +2979,7 @@ function handleChatData(data) {
 ```json
 {
   "event": "error",
-  "api_version": "1.0",
+  "api_version": "2.0",
   "code": "request_failed",
   "message": "...",
   "request_id": "execute-1",
@@ -2956,7 +3013,7 @@ function handleChatData(data) {
 ```json
 {
   "event": "access_denied",
-  "api_version": "1.0",
+  "api_version": "2.0",
   "code": "authentication_required",
   "action": "execute",
   "request_id": "execute-1",
@@ -3009,7 +3066,7 @@ function handleChatData(data) {
 ```javascript
 const ws = new WebSocket("ws://localhost:8765");
 const websocketToken = window.runtimeConfig.websocketToken;
-const API_VERSION = "1.0";
+const API_VERSION = "2.0";
 let hasControl = false;
 let requestSequence = 0;
 

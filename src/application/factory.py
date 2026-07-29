@@ -7,8 +7,11 @@ from ..device_runtime import ResourceArbiter
 from ..device_runtime.factory import create_device_runtime
 from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
+from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
+from .command_runtime import CommandRuntime
 from .composition import CompositionService
+from .safety import SafetyService
 from .services import (
     ApplicationServices,
     DeviceManagementService,
@@ -18,7 +21,6 @@ from .services import (
     TeleoperationService,
     TrajectoryTeachingService,
 )
-from .safety import SafetyService
 
 
 def create_application_services(
@@ -36,6 +38,15 @@ def create_application_services(
         execution_resources=engine.required_resources,
     )
     execution = ExecutionService(manager)
+    skill_engine = SkillEngine()
+    skill_engine.load_skills()
+    commands = CommandRuntime(
+        execution=execution,
+        skill_engine=skill_engine,
+        preview_ttl_s=float(
+            getattr(config, "COMMAND_PREVIEW_TTL_SECONDS", 120.0)
+        ),
+    )
     manual_control = ManualControlService(device_runtime, resources)
     camera_access = CameraAccessService(device_runtime, resources)
     teleoperation = TeleoperationService(device_runtime, resources)
@@ -68,6 +79,7 @@ def create_application_services(
         robot_query=robot_query,
         trajectory_teaching=trajectory_teaching,
         safety=safety,
+        commands=commands,
         device_runtime=device_runtime,
         resources=resources,
         simulation=simulation,

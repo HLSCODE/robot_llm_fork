@@ -93,7 +93,6 @@ import asyncio
 import base64
 import json
 import logging
-import os
 import re
 import threading
 from collections.abc import Coroutine
@@ -120,21 +119,33 @@ except ImportError:
 from ..application import (
     ApplicationServices,
     CameraSession,
+    CommandRuntimeError,
     CompositionChangeType,
     CompositionEvent,
 )
 from ..core.action_schema import get_action_schema
-from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
 from ..core.config_loader import Config
-from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
+from ..core.models import (
+    ActionDefinition,
+    ActionType,
+    LoopBlock,
+    SequenceEntry,
+    SequenceItem,
+    SequenceItemStatus,
+)
 from ..device_runtime import StopMode
+from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
 from ..execution import (
     ExecutionEvent,
     ExecutionEventType,
     ExecutionState,
 )
 from ..llm import LLMCapability, LLMContentPart, LLMMessage, LLMRegistry, LLMStreamEvent
-from ..voice_interaction import CamerasModuleProvider, WakeFeedback, VoiceInteractionController
+from ..voice_interaction import (
+    CamerasModuleProvider,
+    VoiceInteractionController,
+    WakeFeedback,
+)
 from .access_control import (
     AuditSink,
     WebSocketAccessController,
@@ -144,13 +155,12 @@ from .access_control import (
     log_websocket_audit_event,
 )
 from .protocol import (
-    RequestCorrelation,
     WEBSOCKET_API_VERSION,
+    RequestCorrelation,
     WebSocketErrorCode,
     WebSocketRequestContext,
 )
 from .request_limits import WebSocketRequestLimiter
-
 
 if TYPE_CHECKING:
     from ..data_collection import RLBenchRecorder
@@ -328,16 +338,12 @@ class RobotWebSocketServer:
         self._background_tasks: set[asyncio.Task[Any]] = set()
 
         # AI 相关状态
-        self._ai_preview_sequence: List[SequenceItem] = []
-        self._ai_preview_skill_info: Dict[str, Any] = {}
-        self._ai_preview_validated = False
         self._ai_processing = False
 
         # LLM 客户端和技能引擎（延迟初始化，避免未安装 AI 依赖时报错）
         self._llm_registry: Optional[LLMRegistry] = None
         self._llm_client = None
         self._planner_client = None
-        self._skill_engine = None
         self._interaction_controller: Optional[VoiceInteractionController] = None
 
         # 相机帧订阅：通过 subscribe_camera_frames action 注册
@@ -555,24 +561,16 @@ class RobotWebSocketServer:
 
     async def _close_llm_clients(self) -> None:
         registry = self._llm_registry
+        controller = self._interaction_controller
         self._llm_registry = None
         self._interaction_controller = None
         self._llm_client = None
         self._planner_client = None
         if registry is None:
             return
-
-        clients = tuple(
-            registry.get_provider(provider_name)
-            for provider_name in registry.loaded_provider_names
-        )
-        results = await asyncio.gather(
-            *(client.close() for client in clients),
-            return_exceptions=True,
-        )
-        for result in results:
-            if isinstance(result, Exception):
-                logger.warning("关闭 WebSocket LLM client 失败: %s", result)
+        if controller is not None:
+            controller.cancel_active_turn()
+        await registry.close()
 
     async def _close_demo_recorder(self) -> None:
         recorder = self._demo_recorder
@@ -620,11 +618,6 @@ class RobotWebSocketServer:
             config = Config.get_instance()
 
             # 初始化技能引擎
-            from ..skill_system import SkillEngine
-            self._skill_engine = SkillEngine()
-            skill_count = self._skill_engine.load_skills()
-            logger.info("技能引擎加载了 %d 个技能", skill_count)
-
             # 初始化 LLM 能力层
             self._llm_registry = LLMRegistry.from_config(config)
             logger.info(
@@ -636,14 +629,17 @@ class RobotWebSocketServer:
             voice_config = Config.get_voice_interaction_config()
             self._interaction_controller = VoiceInteractionController(
                 llm_registry=self._llm_registry,
-                skill_engine=self._skill_engine,
+                command_runtime=self._services.commands,
+                source="websocket-ai",
                 camera_provider=CamerasModuleProvider(
                     session_factory=self._camera_capture_session,
                     camera_name=config.VISION_CAMERA_NAME or None,
                 ),
                 timeout_s=voice_config["session_timeout_s"],
+                turn_timeout_s=float(
+                    getattr(config, "INTERACTION_TURN_TIMEOUT_S", 90.0)
+                ),
                 history_turns=voice_config["session_history_turns"],
-                cancel_callback=self._cancel_current_ai_task,
                 tts_enabled=voice_config["tts_enabled"],
                 wake_feedback=WakeFeedback(
                     enabled=bool(voice_config.get("wake_feedback_enabled", True)),
@@ -2280,60 +2276,80 @@ class RobotWebSocketServer:
             ))
 
     async def _handle_ai_confirm(self, websocket, data: dict) -> None:
-        """
-        确认执行 AI 规划的序列
-        请求: {"action": "ai_confirm"}
-        """
-        if not self._ai_preview_sequence:
-            await websocket.send(self._json_msg(
-                {"event": "error", "message": "没有待确认的 AI 规划序列"}
-            ))
+        """Confirm the exact preview ID/version and submit it once."""
+        preview_id = str(data.get("preview_id") or "").strip()
+        version = data.get("version")
+        if not preview_id or type(version) is not int:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": "invalid_preview_reference",
+                "message": "ai_confirm 必须包含 preview_id 和整数 version",
+            }))
             return
-        if not self._ai_preview_validated:
-            await websocket.send(self._json_msg(
-                {"event": "error", "message": "AI 规划序列未通过校验，拒绝执行"}
-            ))
+        try:
+            command = self._services.commands.confirm(
+                preview_id,
+                version,
+                risk_acknowledged=(
+                    data.get("risk_acknowledged") is True
+                ),
+                expected_source="websocket-ai",
+            )
+        except CommandRuntimeError as exc:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": exc.code,
+                "message": str(exc),
+            }))
             return
 
-        if self._services.execution.snapshot().active:
-            await websocket.send(self._json_msg(
-                {"event": "error", "message": "已有序列正在执行，请先停止"}
-            ))
-            return
-
-        sequence = self._ai_preview_sequence
-        for item in sequence:
-            item.status = SequenceItemStatus.PENDING
-
+        sequence = list(command.sequence)
         self._services.composition.replace_sequence(
             sequence,
             origin=self._composition_origin(websocket),
         )
-
-        # 标记本次为 AI 触发执行，以便 _on_finished 发送 ai_execution_finished 事件
         self._ai_execution_pending = True
         self._execution_had_failure = False
-
         accepted = await self._submit_execution(
             websocket,
             sequence,
-            origin="websocket-ai",
+            origin=command.source,
             message="AI 序列开始执行",
             steps=len(sequence),
         )
         if not accepted:
             self._ai_execution_pending = False
-            return
-
-        # 清空预览状态
-        self._clear_ai_preview()
 
     async def _handle_ai_cancel(self, websocket, data: dict) -> None:
         """取消 AI 规划"""
-        self._clear_ai_preview()
+        if self._interaction_controller is not None:
+            self._interaction_controller.cancel_active_turn()
+        preview_id = data.get("preview_id")
+        version = data.get("version")
+        if version is not None and type(version) is not int:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": "invalid_preview_reference",
+                "message": "version 必须是整数",
+            }))
+            return
+        try:
+            cancelled = self._services.commands.cancel_preview(
+                str(preview_id) if preview_id is not None else None,
+                version,
+                expected_source="websocket-ai",
+            )
+        except CommandRuntimeError as exc:
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": exc.code,
+                "message": str(exc),
+            }))
+            return
         await websocket.send(self._json_msg({
             "event": "ai_cancelled",
-            "message": "AI 规划已取消",
+            "cancelled": cancelled,
+            "message": "AI 规划已取消" if cancelled else "没有待取消的预览",
         }))
 
     async def _handle_ai_status(self, websocket, data: dict) -> None:
@@ -2378,24 +2394,19 @@ class RobotWebSocketServer:
             "planner_provider": planner_client.get_provider_name() if planner_client else "未配置",
             "planner_model": planner_client.get_model_name() if planner_client else "未配置",
             "processing": self._ai_processing,
-            "has_preview": bool(
-                self._ai_preview_sequence and self._ai_preview_validated
+            "command_runtime": self._services.commands.status(
+                expected_source="websocket-ai"
             ),
+            "has_preview": self._services.commands.pending(
+                expected_source="websocket-ai"
+            ) is not None,
         }))
 
     async def _handle_list_skills(self, websocket, data: dict) -> None:
         """获取可用技能列表"""
-        if self._skill_engine is None:
-            await websocket.send(self._json_msg({
-                "event": "skills_list",
-                "skills": [],
-            }))
-            return
-
-        skills = self._skill_engine.list_all_skills()
         await websocket.send(self._json_msg({
             "event": "skills_list",
-            "skills": skills,
+            "skills": self._services.commands.list_skills(),
         }))
 
     async def _run_interaction_text(
@@ -2410,7 +2421,9 @@ class RobotWebSocketServer:
         if self._interaction_controller is None:
             return False
 
-        self._clear_ai_preview()
+        self._services.commands.cancel_preview(
+            expected_source="websocket-ai"
+        )
         self._ai_processing = True
         await self._broadcast({"event": "ai_status_changed", "status": "分析中..."})
         if emit_minicpm_instruction:
@@ -2468,44 +2481,20 @@ class RobotWebSocketServer:
             return
 
         if event_type == "command_preview":
-            self._clear_ai_preview()
-            sequence_dicts = data.get("sequence") or []
-            try:
-                sequence = [
-                    SequenceItem.from_dict(item)
-                    for item in sequence_dicts
-                    if isinstance(item, dict)
-                ]
-            except Exception as exc:
-                logger.error("命令预览序列解析失败: %s", exc, exc_info=True)
+            preview_id = data.get("preview_id")
+            version = data.get("version")
+            if (
+                not preview_id
+                or not isinstance(version, int)
+                or not data.get("sequence")
+            ):
                 await self._broadcast({
                     "event": "error",
-                    "message": f"命令预览序列解析失败: {exc}",
-                })
-                return
-
-            validation = data.get("validation") or {}
-            validation_passed = (
-                validation.get("is_valid") is True
-                and validation.get("code") == "valid"
-            )
-            confirmation_required = data.get("requires_confirmation") is True
-            if not sequence or not validation_passed or not confirmation_required:
-                await self._broadcast({
-                    "event": "error",
-                    "message": "动作预览未经校验或缺少显式确认要求，已拒绝",
-                })
-                await self._broadcast({
-                    "event": "ai_status_changed",
-                    "status": "预览无效",
+                    "message": "动作预览缺少 ID、版本或动作序列",
                 })
                 return
 
             plan = data.get("plan") or {}
-            skill_info = data.get("skill_info") or {}
-            self._ai_preview_sequence = sequence
-            self._ai_preview_skill_info = skill_info
-            self._ai_preview_validated = True
             await self._broadcast({
                 "event": "interaction_event",
                 "type": event_type,
@@ -2527,15 +2516,15 @@ class RobotWebSocketServer:
 
             await self._broadcast({
                 "event": "ai_preview_ready",
-                "sequence": [item.to_dict() for item in sequence],
-                "skill_info": skill_info,
-                "plan": plan,
-                "validation": validation,
-                "requires_confirmation": True,
+                **interaction_data,
                 "message": text,
             })
             await self._broadcast({"event": "ai_status_changed", "status": "预览就绪"})
-            logger.info("远程文本生成动作预览: %d 个动作", len(sequence))
+            logger.info(
+                "远程文本生成动作预览: id=%s version=%s",
+                preview_id,
+                version,
+            )
             return
 
         if event_type == "text_delta":
@@ -2568,7 +2557,9 @@ class RobotWebSocketServer:
                 "metrics": data.get("metrics"),
                 "packet": data.get("raw"),
             })
-            if not self._ai_preview_sequence:
+            if self._services.commands.pending(
+                expected_source="websocket-ai"
+            ) is None:
                 await self._broadcast({"event": "ai_status_changed", "status": "完成"})
             return
 
@@ -2587,18 +2578,6 @@ class RobotWebSocketServer:
                 "intent": intent,
             })
             await self._broadcast({"event": "ai_status_changed", "status": "已忽略"})
-
-    async def _cancel_current_ai_task(self) -> None:
-        """供 voice_interaction 的 session_control.cancel_task 调用。"""
-        self._clear_ai_preview()
-        if self._services.execution.snapshot().active:
-            self._services.execution.cancel()
-
-    def _clear_ai_preview(self) -> None:
-        """Discard the pending AI preview and its validation state."""
-        self._ai_preview_sequence = []
-        self._ai_preview_skill_info = {}
-        self._ai_preview_validated = False
 
     # ==================================================================
     # 设备管理

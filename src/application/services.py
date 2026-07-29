@@ -30,6 +30,7 @@ from ..execution import (
     ExecutionSnapshot,
 )
 from .camera_access import CameraAccessService
+from .command_runtime import CommandRuntime
 from .composition import CompositionService
 from .safety import SafetyService
 
@@ -438,6 +439,7 @@ class ApplicationServices:
     robot_query: RobotQueryService
     trajectory_teaching: TrajectoryTeachingService
     safety: SafetyService
+    commands: CommandRuntime
     device_runtime: DeviceRuntime
     resources: ResourceArbiter
     simulation: bool

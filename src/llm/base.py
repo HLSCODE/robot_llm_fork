@@ -1,12 +1,12 @@
 """
 LLM 抽象基类。
 
-保留旧 `LLMClient.plan()` 入口，同时新增 chat / stream_chat 等通用模型能力。
+Provider 只暴露通用异步 chat / stream_chat 能力；技能规划由 task 层负责。
 """
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from .types import LLMCapability, LLMChatResult, LLMMessage, LLMStreamEvent
 
@@ -80,23 +80,3 @@ class BaseLLMClient(ABC):
 
     async def close(self) -> None:
         """释放底层资源。"""
-
-
-class LLMClient(BaseLLMClient):
-    """
-    兼容旧规划接口的 LLM 客户端抽象基类。
-    """
-
-    @abstractmethod
-    def plan(self, user_text: str, skill_summaries: List[Dict[str, Any]]) -> LLMPlanResult:
-        """
-        分析用户输入，返回技能调用参数。
-
-        Args:
-            user_text: 用户的自然语言输入
-            skill_summaries: 技能摘要列表
-
-        Returns:
-            LLMPlanResult: 解析结果
-        """
-        pass

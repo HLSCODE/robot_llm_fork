@@ -4,15 +4,22 @@ AI助手 Tab 组件
 """
 import asyncio
 import logging
-from typing import List, Dict, Any
+from typing import Any, Dict
 
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QColor, QTextCursor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QLineEdit,
-    QPushButton, QLabel, QCheckBox, QScrollArea, QGroupBox,
-    QListWidget, QListWidgetItem, QFrame
+    QCheckBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QObject, QThread, QTimer, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QFont, QColor, QTextCursor
 
 from ..ai_integration import AIController, ExecutionBridge
 from ..application import ApplicationServices
@@ -21,9 +28,9 @@ from ..gui.dialogs import ActionPreviewDialog
 from ..voice_interaction import (
     AudioOutputGate,
     CamerasModuleProvider,
-    WakeFeedback,
     VoiceInteractionController,
     VoiceSessionState,
+    WakeFeedback,
 )
 from .voice_audio_player import VoiceAudioPlayer
 
@@ -143,36 +150,30 @@ class AIAssistantWidget(QWidget):
         # 初始化执行桥接器和AI控制器
         self._services = services
         self._execution_bridge = ExecutionBridge(services)
-        self._ai_controller = AIController(execution_bridge=self._execution_bridge)
+        self._ai_controller = AIController(
+            services,
+            self._execution_bridge,
+        )
         config = Config.get_instance()
         voice_config = Config.get_voice_interaction_config()
         self._voice_controller = VoiceInteractionController(
             llm_registry=self._ai_controller.get_llm_registry(),
-            skill_engine=self._ai_controller.get_skill_engine(),
+            command_runtime=services.commands,
+            source="gui-ai",
             camera_provider=CamerasModuleProvider(
                 session_factory=self._camera_capture_session,
                 camera_name=config.VISION_CAMERA_NAME or None,
             ),
             timeout_s=voice_config["session_timeout_s"],
+            turn_timeout_s=float(
+                getattr(config, "INTERACTION_TURN_TIMEOUT_S", 90.0)
+            ),
             history_turns=voice_config["session_history_turns"],
-            cancel_callback=self._ai_controller.cancel_current_task,
             tts_enabled=voice_config["tts_enabled"],
             wake_feedback=WakeFeedback(
                 enabled=bool(voice_config.get("wake_feedback_enabled", True)),
                 text=str(voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
             ),
-        )
-        self._dialog_controller = VoiceInteractionController(
-            llm_registry=self._ai_controller.get_llm_registry(),
-            skill_engine=self._ai_controller.get_skill_engine(),
-            camera_provider=CamerasModuleProvider(
-                session_factory=self._camera_capture_session,
-                camera_name=config.VISION_CAMERA_NAME or None,
-            ),
-            timeout_s=voice_config["session_timeout_s"],
-            history_turns=voice_config["session_history_turns"],
-            cancel_callback=self._ai_controller.cancel_current_task,
-            tts_enabled=voice_config["tts_enabled"],
         )
         self._voice_input_enabled = bool(voice_config.get("speech_input_enabled"))
         self._voice_thread = None
@@ -197,8 +198,7 @@ class AIAssistantWidget(QWidget):
         self._main_window = None
 
         # 当前预览数据
-        self._current_preview_items: List[Dict] = []
-        self._current_skill_info: Dict = {}
+        self._current_preview: Dict[str, Any] | None = None
 
         self._init_ui()
         self._connect_signals()
@@ -700,7 +700,7 @@ class AIAssistantWidget(QWidget):
 
         self._voice_thread = QThread(self)
         self._voice_worker = VoiceSessionWorker(
-            self._dialog_controller,
+            self._voice_controller,
             text,
             require_awake=False,
         )
@@ -717,9 +717,10 @@ class AIAssistantWidget(QWidget):
 
     def _clear_pending_preview(self) -> None:
         """Invalidate the previous preview before accepting new input."""
-        self._ai_controller.clear_current_preview()
-        self._current_preview_items = []
-        self._current_skill_info = {}
+        self._services.commands.cancel_preview(
+            expected_source="gui-ai"
+        )
+        self._current_preview = None
         self.preview_button.setEnabled(False)
         self.execute_button.setEnabled(False)
 
@@ -825,31 +826,21 @@ class AIAssistantWidget(QWidget):
             self._finish_bot_delta()
             data = event.get("data") or {}
             sequence = data.get("sequence") or []
-            skill_info = data.get("skill_info") or {}
-            validation = data.get("validation") or {}
-            validation_passed = (
-                validation.get("is_valid") is True
-                and validation.get("code") == "valid"
-            )
-            confirmation_required = data.get("requires_confirmation") is True
-            try:
-                self._ai_controller.set_current_preview_from_dicts(
-                    sequence,
-                    skill_info,
-                    validation_passed=validation_passed,
-                    confirmation_required=confirmation_required,
+            if (
+                not data.get("preview_id")
+                or not isinstance(data.get("version"), int)
+                or not sequence
+            ):
+                self._current_preview = None
+                self._add_system_message(
+                    "动作预览缺少 ID、版本或动作序列"
                 )
-            except (KeyError, TypeError, ValueError) as exc:
-                self._current_preview_items = []
-                self._current_skill_info = {}
-                self._add_system_message(f"动作预览已拒绝: {exc}")
             else:
-                self._current_preview_items = sequence
-                self._current_skill_info = skill_info
+                self._current_preview = dict(data)
             if not data.get("suppress_message"):
                 self._add_bot_message(event.get("text") or "已生成动作预览")
-            self.preview_button.setEnabled(bool(self._current_preview_items))
-            self.execute_button.setEnabled(bool(self._current_preview_items))
+            self.preview_button.setEnabled(self._current_preview is not None)
+            self.execute_button.setEnabled(self._current_preview is not None)
             self.cancel_button.setEnabled(True)
         elif event_type == "done":
             text = event.get("text", "")
@@ -876,8 +867,7 @@ class AIAssistantWidget(QWidget):
             prefix = "语音会话错误" if is_voice_source else "对话错误"
             self._add_system_message(f"{prefix}: {event.get('text') or '未知错误'}")
 
-        if is_voice_source:
-            self._update_voice_status_display()
+        self._update_voice_status_display()
 
     @pyqtSlot(str)
     def _on_voice_worker_error(self, error: str):
@@ -938,34 +928,50 @@ class AIAssistantWidget(QWidget):
 
     def _on_execute_clicked(self):
         """执行按钮点击"""
-        if not self._current_preview_items:
+        if self._current_preview is None:
             return
+        risk = self._current_preview.get("risk") or {}
+        if risk.get("requires_acknowledgement") is True:
+            self._on_preview_clicked()
+            return
+        self._execute_preview(risk_acknowledged=False)
 
+    def _execute_preview(self, *, risk_acknowledged: bool) -> None:
+        if self._current_preview is None:
+            return
         self.execute_button.setEnabled(False)
         self.preview_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
-        self._ai_controller.confirm_and_execute()
+        accepted = self._ai_controller.confirm_and_execute(
+            str(self._current_preview["preview_id"]),
+            int(self._current_preview["version"]),
+            risk_acknowledged=risk_acknowledged,
+        )
+        if accepted:
+            self._current_preview = None
 
     def _on_preview_clicked(self):
         """预览详情按钮点击"""
-        if not self._current_preview_items:
+        if self._current_preview is None:
             return
 
         dialog = ActionPreviewDialog(
-            items=self._current_preview_items,
-            skill_info=self._current_skill_info,
+            items=self._current_preview.get("sequence") or [],
+            skill_info=self._current_preview.get("skill_info") or {},
+            risk=self._current_preview.get("risk") or {},
             parent=self
         )
         dialog.confirmed.connect(self._on_preview_confirmed)
         dialog.exec()
 
-    def _on_preview_confirmed(self):
+    def _on_preview_confirmed(self, risk_acknowledged: bool):
         """预览确认后执行"""
-        self._on_execute_clicked()
+        self._execute_preview(risk_acknowledged=risk_acknowledged)
 
     def _on_cancel_clicked(self):
         """取消按钮点击"""
         self._voice_audio_player.stop()
+        self._voice_controller.cancel_active_turn()
         self._ai_controller.cancel_current_task()
         self._reset_ui()
 
@@ -981,9 +987,11 @@ class AIAssistantWidget(QWidget):
         """错误发生"""
         self._add_system_message(f"错误: {error}")
         self._set_input_enabled(True)
-        self.execute_button.setEnabled(False)
-        self.preview_button.setEnabled(False)
-        self.cancel_button.setEnabled(False)
+        self._current_preview = self._ai_controller.current_preview()
+        has_preview = self._current_preview is not None
+        self.execute_button.setEnabled(has_preview)
+        self.preview_button.setEnabled(has_preview)
+        self.cancel_button.setEnabled(has_preview)
 
     @pyqtSlot()
     def _on_execution_started(self):
@@ -1022,10 +1030,23 @@ class AIAssistantWidget(QWidget):
         self.execute_button.setEnabled(False)
         self.preview_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
-        self._current_preview_items = []
-        self._current_skill_info = {}
+        self._current_preview = None
 
     @property
     def ai_controller(self) -> AIController:
         """获取AI控制器"""
         return self._ai_controller
+
+    def shutdown(self) -> None:
+        """Stop interaction tasks and release LLM network resources."""
+        if hasattr(self, "_voice_timeout_timer"):
+            self._voice_timeout_timer.stop()
+        self._voice_controller.cancel_active_turn()
+        self._voice_audio_player.stop()
+        if self._speech_worker is not None:
+            self._speech_worker.stop()
+        for thread in (self._voice_thread, self._speech_thread):
+            if thread is not None and thread.isRunning():
+                thread.quit()
+                thread.wait(3000)
+        self._ai_controller.close()

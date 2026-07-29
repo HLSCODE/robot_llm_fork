@@ -1,11 +1,27 @@
-from PyQt6.QtWidgets import (QDialog, QFormLayout, QLineEdit, QComboBox,
-                            QDoubleSpinBox, QDialogButtonBox, QVBoxLayout,
-                            QHBoxLayout, QLabel, QSpinBox, QWidget, QStackedLayout,
-                            QGroupBox, QListWidget, QListWidgetItem, QPushButton,
-                            QFileDialog, QCheckBox, QMessageBox)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtGui import QColor
-from ..core.models import ActionType, ActionDefinition
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QStackedLayout,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..core.models import ActionDefinition, ActionType
 
 
 class ActionPreviewDialog(QDialog):
@@ -15,12 +31,21 @@ class ActionPreviewDialog(QDialog):
     """
 
     # 信号
-    confirmed = pyqtSignal()  # 用户确认执行
+    confirmed = pyqtSignal(bool)
 
-    def __init__(self, items: list, skill_info: dict, parent=None):
+    def __init__(
+        self,
+        items: list,
+        skill_info: dict,
+        *,
+        risk: dict | None = None,
+        parent=None,
+    ):
         super().__init__(parent)
         self._items = items
         self._skill_info = skill_info
+        self._risk = dict(risk or {})
+        self._risk_checkbox = None
         self._init_ui()
 
     def _init_ui(self):
@@ -66,6 +91,22 @@ class ActionPreviewDialog(QDialog):
             warning_label = QLabel("⚠ 提示：动作较多，执行时间较长")
             warning_label.setStyleSheet("color: #d97706; font-size: 12px; font-weight: 600;")
             layout.addWidget(warning_label)
+
+        if self._risk.get("requires_acknowledgement") is True:
+            reasons = ", ".join(self._risk.get("reasons") or [])
+            risk_label = QLabel(
+                "高风险动作：将控制物理设备。"
+                + (f"\n风险项：{reasons}" if reasons else "")
+            )
+            risk_label.setWordWrap(True)
+            risk_label.setStyleSheet(
+                "color: #b91c1c; font-size: 12px; font-weight: 700;"
+            )
+            layout.addWidget(risk_label)
+            self._risk_checkbox = QCheckBox(
+                "我已核对动作、参数和现场环境，并确认执行"
+            )
+            layout.addWidget(self._risk_checkbox)
 
         # Buttons
         button_layout = QHBoxLayout()
@@ -129,7 +170,21 @@ class ActionPreviewDialog(QDialog):
 
     def accept_and_emit(self):
         """确认并发送信号"""
-        self.confirmed.emit()
+        risk_acknowledged = bool(
+            self._risk_checkbox is not None
+            and self._risk_checkbox.isChecked()
+        )
+        if (
+            self._risk.get("requires_acknowledgement") is True
+            and not risk_acknowledged
+        ):
+            QMessageBox.warning(
+                self,
+                "需要风险确认",
+                "请勾选风险确认后再执行。",
+            )
+            return
+        self.confirmed.emit(risk_acknowledged)
         self.accept()
 
 

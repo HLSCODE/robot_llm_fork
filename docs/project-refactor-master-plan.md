@@ -175,13 +175,11 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
                                     |
              arm_sdk / device_control_sdk / cameras / display
 
-     LLMRegistry -> VoiceInteraction -> SkillEngine
-                                   |
-                         validated ExecutionPlan
-                                   |
-                           approval / policy
-                                   |
-                           ExecutionService
+     LLMRegistry -> VoiceInteraction -> CommandRuntime -> SkillEngine
+                                            |
+                         versioned preview / risk approval
+                                            |
+                                  ExecutionService
 
      Teleoperation ----------------> Resource & Safety Layer
      Data Collection -------------> Teleop/Device events
@@ -232,7 +230,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | A-007 | P1 | DONE | 唯一注册表、全部具体动作 handler 和结构化 ActionHandlerResult 已落地 |
 | A-008 | P1 | DOING | WebSocket 已迁移，待协议 contract test |
 | A-009 | P1 | DOING | GUI 手工和 AI 已迁移，待 GUI smoke test |
-| A-010 | P1 | DOING | GUI/网络入口语音命令已进入统一服务，待 CommandRuntime 完整状态模型 |
+| A-010 | P1 | DONE | GUI 文本、真实语音和 WebSocket 命令统一进入 CommandRuntime；入口不再持有私有预览缓存 |
 | A-011 | P1 | DONE | simulation 与真实模式共用状态机和执行入口 |
 | A-012 | P3 | DONE | 删除 legacy executor，未引入 backend 开关 |
 | A-013 | P1 | DONE | GUI 成为唯一桌面应用宿主，附加网络服务与 GUI 共用 ApplicationServices，退出顺序由组合根统一管理 |
@@ -332,7 +330,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | C-003 | P0 | DONE | 权限拒绝、同步完成/拒绝、执行接受与最终成功/失败/取消均记录结构化 client/request/action/run/outcome，且不含凭据或请求 payload |
 | C-004 | P1 | DONE | 所有请求直接响应关联 request_id/action；执行接受、步骤、日志和终态继续关联同一 run_id/request_id |
 | C-005 | P1 | DONE | 请求错误统一为带稳定 code/message/request_id/action 的 error 信封；专用模块错误在协议边界归一，内部异常不向客户端泄露 |
-| C-006 | P1 | DONE | 所有请求强制声明 api_version=1.0，所有响应携带版本；不维护旧协议适配器，破坏性变更要求客户端与服务端同步升级 |
+| C-006 | P1 | DONE | 所有请求强制声明 api_version=2.0，所有响应携带版本；不维护旧协议适配器，破坏性变更要求客户端与服务端同步升级 |
 | C-007 | P1 | DONE | 配置化限制单消息大小、每客户端频率、全服务并发和入站队列；慢客户端发送有 deadline，限流/繁忙返回稳定错误码 |
 | C-008 | P1 | DONE | 请求结果单播、系统/执行事件广播、相机帧显式订阅；广播与订阅发送并发隔离慢客户端 |
 | C-009 | P2 | TODO | 拆分领域 handler 和 service |
@@ -406,15 +404,18 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - `src/skill_system/` 已具备技能注册、规划展开和基础校验。
 - `src/core/action_schema.py` 已成为 WebSocket 动作结构与 Skill 参数校验的
   唯一 Schema 来源；技能输入通过显式绑定映射到动作字段。
+- `ApplicationServices.commands` 是进程内唯一命令预览、版本、过期、风险审批和
+  execution control 状态源；GUI 与 WebSocket 只负责展示和协议适配。
+- GUI 文本与真实语音共享一个 `VoiceInteractionController` 和会话历史；
+  WebSocket 使用独立交互会话，但复用相同 CommandRuntime 策略。
+- OpenAI-compatible 请求使用统一 transport timeout；交互轮次支持总超时和主动
+  cancel，GUI/附加服务关闭时通过 `LLMRegistry.close()` 统一释放已加载 provider。
 
 ### 10.2 当前问题
 
-- GUI 创建了语音和文本两个 `VoiceInteractionController`，会话上下文边界不清晰。
-- session pause 和 execution pause 容易混淆。
-- 预览没有统一 `preview_id`、版本和过期策略。
-- 技能参数只做少量手工映射，缺少强类型、单位、范围和安全规则。
-- provider/task 的取消、超时和资源关闭策略不完全统一。
+- provider health、自动降级和熔断策略尚未建立。
 - Prompt、模型配置和规划结果缺少版本化回归基线。
+- 缺少固定分类/规划数据集以及延迟、token、失败率和成本指标。
 
 ### 10.3 目标
 
@@ -430,14 +431,14 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
 | E-001 | P0 | DONE | 已删除 auto execute 配置和事件分支；GUI/WS 只接受通过校验且要求显式确认的预览，执行前再次校验确认状态，新输入会使旧预览失效 |
-| E-002 | P1 | TODO | Voice CommandRuntime 接入 |
-| E-003 | P1 | TODO | 区分 session control 和 execution control |
-| E-004 | P1 | TODO | 预览增加 preview_id、版本和过期状态 |
+| E-002 | P1 | DONE | Voice router 通过 ApplicationServices.commands 完成技能展开、预览注册和执行控制，不直接持有 SkillEngine |
+| E-003 | P1 | DONE | classifier/router 使用独立 session_action 与 execution_action；暂停会话不会暂停设备执行 |
+| E-004 | P1 | DONE | CommandRuntime 生成单调 version、唯一 preview_id、有效期和状态；确认精确匹配 ID/版本且只能消费一次 |
 | E-005 | P1 | DONE | Skill action type 由 `ActionType` 单一映射解析；未知或非字符串类型返回 `unsupported_action_type`，不生成动作预览 |
 | E-006 | P1 | DONE | 技能参数使用强类型、单位和显式字段绑定；展开前统一校验必填项、未知字段、选项与范围，WebSocket 复用同一 action schema |
-| E-007 | P1 | TODO | 定义高风险动作审批策略 |
-| E-008 | P2 | TODO | 明确 GUI 文本/语音会话共享策略 |
-| E-009 | P2 | TODO | 统一 LLM task 的 timeout/cancel/close |
+| E-007 | P1 | DONE | 物理运动/操作/换枪/重定位/轨迹动作标记为 high risk；GUI 和 WebSocket 必须提交独立风险确认 |
+| E-008 | P2 | DONE | GUI 文本与真实语音共享 controller/session/history，互斥处理单轮请求；WebSocket 会话独立、审批策略共享 |
+| E-009 | P2 | DONE | 统一 provider request timeout、interaction turn timeout、跨线程 cancel 和 Registry/provider 幂等 close |
 | E-010 | P2 | TODO | provider health 和降级策略 |
 | E-011 | P2 | TODO | prompt、模型和技能版本记录 |
 | E-012 | P2 | TODO | 建立分类、规划和技能回归数据集 |
@@ -893,19 +894,20 @@ M4 工程治理与清理
 | 2026-07-29 | M2 | B | 机械臂 Provider 与工具架配置收敛 | B-015 TODO → DOING；B-016 TODO → DONE | 建立 Provider 注册表和共享核心契约测试；RealMan 连接、型号、运动/夹爪及工具架参数强类型化，换枪工作流移入 adapter，删除 controller 旧方法与 `arm_sdk/config.py` | - |
 | 2026-07-29 | M3 | C/F | WebSocket 写安全边界 | C-001/C-002 TODO → DONE；C-003 TODO → DOING | 新增共享密钥认证、单控制客户端租约、心跳/超时/断线释放和结构化安全审计；未配置密钥时写操作默认拒绝，观察者断线不再停止控制者遥操作 | - |
 | 2026-07-29 | M3 | A/C | WebSocket 请求与执行关联 | C-003/C-004/C-005 DOING/TODO → DONE | 新增请求上下文和统一错误信封；直接响应与执行 accepted/step/log/terminal 贯通 request_id/action/run_id，执行接受及最终成功/失败/取消形成两阶段审计；未预期异常被连接边界隔离 | - |
-| 2026-07-29 | M3 | C | WebSocket 版本、流控与投递语义 | C-006/C-007/C-008 TODO → DONE；C-012 TODO → DOING | 强制 api_version=1.0 且不保留旧协议；配置消息/频率/并发/队列/发送超时，明确请求单播、系统广播和相机订阅投递并增加协议契约测试 | - |
+| 2026-07-29 | M3 | C | WebSocket 版本、流控与投递语义 | C-006/C-007/C-008 TODO → DONE；C-012 TODO → DOING | 强制 api_version=2.0 且不保留旧协议；配置消息/频率/并发/队列/发送超时，明确请求单播、系统广播和相机订阅投递并增加协议契约测试 | - |
 | 2026-07-29 | M3 | E/F | AI 执行审批与加粉终态收敛 | E-001/F-P-001 TODO → DONE | 删除自动执行配置和死事件；预览必须通过校验并由 GUI/WebSocket 显式确认；加粉最大轮次未达标改为显式失败并输出 `target_not_reached` | - |
 | 2026-07-29 | M3 | E | Skill action type 显式校验 | E-005 TODO → DONE | 删除未知类型回退 MOVE；映射从 `ActionType` 自动生成，校验结果增加稳定 `ValidationCode`，非法技能不会生成预览 | - |
 | 2026-07-29 | M3 | E/C | Action/Skill Schema 收敛 | E-006 TODO → DONE | 提取覆盖全部 ActionType 的唯一 action schema；WebSocket 删除内联副本；Skill 参数改为强类型、单位和显式绑定，展开前拒绝未知输入、无效绑定、单位冲突及越界动作参数 | - |
+| 2026-07-29 | M3 | E/C | AI/语音命令治理整批收口 | A-010/E-002/E-003/E-004/E-007/E-008/E-009 TODO/DOING → DONE | 新增进程级 CommandRuntime；删除 GUI/WS 私有预览缓存和重复 SkillEngine；预览使用 ID/版本/TTL/来源隔离/单次消费，高风险二次确认；会话与执行控制分离；统一交互超时、取消和 LLM close | 159 tests + 26 subtests |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **E-004**：为预览增加 ID、版本和过期状态，并让确认请求精确引用对应预览。
-4. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
+3. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
    typed DTO，继续固化全部 action 的协议契约。
+4. **E-010/E-011/E-012**：补 provider health/降级、prompt/模型/技能版本记录和固定规划回归数据集。
 5. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。
 6. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
 7. 完成 simulation smoke test 后执行逐设备真实硬件验收。
