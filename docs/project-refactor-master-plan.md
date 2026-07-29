@@ -404,6 +404,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - `src/llm/` 已有 provider 抽象、registry、task runner 和 capability。
 - `src/voice_interaction/` 已拆分 session、router、speech runtime 和 camera adapter。
 - `src/skill_system/` 已具备技能注册、规划展开和基础校验。
+- `src/core/action_schema.py` 已成为 WebSocket 动作结构与 Skill 参数校验的
+  唯一 Schema 来源；技能输入通过显式绑定映射到动作字段。
 
 ### 10.2 当前问题
 
@@ -432,7 +434,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | E-003 | P1 | TODO | 区分 session control 和 execution control |
 | E-004 | P1 | TODO | 预览增加 preview_id、版本和过期状态 |
 | E-005 | P1 | DONE | Skill action type 由 `ActionType` 单一映射解析；未知或非字符串类型返回 `unsupported_action_type`，不生成动作预览 |
-| E-006 | P1 | TODO | 技能参数接入统一 action schema |
+| E-006 | P1 | DONE | 技能参数使用强类型、单位和显式字段绑定；展开前统一校验必填项、未知字段、选项与范围，WebSocket 复用同一 action schema |
 | E-007 | P1 | TODO | 定义高风险动作审批策略 |
 | E-008 | P2 | TODO | 明确 GUI 文本/语音会话共享策略 |
 | E-009 | P2 | TODO | 统一 LLM task 的 timeout/cancel/close |
@@ -835,7 +837,8 @@ M4 工程治理与清理
 
 ### 领域能力
 
-- [ ] action 和 skill 使用统一 schema。
+- [x] WebSocket action schema 和 Skill 参数展开使用统一 schema。
+- [ ] GUI 通用表单、动作持久化入口和 handler 参数模型完全由统一 schema 驱动。
 - [ ] 未知动作和非法参数在执行前拒绝。
 - [ ] 相机、视觉、标定和工位数据有清晰生命周期。
 - [ ] 数据采集和加粉流程有结构化状态与结果。
@@ -893,14 +896,14 @@ M4 工程治理与清理
 | 2026-07-29 | M3 | C | WebSocket 版本、流控与投递语义 | C-006/C-007/C-008 TODO → DONE；C-012 TODO → DOING | 强制 api_version=1.0 且不保留旧协议；配置消息/频率/并发/队列/发送超时，明确请求单播、系统广播和相机订阅投递并增加协议契约测试 | - |
 | 2026-07-29 | M3 | E/F | AI 执行审批与加粉终态收敛 | E-001/F-P-001 TODO → DONE | 删除自动执行配置和死事件；预览必须通过校验并由 GUI/WebSocket 显式确认；加粉最大轮次未达标改为显式失败并输出 `target_not_reached` | - |
 | 2026-07-29 | M3 | E | Skill action type 显式校验 | E-005 TODO → DONE | 删除未知类型回退 MOVE；映射从 `ActionType` 自动生成，校验结果增加稳定 `ValidationCode`，非法技能不会生成预览 | - |
+| 2026-07-29 | M3 | E/C | Action/Skill Schema 收敛 | E-006 TODO → DONE | 提取覆盖全部 ActionType 的唯一 action schema；WebSocket 删除内联副本；Skill 参数改为强类型、单位和显式绑定，展开前拒绝未知输入、无效绑定、单位冲突及越界动作参数 | - |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **E-004/E-006**：为预览增加 ID、版本和过期状态；技能参数接入统一
-   action schema。
+3. **E-004**：为预览增加 ID、版本和过期状态，并让确认请求精确引用对应预览。
 4. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
    typed DTO，继续固化全部 action 的协议契约。
 5. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。

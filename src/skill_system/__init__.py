@@ -5,6 +5,7 @@ Skill 系统模块
 from .models import (
     SkillCategory,
     SkillParameter,
+    SkillParameterType,
     SkillStep,
     Skill,
     SkillMatchResult,
@@ -17,6 +18,7 @@ from .skill_engine import SkillEngine
 __all__ = [
     "SkillCategory",
     "SkillParameter",
+    "SkillParameterType",
     "SkillStep",
     "Skill",
     "SkillMatchResult",

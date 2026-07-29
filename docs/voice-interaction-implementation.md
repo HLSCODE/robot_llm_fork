@@ -357,6 +357,11 @@ async def _handle_command(self, text: str):
 - 只有通过技能和动作序列校验的结果才能生成预览。
 - 校验结果包含稳定 `code`；未知或非字符串 action type 返回
   `unsupported_action_type`，不会静默转换成 MOVE。
+- Skill 参数声明使用 `str`、`int`、`float`、`bool` 强类型和可选物理单位，
+  每个可输入参数必须通过 `parameter_bindings` 显式绑定到动作字段。展开前会拒绝
+  未知输入、未绑定参数、无效字段、单位不一致及 Action Schema 范围错误，对应
+  `invalid_skill_parameters`、`invalid_parameter_binding` 和
+  `invalid_action_parameters`。
 - 所有预览都带有 `requires_confirmation=true`，GUI 必须由用户点击执行或确认，
   WebSocket 必须收到独立的 `ai_confirm` 请求后才能进入统一执行运行时。
 - 接受新的文本或语音输入前会清除上一份待确认预览，避免误确认旧规划。

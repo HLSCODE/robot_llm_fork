@@ -1269,6 +1269,8 @@ ws.onmessage = (event) => {
 
 ### 8.2 获取动作参数结构 `get_action_schema`
 
+响应内容来自服务端唯一 Action Schema，并覆盖当前全部 `ActionType`。前端不得
+自行维护另一份字段、默认值、单位、选项或范围定义。
 用途：
 
 - 前端动态生成创建/编辑动作表单
@@ -1301,10 +1303,14 @@ ws.onmessage = (event) => {
 | 类型值 | 中文含义 |
 |---|---|
 | `MOVE_TO_POINT` | 移动类 |
+| `BASE_MOVE` | 底盘移动类 |
 | `ARM_ACTION` | 执行器类 |
 | `INSPECT_AND_OUTPUT` | 检测类 |
+| `WAIT` | 等待类 |
 | `CHANGE_GUN` | 换工具头类 |
 | `VISION_CAPTURE` | 视觉抓取类 |
+| `VISION_RELOCALIZE` | 视觉重定位类 |
+| `TRAJECTORY` | 轨迹执行类 |
 
 #### `MOVE_TO_POINT` 的结构特点
 
@@ -1975,7 +1981,7 @@ ws.onmessage = (event) => {
       "definition": {
         "id": "action-id",
         "name": "pingzishang",
-        "type": "MOVE",
+        "type": "MOVE_TO_POINT",
         "parameters": {
           "臂": "左",
           "模式": "move_l",
@@ -2012,6 +2018,10 @@ ws.onmessage = (event) => {
 - `ai_preview_ready.sequence` 才是最终给前端展示、确认、执行的任务序列。
 - 服务端只发布 `validation.code=valid` 且 `requires_confirmation=true`
   的预览；未知 action type 会返回 `unsupported_action_type`，不会生成或缓存预览。
+- Skill 输入参数会先检查声明类型、必填项和未知参数，再按显式字段绑定检查单位；
+  绑定后的动作参数继续按同一 Action Schema 检查字段、选项和范围。失败时可能返回
+  `invalid_skill_parameters`、`invalid_parameter_binding` 或
+  `invalid_action_parameters`，且不会生成或缓存预览。
 - `ai_preview_ready` 到来前，前端不应认为规划已经成功。
 
 #### 11.0.2 MiniCPM 聊天触发路径

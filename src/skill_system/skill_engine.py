@@ -4,14 +4,21 @@ Skill 解析引擎
 """
 import logging
 from collections.abc import Mapping
+import math
 from types import MappingProxyType
 from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
 
+from ..core.action_schema import (
+    get_action_fields,
+    validate_action_parameters,
+)
 from ..core.models import SequenceItem, SequenceItemStatus, ActionDefinition, ActionType
 from .models import (
     Skill,
     SkillMatchResult,
+    SkillParameter,
+    SkillParameterType,
     ValidationCode,
     ValidationResult,
 )
@@ -104,8 +111,20 @@ class SkillEngine:
         if action_type_validation is not None:
             return [], action_type_validation
 
+        resolved_params, parameter_validation = self._resolve_skill_parameters(
+            skill,
+            llm_result.extracted_params,
+        )
+        if parameter_validation is not None:
+            return [], parameter_validation
+
         # 展开技能步骤为 SequenceItem
-        items = self._expand_skill(skill, llm_result.extracted_params)
+        items, expansion_validation = self._expand_skill(
+            skill,
+            resolved_params,
+        )
+        if expansion_validation is not None:
+            return [], expansion_validation
 
         # 验证动作序列
         validation = self._validate_sequence(items, skill)
@@ -116,7 +135,7 @@ class SkillEngine:
         self,
         skill: Skill,
         params: Dict[str, Any]
-    ) -> List[SequenceItem]:
+    ) -> Tuple[List[SequenceItem], ValidationResult | None]:
         """
         将技能展开为 SequenceItem 列表
 
@@ -125,9 +144,17 @@ class SkillEngine:
             params: 从用户输入中提取的参数
 
         Returns:
-            SequenceItem 列表
+            (SequenceItem 列表, 可选错误) 元组
         """
-        items = []
+        binding_validation = self._validate_parameter_bindings(skill)
+        if binding_validation is not None:
+            return [], binding_validation
+
+        items: List[SequenceItem] = []
+        parameters_by_name = {
+            parameter.name: parameter
+            for parameter in skill.parameters
+        }
 
         for step in skill.steps:
             action_type = self._resolve_action_type(step.action_type)
@@ -137,22 +164,65 @@ class SkillEngine:
                     f"不支持的动作类型: {step.action_type!r}"
                 )
 
-            # 合并参数：技能定义的参数 + 用户提供的参数
-            merged_params = {**step.parameters}
+            merged_params = dict(step.parameters)
+            for parameter_name, action_field in step.parameter_bindings.items():
+                if parameter_name in params:
+                    merged_params[action_field] = params[parameter_name]
 
-            # 处理参数替换
-            for param_name, param_value in params.items():
-                # 如果用户提供了参数值，使用用户提供的值
-                # 这里可以添加参数映射逻辑
-                if param_name == "volume" and "容量" in merged_params:
-                    merged_params["容量"] = param_value
+            fields, variant_issue = get_action_fields(
+                action_type,
+                merged_params,
+            )
+            if variant_issue is not None or fields is None:
+                message = (
+                    variant_issue.message
+                    if variant_issue is not None
+                    else "无法确定动作参数结构"
+                )
+                return [], ValidationResult.failed(
+                    ValidationCode.INVALID_PARAMETER_BINDING,
+                    f"技能 {skill.id} 步骤 {step.step_id} 参数绑定无效: "
+                    f"{message}",
+                )
+
+            for parameter_name, action_field in step.parameter_bindings.items():
+                field_schema = fields.get(action_field)
+                if field_schema is None:
+                    return [], ValidationResult.failed(
+                        ValidationCode.INVALID_PARAMETER_BINDING,
+                        f"技能 {skill.id} 步骤 {step.step_id} 将参数 "
+                        f"{parameter_name!r} 绑定到了未知动作字段 "
+                        f"{action_field!r}",
+                    )
+                skill_unit = parameters_by_name[parameter_name].unit
+                action_unit = field_schema.get("unit", "")
+                if skill_unit != action_unit:
+                    return [], ValidationResult.failed(
+                        ValidationCode.INVALID_PARAMETER_BINDING,
+                        f"技能 {skill.id} 步骤 {step.step_id} 的参数 "
+                        f"{parameter_name!r} 单位 {skill_unit or '无'} 与动作字段 "
+                        f"{action_field!r} 单位 {action_unit or '无'} 不一致",
+                    )
+
+            action_validation = validate_action_parameters(
+                action_type,
+                merged_params,
+                apply_defaults=True,
+                reject_unknown=True,
+            )
+            if not action_validation.is_valid:
+                return [], ValidationResult.failed(
+                    ValidationCode.INVALID_ACTION_PARAMETERS,
+                    f"技能 {skill.id} 步骤 {step.step_id} 参数无效: "
+                    f"{action_validation.message}",
+                )
 
             # 创建 ActionDefinition
             action_def = ActionDefinition(
                 id="",
                 name=step.action_name,
                 type=action_type,
-                parameters=merged_params
+                parameters=action_validation.parameters,
             )
 
             # 创建 SequenceItem
@@ -165,7 +235,158 @@ class SkillEngine:
             items.append(item)
 
         logger.debug(f"展开技能 {skill.id} 为 {len(items)} 个动作")
-        return items
+        return items, None
+
+    def _resolve_skill_parameters(
+        self,
+        skill: Skill,
+        extracted_params: object,
+    ) -> Tuple[Dict[str, Any], ValidationResult | None]:
+        if not isinstance(extracted_params, dict):
+            return {}, ValidationResult.failed(
+                ValidationCode.INVALID_SKILL_PARAMETERS,
+                f"技能 {skill.id} 的提取参数必须是字典",
+            )
+
+        parameters_by_name = {
+            parameter.name: parameter
+            for parameter in skill.parameters
+        }
+        if any(
+            not isinstance(name, str) or not name
+            for name in extracted_params
+        ):
+            return {}, ValidationResult.failed(
+                ValidationCode.INVALID_SKILL_PARAMETERS,
+                f"技能 {skill.id} 的参数名必须是非空字符串",
+            )
+        unknown_names = extracted_params.keys() - parameters_by_name.keys()
+        if unknown_names:
+            return {}, ValidationResult.failed(
+                ValidationCode.INVALID_SKILL_PARAMETERS,
+                f"技能 {skill.id} 包含未知输入参数: "
+                f"{', '.join(sorted(unknown_names))}",
+            )
+
+        resolved: Dict[str, Any] = {}
+        for parameter in skill.parameters:
+            if parameter.name in extracted_params:
+                raw_value = extracted_params[parameter.name]
+            else:
+                raw_value = parameter.default
+
+            if raw_value is None:
+                if parameter.required:
+                    return {}, ValidationResult.failed(
+                        ValidationCode.INVALID_SKILL_PARAMETERS,
+                        f"技能 {skill.id} 缺少必填参数: {parameter.name}",
+                    )
+                continue
+
+            value, error = self._normalize_skill_parameter(
+                parameter,
+                raw_value,
+            )
+            if error is not None:
+                return {}, ValidationResult.failed(
+                    ValidationCode.INVALID_SKILL_PARAMETERS,
+                    f"技能 {skill.id} 参数 {parameter.name} 无效: {error}",
+                )
+            resolved[parameter.name] = value
+
+        return resolved, None
+
+    @staticmethod
+    def _normalize_skill_parameter(
+        parameter: SkillParameter,
+        value: Any,
+    ) -> Tuple[Any, str | None]:
+        if parameter.type is SkillParameterType.STRING:
+            if not isinstance(value, str):
+                return None, "类型必须是 str"
+            if parameter.required and not value.strip():
+                return None, "不能为空字符串"
+            return value, None
+
+        if parameter.type is SkillParameterType.INTEGER:
+            if not isinstance(value, int) or isinstance(value, bool):
+                return None, "类型必须是 int"
+            return value, None
+
+        if parameter.type is SkillParameterType.FLOAT:
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                return None, "类型必须是 float"
+            numeric_value = float(value)
+            if not math.isfinite(numeric_value):
+                return None, "必须是有限数值"
+            return numeric_value, None
+
+        if parameter.type is SkillParameterType.BOOLEAN:
+            if not isinstance(value, bool):
+                return None, "类型必须是 bool"
+            return value, None
+
+        return None, f"不支持的参数类型: {parameter.type!r}"
+
+    @staticmethod
+    def _validate_parameter_bindings(
+        skill: Skill,
+    ) -> ValidationResult | None:
+        declared_names = [
+            parameter.name
+            for parameter in skill.parameters
+        ]
+        if (
+            any(not isinstance(name, str) or not name for name in declared_names)
+            or len(set(declared_names)) != len(declared_names)
+        ):
+            return ValidationResult.failed(
+                ValidationCode.INVALID_PARAMETER_BINDING,
+                f"技能 {skill.id} 的参数声明名称为空或重复",
+            )
+
+        for step in skill.steps:
+            if not isinstance(step.parameters, dict):
+                return ValidationResult.failed(
+                    ValidationCode.INVALID_ACTION_PARAMETERS,
+                    f"技能 {skill.id} 步骤 {step.step_id} 的动作参数必须是字典",
+                )
+            if not isinstance(step.parameter_bindings, dict) or any(
+                not isinstance(source, str)
+                or not source
+                or not isinstance(target, str)
+                or not target
+                for source, target in step.parameter_bindings.items()
+            ):
+                return ValidationResult.failed(
+                    ValidationCode.INVALID_PARAMETER_BINDING,
+                    f"技能 {skill.id} 步骤 {step.step_id} 的参数绑定"
+                    "必须使用非空字符串名称",
+                )
+
+        declared_name_set = set(declared_names)
+        bound_names = {
+            parameter_name
+            for step in skill.steps
+            for parameter_name in step.parameter_bindings
+        }
+
+        unknown_names = bound_names - declared_name_set
+        if unknown_names:
+            return ValidationResult.failed(
+                ValidationCode.INVALID_PARAMETER_BINDING,
+                f"技能 {skill.id} 绑定了未声明参数: "
+                f"{', '.join(sorted(unknown_names))}",
+            )
+
+        unbound_names = declared_name_set - bound_names
+        if unbound_names:
+            return ValidationResult.failed(
+                ValidationCode.INVALID_PARAMETER_BINDING,
+                f"技能 {skill.id} 存在未绑定参数: "
+                f"{', '.join(sorted(unbound_names))}",
+            )
+        return None
 
     @staticmethod
     def _resolve_action_type(raw_action_type: object) -> ActionType | None:
@@ -248,39 +469,6 @@ class SkillEngine:
             f"动作序列验证通过，共 {len(items)} 个动作",
             warnings=tuple(warnings),
         )
-
-    def get_skill_preview(
-        self,
-        skill_id: str,
-        params: Optional[Dict[str, Any]] = None
-    ) -> Optional[List[Dict[str, Any]]]:
-        """
-        获取技能预览（不实际执行，只展示步骤）
-
-        Args:
-            skill_id: 技能ID
-            params: 可选，参数值
-
-        Returns:
-            步骤预览列表，不存在则返回 None
-        """
-        skill = self._registry.get_skill(skill_id)
-        if skill is None:
-            return None
-
-        params = params or {}
-        preview = []
-
-        for step in skill.steps:
-            preview.append({
-                "step_id": step.step_id,
-                "action_name": step.action_name,
-                "description": step.description,
-                "estimated_time": step.estimated_time,
-                "action_type": step.action_type,
-            })
-
-        return preview
 
     def get_skill_info(self, skill_id: str) -> Optional[Dict[str, Any]]:
         """

@@ -3,7 +3,13 @@
 当 skill_library.json 不存在时，使用这里定义的技能
 """
 from typing import List
-from .models import Skill, SkillCategory, SkillParameter, SkillStep
+from .models import (
+    Skill,
+    SkillCategory,
+    SkillParameter,
+    SkillParameterType,
+    SkillStep,
+)
 
 
 def get_default_skills() -> List[Skill]:
@@ -90,10 +96,11 @@ def get_default_skills() -> List[Skill]:
                 SkillParameter(
                     name="volume",
                     param_label="容量",
-                    type="int",
+                    type=SkillParameterType.INTEGER,
                     description="吸取容量(ul)",
                     default=500,
-                    required=False
+                    required=False,
+                    unit="ul",
                 )
             ],
             steps=[
@@ -110,6 +117,7 @@ def get_default_skills() -> List[Skill]:
                     action_name="xiye",
                     action_type="MANIPULATE",
                     parameters={"执行器": "吸液枪", "操作": "吸", "容量": 500, "吸液速度": 1200},
+                    parameter_bindings={"volume": "容量"},
                     description="吸取液体",
                     estimated_time=2.0
                 ),
@@ -154,8 +162,22 @@ def get_default_skills() -> List[Skill]:
             description="执行传感器检测，判断是否通过阈值",
             icon="🔍",
             parameters=[
-                SkillParameter(name="sensor_id", param_label="传感器ID", type="int", description="传感器编号", default=2, required=False),
-                SkillParameter(name="threshold", param_label="阈值", type="float", description="检测阈值", default=0.0, required=False),
+                SkillParameter(
+                    name="sensor_id",
+                    param_label="传感器ID",
+                    type=SkillParameterType.STRING,
+                    description="传感器编号",
+                    default="2",
+                    required=False,
+                ),
+                SkillParameter(
+                    name="threshold",
+                    param_label="阈值",
+                    type=SkillParameterType.FLOAT,
+                    description="检测阈值",
+                    default=0.0,
+                    required=False,
+                ),
             ],
             steps=[
                 SkillStep(
@@ -163,6 +185,10 @@ def get_default_skills() -> List[Skill]:
                     action_name="检测",
                     action_type="INSPECT",
                     parameters={"Sensor_ID": "2", "Threshold": 0.0, "Timeout": 5.0},
+                    parameter_bindings={
+                        "sensor_id": "Sensor_ID",
+                        "threshold": "Threshold",
+                    },
                     description="执行传感器检测",
                     estimated_time=5.0
                 ),

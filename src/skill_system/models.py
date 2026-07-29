@@ -16,7 +16,16 @@ class SkillCategory(Enum):
     COMPOUND = "复合"      # 复合类技能
 
 
-@dataclass
+class SkillParameterType(str, Enum):
+    """技能输入参数支持的基础类型。"""
+
+    STRING = "str"
+    INTEGER = "int"
+    FLOAT = "float"
+    BOOLEAN = "bool"
+
+
+@dataclass(frozen=True, slots=True)
 class SkillParameter:
     """
     技能参数定义
@@ -24,19 +33,21 @@ class SkillParameter:
     """
     name: str              # 参数名（英文，用于代码中引用）
     param_label: str       # 参数显示名称（中文）
-    type: str              # 参数类型: str, int, float, bool
+    type: SkillParameterType
     description: str       # 参数描述
     default: Any           # 默认值
     required: bool = True  # 是否必填
+    unit: str = ""         # 物理单位，用于校验动作参数绑定
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "name": self.name,
             "param_label": self.param_label,
-            "type": self.type,
+            "type": self.type.value,
             "description": self.description,
             "default": self.default,
             "required": self.required,
+            "unit": self.unit,
         }
 
     @classmethod
@@ -44,10 +55,11 @@ class SkillParameter:
         return cls(
             name=data["name"],
             param_label=data.get("param_label", data["name"]),
-            type=data["type"],
+            type=SkillParameterType(data["type"]),
             description=data.get("description", ""),
             default=data.get("default"),
             required=data.get("required", True),
+            unit=data["unit"],
         )
 
 
@@ -61,6 +73,7 @@ class SkillStep:
     action_name: str                    # 调用的动作名（对应 actions_library.json 中的 name）
     action_type: str                     # MOVE / MANIPULATE / INSPECT / CHANGE_GUN
     parameters: Dict[str, Any]          # 动作参数
+    parameter_bindings: Dict[str, str] = field(default_factory=dict)
     description: str = ""               # 步骤描述
     estimated_time: float = 2.0          # 预估执行时间（秒）
 
@@ -70,6 +83,7 @@ class SkillStep:
             "action_name": self.action_name,
             "action_type": self.action_type,
             "parameters": self.parameters,
+            "parameter_bindings": self.parameter_bindings,
             "description": self.description,
             "estimated_time": self.estimated_time,
         }
@@ -81,6 +95,7 @@ class SkillStep:
             action_name=data["action_name"],
             action_type=data["action_type"],
             parameters=data.get("parameters", {}),
+            parameter_bindings=data["parameter_bindings"],
             description=data.get("description", ""),
             estimated_time=data.get("estimated_time", 2.0),
         )
@@ -117,21 +132,10 @@ class Skill:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'Skill':
-        category_str = data.get("category", "复合")
-        # 兼容旧格式的 category 字符串
-        if isinstance(category_str, str):
-            category = SkillCategory.COMPOUND
-            for cat in SkillCategory:
-                if cat.value == category_str:
-                    category = cat
-                    break
-        else:
-            category = category_str
-
         return cls(
             id=data["id"],
             name=data["name"],
-            category=category,
+            category=SkillCategory(data["category"]),
             description=data.get("description", ""),
             icon=data.get("icon", "🤖"),
             parameters=[SkillParameter.from_dict(p) for p in data.get("parameters", [])],
@@ -144,7 +148,11 @@ class Skill:
         """获取技能的摘要信息（用于 LLM Prompt）"""
         param_info = []
         for p in self.parameters:
-            param_info.append(f"- {p.param_label}({p.name}): {p.description}")
+            unit = f", 单位={p.unit}" if p.unit else ""
+            param_info.append(
+                f"- {p.param_label}({p.name}, 类型={p.type.value}{unit}): "
+                f"{p.description}"
+            )
 
         step_descriptions = [s.description or s.action_name for s in self.steps]
 
@@ -200,6 +208,9 @@ class ValidationCode(str, Enum):
     INVALID_SKILL_MATCH = "invalid_skill_match"
     SKILL_NOT_FOUND = "skill_not_found"
     UNSUPPORTED_ACTION_TYPE = "unsupported_action_type"
+    INVALID_SKILL_PARAMETERS = "invalid_skill_parameters"
+    INVALID_PARAMETER_BINDING = "invalid_parameter_binding"
+    INVALID_ACTION_PARAMETERS = "invalid_action_parameters"
     EMPTY_SEQUENCE = "empty_sequence"
 
 
