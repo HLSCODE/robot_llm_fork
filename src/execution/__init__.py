@@ -1,3 +1,11 @@
+from .action_handlers import (
+    ActionCancelledError,
+    ActionExecutionContext,
+    ActionHandler,
+    ActionHandlerNotFoundError,
+    ActionHandlerRegistry,
+    ActionTimeoutError,
+)
 from .control import ExecutionControl
 from .manager import (
     EngineCallbacks,
@@ -18,6 +26,12 @@ from .models import (
 )
 
 __all__ = [
+    "ActionCancelledError",
+    "ActionExecutionContext",
+    "ActionHandler",
+    "ActionHandlerNotFoundError",
+    "ActionHandlerRegistry",
+    "ActionTimeoutError",
     "EngineCallbacks",
     "EngineResult",
     "ExecutionAlreadyRunningError",

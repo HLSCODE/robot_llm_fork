@@ -3,7 +3,6 @@
 from collections.abc import Sequence
 import logging
 from pathlib import Path
-import time
 from typing import Any
 
 from ..actions.circle_dispense import execute_right_arm_circle_dispense
@@ -47,6 +46,15 @@ from ..device_runtime.ids import (
     ROBOT_SYSTEM,
     TOOL_CHANGER,
 )
+from .action_handlers import (
+    ActionCancelledError,
+    ActionExecutionContext,
+    ActionHandlerRegistry,
+    ActionParameters,
+    ActionTimeoutError,
+    InspectActionHandler,
+    WaitActionHandler,
+)
 from .control import ExecutionControl
 from .manager import EngineCallbacks
 from .models import EngineResult
@@ -65,30 +73,36 @@ class ActionEngine:
         self._device_runtime = device_runtime
         self.config = config
         self.execution_context = ExecutionContext()
-        self._control: ExecutionControl | None = None
         self._callbacks: EngineCallbacks | None = None
         self._last_error = ""
+        self._default_action_timeout_seconds = float(
+            getattr(config, "EXECUTION_ACTION_TIMEOUT_SECONDS", 600.0)
+        )
+        if self._default_action_timeout_seconds <= 0:
+            raise ValueError(
+                "EXECUTION_ACTION_TIMEOUT_SECONDS must be positive"
+            )
+        self._handler_registry = self._create_handler_registry()
 
-        # 动作类型与执行方法的映射
-        self._execute_methods = {
-            ActionType.MOVE: self._execute_move,
-            ActionType.BASE_MOVE: self._execute_base_move,
-            ActionType.MANIPULATE: self._execute_manipulate,
-            ActionType.INSPECT: self._execute_inspect,
-            ActionType.WAIT: self._execute_wait,
-            ActionType.CHANGE_GUN: self._execute_change_gun,
-            ActionType.VISION_CAPTURE: self._execute_vision_capture,
-            ActionType.VISION_RELOCALIZE: self._execute_vision_relocalize,
-            ActionType.TRAJECTORY: self._execute_trajectory,
-        }
-
-    @property
-    def _stop_requested(self) -> bool:
-        return self._required_control().cancel_requested
-
-    @property
-    def _paused(self) -> bool:
-        return self._required_control().paused
+    def _create_handler_registry(self) -> ActionHandlerRegistry:
+        registry = ActionHandlerRegistry()
+        registry.register(ActionType.MOVE, self._execute_move)
+        registry.register(ActionType.BASE_MOVE, self._execute_base_move)
+        registry.register(ActionType.MANIPULATE, self._execute_manipulate)
+        registry.register(ActionType.INSPECT, InspectActionHandler())
+        registry.register(ActionType.WAIT, WaitActionHandler())
+        registry.register(ActionType.CHANGE_GUN, self._execute_change_gun)
+        registry.register(
+            ActionType.VISION_CAPTURE,
+            self._execute_vision_capture,
+        )
+        registry.register(
+            ActionType.VISION_RELOCALIZE,
+            self._execute_vision_relocalize,
+        )
+        registry.register(ActionType.TRAJECTORY, self._execute_trajectory)
+        registry.validate_complete()
+        return registry
 
     @property
     def _body_controller(self) -> BodyAxis | None:
@@ -105,7 +119,6 @@ class ActionEngine:
         callbacks: EngineCallbacks,
     ) -> EngineResult:
         """Execute a sequence in the current worker thread."""
-        self._control = control
         self._callbacks = callbacks
         self.execution_context.clear()
         failure = ""
@@ -125,7 +138,7 @@ class ActionEngine:
             loop_item_counter: dict[str, int] = {}
 
             for index, (item, loop) in enumerate(flat_sequence):
-                if self._stop_requested:
+                if control.cancel_requested:
                     self._on_log("执行已停止")
                     return EngineResult(success=False, cancelled=True)
                 if not control.wait_if_paused():
@@ -147,7 +160,7 @@ class ActionEngine:
                 self._on_step_started(index, item)
 
                 try:
-                    success = self._execute_action(item)
+                    success = self._execute_action(item, control)
                     if success:
                         item.status = SequenceItemStatus.SUCCESS
                         self._on_step_completed(index, item)
@@ -168,7 +181,6 @@ class ActionEngine:
                     self._on_step_failed(index, item, failure)
                     break
         finally:
-            self._control = None
             self._callbacks = None
 
         if control.cancel_requested:
@@ -176,11 +188,6 @@ class ActionEngine:
         if failure:
             return EngineResult(success=False, error=failure)
         return EngineResult(success=True)
-
-    def _required_control(self) -> ExecutionControl:
-        if self._control is None:
-            raise RuntimeError("action engine is not running")
-        return self._control
 
     def _required_callbacks(self) -> EngineCallbacks:
         if self._callbacks is None:
@@ -222,7 +229,11 @@ class ActionEngine:
     # 动作分发（与 execution.py 逻辑一致）
     # ------------------------------------------------------------------
 
-    def _execute_action(self, item: SequenceItem) -> bool:
+    def _execute_action(
+        self,
+        item: SequenceItem,
+        control: ExecutionControl,
+    ) -> bool:
         definition = item.definition
         params = definition.parameters
 
@@ -230,29 +241,58 @@ class ActionEngine:
         self._on_log(f"参数: {params}")
 
         try:
-            # 根据动作类型获取对应的执行方法
-            execute_method = self._execute_methods.get(definition.type)
-            if execute_method:
-                return execute_method(params)
-            else:
-                self._on_log(f"未知的动作类型: {definition.type}", "error")
-                return False
-        except Exception as e:
-            self._on_log(f"执行错误: {str(e)}", "error")
+            timeout_seconds = float(
+                params.get(
+                    "timeout_seconds",
+                    self._default_action_timeout_seconds,
+                )
+            )
+            context = ActionExecutionContext(
+                action_name=definition.name,
+                control=control,
+                timeout_seconds=timeout_seconds,
+                log=self._on_log,
+            )
+        except (TypeError, ValueError) as exc:
+            self._on_log(f"动作超时配置无效: {exc}", "error")
+            return False
+
+        try:
+            return self._handler_registry.execute(
+                definition.type,
+                params,
+                context,
+            )
+        except ActionCancelledError:
+            self._on_log(f"动作已取消: {definition.name}")
+            return False
+        except ActionTimeoutError as exc:
+            self._on_log(str(exc), "error")
+            return False
+        except Exception as exc:
+            self._on_log(f"执行错误: {str(exc)}", "error")
             return False
 
     # ------------------------------------------------------------------
     # 移动类动作
     # ------------------------------------------------------------------
 
-    def _execute_move(self, params: dict) -> bool:
+    def _execute_move(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         target = params.get('目标', '机械臂')
         if target == '身体':
-            return self._execute_body_move(params)
+            return self._execute_body_move(params, context)
         else:
-            return self._execute_robot_move(params)
+            return self._execute_robot_move(params, context)
 
-    def _execute_robot_move(self, params: dict) -> bool:
+    def _execute_robot_move(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行机械臂移动"""
         arm = params.get('臂', '左')
         target_pose_str = params.get('点位', '')
@@ -289,8 +329,7 @@ class ActionEngine:
                         f"机械臂移动失败 (第{attempt}次): {exc}",
                         "warn",
                     )
-                if not self._required_control().sleep(0.5):
-                    return False
+                context.sleep(0.5)
 
             self._on_log("机械臂移动重试次数耗尽", "error")
             return False
@@ -298,7 +337,11 @@ class ActionEngine:
             self._on_log(f"执行机械臂移动出错: {str(e)}", "error")
             return False
 
-    def _execute_body_move(self, params: dict) -> bool:
+    def _execute_body_move(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行身体移动（ModbusMotor）"""
         position = params.get('位置', 0)
 
@@ -314,7 +357,7 @@ class ActionEngine:
 
             # 等待到达目标位置
             while True:
-                if self._stop_requested:
+                if context.stop_requested:
                     self._on_log("身体移动已停止")
                     return False
                 st = self._body_controller.is_reached()
@@ -324,25 +367,32 @@ class ActionEngine:
                 if st:
                     self._on_log(f"身体移动完成，位置={position}")
                     return True
-                if not self._required_control().sleep(0.1):
-                    return False
+                context.sleep(0.1)
         except Exception as e:
             self._on_log(f"执行身体移动出错: {str(e)}", "error")
             return False
 
-    def _execute_base_move(self, params: dict) -> bool:
+    def _execute_base_move(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行底盘移动（统一入口，根据 move_mode 区分）"""
         move_mode = params.get('move_mode', 'position')
         
         if move_mode == 'position':
-            return self._execute_base_move_position(params)
+            return self._execute_base_move_position(params, context)
         elif move_mode == 'distance':
-            return self._execute_base_move_distance(params)
+            return self._execute_base_move_distance(params, context)
         else:
             self._on_log(f"未知的移动方式：{move_mode}", "error")
             return False
 
-    def _execute_base_move_position(self, params: dict) -> bool:
+    def _execute_base_move_position(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行底盘位置移动"""
         id_value = params.get('id', 0)
         cid = params.get('cid', 0)
@@ -354,7 +404,13 @@ class ActionEngine:
             return False
         
         try:
-            success = self._move_controller.move_to_position(id_value, cid)
+            success = context.invoke(
+                "mobile_base.move_to_position",
+                lambda: self._move_controller.move_to_position(
+                    id_value,
+                    cid,
+                ),
+            )
             
             if success:
                 self._on_log(f"底盘位置移动完成：ID={id_value}, CID={cid}")
@@ -366,7 +422,11 @@ class ActionEngine:
             self._on_log(f"执行底盘位置移动出错：{str(e)}", "error")
             return False
 
-    def _execute_base_move_distance(self, params: dict) -> bool:
+    def _execute_base_move_distance(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行底盘距离移动"""
         x = params.get('x', 0.0)
         y = params.get('y', 0.0)
@@ -379,7 +439,10 @@ class ActionEngine:
             return False
 
         try:
-            success = self._move_controller.move_slowly(x, y, angle)
+            success = context.invoke(
+                "mobile_base.move_slowly",
+                lambda: self._move_controller.move_slowly(x, y, angle),
+            )
 
             if success:
                 self._on_log(f"底盘距离移动完成：x={x}cm, y={y}cm, angle={angle}°")
@@ -395,7 +458,11 @@ class ActionEngine:
     # 操作类动作
     # ------------------------------------------------------------------
 
-    def _execute_manipulate(self, params: dict) -> bool:
+    def _execute_manipulate(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         executor = params.get('执行器', '快换手')
         number = params.get('编号', 1)
         operation = params.get('操作', '开')
@@ -424,11 +491,11 @@ class ActionEngine:
             relay.set_channel(number, operation == '开')
 
         elif executor == '夹爪':
-            return self._execute_gripper(operation)
+            return self._execute_gripper(operation, context)
         elif executor == '吸液枪':
-            return self._execute_pipette(params)
+            return self._execute_pipette(params, context)
         elif executor in ('表情屏', '表情', 'expression_display', 'expression'):
-            return self._execute_expression_display(params)
+            return self._execute_expression_display(params, context)
         elif executor == '右臂转圈注液':
             pipette = self._device_runtime.require(PIPETTE, Pipette)
             return execute_right_arm_circle_dispense(
@@ -439,13 +506,13 @@ class ActionEngine:
                 pipette=pipette,
                 params=params,
                 log=self._on_log,
-                stop_requested=lambda: self._stop_requested,
-                paused=lambda: self._paused,
+                stop_requested=lambda: context.stop_requested,
+                paused=lambda: context.paused,
             )
         elif executor == '智能加粉':
-            return self._execute_powder_dispense(params)
+            return self._execute_powder_dispense(params, context)
         elif executor == '加粉装置':
-            return self._execute_tapping(params)
+            return self._execute_tapping(params, context)
         else:
             self._on_log(f"未知的执行器: {executor}", "error")
             return False
@@ -453,7 +520,11 @@ class ActionEngine:
         self._on_log(f"执行器: {executor}, 编号: {number}, 操作: {operation}")
         return True
 
-    def _execute_expression_display(self, params: dict) -> bool:
+    def _execute_expression_display(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         operation = str(params.get('操作', '切换')).lower()
         if operation in ('关闭', 'close'):
             self._device_runtime.shutdown(EXPRESSION_DISPLAY)
@@ -484,7 +555,11 @@ class ActionEngine:
             self._on_log(f"表情屏切换失败: {str(e)}", "error")
             return False
 
-    def _execute_gripper(self, operation: str) -> bool:
+    def _execute_gripper(
+        self,
+        operation: str,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行夹爪动作"""
         self._on_log(f"夹爪动作: {operation}")
 
@@ -507,13 +582,16 @@ class ActionEngine:
                 return True
             except Exception as e:
                 self._on_log(f"执行夹爪出错: {str(e)} (第{attempt}次)", "warn")
-            if not self._required_control().sleep(0.5):
-                return False
+            context.sleep(0.5)
 
         self._on_log("夹爪重试次数耗尽", "error")
         return False
 
-    def _execute_tapping(self, params: dict) -> bool:
+    def _execute_tapping(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行加粉装置动作（夹爪/针升降/针旋转）。"""
         operation = params.get('操作', '')
         self._on_log(f"加粉装置动作: {operation}")
@@ -558,7 +636,11 @@ class ActionEngine:
             self._on_log(f"加粉装置 {operation} 执行失败: {e}", "error")
             return False
 
-    def _execute_powder_dispense(self, params: dict) -> bool:
+    def _execute_powder_dispense(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行智能闭环加粉动作。"""
         from ..agents.powder_dispense_agent import PowderDispenseAgent, config_from_params
         from ..vision.balance_reader_simple import read_balance
@@ -580,7 +662,7 @@ class ActionEngine:
             controller,
             read_balance,
             log=lambda msg: self._on_log(msg),
-            should_stop=lambda: self._stop_requested,
+            should_stop=lambda: context.stop_requested,
         )
         try:
             result = agent.run(config)
@@ -597,7 +679,11 @@ class ActionEngine:
         )
         return result.success
 
-    def _execute_pipette(self, params: dict) -> bool:
+    def _execute_pipette(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行吸液枪动作（吸/吐）"""
         operation = params.get('操作', '吸')
         capacity = params.get('容量', 500)
@@ -664,34 +750,11 @@ class ActionEngine:
             self._on_log(f"执行吸液枪出错: {str(e)}", "error")
             return False
 
-    # ------------------------------------------------------------------
-    # 检测类动作
-    # ------------------------------------------------------------------
-
-    def _execute_inspect(self, params: dict) -> bool:
-        sensor_id = params.get('Sensor_ID', '')
-        threshold = params.get('Threshold', 0)
-        timeout = params.get('Timeout', 5)
-
-        self._on_log(f"读取传感器 {sensor_id}, 阈值: {threshold}, 超时: {timeout}s")
-        if not self._required_control().sleep(0.8):
-            return False
-        self._on_log("检测完成 - 结果: 通过")
-        return True
-
-
-    def _execute_wait(self, params: dict) -> bool:
-        wait_seconds = float(params.get('wait_seconds', 1.0))
-        if wait_seconds <= 0:
-            return True
-
-        self._on_log(f"Waiting: {wait_seconds:.1f}s")
-        completed = self._required_control().sleep(wait_seconds)
-        if not completed:
-            self._on_log("Wait cancelled by stop request")
-        return completed
-
-    def _execute_trajectory(self, params: dict) -> bool:
+    def _execute_trajectory(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         robot_name = params.get("robot", "robot1")
         file_path = params.get("file_path", "")
 
@@ -707,22 +770,17 @@ class ActionEngine:
                 ROBOT_SYSTEM,
                 TrajectoryControl,
             )
-            trajectory.send_trajectory(arm, file_path)
+            context.invoke(
+                "trajectory.send",
+                lambda: trajectory.send_trajectory(arm, file_path),
+            )
 
-            start_time = time.time()
-            timeout_seconds = float(params.get("timeout_seconds", 600))
-            while time.time() - start_time < timeout_seconds:
-                if self._stop_requested:
-                    self._on_log("轨迹执行已停止")
-                    return False
+            while True:
+                context.checkpoint()
                 if trajectory.is_trajectory_complete(arm):
                     self._on_log("轨迹执行完成")
                     return True
-                if not self._required_control().sleep(0.5):
-                    return False
-
-            self._on_log("轨迹执行超时", "error")
-            return False
+                context.sleep(0.5)
         except Exception as e:
             self._on_log(f"轨迹执行异常: {e}", "error")
             return False
@@ -731,7 +789,11 @@ class ActionEngine:
     # 换枪类动作
     # ------------------------------------------------------------------
 
-    def _execute_change_gun(self, params: dict) -> bool:
+    def _execute_change_gun(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行换枪动作"""
         gun_position = params.get('Gun_Position', 1)
         operation = params.get('Operation', '取')
@@ -762,7 +824,11 @@ class ActionEngine:
     # 视觉抓取动作
     # ------------------------------------------------------------------
 
-    def _execute_vision_capture(self, params: dict) -> bool:
+    def _execute_vision_capture(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行视觉抓取动作（委托共用模块）"""
         from ..vision.executor import execute_vision_capture
         camera = self._device_runtime.require(CAMERA, DepthCameraSource)
@@ -773,7 +839,11 @@ class ActionEngine:
             self._on_log,
         )
 
-    def _execute_vision_relocalize(self, params: dict) -> bool:
+    def _execute_vision_relocalize(
+        self,
+        params: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> bool:
         """执行视觉重定位动作。"""
         from ..vision.relocalization import execute_vision_relocalization
 

@@ -2,7 +2,7 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-28
+> 最近更新：2026-07-29
 > 当前阶段：核心运行时和主要入口已直接切换，进入安全能力、handler 拆分与硬件验收  
 > 上级计划：[Robot LLM 项目重构总计划](project-refactor-master-plan.md)
 
@@ -67,7 +67,9 @@
 | `SafetyService` | 编排受控取消、软件快停/急停、会话释放和逐设备结果 | 软件链路已落地，待真实硬件验收 |
 | `src/execution/models.py` | 状态、事件、快照、结果、错误 | 已落地 |
 | `ExecutionManager` | 唯一 worker、run_id、终态和事件 | 已落地 |
-| `ActionEngine` | 当前唯一 ActionType 执行分发 | 已落地，待拆 handler |
+| `ActionHandlerRegistry` | 唯一 ActionType 分发、重复注册拒绝和完整性校验 | 已落地 |
+| `ActionExecutionContext` | 单动作 deadline、暂停、协作取消和阻塞调用边界 | 已落地，待逐设备补强 |
+| `ActionEngine` | 序列编排及尚未迁出的领域 handler | WAIT/INSPECT 已拆，其他 handler 迁移中 |
 | `src/device_runtime/contracts.py` | 设备能力协议 | 已落地 |
 | `DeviceRuntime` | 注册、初始化、查询、停止、重连和关闭 | 已落地 |
 | `ResourceArbiter` | 非阻塞独占资源租约 | 已落地 |
@@ -190,8 +192,8 @@ IDLE
 | ER-007 | P0 | TODO | WebSocket 认证和控制租约 | 未授权客户端不能写硬件 |
 | ER-008 | P1 | DONE | DeviceRuntime 和 capability | 状态和生命周期唯一 |
 | ER-009 | P1 | DONE | 统一 simulation runtime | 与真实模式共用状态机 |
-| ER-010 | P1 | DOING | ActionHandlerRegistry | 拆除 ActionEngine 巨型分发 |
-| ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 每个长动作声明停止能力 |
+| ER-010 | P1 | DOING | ActionHandlerRegistry | 唯一注册表和 WAIT/INSPECT 已落地，继续拆除引擎内领域 handler |
+| ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 统一 deadline/cancel 已落地，继续补齐设备级停止声明与验证 |
 | ER-012 | P1 | DOING | camera session/resource | 预览和视觉任务不争用 |
 | ER-013 | P1 | DONE | 机械臂能力接口补强 | GUI、执行、视觉、示教和数据采集不依赖 RM 原生字段 |
 | ER-014 | P1 | TODO | WebSocket contract tests | 事件顺序、终态和错误稳定 |
@@ -208,7 +210,9 @@ IDLE
 
 1. 已定义运动设备的 quick-stop/emergency-stop 能力声明和显式能力矩阵。
 2. 已区分 `not_ready`、`unsupported`、`stopped`、`failed`；不把 SDK 成功返回表述为设备停稳确认。
-3. 待为每个阻塞 ActionEngine 路径增加超时和 cooperative cancel。
+3. 已建立覆盖全部 ActionType 的动作级硬 deadline 和 cooperative cancel
+   上下文；deadline 不会通过脱离资源租约的后台线程伪中断 SDK 调用。
+   待逐路径增加更细的检查点、设备级停止能力和最大取消延迟测试。
 4. 待在真实设备上验证 cancel、quick-stop、emergency-stop。
 5. 待将设备错误进一步关联到 operation 和 `run_id`；当前报告已包含 `device_id`。
 
@@ -221,8 +225,9 @@ IDLE
 
 ### Phase B：ActionHandlerRegistry
 
-1. 定义 typed `ActionHandler` 协议和 handler result。
-2. 先拆 WAIT、INSPECT、表达屏等低耦合动作。
+1. 已定义 typed `ActionHandler` 协议、`ActionHandlerRegistry` 和统一执行上下文；
+   结构化 handler result 仍待接入。
+2. 已拆 WAIT、INSPECT；表达屏及其他低耦合操作待迁移。
 3. 再拆机械臂、身体、底盘、末端执行器。
 4. 最后拆视觉、轨迹、智能加粉等领域 flow。
 5. ActionType 缺少 handler 时在 submit 前显式失败。
@@ -322,7 +327,7 @@ git diff --check
 | WebSocket 无认证和控制所有者 | P0 | 在开放网络部署前完成 |
 | 视觉仍依赖 RM 原生对象 | P1 | 提升 RobotSystem 视觉/示教能力 |
 | 相机预览尚无持久 session lease | P1 | CameraSession + ResourceArbiter |
-| ActionEngine 仍为大类 | P1 | 分批迁移 handler registry |
+| ActionEngine 仍包含多数领域 handler | P1 | 注册表已唯一化，继续按运动、操作、视觉和领域 flow 分批迁移 |
 | GUI/WebSocket 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
 | simulation 与真实设备差异 | P1 | 同状态机 + contract + 硬件清单 |
 
@@ -349,3 +354,4 @@ git diff --check
 | 2026-07-28 | 安全停止软件链路 | TODO → DOING | 新增统一停止契约、设备能力矩阵和 SafetyService；RealMan 双臂快停/急停接入 GUI 与 WebSocket，真实硬件验收仍待完成 |
 | 2026-07-28 | 应用与附加服务宿主 | TODO → DONE | GUI/WebSocket 直接切换为单进程共享 ApplicationServices；WebSocket 具备异步 start/stop，网络服务先于设备运行时关闭 |
 | 2026-07-28 | 编排状态服务 | TODO → DONE | 动作库、任务库和当前序列进入线程安全 CompositionService；GUI/WS 删除 StorageManager 直连并通过 revision 事件同步 |
+| 2026-07-29 | handler 与动作控制首批收敛 | ER-010/ER-011 保持 DOING | 唯一 ActionHandlerRegistry、注册完整性校验和动作 deadline/cancel 上下文落地；WAIT/INSPECT 拆出，阻塞调用超时后仍等待真实返回并保留资源租约 |

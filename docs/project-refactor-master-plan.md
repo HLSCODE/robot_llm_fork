@@ -2,7 +2,7 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-28
+> 最近更新：2026-07-29
 > 当前里程碑：M1/M2 — 核心 Runtime 已落地，入口迁移与硬件验收进行中  
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
@@ -72,6 +72,10 @@ ActionEngine -------- DeviceRuntime ----+
 - 受控取消、软件快停和软件急停已由 `SafetyService` 统一编排；GUI 与 WebSocket
   共用逐设备结果，当前 RealMan 停止链路待真实硬件验收。
 - 已删除无引用的 RealMan 直连动作脚本，不保留兼容转发。
+- `ActionHandlerRegistry` 已成为唯一动作类型分发入口，全部现有 `ActionType`
+  在执行引擎构造时完成注册完整性校验；`WAIT`、`INSPECT` 已迁出引擎。
+- 所有动作已接入统一硬 deadline、暂停和协作取消上下文；阻塞 SDK 调用返回前
+  不释放执行资源，设备级即时停止能力仍需逐路径补齐并完成硬件验收。
 
 仍需继续收敛的重点：
 
@@ -206,7 +210,7 @@ ActionEngine -------- DeviceRuntime ----+
 | A-004 | P0 | DROPPED | 不保留旧执行链路；改为新 runtime 单元和边界测试 |
 | A-005 | P1 | DONE | 实现 execution models/events/handle |
 | A-006 | P1 | DOING | 实现唯一 ExecutionManager；待硬件验收和更多竞态测试 |
-| A-007 | P1 | DOING | ActionEngine 已唯一化，后续拆分 ActionHandlerRegistry |
+| A-007 | P1 | DOING | ActionHandlerRegistry 已成为唯一分发入口，WAIT/INSPECT 已拆分；待迁移运动、操作、视觉和领域 flow handler |
 | A-008 | P1 | DOING | WebSocket 已迁移，待协议 contract test |
 | A-009 | P1 | DOING | GUI 手工和 AI 已迁移，待 GUI smoke test |
 | A-010 | P1 | DOING | GUI/网络入口语音命令已进入统一服务，待 CommandRuntime 完整状态模型 |
@@ -255,7 +259,7 @@ ActionEngine -------- DeviceRuntime ----+
 | B-004 | P1 | DONE | 建立 DeviceRuntime 和 DeviceSnapshot |
 | B-005 | P1 | DOING | 主要入口已统一初始化/重连/关闭，待真实设备逐项验收 |
 | B-006 | P1 | DONE | 定义设备 capability/state/error |
-| B-007 | P1 | TODO | 为阻塞动作补充超时和停止能力 |
+| B-007 | P1 | DOING | 已建立统一动作 deadline 与 cooperative cancel 契约；待补齐各阻塞 SDK 的设备级停止能力和硬件验证 |
 | B-008 | P2 | TODO | 统一串口 transport 生命周期 |
 | B-009 | P2 | DONE | relay/tool-changer/pipette 及机械臂 adapter 已落地，视觉不再依赖厂商对象 |
 | B-010 | P2 | TODO | 评估并接入 PWM neck 动作能力 |
@@ -855,10 +859,11 @@ M4 工程治理与清理
 | 2026-07-28 | M2 | A/B/D/F | 统一安全停止软件链路 | B-001 TODO → DONE；ER-006 保持 DOING | 建立停止能力矩阵、逐设备结果与 SafetyService；RealMan 快停/急停接入 GUI/WS，真实硬件验收待完成 | - |
 | 2026-07-28 | M2 | A/C/D | GUI 与附加服务统一宿主 | A-013/C-014 TODO → DONE | 删除 GUI/Server 二选一组合路径；WebSocket 进入受管理 asyncio 线程并共享唯一 ApplicationServices，默认仅监听本机 | - |
 | 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
+| 2026-07-29 | M2 | A/B | 动作 handler 与执行控制首批收敛 | B-007 TODO → DOING；A-007 保持 DOING | 建立唯一 ActionHandlerRegistry、注册完整性校验和统一动作 deadline/cancel 上下文；首批拆出 WAIT/INSPECT，阻塞调用不使用脱离资源租约的后台超时线程 | - |
 
 ## 22. 建议的首批实施顺序
 
-1. **A-007/B-007**：拆分 ActionHandlerRegistry，并为阻塞硬件动作补齐超时与可取消点。
+1. **A-007/B-007**：继续拆分运动、操作、视觉和领域 handler，并为每条阻塞硬件路径声明及验证设备级停止能力。
 2. **B-002/ER-006**：补齐所有直接控制资源租约，并完成 RealMan 及其他运动设备停止能力的真实硬件验收。
 3. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
 4. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。
