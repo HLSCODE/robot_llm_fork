@@ -436,3 +436,4 @@ RealMan 停止专项验收：
 | 2026-07-29 | 机械臂 Provider 配置收敛 | B-015 TODO → DOING；B-016 TODO → DONE | Provider 注册表和共享核心契约测试落地；RealMan 型号、连接、运动/夹爪及工具架参数强类型化，删除 controller 换枪硬编码、旧配置模块和旧环境键 |
 | 2026-07-29 | WebSocket 安全与执行关联 | ER-007 TODO → DONE；ER-014 TODO → DOING | 写操作认证和单控制租约落地；直接响应、执行事件及业务终态贯通 request_id/action/run_id，错误信封稳定且内部异常不泄露，补充同步快速终态竞态测试 |
 | 2026-07-29 | WebSocket 协议治理 | ER-014 保持 DOING | 强制 API 1.0 版本声明且不保留旧协议兼容；消息大小、频率、并发、排队和发送超时配置化，明确请求单播、系统广播和相机订阅语义 |
+| 2026-07-29 | AI 审批与加粉终态 | ER-010 保持 DONE | GUI/WebSocket 只接受已校验且必须显式确认的 AI 预览；删除自动执行开关；加粉达到最大轮次未达标返回失败并映射 `target_not_reached` |

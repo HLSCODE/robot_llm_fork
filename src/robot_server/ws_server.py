@@ -71,7 +71,8 @@ WebSocket 路径:
         {"event": "error",              "message": "..."}              # 请求参数校验错误
         {"event": "ai_status_changed",  "status": "分析中..."}
         {"event": "ai_skill_matched",   "skill_id": "...", "skill_name": "...", "params": {...}}
-        {"event": "ai_preview_ready",   "sequence": [...], "skill_info": {...}}
+        {"event": "ai_preview_ready",   "sequence": [...], "skill_info": {...},
+         "validation": {"is_valid": true}, "requires_confirmation": true}
         {"event": "ai_execution_finished", "success": true, "message": "..."}
         {"event": "chat_connected"}                                    # 聊天会话已建立
         {"event": "chat_disconnected"}                                 # 聊天会话已断开
@@ -327,6 +328,7 @@ class RobotWebSocketServer:
         # AI 相关状态
         self._ai_preview_sequence: List[SequenceItem] = []
         self._ai_preview_skill_info: Dict[str, Any] = {}
+        self._ai_preview_validated = False
         self._ai_processing = False
 
         # LLM 客户端和技能引擎（延迟初始化，避免未安装 AI 依赖时报错）
@@ -641,7 +643,6 @@ class RobotWebSocketServer:
                 history_turns=voice_config["session_history_turns"],
                 cancel_callback=self._cancel_current_ai_task,
                 tts_enabled=voice_config["tts_enabled"],
-                auto_execute_command=voice_config["auto_execute_command"],
                 wake_feedback=WakeFeedback(
                     enabled=bool(voice_config.get("wake_feedback_enabled", True)),
                     text=str(voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
@@ -2451,6 +2452,11 @@ class RobotWebSocketServer:
                 {"event": "error", "message": "没有待确认的 AI 规划序列"}
             ))
             return
+        if not self._ai_preview_validated:
+            await websocket.send(self._json_msg(
+                {"event": "error", "message": "AI 规划序列未通过校验，拒绝执行"}
+            ))
+            return
 
         if self._services.execution.snapshot().active:
             await websocket.send(self._json_msg(
@@ -2483,13 +2489,11 @@ class RobotWebSocketServer:
             return
 
         # 清空预览状态
-        self._ai_preview_sequence = []
-        self._ai_preview_skill_info = {}
+        self._clear_ai_preview()
 
     async def _handle_ai_cancel(self, websocket, data: dict) -> None:
         """取消 AI 规划"""
-        self._ai_preview_sequence = []
-        self._ai_preview_skill_info = {}
+        self._clear_ai_preview()
         await websocket.send(self._json_msg({
             "event": "ai_cancelled",
             "message": "AI 规划已取消",
@@ -2537,7 +2541,9 @@ class RobotWebSocketServer:
             "planner_provider": planner_client.get_provider_name() if planner_client else "未配置",
             "planner_model": planner_client.get_model_name() if planner_client else "未配置",
             "processing": self._ai_processing,
-            "has_preview": bool(self._ai_preview_sequence),
+            "has_preview": bool(
+                self._ai_preview_sequence and self._ai_preview_validated
+            ),
         }))
 
     async def _handle_list_skills(self, websocket, data: dict) -> None:
@@ -2567,6 +2573,7 @@ class RobotWebSocketServer:
         if self._interaction_controller is None:
             return False
 
+        self._clear_ai_preview()
         self._ai_processing = True
         await self._broadcast({"event": "ai_status_changed", "status": "分析中..."})
         if emit_minicpm_instruction:
@@ -2598,14 +2605,15 @@ class RobotWebSocketServer:
         if event_type in ("text_delta", "audio_delta", "done"):
             interaction_data.pop("raw", None)
 
-        await self._broadcast({
-            "event": "interaction_event",
-            "type": event_type,
-            "text": text,
-            "text_delta": event.get("text_delta") or "",
-            "intent": intent,
-            "data": interaction_data,
-        })
+        if event_type != "command_preview":
+            await self._broadcast({
+                "event": "interaction_event",
+                "type": event_type,
+                "text": text,
+                "text_delta": event.get("text_delta") or "",
+                "intent": intent,
+                "data": interaction_data,
+            })
 
         if event_type == "intent":
             intent_name = (intent or {}).get("intent", "unknown")
@@ -2623,6 +2631,7 @@ class RobotWebSocketServer:
             return
 
         if event_type == "command_preview":
+            self._clear_ai_preview()
             sequence_dicts = data.get("sequence") or []
             try:
                 sequence = [
@@ -2638,10 +2647,33 @@ class RobotWebSocketServer:
                 })
                 return
 
+            validation = data.get("validation") or {}
+            validation_passed = validation.get("is_valid") is True
+            confirmation_required = data.get("requires_confirmation") is True
+            if not sequence or not validation_passed or not confirmation_required:
+                await self._broadcast({
+                    "event": "error",
+                    "message": "动作预览未经校验或缺少显式确认要求，已拒绝",
+                })
+                await self._broadcast({
+                    "event": "ai_status_changed",
+                    "status": "预览无效",
+                })
+                return
+
             plan = data.get("plan") or {}
             skill_info = data.get("skill_info") or {}
             self._ai_preview_sequence = sequence
             self._ai_preview_skill_info = skill_info
+            self._ai_preview_validated = True
+            await self._broadcast({
+                "event": "interaction_event",
+                "type": event_type,
+                "text": text,
+                "text_delta": event.get("text_delta") or "",
+                "intent": intent,
+                "data": interaction_data,
+            })
 
             if plan:
                 await self._broadcast({
@@ -2658,7 +2690,8 @@ class RobotWebSocketServer:
                 "sequence": [item.to_dict() for item in sequence],
                 "skill_info": skill_info,
                 "plan": plan,
-                "validation": data.get("validation") or {},
+                "validation": validation,
+                "requires_confirmation": True,
                 "message": text,
             })
             await self._broadcast({"event": "ai_status_changed", "status": "预览就绪"})
@@ -2717,10 +2750,15 @@ class RobotWebSocketServer:
 
     async def _cancel_current_ai_task(self) -> None:
         """供 voice_interaction 的 session_control.cancel_task 调用。"""
-        self._ai_preview_sequence = []
-        self._ai_preview_skill_info = {}
+        self._clear_ai_preview()
         if self._services.execution.snapshot().active:
             self._services.execution.cancel()
+
+    def _clear_ai_preview(self) -> None:
+        """Discard the pending AI preview and its validation state."""
+        self._ai_preview_sequence = []
+        self._ai_preview_skill_info = {}
+        self._ai_preview_validated = False
 
     # ==================================================================
     # 设备管理

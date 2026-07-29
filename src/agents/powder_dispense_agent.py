@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from enum import Enum
 from typing import Callable, Protocol
 
 
@@ -16,9 +17,19 @@ class PowderController(Protocol):
     def rotation_stop(self) -> None: ...
 
 
-@dataclass
+class PowderDispenseOutcome(str, Enum):
+    """Terminal outcomes for one closed-loop dispensing attempt."""
+
+    TARGET_REACHED = "target_reached"
+    MAX_ROUNDS_REACHED = "max_rounds_reached"
+    STOPPED = "stopped"
+    OVER_TARGET = "over_target"
+    READING_ANOMALY = "reading_anomaly"
+
+
+@dataclass(frozen=True, slots=True)
 class PowderDispenseResult:
-    success: bool
+    outcome: PowderDispenseOutcome
     initial_g: float
     final_g: float
     target_mg: float
@@ -26,8 +37,12 @@ class PowderDispenseResult:
     rounds: int
     message: str
 
+    @property
+    def successful(self) -> bool:
+        return self.outcome is PowderDispenseOutcome.TARGET_REACHED
 
-@dataclass
+
+@dataclass(frozen=True, slots=True)
 class PowderDispenseConfig:
     target_mg: float = 100.0
     tolerance_mg: float = 5.0
@@ -92,15 +107,36 @@ class PowderDispenseAgent:
 
             for rounds in range(1, config.max_rounds + 1):
                 if self._should_stop():
-                    return self._result(False, initial_g, current_g, config, rounds - 1, "用户停止")
+                    return self._result(
+                        PowderDispenseOutcome.STOPPED,
+                        initial_g,
+                        current_g,
+                        config,
+                        rounds - 1,
+                        "用户停止",
+                    )
 
                 added_mg = (current_g - initial_g) * 1000.0
                 remaining_mg = config.target_mg - added_mg
 
                 if remaining_mg < -config.tolerance_mg:
-                    return self._result(False, initial_g, current_g, config, rounds - 1, "加粉超量")
+                    return self._result(
+                        PowderDispenseOutcome.OVER_TARGET,
+                        initial_g,
+                        current_g,
+                        config,
+                        rounds - 1,
+                        "加粉超量",
+                    )
                 if remaining_mg <= config.tolerance_mg:
-                    return self._result(True, initial_g, current_g, config, rounds - 1, "达到目标")
+                    return self._result(
+                        PowderDispenseOutcome.TARGET_REACHED,
+                        initial_g,
+                        current_g,
+                        config,
+                        rounds - 1,
+                        "达到目标",
+                    )
 
                 step = self._choose_step(remaining_mg, config)
                 self._log(
@@ -114,9 +150,23 @@ class PowderDispenseAgent:
                 current_g = self._read_balance_retry(config)
                 delta_mg = (current_g - previous_g) * 1000.0
                 if delta_mg < -config.max_drop_mg:
-                    return self._result(False, initial_g, current_g, config, rounds, "读数异常下降")
+                    return self._result(
+                        PowderDispenseOutcome.READING_ANOMALY,
+                        initial_g,
+                        current_g,
+                        config,
+                        rounds,
+                        "读数异常下降",
+                    )
 
-            return self._result(True, initial_g, current_g, config, config.max_rounds, "达到最大轮次，继续后续流程")
+            return self._result(
+                PowderDispenseOutcome.MAX_ROUNDS_REACHED,
+                initial_g,
+                current_g,
+                config,
+                config.max_rounds,
+                "达到最大轮次但未达到目标",
+            )
         finally:
             self._return_safe(ctrl, config)
 
@@ -154,7 +204,7 @@ class PowderDispenseAgent:
 
     @staticmethod
     def _result(
-        success: bool,
+        outcome: PowderDispenseOutcome,
         initial_g: float,
         final_g: float,
         config: PowderDispenseConfig,
@@ -162,7 +212,7 @@ class PowderDispenseAgent:
         message: str,
     ) -> PowderDispenseResult:
         return PowderDispenseResult(
-            success=success,
+            outcome=outcome,
             initial_g=initial_g,
             final_g=final_g,
             target_mg=config.target_mg,

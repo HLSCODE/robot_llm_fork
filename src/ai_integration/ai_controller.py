@@ -45,6 +45,8 @@ class AIController(QObject):
 
         self._current_sequence: List[SequenceItem] = []
         self._current_skill_info: Dict[str, Any] = {}
+        self._current_preview_validated = False
+        self._current_preview_confirmed = False
         if self._execution_bridge is not None:
             self._execution_bridge.execution_completed.connect(
                 self._on_execution_completed
@@ -69,10 +71,30 @@ class AIController(QObject):
         self,
         items: List[Dict[str, Any]],
         skill_info: Dict[str, Any],
+        *,
+        validation_passed: bool,
+        confirmation_required: bool,
     ) -> None:
-        """Store the action preview produced by voice_interaction."""
-        self._current_sequence = [SequenceItem.from_dict(item) for item in items]
+        """Store a validated preview that must be explicitly confirmed."""
+        self.clear_current_preview()
+        if not validation_passed:
+            raise ValueError("动作预览未通过校验")
+        if not confirmation_required:
+            raise ValueError("动作预览缺少显式确认要求")
+
+        sequence = [SequenceItem.from_dict(item) for item in items]
+        if not sequence:
+            raise ValueError("动作预览不包含可执行动作")
+        self._current_sequence = sequence
         self._current_skill_info = dict(skill_info or {})
+        self._current_preview_validated = True
+
+    def clear_current_preview(self) -> None:
+        """Discard the current preview and all approval state."""
+        self._current_sequence = []
+        self._current_skill_info = {}
+        self._current_preview_validated = False
+        self._current_preview_confirmed = False
 
     def get_current_preview(self) -> tuple:
         """Return the currently stored action preview."""
@@ -83,11 +105,15 @@ class AIController(QObject):
         if not self._current_sequence:
             self.error_occurred.emit("没有可执行的动作序列")
             return
+        if not self._current_preview_validated:
+            self.error_occurred.emit("动作预览未通过校验，拒绝执行")
+            return
 
         if self._execution_bridge is None:
             self.error_occurred.emit("执行器未初始化")
             return
 
+        self._current_preview_confirmed = True
         self.status_changed.emit("执行中...")
         self.execution_started.emit()
         self.sequence_execution_started.emit(self._current_sequence)
@@ -107,10 +133,17 @@ class AIController(QObject):
         """Start real/simulated execution after the GUI preview animation."""
         if not self._current_sequence:
             return
+        if not (
+            self._current_preview_validated
+            and self._current_preview_confirmed
+        ):
+            self.error_occurred.emit("动作预览未经校验和显式确认，拒绝执行")
+            return
         if self._execution_bridge is None:
             self.error_occurred.emit("执行器未初始化")
             return
 
+        self._current_preview_confirmed = False
         try:
             accepted = self._execution_bridge.execute_sequence_items(
                 self._current_sequence,
@@ -131,8 +164,7 @@ class AIController(QObject):
         if self._execution_bridge:
             self._execution_bridge.stop_execution()
 
-        self._current_sequence = []
-        self._current_skill_info = {}
+        self.clear_current_preview()
 
         self.status_changed.emit("已取消")
         logger.info("当前任务已取消")
@@ -176,7 +208,6 @@ class AIController(QObject):
 
     def _on_execution_completed(self, success: bool) -> None:
         message = "执行成功" if success else "执行失败或已停止"
-        self._current_sequence = []
-        self._current_skill_info = {}
+        self.clear_current_preview()
         self.execution_finished.emit(success, message)
         self.status_changed.emit("执行完成" if success else "执行失败")

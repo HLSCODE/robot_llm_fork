@@ -34,8 +34,6 @@ VoiceEventType = Literal[
     "text_delta",
     "audio_delta",
     "command_preview",
-    "command_started",
-    "command_finished",
     "vision_started",
     "error",
     "done",

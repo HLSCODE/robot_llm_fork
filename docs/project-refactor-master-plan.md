@@ -408,7 +408,6 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 ### 10.2 当前问题
 
 - GUI 创建了语音和文本两个 `VoiceInteractionController`，会话上下文边界不清晰。
-- auto execute 配置存在，但当前执行行为没有完整接入。
 - session pause 和 execution pause 容易混淆。
 - 预览没有统一 `preview_id`、版本和过期策略。
 - SkillEngine 对未知 action type 静默回退为 MOVE。
@@ -429,7 +428,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
-| E-001 | P0 | TODO | 禁止未经校验的 auto execute |
+| E-001 | P0 | DONE | 已删除 auto execute 配置和事件分支；GUI/WS 只接受通过校验且要求显式确认的预览，执行前再次校验确认状态，新输入会使旧预览失效 |
 | E-002 | P1 | TODO | Voice CommandRuntime 接入 |
 | E-003 | P1 | TODO | 区分 session control 和 execution control |
 | E-004 | P1 | TODO | 预览增加 preview_id、版本和过期状态 |
@@ -525,7 +524,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
-| F-P-001 | P0 | TODO | 明确“最大轮次仍返回成功”的业务语义 |
+| F-P-001 | P0 | DONE | 达到最大轮次但未达到目标明确返回 `MAX_ROUNDS_REACHED` 失败终态，并映射稳定错误码 `target_not_reached` |
 | F-P-002 | P1 | DOING | 加粉流程已接入统一取消、结构化 handler result、可取消等待和安全回位；待真实硬件验收 |
 | F-P-003 | P1 | TODO | 记录每轮读数、动作、阈值和结果 |
 | F-P-004 | P2 | TODO | 为规则策略建立离线回归测试 |
@@ -893,14 +892,17 @@ M4 工程治理与清理
 | 2026-07-29 | M3 | C/F | WebSocket 写安全边界 | C-001/C-002 TODO → DONE；C-003 TODO → DOING | 新增共享密钥认证、单控制客户端租约、心跳/超时/断线释放和结构化安全审计；未配置密钥时写操作默认拒绝，观察者断线不再停止控制者遥操作 | - |
 | 2026-07-29 | M3 | A/C | WebSocket 请求与执行关联 | C-003/C-004/C-005 DOING/TODO → DONE | 新增请求上下文和统一错误信封；直接响应与执行 accepted/step/log/terminal 贯通 request_id/action/run_id，执行接受及最终成功/失败/取消形成两阶段审计；未预期异常被连接边界隔离 | - |
 | 2026-07-29 | M3 | C | WebSocket 版本、流控与投递语义 | C-006/C-007/C-008 TODO → DONE；C-012 TODO → DOING | 强制 api_version=1.0 且不保留旧协议；配置消息/频率/并发/队列/发送超时，明确请求单播、系统广播和相机订阅投递并增加协议契约测试 | - |
+| 2026-07-29 | M3 | E/F | AI 执行审批与加粉终态收敛 | E-001/F-P-001 TODO → DONE | 删除自动执行配置和死事件；预览必须通过校验并由 GUI/WebSocket 显式确认；加粉最大轮次未达标改为显式失败并输出 `target_not_reached` | - |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
+3. **E-004/E-005/E-006**：为预览增加 ID、版本和过期状态；未知 action
+   type 显式失败；技能参数接入统一 action schema。
+4. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
    typed DTO，继续固化全部 action 的协议契约。
-4. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。
-5. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
-6. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+5. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。
+6. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
+7. 完成 simulation smoke test 后执行逐设备真实硬件验收。

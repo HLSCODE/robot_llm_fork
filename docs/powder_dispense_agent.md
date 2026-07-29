@@ -11,7 +11,7 @@
 ```text
 GUI/任务流
   -> ARM_ACTION / 执行器=智能加粉
-  -> ExecutionManager / ActionEngine
+  -> ExecutionManager / PowderDispenseActionHandler
   -> PowderDispenseAgent
   -> balance_reader_simple.read_balance()
   -> DeviceRuntime / PowderDispenser
@@ -123,7 +123,9 @@ VVEAI_MODEL=doubao-seed-1-8-251228
 智能加粉包含以下保护：
 
 - 连续天平读数失败会停止任务。
-- 达到最大轮次会结束闭环并返回成功，让后续任务继续执行。
+- 达到最大轮次但仍未进入目标容差时返回
+  `MAX_ROUNDS_REACHED`，统一执行结果为失败并使用
+  `target_not_reached` 错误码，后续动作不会继续执行。
 - 超过目标重量并超过容差会返回失败。
 - 当前重量相比上一轮明显下降会返回失败。
 - 用户停止任务时会尽快退出闭环。
@@ -171,7 +173,7 @@ python -m py_compile \
 | `src/agents/powder_dispense_agent.py` | 智能闭环加粉核心逻辑 |
 | `src/devices/tapping_controller.py` | 加粉装置底层控制 |
 | `src/vision/balance_reader_simple.py` | 大模型视觉读取天平 |
-| `src/execution/engine.py` | 唯一动作执行入口 |
+| `src/execution/handlers/manipulation.py` | 加粉 action handler 与统一结果映射 |
 | `src/device_runtime/factory.py` | 加粉设备注册和生命周期 |
 | `src/gui/dialogs.py` | GUI 动作配置面板 |
 | `src/robot_server/ws_server.py` | WebSocket 动作 schema |

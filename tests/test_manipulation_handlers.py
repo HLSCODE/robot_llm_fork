@@ -446,6 +446,35 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
         self.assertIn(("lift_safe", 1), powder.calls)
         self.assertIn(("rotation_home", 3), powder.calls)
 
+    def test_powder_max_rounds_maps_to_target_not_reached(self):
+        powder = _PowderDispenser()
+        runtime = _runtime_with(
+            POWDER_DISPENSER,
+            DeviceCapability.POWDER_DISPENSER,
+            powder,
+        )
+        readings = iter((1.0, 1.001))
+        context, _logs = _context()
+        handler = PowderDispenseActionHandler(
+            runtime,
+            lambda: {},
+            read_balance=lambda: next(readings),
+        )
+
+        result = handler(
+            {
+                "target_mg": 100,
+                "tolerance_mg": 1,
+                "max_rounds": 1,
+                "settle_seconds": 0,
+            },
+            context,
+        )
+
+        self.assertFalse(result.successful)
+        self.assertIs(ActionResultCode.TARGET_NOT_REACHED, result.code)
+        self.assertIn("未达到目标", result.message)
+
 
 class ManipulationRuntimeIntegrationTests(unittest.TestCase):
     def test_discrete_manipulation_actions_use_unified_registry(self):

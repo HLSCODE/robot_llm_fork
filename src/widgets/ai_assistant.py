@@ -157,7 +157,6 @@ class AIAssistantWidget(QWidget):
             history_turns=voice_config["session_history_turns"],
             cancel_callback=self._ai_controller.cancel_current_task,
             tts_enabled=voice_config["tts_enabled"],
-            auto_execute_command=voice_config["auto_execute_command"],
             wake_feedback=WakeFeedback(
                 enabled=bool(voice_config.get("wake_feedback_enabled", True)),
                 text=str(voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
@@ -174,7 +173,6 @@ class AIAssistantWidget(QWidget):
             history_turns=voice_config["session_history_turns"],
             cancel_callback=self._ai_controller.cancel_current_task,
             tts_enabled=voice_config["tts_enabled"],
-            auto_execute_command=voice_config["auto_execute_command"],
         )
         self._voice_input_enabled = bool(voice_config.get("speech_input_enabled"))
         self._voice_thread = None
@@ -691,6 +689,7 @@ class AIAssistantWidget(QWidget):
             self._add_system_message("正在处理上一句话，请稍候")
             return
 
+        self._clear_pending_preview()
         self._voice_processing = True
         self._voice_streaming_reply = False
         self._voice_audio_chunk_count = 0
@@ -715,6 +714,14 @@ class AIAssistantWidget(QWidget):
         self._voice_thread.finished.connect(self._on_voice_thread_finished)
         self._voice_thread.finished.connect(self._voice_thread.deleteLater)
         self._voice_thread.start()
+
+    def _clear_pending_preview(self) -> None:
+        """Invalidate the previous preview before accepting new input."""
+        self._ai_controller.clear_current_preview()
+        self._current_preview_items = []
+        self._current_skill_info = {}
+        self.preview_button.setEnabled(False)
+        self.execute_button.setEnabled(False)
 
     @pyqtSlot(dict)
     def _handle_dialog_event(self, event: dict):
@@ -772,6 +779,7 @@ class AIAssistantWidget(QWidget):
             text = (event.get("text") or "").strip()
             elapsed_ms = float((event.get("data") or {}).get("elapsed_ms") or 0.0)
             if text:
+                self._clear_pending_preview()
                 self._voice_processing = True
                 self._voice_streaming_reply = False
                 self._voice_audio_chunk_count = 0
@@ -816,13 +824,25 @@ class AIAssistantWidget(QWidget):
         elif event_type == "command_preview":
             self._finish_bot_delta()
             data = event.get("data") or {}
-            self._current_preview_items = data.get("sequence", [])
-            self._current_skill_info = data.get("skill_info", {})
-            if self._current_preview_items:
+            sequence = data.get("sequence") or []
+            skill_info = data.get("skill_info") or {}
+            validation = data.get("validation") or {}
+            validation_passed = validation.get("is_valid") is True
+            confirmation_required = data.get("requires_confirmation") is True
+            try:
                 self._ai_controller.set_current_preview_from_dicts(
-                    self._current_preview_items,
-                    self._current_skill_info,
+                    sequence,
+                    skill_info,
+                    validation_passed=validation_passed,
+                    confirmation_required=confirmation_required,
                 )
+            except (KeyError, TypeError, ValueError) as exc:
+                self._current_preview_items = []
+                self._current_skill_info = {}
+                self._add_system_message(f"动作预览已拒绝: {exc}")
+            else:
+                self._current_preview_items = sequence
+                self._current_skill_info = skill_info
             if not data.get("suppress_message"):
                 self._add_bot_message(event.get("text") or "已生成动作预览")
             self.preview_button.setEnabled(bool(self._current_preview_items))

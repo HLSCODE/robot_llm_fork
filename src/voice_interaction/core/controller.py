@@ -27,7 +27,6 @@ class VoiceInteractionController:
         timeout_s: float = 30.0,
         cancel_callback: Optional[Callable[[], Any]] = None,
         tts_enabled: bool = False,
-        auto_execute_command: bool = False,
         history_turns: int = 6,
         wake_feedback: Optional[WakeFeedback] = None,
     ) -> None:
@@ -43,7 +42,6 @@ class VoiceInteractionController:
             camera_provider=camera_provider,
             cancel_callback=cancel_callback,
             tts_enabled=tts_enabled,
-            auto_execute_command=auto_execute_command,
             history_turns=history_turns,
         )
 

@@ -7,6 +7,7 @@ from typing import Any
 from ...actions.circle_dispense import execute_right_arm_circle_dispense
 from ...agents.powder_dispense_agent import (
     PowderDispenseAgent,
+    PowderDispenseOutcome,
     config_from_params,
 )
 from ...device_runtime import (
@@ -877,21 +878,26 @@ class PowderDispenseActionHandler:
                 device_id=POWDER_DISPENSER,
             )
 
-        level = "info" if result.success else "error"
+        level = "info" if result.successful else "error"
         message = (
             f"智能加粉结束: {result.message}, "
             f"已加={result.added_mg:.1f}mg/{result.target_mg:.1f}mg, "
             f"轮次={result.rounds}, 终值={result.final_g:.4f}g"
         )
         context.log(message, level)
-        if result.success:
+        if result.successful:
             return context.success(
                 message=result.message,
                 operation=self._OPERATION,
                 device_id=POWDER_DISPENSER,
             )
+        failure_code = (
+            ActionResultCode.TARGET_NOT_REACHED
+            if result.outcome is PowderDispenseOutcome.MAX_ROUNDS_REACHED
+            else ActionResultCode.OPERATION_REJECTED
+        )
         return context.failure(
-            ActionResultCode.OPERATION_REJECTED,
+            failure_code,
             message,
             operation=self._OPERATION,
             device_id=POWDER_DISPENSER,

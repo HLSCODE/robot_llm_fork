@@ -169,8 +169,6 @@ VoiceEventType = Literal[
     "text_delta",
     "audio_delta",
     "command_preview",
-    "command_started",
-    "command_finished",
     "vision_started",
     "error",
     "done",
@@ -348,14 +346,19 @@ async def _handle_command(self, text: str):
         data={
             "plan": plan,
             "sequence": sequence,
+            "validation": {"is_valid": True},
+            "requires_confirmation": True,
         },
     )
 ```
 
-执行策略建议：
+执行策略：
 
-- GUI 第一阶段只生成预览，不自动执行。
-- 后续可加配置：`VOICE_AUTO_EXECUTE_COMMAND=true/false`。
+- 只有通过技能和动作序列校验的结果才能生成预览。
+- 所有预览都带有 `requires_confirmation=true`，GUI 必须由用户点击执行或确认，
+  WebSocket 必须收到独立的 `ai_confirm` 请求后才能进入统一执行运行时。
+- 接受新的文本或语音输入前会清除上一份待确认预览，避免误确认旧规划。
+- 项目不提供自动执行配置，也不保留绕过确认的兼容路径。
 - 执行动作时必须支持取消。
 
 ## 13. Vision 处理
@@ -546,7 +549,6 @@ CAMERA_PROVIDER=realsense
 VISION_CAMERA_NAME=monitor1
 VOICE_SESSION_TIMEOUT_S=30
 VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S=30
-VOICE_AUTO_EXECUTE_COMMAND=false
 VOICE_TTS_ENABLED=false
 VOICE_INPUT_ENABLED=false
 VOICE_AUDIO_SAMPLE_RATE=16000
@@ -563,7 +565,6 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 - `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/cameras/` 支持的 `realsense` / `webcam`。
 - `VISION_CAMERA_NAME`：视觉问答默认使用的相机名称或序列号；为空时使用所有在线相机。
 - `VOICE_SESSION_TIMEOUT_S`：唤醒后无交互多久自动休眠。
-- `VOICE_AUTO_EXECUTE_COMMAND`：命令是否自动执行，第一阶段建议 false。
 - `VOICE_TTS_ENABLED`：是否在 `voice_stream` task 中请求模型生成语音回复。`classifier/planner` 等文本 task 不受该配置影响。
 - `VOICE_INPUT_ENABLED`：是否启用真实语音输入；true 时同时启用唤醒词和 ASR，false 时二者都不加载。
 
@@ -574,7 +575,6 @@ LLM_DEFAULT_PROVIDER=minicpm
 CAMERA_PROVIDER=realsense
 VISION_CAMERA_NAME=monitor1
 VOICE_SESSION_TIMEOUT_S=30
-VOICE_AUTO_EXECUTE_COMMAND=false
 VOICE_TTS_ENABLED=false
 VOICE_INPUT_ENABLED=false
 ```

@@ -1988,7 +1988,13 @@ ws.onmessage = (event) => {
   "skill_info": {
     "id": "grab_bottle",
     "name": "抓取瓶子"
-  }
+  },
+  "validation": {
+    "is_valid": true,
+    "message": "校验通过",
+    "warnings": []
+  },
+  "requires_confirmation": true
 }
 ```
 
@@ -2003,6 +2009,7 @@ ws.onmessage = (event) => {
 
 - `ai_chat` 没有单独的“提交成功”响应包；前端要把后续收到的事件流当作这次请求的结果。
 - `ai_preview_ready.sequence` 才是最终给前端展示、确认、执行的任务序列。
+- 服务端只发布通过校验且 `requires_confirmation=true` 的预览；缺少任一条件时预览会被拒绝。
 - `ai_preview_ready` 到来前，前端不应认为规划已经成功。
 
 #### 11.0.2 MiniCPM 聊天触发路径
@@ -2151,7 +2158,9 @@ ws.onmessage = (event) => {
 {
   "event": "ai_preview_ready",
   "sequence": [],
-  "skill_info": {}
+  "skill_info": {},
+  "validation": {"is_valid": true},
+  "requires_confirmation": true
 }
 ```
 
@@ -2168,6 +2177,7 @@ ws.onmessage = (event) => {
 
 - `ai_chat` 只负责规划，不直接执行
 - 真正执行要靠 `ai_confirm`
+- 项目不存在自动执行配置，前端不得将预览事件本身视为执行授权
 - `sequence` 会写入服务端的“AI 待确认预览区”，但此时还不会覆盖当前执行序列
 - 前端应以 `ai_preview_ready.sequence` 作为唯一权威预览数据源
 - 如果收到 `ai_skill_not_matched` 或 `error`，则视为本轮规划失败
@@ -2218,7 +2228,7 @@ AI 执行流程结束示例：
 说明：
 
 - `ai_confirm` 只能确认“最近一次尚未取消的 AI 预览序列”。
-- 如果当前没有待确认预览，服务端会返回 `error`。
+- 如果当前没有待确认预览，或预览未通过服务端校验，服务端会返回 `error`。
 - `ai_confirm` 成功后，预览缓存会被清空。
 - 执行进度事件与普通 `execute` 共用同一套 `step_started` / `step_completed` / `step_failed` / `execution_finished`。
 

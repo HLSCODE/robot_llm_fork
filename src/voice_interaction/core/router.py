@@ -29,7 +29,6 @@ class VoiceIntentRouter:
         camera_provider=None,
         cancel_callback: Optional[CancelCallback] = None,
         tts_enabled: bool = False,
-        auto_execute_command: bool = False,
         history_turns: int = 6,
     ) -> None:
         self.llm_registry = llm_registry
@@ -38,7 +37,6 @@ class VoiceIntentRouter:
         self.camera_provider = camera_provider
         self.cancel_callback = cancel_callback
         self.tts_enabled = bool(tts_enabled)
-        self.auto_execute_command = bool(auto_execute_command)
         self.history_turns = max(0, int(history_turns))
 
     async def route(
@@ -145,7 +143,7 @@ class VoiceIntentRouter:
                         "message": validation.message,
                         "warnings": validation.warnings,
                     },
-                    "auto_execute": self.auto_execute_command,
+                    "requires_confirmation": True,
                     "suppress_message": True,
                 },
             )
@@ -154,11 +152,6 @@ class VoiceIntentRouter:
                 humanize=True,
             ):
                 yield event
-
-            if self.auto_execute_command:
-                yield VoiceEvent(type="command_started", text="自动执行暂未接入 GUI 第一阶段")
-                async for event in self._stream_feedback("自动执行暂未接入当前界面，请手动确认执行。"):
-                    yield event
         finally:
             self.session.resume()
 

@@ -28,7 +28,6 @@ class Config:
     VOICE_SESSION_TIMEOUT_S: float = 30.0
     VOICE_SESSION_HISTORY_TURNS: int = 6
     VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S: float = 30.0
-    VOICE_AUTO_EXECUTE_COMMAND: bool = False
     VOICE_TTS_ENABLED: bool = False
     VOICE_INPUT_ENABLED: bool = False
     VOICE_AUDIO_SAMPLE_RATE: int = 16000
@@ -337,9 +336,6 @@ class Config:
         instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S = float(os.getenv(
             "VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S", "30"
         ))
-        instance.VOICE_AUTO_EXECUTE_COMMAND = os.getenv(
-            "VOICE_AUTO_EXECUTE_COMMAND", "false"
-        ).lower() in ("true", "1", "yes")
         instance.VOICE_TTS_ENABLED = os.getenv(
             "VOICE_TTS_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
@@ -1194,7 +1190,6 @@ class Config:
             "session_timeout_s": instance.VOICE_SESSION_TIMEOUT_S,
             "session_history_turns": instance.VOICE_SESSION_HISTORY_TURNS,
             "speech_startup_wait_timeout_s": instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S,
-            "auto_execute_command": instance.VOICE_AUTO_EXECUTE_COMMAND,
             "tts_enabled": instance.VOICE_TTS_ENABLED,
             "speech_input_enabled": instance.VOICE_INPUT_ENABLED,
             "wake_word_enabled": instance.VOICE_INPUT_ENABLED,

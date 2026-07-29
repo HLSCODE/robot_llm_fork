@@ -43,6 +43,7 @@ class ActionResultCode(str, Enum):
     RESOURCE_NOT_FOUND = "resource_not_found"
     DEVICE_UNAVAILABLE = "device_unavailable"
     DEVICE_OPERATION_FAILED = "device_operation_failed"
+    TARGET_NOT_REACHED = "target_not_reached"
     OPERATION_REJECTED = "operation_rejected"
     ACTION_TIMEOUT = "action_timeout"
     CONTROL_POLICY_MISMATCH = "control_policy_mismatch"
