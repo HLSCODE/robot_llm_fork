@@ -105,13 +105,14 @@ except ImportError:
 
 from ..application import (
     ApplicationServices,
+    CameraSession,
     CompositionChangeType,
     CompositionEvent,
 )
 from ..core.models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus, LoopBlock, SequenceEntry
 from ..core.config_loader import Config
 from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
-from ..device_runtime import ArmStateReader, DepthCameraSource, StopMode
+from ..device_runtime import StopMode
 from ..execution import (
     ExecutionEvent,
     ExecutionEventType,
@@ -248,6 +249,7 @@ class RobotWebSocketServer:
         # 相机帧订阅：通过 subscribe_camera_frames action 注册
         self._camera_frame_subs: Set = set()
         self._camera_push_task: Optional[asyncio.Task] = None
+        self._camera_preview_session: Optional[CameraSession] = None
 
         # MiniCPM 代理配置（延迟初始化）
         self._minicpm_cfg: Optional[MiniCPMChatConfig] = None
@@ -266,6 +268,7 @@ class RobotWebSocketServer:
 
         # 数据采集状态
         self._demo_recorder: Optional["RLBenchRecorder"] = None
+        self._demo_camera_session: Optional[CameraSession] = None
         self._demo_session = {
             "active": False,
             "task": None,
@@ -336,6 +339,7 @@ class RobotWebSocketServer:
 
         self._camera_frame_subs.clear()
         await self._cancel_background_tasks()
+        self._stop_camera_if_idle()
         await self._close_llm_clients()
         await self._close_demo_recorder()
         self._clients.clear()
@@ -466,18 +470,27 @@ class RobotWebSocketServer:
     async def _close_demo_recorder(self) -> None:
         recorder = self._demo_recorder
         self._demo_recorder = None
-        if recorder is None:
+        camera_session = self._demo_camera_session
+        self._demo_camera_session = None
+        if recorder is None and camera_session is None:
             return
         errors: list[Exception] = []
+        if recorder is not None:
+            try:
+                await asyncio.to_thread(recorder.stop_recording)
+            except Exception as exc:
+                errors.append(exc)
+            try:
+                recorder.end_session()
+            except Exception as exc:
+                errors.append(exc)
         try:
-            await asyncio.to_thread(recorder.stop_recording)
-        except Exception as exc:
-            errors.append(exc)
-        try:
-            recorder.end_session()
+            self._services.teleoperation.stop()
         except Exception as exc:
             errors.append(exc)
         finally:
+            if camera_session is not None:
+                camera_session.close()
             self._demo_session = {
                 "active": False,
                 "task": None,
@@ -518,7 +531,7 @@ class RobotWebSocketServer:
                 llm_registry=self._llm_registry,
                 skill_engine=self._skill_engine,
                 camera_provider=CamerasModuleProvider(
-                    manager_factory=self._camera_for_capture,
+                    session_factory=self._camera_capture_session,
                     camera_name=config.VISION_CAMERA_NAME or None,
                 ),
                 timeout_s=voice_config["session_timeout_s"],
@@ -540,9 +553,10 @@ class RobotWebSocketServer:
             return self._llm_registry.get_chat_client(provider)
         return self._llm_client
 
-    def _camera_for_capture(self):
-        self._services.devices.initialize(CAMERA)
-        return self._camera_manager
+    def _camera_capture_session(self):
+        return self._services.camera_access.open(
+            "websocket-voice-capture"
+        )
 
     def _get_planner_client(self, provider: Optional[str] = None):
         if self._llm_registry is not None:
@@ -2140,21 +2154,17 @@ class RobotWebSocketServer:
         请求: {"action": "test_camera"}
         """
         def _do_test():
+            session = None
             try:
                 import time
 
                 config = Config.get_instance()
                 camera_name = config.VISION_CAMERA_NAME or None
 
-                self._services.devices.initialize(CAMERA)
-                mgr = self._camera_manager
-                if mgr is None:
-                    self._broadcast_threadsafe({
-                        "event": "camera_test_result",
-                        "success": False,
-                        "message": "相机管理器未启动（请检查 CAMERA_PROVIDER 和设备配置）",
-                    })
-                    return
+                session = self._services.camera_access.open(
+                    "websocket-test"
+                )
+                mgr = session.camera
 
                 # 等待至少一路相机上线
                 deadline = time.time() + 10
@@ -2244,6 +2254,9 @@ class RobotWebSocketServer:
                     "success": False,
                     "message": f"测试异常: {str(e)}",
                 })
+            finally:
+                if session is not None:
+                    session.close()
 
         threading.Thread(target=_do_test, daemon=True, name="TestCamera").start()
         await websocket.send(self._json_msg({"event": "log", "level": "info", "message": "正在测试相机..."}))
@@ -2297,10 +2310,6 @@ class RobotWebSocketServer:
     # 相机管理器
     # ==================================================================
 
-    def _init_camera(self) -> None:
-        """Initialize the runtime-owned camera manager."""
-        self._services.devices.initialize(CAMERA)
-
     async def _handle_camera_status(self, websocket, data: dict) -> None:
         """
         查询相机管理器状态
@@ -2349,21 +2358,30 @@ class RobotWebSocketServer:
         请求: {"action": "subscribe_camera_frames"}
         成功后服务端持续推送: {"event": "camera_frames", "frames": [...]}
         """
-        if self._camera_manager is None or not self._camera_manager.is_running:
-            self._init_camera()
-        if self._camera_manager is None:
-            await websocket.send(self._json_msg({
-                "event": "camera_error",
-                "message": "未配置任何相机",
-                "cameras": [],
-            }))
-            return
-        if not self._camera_manager.camera_count:
+        if self._camera_preview_session is None:
+            try:
+                self._camera_preview_session = (
+                    self._services.camera_access.open(
+                        "websocket-preview"
+                    )
+                )
+            except Exception as exc:
+                await websocket.send(self._json_msg({
+                    "event": "camera_error",
+                    "message": f"相机资源不可用: {exc}",
+                    "cameras": [],
+                }))
+                return
+
+        camera = self._camera_preview_session.camera
+        if not camera.camera_count:
             await websocket.send(self._json_msg({
                 "event": "camera_error",
                 "message": "所有配置相机均不可用",
-                "cameras": self._camera_manager.get_cameras_info(),
+                "cameras": camera.get_cameras_info(),
             }))
+            self._camera_preview_session.close()
+            self._camera_preview_session = None
             return
 
         self._camera_frame_subs.add(websocket)
@@ -2388,36 +2406,54 @@ class RobotWebSocketServer:
     async def _camera_push_loop(self) -> None:
         """后台任务：以 30fps 向所有订阅客户端推送相机帧。"""
         interval = 1.0 / 30
-        while self._camera_frame_subs:
-            if self._camera_manager:
-                jpegs = self._camera_manager.get_latest_jpegs()
-                if jpegs:
-                    payload = json.dumps({
-                        "event": "camera_frames",
-                        "frames": [
-                            {
-                                "serial": serial,
-                                "name": name,
-                                "index": idx,
-                                "data": base64.b64encode(jpeg).decode("ascii"),
-                            }
-                            for idx, (serial, name, jpeg) in enumerate(jpegs)
-                        ],
-                    }, ensure_ascii=False)
-                    dead: List = []
-                    for ws in list(self._camera_frame_subs):
-                        try:
-                            await ws.send(payload)
-                        except Exception:
-                            dead.append(ws)
-                    for ws in dead:
-                        self._camera_frame_subs.discard(ws)
-            await asyncio.sleep(interval)
-        self._camera_push_task = None
-        self._stop_camera_if_idle()
+        try:
+            while self._camera_frame_subs:
+                session = self._camera_preview_session
+                if session is not None and session.active:
+                    jpegs = session.camera.get_latest_jpegs()
+                    if jpegs:
+                        payload = json.dumps({
+                            "event": "camera_frames",
+                            "frames": [
+                                {
+                                    "serial": serial,
+                                    "name": name,
+                                    "index": idx,
+                                    "data": base64.b64encode(jpeg).decode(
+                                        "ascii"
+                                    ),
+                                }
+                                for idx, (serial, name, jpeg) in enumerate(
+                                    jpegs
+                                )
+                            ],
+                        }, ensure_ascii=False)
+                        dead: List = []
+                        for ws in list(self._camera_frame_subs):
+                            try:
+                                await ws.send(payload)
+                            except Exception:
+                                dead.append(ws)
+                        for ws in dead:
+                            self._camera_frame_subs.discard(ws)
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.error("相机预览推送失败: %s", exc)
+        finally:
+            self._camera_frame_subs.clear()
+            self._camera_push_task = None
+            self._stop_camera_if_idle()
 
     def _stop_camera_if_idle(self) -> None:
-        """The device runtime releases the camera during application shutdown."""
+        """Release the preview lease after the last subscriber leaves."""
+        if self._camera_frame_subs:
+            return
+        session = self._camera_preview_session
+        self._camera_preview_session = None
+        if session is not None:
+            session.close()
 
     # ==================================================================
     # LLM 聊天（dispatch 模式）
@@ -3297,30 +3333,47 @@ class RobotWebSocketServer:
             }))
             return
 
+        if (
+            self._demo_recorder is not None
+            or self._demo_camera_session is not None
+        ):
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "数据采集会话已经启动",
+            }))
+            return
+
         # 初始化数据采集器（延迟初始化）
-        if self._demo_recorder is None:
+        camera_session = None
+        try:
             from ..data_collection import RLBenchRecorder
             from ..data_collection.config import DataCollectionConfig
 
             config = DataCollectionConfig()
-            robot_state_reader = self._services.device_runtime.require(
-                ROBOT_SYSTEM,
-                ArmStateReader,
+            camera_session = self._services.camera_access.open_depth(
+                "websocket-data-collection"
             )
-            camera_source = self._services.device_runtime.require(
-                CAMERA,
-                DepthCameraSource,
-            )
-            self._demo_recorder = RLBenchRecorder(
-                robot_state_reader=robot_state_reader,
-                camera_source=camera_source,
+            self._services.devices.initialize(ROBOT_SYSTEM)
+            recorder = RLBenchRecorder(
+                robot_state_reader=(
+                    self._services.robot_query.state_reader()
+                ),
+                camera_source=camera_session.camera,
                 config=config,
             )
-
-        # 开始会话
-        result = self._demo_recorder.start_session(task, description)
+            result = recorder.start_session(task, description)
+        except Exception as exc:
+            if camera_session is not None:
+                camera_session.close()
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": f"数据采集会话启动失败: {exc}",
+            }))
+            return
 
         if result.get("success"):
+            self._demo_recorder = recorder
+            self._demo_camera_session = camera_session
             # 更新会话状态
             self._demo_session["active"] = True
             self._demo_session["task"] = task
@@ -3336,6 +3389,7 @@ class RobotWebSocketServer:
                 "message": result["message"]
             }))
         else:
+            camera_session.close()
             await websocket.send(self._json_msg({
                 "event": "demo_record_error",
                 "message": result.get("message", "会话启动失败")
@@ -3353,31 +3407,45 @@ class RobotWebSocketServer:
                 "message": "会话未启动，请先发送demo_session_start"
             }))
             return
+        recorder = self._demo_recorder
+        if recorder is None:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "数据采集器不可用",
+            }))
+            return
 
-        # 开始记录
-        result = self._demo_recorder.start_recording()
+        teleoperation_was_active = self._services.teleoperation.active
+        try:
+            self._services.teleoperation.start()
+        except Exception as exc:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": f"遥操作资源申请失败: {exc}",
+            }))
+            return
+
+        try:
+            result = recorder.start_recording()
+        except Exception as exc:
+            if not teleoperation_was_active:
+                self._services.teleoperation.stop()
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": f"启动数据记录失败: {exc}",
+            }))
+            return
 
         if result.get("success"):
             episode_id = result["episode_id"]
 
-            # 自动启动遥操作模式（双臂）
-            if self._robot_system:
-                try:
-                    self._services.teleoperation.start()
-                except Exception as exc:
-                    self._demo_recorder.stop_recording()
-                    await websocket.send(self._json_msg({
-                        "event": "demo_record_error",
-                        "message": f"遥操作资源申请失败: {exc}",
-                    }))
-                    return
-                # 启动双臂遥操作模式
-                for arm_name in ["左", "右"]:
-                    self._teleop_modes[arm_name] = True
-                    self._teleop_msg_counts[arm_name] = 0
-                    self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
+            # 启动双臂遥操作模式
+            for arm_name in ["左", "右"]:
+                self._teleop_modes[arm_name] = True
+                self._teleop_msg_counts[arm_name] = 0
+                self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
 
-                logger.info("数据采集已自动启动遥操作模式: 双臂")
+            logger.info("数据采集已自动启动遥操作模式: 双臂")
 
             logger.info(f"episode {episode_id} 开始记录（已自动启动遥操作）")
 
@@ -3387,6 +3455,8 @@ class RobotWebSocketServer:
                 "message": result["message"] + "（已自动启动遥操作模式）"
             }))
         else:
+            if not teleoperation_was_active:
+                self._services.teleoperation.stop()
             await websocket.send(self._json_msg({
                 "event": "demo_record_error",
                 "message": result.get("message", "记录启动失败")
@@ -3405,8 +3475,16 @@ class RobotWebSocketServer:
             }))
             return
 
+        recorder = self._demo_recorder
+        if recorder is None:
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "数据采集器不可用",
+            }))
+            return
+
         # 结束记录并保存
-        result = self._demo_recorder.stop_recording()
+        result = recorder.stop_recording()
 
         if result.get("success"):
             episode_id = result["episode_id"]
@@ -3441,30 +3519,59 @@ class RobotWebSocketServer:
             }))
             return
 
-        # 结束会话
-        result = self._demo_recorder.end_session()
+        recorder = self._demo_recorder
+        camera_session = self._demo_camera_session
+        if recorder is None or camera_session is None:
+            try:
+                await self._close_demo_recorder()
+            except Exception as exc:
+                logger.warning(
+                    "清理不完整的数据采集会话失败: %s",
+                    exc,
+                )
+            await websocket.send(self._json_msg({
+                "event": "demo_record_error",
+                "message": "数据采集会话状态不完整，已执行清理",
+            }))
+            return
 
-        # 自动停止遥操作模式（双臂）
-        if self._robot_system:
-            # 停止双臂遥操作模式
-            for arm_name in ["左", "右"]:
-                self._teleop_modes[arm_name] = False
-                self._teleop_msg_counts[arm_name] = 0
-                self._last_grip[arm_name] = None  # 重置夹爪跟踪状态
+        try:
+            recorder.stop_recording()
+            result = recorder.end_session()
+        except Exception as exc:
+            result = {
+                "success": False,
+                "message": f"结束数据采集会话失败: {exc}",
+            }
+        finally:
+            try:
+                self._services.teleoperation.stop()
+            finally:
+                camera_session.close()
+                self._demo_recorder = None
+                self._demo_camera_session = None
+                for arm_name in ["左", "右"]:
+                    self._teleop_modes[arm_name] = False
+                    self._teleop_msg_counts[arm_name] = 0
+                    self._last_grip[arm_name] = None
 
-            logger.info("数据采集会话已自动停止遥操作模式: 双臂")
-        self._services.teleoperation.stop()
-
-        # 清空会话状态
-        self._demo_session["active"] = False
-        self._demo_session["task"] = None
-        self._demo_session["description"] = None
+                logger.info(
+                    "数据采集会话已自动停止遥操作模式: 双臂"
+                )
+                self._demo_session["active"] = False
+                self._demo_session["task"] = None
+                self._demo_session["description"] = None
 
         logger.info("数据采集会话已结束（已自动停止遥操作）")
 
+        event = (
+            "demo_session_ended"
+            if result.get("success")
+            else "demo_record_error"
+        )
         await websocket.send(self._json_msg({
-            "event": "demo_session_ended",
-            "message": result["message"] + "（已自动停止遥操作模式）"
+            "event": event,
+            "message": result["message"] + "（已自动停止遥操作模式）",
         }))
 
     @staticmethod

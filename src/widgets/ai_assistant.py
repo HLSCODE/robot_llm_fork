@@ -16,7 +16,6 @@ from PyQt6.QtGui import QFont, QColor, QTextCursor
 
 from ..ai_integration import AIController, ExecutionBridge
 from ..application import ApplicationServices
-from ..device_runtime.ids import CAMERA
 from ..core.config_loader import Config
 from ..gui.dialogs import ActionPreviewDialog
 from ..voice_interaction import (
@@ -151,7 +150,7 @@ class AIAssistantWidget(QWidget):
             llm_registry=self._ai_controller.get_llm_registry(),
             skill_engine=self._ai_controller.get_skill_engine(),
             camera_provider=CamerasModuleProvider(
-                manager_factory=self._camera_for_capture,
+                session_factory=self._camera_capture_session,
                 camera_name=config.VISION_CAMERA_NAME or None,
             ),
             timeout_s=voice_config["session_timeout_s"],
@@ -168,7 +167,7 @@ class AIAssistantWidget(QWidget):
             llm_registry=self._ai_controller.get_llm_registry(),
             skill_engine=self._ai_controller.get_skill_engine(),
             camera_provider=CamerasModuleProvider(
-                manager_factory=self._camera_for_capture,
+                session_factory=self._camera_capture_session,
                 camera_name=config.VISION_CAMERA_NAME or None,
             ),
             timeout_s=voice_config["session_timeout_s"],
@@ -212,9 +211,8 @@ class AIAssistantWidget(QWidget):
         self._voice_timeout_timer.timeout.connect(self._check_voice_session_timeout)
         self._voice_timeout_timer.start()
 
-    def _camera_for_capture(self):
-        self._services.devices.initialize(CAMERA)
-        return self._services.device_runtime.get_if_ready(CAMERA)
+    def _camera_capture_session(self):
+        return self._services.camera_access.open("gui-voice-capture")
 
     def _init_ui(self):
         """初始化UI"""

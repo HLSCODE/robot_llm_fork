@@ -360,23 +360,24 @@ async def _handle_command(self, text: str):
 
 ## 13. Vision 处理
 
-视觉问题需要先通过 `src/cameras/` 采集图像，再调用视觉融合 task。GUI 第一阶段默认注入 `CamerasModuleProvider`：
+视觉问题通过应用层相机会话采集图像，再调用视觉融合 task。GUI 默认注入
+`CamerasModuleProvider`：
 
 ```python
-def camera_for_capture():
-    application_services.devices.initialize(CAMERA)
-    return application_services.device_runtime.get_if_ready(CAMERA)
+def camera_capture_session():
+    return application_services.camera_access.open("gui-voice-capture")
 
 
 camera_provider = CamerasModuleProvider(
-    manager_factory=camera_for_capture,
+    session_factory=camera_capture_session,
     camera_name=Config.get_instance().VISION_CAMERA_NAME or None,
 )
 ```
 
-`manager_factory` 必须由应用组装层注入，并从唯一的 `DeviceRuntime`
-初始化、获取相机；`CamerasModuleProvider` 不创建或关闭相机。它调用
-`get_latest_jpegs()` 转成 `LLMContentPart(type="image")`。如果
+`session_factory` 必须由应用组装层注入，并通过 `CameraAccessService`
+取得独占 `CameraSession`。provider 在抓帧成功、失败或超时后都会退出上下文并
+释放租约，不直接创建、初始化或关闭底层相机。它调用 `get_latest_jpegs()` 转成
+`LLMContentPart(type="image")`。如果
 `VISION_CAMERA_NAME` 为空，则使用所有在线相机；如果配置了名称或序列号，
 则只使用对应相机。
 

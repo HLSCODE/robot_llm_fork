@@ -27,6 +27,19 @@ FORBIDDEN_DEPENDENCIES = (
     "src.devices",
     "src.expression_display.display",
 )
+PRESENTATION_DIRECTORIES = (
+    "src/gui",
+    "src/widgets",
+    "src/ai_integration",
+    "src/robot_server",
+    "src/voice_interaction",
+)
+FORBIDDEN_RUNTIME_OPERATIONS = (
+    "initialize",
+    "require",
+    "shutdown",
+    "shutdown_all",
+)
 
 
 class DependencyBoundaryTests(unittest.TestCase):
@@ -68,6 +81,27 @@ class DependencyBoundaryTests(unittest.TestCase):
 
         self.assertEqual([], violations, "\n".join(violations))
 
+    def test_presentation_layers_do_not_control_device_runtime_directly(self):
+        violations: list[str] = []
+        forbidden_suffixes = tuple(
+            f".device_runtime.{operation}"
+            for operation in FORBIDDEN_RUNTIME_OPERATIONS
+        )
+        for relative_directory in PRESENTATION_DIRECTORIES:
+            for path in (PROJECT_ROOT / relative_directory).rglob("*.py"):
+                tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    call_path = self._attribute_path(node.func)
+                    if call_path.endswith(forbidden_suffixes):
+                        violations.append(
+                            f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} "
+                            f"calls {call_path}"
+                        )
+
+        self.assertEqual([], violations, "\n".join(violations))
+
     @staticmethod
     def _imported_modules(node: ast.AST, package: str) -> tuple[str, ...]:
         if isinstance(node, ast.Import):
@@ -78,6 +112,15 @@ class DependencyBoundaryTests(unittest.TestCase):
             return (node.module or "",)
         relative_name = "." * node.level + (node.module or "")
         return (resolve_name(relative_name, package),)
+
+    @classmethod
+    def _attribute_path(cls, node: ast.AST) -> str:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            prefix = cls._attribute_path(node.value)
+            return f"{prefix}.{node.attr}" if prefix else node.attr
+        return ""
 
 
 if __name__ == "__main__":

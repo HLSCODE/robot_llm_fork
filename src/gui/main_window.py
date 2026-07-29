@@ -31,9 +31,7 @@ from ..core.models import (
 from ..device_runtime import StopMode
 from ..device_runtime.ids import (
     BODY_AXIS,
-    CAMERA,
     MOBILE_BASE,
-    PIPETTE,
     RELAY_BANK,
     ROBOT_SYSTEM,
 )
@@ -891,7 +889,6 @@ class MainWindow(QMainWindow):
     def _set_relay_state(self, channel: str, turn_on: bool):
         action_text = "打开" if turn_on else "关闭"
         try:
-            self._services.devices.initialize(RELAY_BANK)
             channel_number = {"Y1": 1, "Y2": 2}[channel]
             self._services.manual_control.set_relay(
                 channel_number,
@@ -1305,7 +1302,6 @@ class MainWindow(QMainWindow):
         self.log_widget.append_log("开始初始化移液枪...")
         self.init_pipette_btn.setEnabled(False)
         try:
-            self._services.devices.initialize(PIPETTE)
             success = self._services.manual_control.initialize_pipette()
             self.update_hand_status(bool(success))
             if success:
@@ -1324,7 +1320,6 @@ class MainWindow(QMainWindow):
         """Initialize pipette automatically when app starts."""
         self.log_widget.append_log("自动初始化移液枪...")
         try:
-            self._services.devices.initialize(PIPETTE)
             success = self._services.manual_control.initialize_pipette()
             self.update_hand_status(bool(success))
             if success:
@@ -1340,7 +1335,6 @@ class MainWindow(QMainWindow):
         self.init_pipette_btn.setEnabled(False)
         try:
             self.log_widget.append_log("正在退枪头...")
-            self._services.devices.initialize(PIPETTE)
             success = self._services.manual_control.eject_pipette_tip()
             if success:
                 self.log_widget.append_log("枪头已退出")
@@ -2572,13 +2566,13 @@ class MainWindow(QMainWindow):
 
                 config = Config.get_instance()
                 camera_name = config.VISION_CAMERA_NAME or None
+                session = None
 
                 try:
-                    self._services.devices.initialize(CAMERA)
-                    mgr = self._services.device_runtime.get_if_ready(CAMERA)
-                    if mgr is None:
-                        self.result.emit(False, "相机管理器未启动（请检查 CAMERA_PROVIDER 和设备配置）")
-                        return
+                    session = self._services.camera_access.open(
+                        "gui-test"
+                    )
+                    mgr = session.camera
 
                     # 等待至少一路相机上线
                     deadline = time.time() + 10
@@ -2642,6 +2636,9 @@ class MainWindow(QMainWindow):
 
                 except Exception as e:
                     self.result.emit(False, f"测试异常: {str(e)}")
+                finally:
+                    if session is not None:
+                        session.close()
 
         def on_result(success, msg):
             self.log_widget.append_log(f"[相机测试] {msg}")

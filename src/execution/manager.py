@@ -76,7 +76,10 @@ class ExecutionManager:
         self,
         engine: ExecutionEngine,
         resource_arbiter: ResourceArbiter,
-        execution_resources: Callable[[], tuple[str, ...]],
+        execution_resources: Callable[
+            [Sequence[Any]],
+            tuple[str, ...],
+        ],
     ) -> None:
         self._engine = engine
         self._resource_arbiter = resource_arbiter
@@ -115,10 +118,14 @@ class ExecutionManager:
                 )
 
             run_id = uuid4().hex
-            resources = self._execution_resources()
-            lease = self._resource_arbiter.acquire(
-                owner_id=f"execution:{run_id}",
-                resources=resources,
+            resources = self._execution_resources(sequence)
+            lease = (
+                self._resource_arbiter.acquire(
+                    owner_id=f"execution:{run_id}",
+                    resources=resources,
+                )
+                if resources
+                else None
             )
             control = ExecutionControl()
             self._run_id = run_id
@@ -144,7 +151,8 @@ class ExecutionManager:
         try:
             thread.start()
         except Exception:
-            lease.release()
+            if lease is not None:
+                lease.release()
             with self._lock:
                 self._state = ExecutionState.FAILED
                 self._error = "failed to start execution worker"
@@ -213,11 +221,12 @@ class ExecutionManager:
         run_id: str,
         sequence: Sequence[Any],
         control: ExecutionControl,
-        lease: ResourceLease,
+        lease: ResourceLease | None,
     ) -> None:
         with self._lock:
             if self._run_id != run_id:
-                lease.release()
+                if lease is not None:
+                    lease.release()
                 return
             self._state = ExecutionState.RUNNING
             self._started_at = time.time()
@@ -274,7 +283,8 @@ class ExecutionManager:
                 error_operation="execution.engine.run",
             )
         finally:
-            lease.release()
+            if lease is not None:
+                lease.release()
 
         if result.cancelled or control.cancel_requested:
             final_state = ExecutionState.CANCELLED

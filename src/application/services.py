@@ -29,8 +29,9 @@ from ..execution import (
     ExecutionManager,
     ExecutionSnapshot,
 )
-from .safety import SafetyService
+from .camera_access import CameraAccessService
 from .composition import CompositionService
+from .safety import SafetyService
 
 
 class ExecutionService:
@@ -67,29 +68,39 @@ class ExecutionService:
     def wait(self, timeout: float | None = None) -> ExecutionSnapshot:
         return self._manager.wait(timeout=timeout)
 
+
 class DeviceManagementService:
     """Application entry for device lifecycle and status."""
 
     def __init__(
         self,
         runtime: DeviceRuntime,
+        resources: ResourceArbiter,
         safety: SafetyService,
     ) -> None:
         self._runtime = runtime
+        self._resources = resources
         self._safety = safety
 
     def initialize(self, device_id: str) -> dict[str, Any]:
-        self._runtime.initialize(device_id)
-        return self._snapshot_dict(device_id)
+        with self._lifecycle_lease("initialize", (device_id,)):
+            self._runtime.initialize(device_id)
+            return self._snapshot_dict(device_id)
 
     def initialize_many(
         self,
         device_ids: Sequence[str],
     ) -> dict[str, dict[str, Any]]:
-        return {
-            device_id: self.initialize(device_id)
-            for device_id in device_ids
-        }
+        selected = tuple(dict.fromkeys(device_ids))
+        if not selected:
+            return {}
+        with self._lifecycle_lease("initialize-many", selected):
+            for device_id in selected:
+                self._runtime.initialize(device_id)
+            return {
+                device_id: self._snapshot_dict(device_id)
+                for device_id in selected
+            }
 
     def status(self) -> dict[str, dict[str, Any]]:
         return {
@@ -117,8 +128,20 @@ class DeviceManagementService:
             f"safety:{index}": error
             for index, error in enumerate(report.errors, start=1)
         }
-        errors.update(self._runtime.shutdown_all())
+        device_ids = self._runtime.registered_device_ids()
+        with self._lifecycle_lease("shutdown", device_ids):
+            errors.update(self._runtime.shutdown_all())
         return errors
+
+    def _lifecycle_lease(
+        self,
+        operation: str,
+        device_ids: Sequence[str],
+    ) -> ResourceLease:
+        return self._resources.acquire(
+            owner_id=f"device-lifecycle:{operation}:{uuid4().hex}",
+            resources=tuple(device_ids),
+        )
 
     def _snapshot_dict(self, device_id: str) -> dict[str, Any]:
         snapshot = self._runtime.snapshot(device_id)
@@ -299,9 +322,12 @@ class RobotQueryService:
     def __init__(self, runtime: DeviceRuntime) -> None:
         self._runtime = runtime
 
+    def state_reader(self) -> ArmStateReader:
+        """Return the normalized read capability for a read-only session."""
+        return self._runtime.require(ROBOT_SYSTEM, ArmStateReader)
+
     def read_state(self, arm: str | ArmId) -> ArmState:
-        reader = self._runtime.require(ROBOT_SYSTEM, ArmStateReader)
-        return reader.read_arm_state(_arm_id(arm))
+        return self.state_reader().read_arm_state(_arm_id(arm))
 
     def try_read_state(self, arm: str | ArmId) -> ArmState | None:
         reader = self._runtime.get_if_ready(ROBOT_SYSTEM)
@@ -403,6 +429,7 @@ def _arm_id(arm: str | ArmId) -> ArmId:
 
 @dataclass(frozen=True, slots=True)
 class ApplicationServices:
+    camera_access: CameraAccessService
     composition: CompositionService
     execution: ExecutionService
     devices: DeviceManagementService

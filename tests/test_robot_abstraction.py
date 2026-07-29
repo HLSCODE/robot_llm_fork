@@ -289,10 +289,15 @@ class RobotApplicationServiceTests(unittest.TestCase):
         services = create_application_services(object(), simulation=True)
         item = SequenceItem.from_definition(
             ActionDefinition(
-                id="wait",
-                name="wait",
-                type=ActionType.WAIT,
-                parameters={"wait_seconds": 0.01},
+                id="move",
+                name="move",
+                type=ActionType.MOVE,
+                parameters={
+                    "目标": "机械臂",
+                    "臂": "右",
+                    "模式": "move_j",
+                    "点位": [0, 0, 0, 0, 0, 0],
+                },
             )
         )
 

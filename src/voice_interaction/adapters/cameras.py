@@ -4,6 +4,7 @@ Camera adapters for voice interaction tasks.
 from __future__ import annotations
 
 import base64
+from contextlib import AbstractContextManager
 import logging
 import time
 from typing import Callable, Optional, Protocol, Sequence
@@ -32,7 +33,7 @@ class CamerasModuleProvider:
 
     def __init__(
         self,
-        manager_factory: Callable[[], object],
+        session_factory: Callable[[], AbstractContextManager[object]],
         *,
         camera_name: Optional[str] = None,
         wait_timeout_s: float = 2.0,
@@ -43,10 +44,29 @@ class CamerasModuleProvider:
         self.wait_timeout_s = max(0.0, float(wait_timeout_s))
         self.poll_interval_s = max(0.01, float(poll_interval_s))
         self.max_frames = max_frames if max_frames and max_frames > 0 else None
-        self._manager_factory = manager_factory
+        self._session_factory = session_factory
 
     def capture_llm_parts(self) -> Sequence[LLMContentPart]:
-        manager = self._get_manager()
+        try:
+            with self._session_factory() as manager:
+                return self._capture_from_manager(manager)
+        except CameraCaptureError:
+            raise
+        except Exception as exc:
+            raise CameraCaptureError(
+                "摄像头暂时不可用，无法读取画面。",
+                f"相机会话或抓帧失败: {exc}",
+            ) from exc
+
+    def _capture_from_manager(
+        self,
+        manager: object,
+    ) -> Sequence[LLMContentPart]:
+        if manager is None:
+            raise CameraCaptureError(
+                "我现在还没接上摄像头，暂时看不到周围环境。",
+                "相机会话没有返回相机能力",
+            )
         frames = self._wait_for_jpegs(manager)
         if not frames:
             info = self._format_cameras_info(manager)
@@ -72,15 +92,6 @@ class CamerasModuleProvider:
                 )
             )
         return parts
-
-    def _get_manager(self):
-        manager = self._manager_factory()
-        if manager is None:
-            raise CameraCaptureError(
-                "我现在还没接上摄像头，暂时看不到周围环境。",
-                "相机管理器未初始化，请检查 CAMERA_PROVIDER 和相机配置",
-            )
-        return manager
 
     def _wait_for_jpegs(self, manager) -> list[tuple[str, str, bytes]]:
         deadline = time.monotonic() + self.wait_timeout_s

@@ -326,6 +326,29 @@ class ActionEngine:
             )
         return EngineResult(success=True)
 
+    def required_resources(
+        self,
+        sequence: Sequence[SequenceEntry],
+    ) -> tuple[str, ...]:
+        """Resolve the exact device lease set before accepting a run."""
+        resources: list[str] = []
+        seen: set[str] = set()
+        for entry in sequence:
+            items = entry.items if isinstance(entry, LoopBlock) else (entry,)
+            for item in items:
+                if not isinstance(item, SequenceItem):
+                    continue
+                policy = self._handler_registry.control_policy(
+                    item.definition.type,
+                    item.definition.parameters,
+                )
+                for device_id in policy.device_ids:
+                    if device_id in seen:
+                        continue
+                    seen.add(device_id)
+                    resources.append(device_id)
+        return tuple(resources)
+
     def _required_callbacks(self) -> EngineCallbacks:
         if self._callbacks is None:
             raise RuntimeError("action engine callbacks are unavailable")

@@ -3,7 +3,7 @@
 > 文档状态：Active  
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-29
-> 当前里程碑：M1/M2 — 核心 Runtime 已落地，入口迁移与硬件验收进行中  
+> 当前里程碑：M2/M3 — 入口资源所有权已收敛，供应商验证与领域服务拆分进行中
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -43,13 +43,13 @@
 GUI / WebSocket / Voice / AI
               |
       ApplicationServices
-       /       |         |          \
-Execution  Device   Teleoperation   Safety
- Service   Service     Service       Service
-    |         |           |            |
-ExecutionManager    ResourceArbiter     |
-    |                         |         |
-ActionEngine -------- DeviceRuntime ----+
+       /       |          |             \
+Execution  Device   CameraAccess   Manual/Session
+ Service   Service     Service        Services
+    |         |          |               |
+ExecutionManager    ResourceArbiter -----+
+    |                         |
+ActionEngine -------- DeviceRuntime ----- SafetyService
                               |
                   contracts / adapters / fakes
                               |
@@ -65,6 +65,10 @@ ActionEngine -------- DeviceRuntime ----+
 - 遥操作持有会话级资源租约，与序列执行互斥。
 - 相机测试、语音视觉、视觉抓取和重定位不再自行创建或关闭相机。
 - 相机 manager 的旧全局单例已删除，实例只由 `DeviceRuntime` 持有。
+- 相机测试、语音视觉、WebSocket 预览和数据采集通过 `CameraAccessService`
+  持有显式会话租约；最后一个预览订阅者离开或会话结束时自动释放。
+- 序列提交根据动作控制策略计算实际设备租约，不再锁定全部已注册设备；
+  纯软件动作可与相机预览并行，视觉动作会与其他相机会话显式互斥。
 - 已删除无引用的 legacy GUI、旧底盘控制器和独立 ADP 控制脚本。
 - 已建立厂商无关的机械臂模型与能力接口，RealMan 仅在 adapter/driver 边界内出现。
 - GUI、执行引擎、视觉、重定位和数据采集均已切换到统一机械臂能力。
@@ -237,7 +241,8 @@ ActionEngine -------- DeviceRuntime ----+
 ### 7.1 当前问题
 
 - GUI 与 WebSocket 已共用同一个 `DeviceRuntime`，但真实设备仍需逐项验证统一关闭顺序。
-- 部分业务路径仍需确认没有绕过 Application Service 访问 runtime-owned 设备。
+- presentation/transport 层的硬件写操作已通过 Application Service 或统一执行
+  handler；保留的 `get_if_ready()` 仅用于只读就绪状态展示。
 - `src/devices/` 与 `src/device_control_sdk/` 使用不同抽象风格。
 - 串口设备有的每次动作创建，有的长期持有，所有权不清晰。
 - 设备连接状态可能只表示“控制器对象存在”，不表示设备真实在线。
@@ -260,7 +265,7 @@ ActionEngine -------- DeviceRuntime ----+
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
 | B-001 | P0 | DONE | 已定义 cancel、quick-stop、emergency-stop 语义、结果状态和逐设备能力矩阵；真实硬件验收由 ER-006 跟踪 |
-| B-002 | P0 | DOING | 序列、遥操作和直接控制增加资源互斥 |
+| B-002 | P0 | DONE | 序列按动作策略申请精确设备集合；设备生命周期、手工控制、遥操作、示教、相机预览/测试/语音和数据采集均使用资源租约 |
 | B-003 | P0 | DONE | 设备关闭前取消执行并等待资源释放 |
 | B-004 | P1 | DONE | 建立 DeviceRuntime 和 DeviceSnapshot |
 | B-005 | P1 | DOING | 主要入口已统一初始化/重连/关闭，待真实设备逐项验收 |
@@ -440,8 +445,8 @@ ActionEngine -------- DeviceRuntime ----+
 
 当前问题：
 
-- 相机生命周期和全局单例问题已收敛到 `DeviceRuntime`；实时预览、
-  语音视觉、抓取、重定位和测试仍缺少细粒度 session/资源租约。
+- 相机生命周期、全局单例和现有业务入口的资源所有权已收敛；
+  后续重点是视觉结果、标定、模型和工位数据治理。
 - 标定、工位和模型文件缺少统一版本元数据。
 - `core.move_compensation` 反向依赖 `gui.udp_receive`。
 
@@ -449,8 +454,8 @@ ActionEngine -------- DeviceRuntime ----+
 
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
-| F-V-001 | P1 | TODO | 相机接入 ResourceArbiter |
-| F-V-002 | P1 | DOING | 相机生命周期已归 DeviceRuntime，待细粒度 session/租约 |
+| F-V-001 | P1 | DONE | 相机已接入 ResourceArbiter |
+| F-V-002 | P1 | DONE | 相机生命周期归 DeviceRuntime，短任务和长预览/采集均使用显式 CameraSession |
 | F-V-003 | P1 | TODO | 移除 core 对 gui.udp_receive 的依赖 |
 | F-V-004 | P2 | TODO | 建立 VisionService 和 typed result |
 | F-V-005 | P2 | TODO | 模型、标定、工位配置版本化 |
@@ -808,7 +813,7 @@ M4 工程治理与清理
 - [ ] GUI、WebSocket、voice 和 AI 不直接操作具体动作实现。
 - [ ] ExecutionManager 是唯一序列执行所有者。
 - [ ] DeviceRuntime 是唯一硬件生命周期所有者。
-- [ ] teleop、sequence、测试和直接控制服从资源仲裁。
+- [x] teleop、sequence、测试和直接控制服从资源仲裁。
 - [ ] runtime/core 不反向依赖 GUI 或 WebSocket。
 
 ### 安全与协议
@@ -871,12 +876,13 @@ M4 工程治理与清理
 | 2026-07-29 | M2 | A/B | domain handlers 收敛 | A-007/B-007 保持 DOING | 换枪、轨迹、视觉抓取和视觉重定位移出 ActionEngine；参数先校验再初始化设备，轨迹轮询配置化，视觉 executor 可注入，取消/超时继续向统一运行时透传 | - |
 | 2026-07-29 | M2 | A/B/C | 结构化 handler result | A-007 DOING → DONE | 全部 handler 直接切换为 ActionHandlerResult，不保留 bool 兼容；稳定 code、message、operation、device_id 贯通运行时快照和事件，并由 WebSocket 状态/步骤失败协议输出 | - |
 | 2026-07-29 | M2 | A/B/C | 动作控制策略矩阵 | B-007/ER-011 保持 DOING | 注册表绑定 handler 与不可变控制策略；全部动作参数分支声明取消模式、涉及设备和停止目标，执行前拒绝能力矛盾，并通过 step_started/WebSocket 输出；RealMan 最大停止延迟待硬件验收 | - |
+| 2026-07-29 | M2/M3 | A/B/F | 资源所有权与相机会话收敛 | B-002/F-V-001/F-V-002 DOING/TODO → DONE | 序列按动作策略申请精确设备租约；设备生命周期纳入仲裁；GUI/WS 相机测试、语音视觉、WebSocket 预览和数据采集统一使用 CameraAccessService/CameraSession，采集先取得遥操作租约再启动记录 | - |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-2. **B-002**：补齐所有直接控制资源租约。
-3. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
-4. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。
+2. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
+3. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。
+4. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。
 5. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
 6. 完成 simulation smoke test 后执行逐设备真实硬件验收。

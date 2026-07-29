@@ -133,6 +133,20 @@
 
 ---
 
+## 资源所有权
+
+- `demo_session_start` 通过 `CameraAccessService.open_depth()` 取得独占相机会话，
+  并在整个数据采集 session 期间持有；相机预览、语音视觉、相机测试和视觉动作
+  会在资源冲突时被明确拒绝。
+- `demo_record_start` 必须先取得 `TeleoperationService` 的机械臂会话租约，
+  成功后才启动 30Hz recorder，避免采集线程已经运行但机器人控制权申请失败。
+- `demo_session_end`、WebSocket 服务停止以及异常清理都会停止 recorder 和
+  teleoperation，并在 `finally` 路径释放相机会话。
+- 当前资源所有权已收敛，但 session/episode 状态仍位于
+  `RobotWebSocketServer`；提取独立 `DataCollectionService` 是下一阶段工作。
+
+---
+
 ### 错误响应
 
 当请求失败时，返回错误消息：

@@ -3,7 +3,7 @@
 > 文档状态：Active  
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-29
-> 当前阶段：核心运行时、入口、handler 和结果协议已收敛，进入安全能力与硬件验收
+> 当前阶段：核心运行时、入口、handler、结果协议和资源所有权已收敛，进入供应商验证与硬件验收
 > 上级计划：[Robot LLM 项目重构总计划](project-refactor-master-plan.md)
 
 ## 1. 范围与决策
@@ -38,13 +38,15 @@
                            ApplicationServices
                    +----------------+----------------+----------------+
                    |                |                |                |
-           ExecutionService  DeviceManagement  Manual/Teleop   SafetyService
-                   |            Service           Service            |
+           ExecutionService  DeviceManagement  CameraAccess    SafetyService
+                   |            Service          Service             |
                    |                |                |                |
            ExecutionManager        DeviceRuntime --------------------+
             state/run/event          state/lifecycle |
                    |                |                |
               ActionEngine ---------+-------- ResourceArbiter
+                                                   |
+                                      Manual/Teleop/Teaching
                                     |
                     contracts / adapters / fakes
                                     |
@@ -61,6 +63,7 @@
 | `ExecutionService` | submit/pause/resume/cancel/snapshot/wait | 已落地 |
 | `DeviceManagementService` | initialize/status/shutdown | 已落地 |
 | `ManualControlService` | 夹爪、继电器、移液枪、遥操作初始化 | 已落地 |
+| `CameraAccessService` | 相机短任务与长会话的独占租约 | 已落地 |
 | `TeleoperationService` | 遥操作会话和机械臂资源租约 | 已落地 |
 | `RobotQueryService` | 厂商无关的机械臂状态读取 | 已落地 |
 | `TrajectoryTeachingService` | 拖动示教会话及资源租约 | 已落地 |
@@ -102,7 +105,8 @@
 | WebSocket status/init/disconnect | 通过应用服务和 runtime | typed DTO、错误码 |
 | GUI/WebSocket quick-stop/emergency-stop | 通过 `SafetyService`，返回逐设备结果 | RealMan 真实硬件验收、其他运动设备能力补齐 |
 | 遥操作 | 持有会话级机械臂资源租约，软件停止后统一释放 | 心跳、所有者、超时自动停止 |
-| 相机测试/语音视觉/视觉动作 | 使用 runtime-owned camera | 预览 session 和细粒度租约 |
+| 相机测试/语音视觉/视觉动作 | 使用 runtime-owned camera 和精确资源租约 | 模型、标定和视觉结果治理 |
+| WebSocket 相机预览/数据采集 | 持有完整会话周期的 CameraSession；采集开始记录前先申请 teleop 租约 | DataCollectionService 和状态机 |
 
 ### 2.4 已删除内容
 
@@ -230,7 +234,7 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 | ER-009 | P1 | DONE | 统一 simulation runtime | 与真实模式共用状态机 |
 | ER-010 | P1 | DONE | ActionHandlerRegistry | 全部具体动作 handler 已迁出 ActionEngine，并统一返回结构化 ActionHandlerResult |
 | ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 全动作控制策略、执行前能力校验和事件输出已落地；待 RealMan 最大停止延迟验收 |
-| ER-012 | P1 | DOING | camera session/resource | 预览和视觉任务不争用 |
+| ER-012 | P1 | DONE | camera session/resource | 预览、测试、语音、视觉动作和数据采集通过显式租约互斥，非相机序列不被阻塞 |
 | ER-013 | P1 | DONE | 机械臂能力接口补强 | GUI、执行、视觉、示教和数据采集不依赖 RM 原生字段 |
 | ER-014 | P1 | TODO | WebSocket contract tests | 事件顺序、终态和错误稳定 |
 | ER-015 | P1 | TODO | GUI simulation smoke tests | 按钮和步骤状态正确 |
@@ -282,10 +286,11 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 
 1. 已将机械臂运动、状态、夹爪、遥操作、轨迹示教和工具架提升为项目级接口。
 2. 已移除业务代码对 `robot1_ctrl/robot2_ctrl` 和 RM SDK 对象的了解。
-3. 下一步接入第二种供应商 adapter，验证核心能力与可选能力拆分。
-4. 为相机预览、语音视觉和测试建立 session/lease。
-4. 统一设备 health、错误码、重试与重连策略。
-5. 清理底层驱动文件中的业务 GUI 和过期演示入口。
+3. 相机预览、语音视觉、测试和数据采集已建立 session/lease；序列按动作
+   控制策略申请精确设备集合。
+4. 下一步接入第二种供应商 adapter，验证核心能力与可选能力拆分。
+5. 统一设备 health、错误码、重试与重连策略。
+6. 清理底层驱动文件中的业务 GUI 和过期演示入口。
 
 完成标准：
 
@@ -316,10 +321,13 @@ git diff --check
 
 - DeviceRuntime 唯一实例、关闭和重新初始化。
 - ResourceArbiter 冲突和释放。
+- 动作策略到序列资源集合的精确映射。
+- 相机预览、测试、语音和数据采集会话的异常释放。
+- 数据记录启动前取得 teleop 机械臂租约。
 - ExecutionManager 单 run、暂停、恢复、取消和终态。
 - worker 结束后资源释放。
 - simulation ActionEngine 执行。
-- teleop session 阻止 sequence。
+- teleop session 阻止需要机械臂的 sequence。
 - quick-stop 取消 active execution、释放 teleop lease 并调用 ready robot。
 - DeviceRuntime 对停止成功、未就绪、不支持和失败逐项报告，单设备失败不阻断其他设备。
 - 全动作控制策略矩阵、矛盾声明拒绝和设备注册能力执行前校验。
@@ -337,7 +345,7 @@ git diff --check
 - 全 ActionType simulation。
 - WebSocket accepted/step/terminal 事件顺序。
 - GUI signal 的主线程投递。
-- camera/teleop/data collection 资源冲突。
+- 多客户端相机 subscribe/unsubscribe 与断线竞态。
 
 ## 7. 真实硬件验收
 
@@ -387,7 +395,6 @@ RealMan 停止专项验收：
 | 阻塞 SDK 延迟响应 cancel | P0 | timeout、quick-stop、硬件验收 |
 | WebSocket 无认证和控制所有者 | P0 | 在开放网络部署前完成 |
 | 视觉流程内部仍包含长同步调用 | P1 | 标记不可即时取消区段，并通过设备停止能力和硬件测试验证最大延迟 |
-| 相机预览尚无持久 session lease | P1 | CameraSession + ResourceArbiter |
 | 底层设备错误尚未统一映射到细分错误码 | P1 | 在 adapter 边界建立厂商错误映射并保留原始诊断上下文 |
 | GUI/WebSocket 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
 | simulation 与真实设备差异 | P1 | 同状态机 + contract + 硬件清单 |
@@ -421,3 +428,4 @@ RealMan 停止专项验收：
 | 2026-07-29 | domain handlers 收敛 | ER-010/ER-011 保持 DOING | 换枪、轨迹、视觉抓取和视觉重定位移出 ActionEngine；轨迹轮询配置化，参数校验前置，视觉流程改为可注入 executor，四类调用统一透传取消与超时 |
 | 2026-07-29 | 结构化 handler result | ER-010 DOING → DONE | 全部 handler 直接切换为 ActionHandlerResult，不保留 bool 兼容；失败 code、message、operation、device_id 贯通 EngineResult、ExecutionSnapshot 和执行事件 |
 | 2026-07-29 | 动作控制策略矩阵 | ER-011 保持 DOING | 注册表直接绑定 handler 与控制策略；全部动作分支声明取消模式、设备和停止目标，执行前拒绝能力矛盾，并通过运行时事件/WebSocket 输出；RealMan 最大停止延迟仍待硬件验收 |
+| 2026-07-29 | 精确资源租约与相机会话 | ER-012 DOING → DONE | ExecutionManager 按动作策略申请实际设备集合；设备初始化/关闭纳入仲裁；相机测试、语音、WebSocket 预览和数据采集直接切换到 CameraAccessService/CameraSession，不保留 manager_factory 兼容入口 |

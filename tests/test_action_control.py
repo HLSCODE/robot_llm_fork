@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.models import (
+    ActionDefinition,
+    ActionType,
+    LoopBlock,
+    SequenceItem,
+)
 from src.device_runtime import (
     DeviceCapability,
     DeviceRegistration,
@@ -293,6 +298,30 @@ class ActionControlPolicyTests(unittest.TestCase):
                     "removed-device": policy,
                 },
             )
+
+    def test_sequence_resources_are_exact_and_include_loop_children(self):
+        engine = ActionEngine(DeviceRuntime(), object())
+        wait = SequenceItem.from_definition(
+            ActionDefinition("wait", "wait", ActionType.WAIT, {})
+        )
+        vision = SequenceItem.from_definition(
+            ActionDefinition(
+                "vision",
+                "vision",
+                ActionType.VISION_CAPTURE,
+                {},
+            )
+        )
+        loop = LoopBlock(
+            uuid="loop",
+            items=[vision, vision],
+            repeat_count=2,
+        )
+
+        self.assertEqual(
+            (ROBOT_SYSTEM, CAMERA),
+            engine.required_resources([wait, loop]),
+        )
 
 
 class ActionControlPreflightTests(unittest.TestCase):

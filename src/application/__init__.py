@@ -1,4 +1,4 @@
-from .factory import create_application_services
+from .camera_access import CameraAccessService, CameraSession
 from .composition import (
     CompositionChangeType,
     CompositionEvent,
@@ -6,6 +6,7 @@ from .composition import (
     CompositionService,
     TaskSummary,
 )
+from .factory import create_application_services
 from .safety import SafetyService, SafetyStopReport
 from .services import (
     ApplicationServices,
@@ -19,6 +20,8 @@ from .services import (
 
 __all__ = [
     "ApplicationServices",
+    "CameraAccessService",
+    "CameraSession",
     "CompositionChangeType",
     "CompositionEvent",
     "CompositionRevisionConflict",

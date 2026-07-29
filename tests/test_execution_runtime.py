@@ -218,7 +218,7 @@ class ExecutionManagerTests(unittest.TestCase):
         self.manager = ExecutionManager(
             engine=self.engine,
             resource_arbiter=self.resources,
-            execution_resources=lambda: ("robot",),
+            execution_resources=lambda _sequence: ("robot",),
         )
 
     def test_single_run_pause_resume_and_completion(self):
@@ -301,10 +301,15 @@ class ApplicationServiceTests(unittest.TestCase):
         services.teleoperation.start()
         item = SequenceItem.from_definition(
             ActionDefinition(
-                id="wait",
-                name="wait",
-                type=ActionType.WAIT,
-                parameters={"wait_seconds": 0.01},
+                id="move",
+                name="move",
+                type=ActionType.MOVE,
+                parameters={
+                    "目标": "机械臂",
+                    "臂": "左",
+                    "模式": "move_j",
+                    "点位": [0, 0, 0, 0, 0, 0],
+                },
             )
         )
 
