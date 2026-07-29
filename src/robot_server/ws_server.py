@@ -63,7 +63,7 @@ WebSocket 路径:
     ws://{host}:{port}/               — 前端主控连接（本协议，所有功能均通过 action 字段分发）
 
     服务端 → 前端（事件推送）:
-        {"event": "step_started",       "index": 0, "name": "...", "status": "RUNNING"}
+        {"event": "step_started",       "index": 0, "name": "...", "status": "RUNNING", "control_policy": {...}}
         {"event": "step_completed",     "index": 0, "name": "..."}
         {"event": "step_failed",        "index": 0, "name": "...", "error": "...", "failure": {...}}
         {"event": "log",                "level": "info|warn|error", "message": "..."}
@@ -2719,7 +2719,11 @@ class RobotWebSocketServer:
         """Translate execution-domain events to the WebSocket protocol."""
         event_type = event.event_type
         if event_type is ExecutionEventType.STEP_STARTED:
-            self._on_step_started(event.index or 0, event.item)
+            self._on_step_started(
+                event.index or 0,
+                event.item,
+                event.data,
+            )
         elif event_type is ExecutionEventType.STEP_COMPLETED:
             self._on_step_completed(event.index or 0, event.item)
         elif event_type is ExecutionEventType.STEP_FAILED:
@@ -2748,12 +2752,18 @@ class RobotWebSocketServer:
         elif event_type is ExecutionEventType.SUCCEEDED:
             self._on_finished()
 
-    def _on_step_started(self, index: int, item: SequenceItem) -> None:
+    def _on_step_started(
+        self,
+        index: int,
+        item: SequenceItem,
+        control_policy: dict[str, Any],
+    ) -> None:
         self._broadcast_threadsafe({
             "event": "step_started",
             "index": index,
             "name": item.definition.name,
             "status": item.status.value,
+            "control_policy": control_policy,
         })
 
     def _on_step_completed(self, index: int, item: SequenceItem) -> None:

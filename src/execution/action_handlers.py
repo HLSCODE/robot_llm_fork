@@ -7,6 +7,10 @@ import time
 from typing import Any, Protocol, TypeVar
 
 from ..core.models import ActionType
+from .action_control import (
+    ActionControlPolicy,
+    ActionControlPolicyResolver,
+)
 from .control import ExecutionControl
 
 
@@ -41,6 +45,7 @@ class ActionResultCode(str, Enum):
     DEVICE_OPERATION_FAILED = "device_operation_failed"
     OPERATION_REJECTED = "operation_rejected"
     ACTION_TIMEOUT = "action_timeout"
+    CONTROL_POLICY_MISMATCH = "control_policy_mismatch"
     INTERNAL_ERROR = "internal_error"
 
 
@@ -264,31 +269,44 @@ class ActionHandler(Protocol):
     ) -> ActionHandlerResult: ...
 
 
+@dataclass(frozen=True, slots=True)
+class _ActionHandlerRegistration:
+    handler: ActionHandler
+    control_policy: ActionControlPolicyResolver
+
+
 class ActionHandlerRegistry:
-    """The only ActionType-to-handler dispatch table."""
+    """The only ActionType-to-handler and control-policy dispatch table."""
 
     def __init__(self) -> None:
-        self._handlers: dict[ActionType, ActionHandler] = {}
+        self._registrations: dict[
+            ActionType,
+            _ActionHandlerRegistration,
+        ] = {}
         self._frozen = False
 
     def register(
         self,
         action_type: ActionType,
         handler: ActionHandler,
+        control_policy: ActionControlPolicyResolver,
     ) -> None:
         if self._frozen:
             raise RuntimeError("action handler registry is frozen")
-        if action_type in self._handlers:
+        if action_type in self._registrations:
             raise ValueError(
                 f"handler already registered for {action_type.value}"
             )
-        self._handlers[action_type] = handler
+        self._registrations[action_type] = _ActionHandlerRegistration(
+            handler=handler,
+            control_policy=control_policy,
+        )
 
     def validate_complete(self) -> None:
         missing = [
             action_type.value
             for action_type in ActionType
-            if action_type not in self._handlers
+            if action_type not in self._registrations
         ]
         if missing:
             raise ActionHandlerNotFoundError(
@@ -302,15 +320,10 @@ class ActionHandlerRegistry:
         parameters: ActionParameters,
         context: ActionExecutionContext,
     ) -> ActionHandlerResult:
-        try:
-            handler = self._handlers[action_type]
-        except KeyError as exc:
-            raise ActionHandlerNotFoundError(
-                f"no handler registered for {action_type.value}"
-            ) from exc
+        registration = self._registration(action_type)
 
         context.checkpoint()
-        result = handler(parameters, context)
+        result = registration.handler(parameters, context)
         if not isinstance(result, ActionHandlerResult):
             raise TypeError(
                 f"handler for {action_type.value} returned "
@@ -319,9 +332,33 @@ class ActionHandlerRegistry:
         context.checkpoint()
         return result
 
+    def control_policy(
+        self,
+        action_type: ActionType,
+        parameters: ActionParameters,
+    ) -> ActionControlPolicy:
+        policy = self._registration(action_type).control_policy(parameters)
+        if not isinstance(policy, ActionControlPolicy):
+            raise TypeError(
+                f"control policy for {action_type.value} returned "
+                f"{type(policy).__name__}, expected ActionControlPolicy"
+            )
+        return policy
+
     @property
     def registered_types(self) -> frozenset[ActionType]:
-        return frozenset(self._handlers)
+        return frozenset(self._registrations)
+
+    def _registration(
+        self,
+        action_type: ActionType,
+    ) -> _ActionHandlerRegistration:
+        try:
+            return self._registrations[action_type]
+        except KeyError as exc:
+            raise ActionHandlerNotFoundError(
+                f"no handler registered for {action_type.value}"
+            ) from exc
 
 
 class WaitActionHandler:

@@ -6,6 +6,7 @@ import unittest
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.execution import (
+    ActionCancellationMode,
     ActionExecutionContext,
     ActionHandlerNotFoundError,
     ActionHandlerResult,
@@ -17,6 +18,7 @@ from src.execution import (
     ExecutionEventType,
     ExecutionState,
 )
+from src.execution.action_control import resolve_wait_control_policy
 
 
 class ActionHandlerRegistryTests(unittest.TestCase):
@@ -25,13 +27,21 @@ class ActionHandlerRegistryTests(unittest.TestCase):
         handler = lambda _parameters, _context: (
             ActionHandlerResult.succeeded()
         )
-        registry.register(ActionType.WAIT, handler)
+        registry.register(
+            ActionType.WAIT,
+            handler,
+            resolve_wait_control_policy,
+        )
 
         with self.assertRaisesRegex(
             ValueError,
             "handler already registered",
         ):
-            registry.register(ActionType.WAIT, handler)
+            registry.register(
+                ActionType.WAIT,
+                handler,
+                resolve_wait_control_policy,
+            )
 
     def test_registry_reports_all_missing_action_types(self):
         registry = ActionHandlerRegistry()
@@ -40,6 +50,7 @@ class ActionHandlerRegistryTests(unittest.TestCase):
             lambda _parameters, _context: (
                 ActionHandlerResult.succeeded()
             ),
+            resolve_wait_control_policy,
         )
 
         with self.assertRaises(ActionHandlerNotFoundError) as raised:
@@ -54,18 +65,27 @@ class ActionHandlerRegistryTests(unittest.TestCase):
             ActionHandlerResult.succeeded()
         )
         for action_type in ActionType:
-            registry.register(action_type, handler)
+            registry.register(
+                action_type,
+                handler,
+                resolve_wait_control_policy,
+            )
 
         registry.validate_complete()
 
         with self.assertRaisesRegex(RuntimeError, "registry is frozen"):
-            registry.register(ActionType.WAIT, handler)
+            registry.register(
+                ActionType.WAIT,
+                handler,
+                resolve_wait_control_policy,
+            )
 
     def test_registry_rejects_legacy_boolean_result(self):
         registry = ActionHandlerRegistry()
         registry.register(
             ActionType.WAIT,
             lambda _parameters, _context: True,
+            resolve_wait_control_policy,
         )
         context = ActionExecutionContext(
             action_name="legacy handler",
@@ -79,6 +99,24 @@ class ActionHandlerRegistryTests(unittest.TestCase):
             "expected ActionHandlerResult",
         ):
             registry.execute(ActionType.WAIT, {}, context)
+
+    def test_registry_resolves_control_policy_with_handler(self):
+        registry = ActionHandlerRegistry()
+        registry.register(
+            ActionType.WAIT,
+            lambda _parameters, _context: (
+                ActionHandlerResult.succeeded()
+            ),
+            resolve_wait_control_policy,
+        )
+
+        policy = registry.control_policy(ActionType.WAIT, {})
+
+        self.assertEqual(
+            ActionCancellationMode.BOUNDED_COOPERATIVE,
+            policy.cancellation_mode,
+        )
+        self.assertEqual(0.1, policy.expected_max_cancel_latency_seconds)
 
 
 class ActionHandlerResultTests(unittest.TestCase):
@@ -198,6 +236,19 @@ class ActionTimeoutIntegrationTests(unittest.TestCase):
         self.assertIn("action timed out after 0.02s", final.error)
         self.assertEqual("action_timeout", final.error_code)
         self.assertEqual("action.execute", final.error_operation)
+        step_started = next(
+            event
+            for event in events
+            if event.event_type is ExecutionEventType.STEP_STARTED
+        )
+        self.assertEqual(
+            "bounded_cooperative",
+            step_started.data["cancellation_mode"],
+        )
+        self.assertEqual(
+            0.1,
+            step_started.data["expected_max_cancel_latency_seconds"],
+        )
         step_failed = next(
             event
             for event in events

@@ -23,6 +23,10 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
+_STOP_CAPABILITY_BY_MODE = {
+    StopMode.QUICK: DeviceCapability.QUICK_STOP,
+    StopMode.EMERGENCY: DeviceCapability.EMERGENCY_STOP,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,6 +158,20 @@ class DeviceRuntime:
             for device_id in self.registered_device_ids()
         )
 
+    def declared_stop_modes(
+        self,
+        device_id: str,
+    ) -> frozenset[StopMode]:
+        """Return stop modes advertised by a device registration."""
+        record = self._record(device_id)
+        with record.lock:
+            capabilities = record.registration.capabilities
+            return frozenset(
+                mode
+                for mode, capability in _STOP_CAPABILITY_BY_MODE.items()
+                if capability in capabilities
+            )
+
     def stop_all(self, mode: StopMode) -> tuple[DeviceStopResult, ...]:
         """Stop every ready motion device without acquiring execution leases."""
         if not isinstance(mode, StopMode):
@@ -162,10 +180,7 @@ class DeviceRuntime:
             raise ValueError(
                 "controlled cancellation belongs to the application service"
             )
-        required_capability = {
-            StopMode.QUICK: DeviceCapability.QUICK_STOP,
-            StopMode.EMERGENCY: DeviceCapability.EMERGENCY_STOP,
-        }[mode]
+        required_capability = _STOP_CAPABILITY_BY_MODE[mode]
         motion_device_ids = self.find_by_capability(DeviceCapability.MOTION)
         return tuple(
             self._stop_device(device_id, mode, required_capability)

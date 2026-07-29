@@ -12,7 +12,23 @@ from ..core.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ..device_runtime import DeviceRuntime
+from ..device_runtime import DeviceNotRegisteredError, DeviceRuntime
+from .action_control import (
+    BASE_MOVE_CONTROL_POLICIES,
+    MANIPULATE_CONTROL_POLICIES,
+    MOVE_CONTROL_POLICIES,
+    ActionControlPolicy,
+    resolve_base_move_control_policy,
+    resolve_change_tool_control_policy,
+    resolve_inspect_control_policy,
+    resolve_manipulate_control_policy,
+    resolve_move_control_policy,
+    resolve_trajectory_control_policy,
+    resolve_vision_capture_control_policy,
+    resolve_vision_relocalization_control_policy,
+    resolve_wait_control_policy,
+    validate_control_policy_routes,
+)
 from .action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -50,6 +66,7 @@ class ActionEngine:
     _ACTION_OPERATION = "action.execute"
     _RUN_STEP_OPERATION = "action_engine.run_step"
     _TIMEOUT_CONFIGURATION_OPERATION = "action.configure_timeout"
+    _CONTROL_POLICY_OPERATION = "action.control_policy.validate"
 
     def __init__(
         self,
@@ -128,41 +145,74 @@ class ActionEngine:
 
     def _create_handler_registry(self) -> ActionHandlerRegistry:
         registry = ActionHandlerRegistry()
+        move_handler = MoveActionHandler(
+            RobotMoveActionHandler(
+                self._device_runtime,
+                self.execution_context,
+                self._motion_handler_options,
+            ),
+            BodyMoveActionHandler(
+                self._device_runtime,
+                self._motion_handler_options,
+            ),
+        )
+        validate_control_policy_routes(
+            "move targets",
+            move_handler.registered_targets,
+            MOVE_CONTROL_POLICIES,
+        )
         registry.register(
             ActionType.MOVE,
-            MoveActionHandler(
-                RobotMoveActionHandler(
-                    self._device_runtime,
-                    self.execution_context,
-                    self._motion_handler_options,
-                ),
-                BodyMoveActionHandler(
-                    self._device_runtime,
-                    self._motion_handler_options,
-                ),
-            ),
+            move_handler,
+            resolve_move_control_policy,
+        )
+
+        base_move_handler = BaseMoveActionHandler(self._device_runtime)
+        validate_control_policy_routes(
+            "base move modes",
+            base_move_handler.registered_modes,
+            BASE_MOVE_CONTROL_POLICIES,
         )
         registry.register(
             ActionType.BASE_MOVE,
-            BaseMoveActionHandler(self._device_runtime),
+            base_move_handler,
+            resolve_base_move_control_policy,
+        )
+
+        manipulation_handler = create_manipulation_handler(
+            self._device_runtime,
+            self._manipulation_handler_options,
+            self._tapping_config_provider,
+        )
+        validate_control_policy_routes(
+            "manipulation executors",
+            manipulation_handler.registered_executors,
+            MANIPULATE_CONTROL_POLICIES,
         )
         registry.register(
             ActionType.MANIPULATE,
-            create_manipulation_handler(
-                self._device_runtime,
-                self._manipulation_handler_options,
-                self._tapping_config_provider,
-            ),
+            manipulation_handler,
+            resolve_manipulate_control_policy,
         )
-        registry.register(ActionType.INSPECT, InspectActionHandler())
-        registry.register(ActionType.WAIT, WaitActionHandler())
+        registry.register(
+            ActionType.INSPECT,
+            InspectActionHandler(),
+            resolve_inspect_control_policy,
+        )
+        registry.register(
+            ActionType.WAIT,
+            WaitActionHandler(),
+            resolve_wait_control_policy,
+        )
         registry.register(
             ActionType.CHANGE_GUN,
             ChangeToolActionHandler(self._device_runtime),
+            resolve_change_tool_control_policy,
         )
         registry.register(
             ActionType.VISION_CAPTURE,
             VisionCaptureActionHandler(self._device_runtime),
+            resolve_vision_capture_control_policy,
         )
         registry.register(
             ActionType.VISION_RELOCALIZE,
@@ -170,6 +220,7 @@ class ActionEngine:
                 self._device_runtime,
                 self.execution_context,
             ),
+            resolve_vision_relocalization_control_policy,
         )
         registry.register(
             ActionType.TRAJECTORY,
@@ -177,6 +228,7 @@ class ActionEngine:
                 self._device_runtime,
                 self._trajectory_handler_options,
             ),
+            resolve_trajectory_control_policy,
         )
         registry.validate_complete()
         return registry
@@ -224,11 +276,18 @@ class ActionEngine:
                         self._on_loop_progress(loop.uuid, current_iter, loop.repeat_count)
                     loop_item_counter[loop.uuid] = (counter + 1) % iter_size
 
-                item.status = SequenceItemStatus.RUNNING
-                self._on_step_started(index, item)
-
                 try:
-                    result = self._execute_action(item, control)
+                    control_policy = self._handler_registry.control_policy(
+                        item.definition.type,
+                        item.definition.parameters,
+                    )
+                    item.status = SequenceItemStatus.RUNNING
+                    self._on_step_started(index, item, control_policy)
+                    result = self._execute_action(
+                        item,
+                        control,
+                        control_policy,
+                    )
                     if result.successful:
                         item.status = SequenceItemStatus.SUCCESS
                         self._on_step_completed(index, item)
@@ -272,8 +331,17 @@ class ActionEngine:
             raise RuntimeError("action engine callbacks are unavailable")
         return self._callbacks
 
-    def _on_step_started(self, index: int, item: SequenceItem) -> None:
-        self._required_callbacks().on_step_started(index, item)
+    def _on_step_started(
+        self,
+        index: int,
+        item: SequenceItem,
+        control_policy: ActionControlPolicy,
+    ) -> None:
+        self._required_callbacks().on_step_started(
+            index,
+            item,
+            control_policy,
+        )
 
     def _on_step_completed(self, index: int, item: SequenceItem) -> None:
         self._required_callbacks().on_step_completed(index, item)
@@ -309,6 +377,7 @@ class ActionEngine:
         self,
         item: SequenceItem,
         control: ExecutionControl,
+        control_policy: ActionControlPolicy,
     ) -> ActionHandlerResult:
         definition = item.definition
         params = definition.parameters
@@ -338,6 +407,11 @@ class ActionEngine:
                 operation=self._TIMEOUT_CONFIGURATION_OPERATION,
             )
 
+        policy_failure = self._validate_control_policy(control_policy)
+        if policy_failure is not None:
+            self._on_log(policy_failure.message, "error")
+            return policy_failure
+
         try:
             return self._handler_registry.execute(
                 definition.type,
@@ -363,3 +437,40 @@ class ActionEngine:
                 message,
                 operation=self._ACTION_OPERATION,
             )
+
+    def _validate_control_policy(
+        self,
+        policy: ActionControlPolicy,
+    ) -> ActionHandlerResult | None:
+        for target in policy.stop_targets:
+            try:
+                declared_modes = self._device_runtime.declared_stop_modes(
+                    target.device_id
+                )
+            except DeviceNotRegisteredError as exc:
+                return ActionHandlerResult.failed(
+                    ActionResultCode.CONTROL_POLICY_MISMATCH,
+                    "动作控制策略引用了未注册的停止设备: "
+                    f"{target.device_id}: {exc}",
+                    operation=self._CONTROL_POLICY_OPERATION,
+                    device_id=target.device_id,
+                )
+
+            missing_modes = target.required_modes - declared_modes
+            if not missing_modes:
+                continue
+            missing_values = ", ".join(
+                mode.value
+                for mode in sorted(
+                    missing_modes,
+                    key=lambda item: item.value,
+                )
+            )
+            return ActionHandlerResult.failed(
+                ActionResultCode.CONTROL_POLICY_MISMATCH,
+                "设备停止能力不满足动作控制策略: "
+                f"{target.device_id} 缺少 {missing_values}",
+                operation=self._CONTROL_POLICY_OPERATION,
+                device_id=target.device_id,
+            )
+        return None

@@ -77,8 +77,11 @@ ActionEngine -------- DeviceRuntime ----+
   `ActionEngine`，引擎只保留序列编排、状态推进和事件转换。
 - handler 已统一返回不可与 `bool` 混用的 `ActionHandlerResult`；稳定错误码、
   用户消息、操作标识和设备 ID 已贯通运行时快照及执行事件。
-- 所有动作已接入统一硬 deadline、暂停和协作取消上下文；阻塞 SDK 调用返回前
-  不释放执行资源，设备级即时停止能力仍需逐路径补齐并完成硬件验收。
+- 所有动作已接入统一硬 deadline、暂停和协作取消上下文；注册表同时绑定动作
+  控制策略，按实际参数分支声明阻塞调用、涉及设备、取消模式和设备停止目标。
+  策略与设备注册能力不一致时会在初始化设备前拒绝执行，并通过运行时事件及
+  WebSocket 输出；handler 路由与策略路由不一致时应用启动失败，避免新增动作
+  漏配安全策略。RealMan 最大停止延迟仍待真实硬件验收。
 
 仍需继续收敛的重点：
 
@@ -262,7 +265,7 @@ ActionEngine -------- DeviceRuntime ----+
 | B-004 | P1 | DONE | 建立 DeviceRuntime 和 DeviceSnapshot |
 | B-005 | P1 | DOING | 主要入口已统一初始化/重连/关闭，待真实设备逐项验收 |
 | B-006 | P1 | DONE | 定义设备 capability/state/error |
-| B-007 | P1 | DOING | 已建立统一动作 deadline 与 cooperative cancel 契约；待补齐各阻塞 SDK 的设备级停止能力和硬件验证 |
+| B-007 | P1 | DOING | 已建立全动作控制策略矩阵、执行前停止能力校验和事件输出；无即时取消能力的路径已显式标记，待完成 RealMan 最大停止延迟硬件验证 |
 | B-008 | P2 | TODO | 统一串口 transport 生命周期 |
 | B-009 | P2 | DONE | relay/tool-changer/pipette 及机械臂 adapter 已落地，视觉不再依赖厂商对象 |
 | B-010 | P2 | TODO | 评估并接入 PWM neck 动作能力 |
@@ -788,7 +791,7 @@ M4 工程治理与清理
 | 软件 stop 被误认为急停 | P0 | 停止不及时 | 能力分层、UI/API 明确、硬件验证 |
 | WebSocket 未授权控制 | P0 | 任意网络客户端操作设备 | 认证、权限、控制租约、TLS |
 | 迁移时行为漂移 | P1 | GUI/WS 功能回归 | 最终接口测试、simulation、硬件验收 |
-| 阻塞 SDK 无法取消 | P1 | shutdown 卡住 | timeout、quick-stop、隔离 worker |
+| 阻塞 SDK 无法取消 | P1 | shutdown 卡住 | 动作控制策略显式区分协作取消、调用后取消和设备辅助停止；继续完成真实时延验收 |
 | 配置/任务格式损坏 | P1 | 无法启动或数据丢失 | schema version、原子写、备份 |
 | simulation 与真实行为偏差 | P1 | 测试假阳性 | 共享状态机/校验，硬件验收 |
 | GUI 线程错误 | P1 | 崩溃或界面异常 | Qt adapter、主线程更新规则 |
@@ -867,10 +870,11 @@ M4 工程治理与清理
 | 2026-07-29 | M2 | A/B/F | manipulation handlers 收敛 | A-007/B-007/F-P-002 保持 DOING | MANIPULATE 改为执行器子注册表；快换手、继电器、夹爪、移液枪、表情屏、加粉及转圈注液移出 ActionEngine；非法参数在设备初始化前拒绝，智能加粉等待支持取消并保留安全回位 | - |
 | 2026-07-29 | M2 | A/B | domain handlers 收敛 | A-007/B-007 保持 DOING | 换枪、轨迹、视觉抓取和视觉重定位移出 ActionEngine；参数先校验再初始化设备，轨迹轮询配置化，视觉 executor 可注入，取消/超时继续向统一运行时透传 | - |
 | 2026-07-29 | M2 | A/B/C | 结构化 handler result | A-007 DOING → DONE | 全部 handler 直接切换为 ActionHandlerResult，不保留 bool 兼容；稳定 code、message、operation、device_id 贯通运行时快照和事件，并由 WebSocket 状态/步骤失败协议输出 | - |
+| 2026-07-29 | M2 | A/B/C | 动作控制策略矩阵 | B-007/ER-011 保持 DOING | 注册表绑定 handler 与不可变控制策略；全部动作参数分支声明取消模式、涉及设备和停止目标，执行前拒绝能力矛盾，并通过 step_started/WebSocket 输出；RealMan 最大停止延迟待硬件验收 | - |
 
 ## 22. 建议的首批实施顺序
 
-1. **B-007/ER-006/ER-011**：为每条阻塞硬件路径声明并验证设备级停止能力，完成 RealMan 及其他运动设备停止验收。
+1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-002**：补齐所有直接控制资源租约。
 3. **B-015/B-016**：用第二种机械臂验证 provider 契约，并配置化型号相关工具点位。
 4. **C-001/C-002/C-003**：实现认证、客户端控制租约和审计。

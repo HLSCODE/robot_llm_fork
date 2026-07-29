@@ -5,7 +5,12 @@ import json
 from types import SimpleNamespace
 import unittest
 
-from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.models import (
+    ActionDefinition,
+    ActionType,
+    SequenceItem,
+    SequenceItemStatus,
+)
 from src.execution import (
     ActionHandlerResult,
     ActionResultCode,
@@ -18,6 +23,50 @@ from src.robot_server.ws_server import RobotWebSocketServer
 
 
 class ExecutionResultWebSocketContractTests(unittest.TestCase):
+    def test_step_started_exposes_action_control_policy(self):
+        server = RobotWebSocketServer(services=SimpleNamespace())
+        messages: list[dict] = []
+        server._broadcast_threadsafe = messages.append
+        item = SequenceItem.from_definition(
+            ActionDefinition(
+                id="wait",
+                name="wait",
+                type=ActionType.WAIT,
+                parameters={},
+            )
+        )
+        item.status = SequenceItemStatus.RUNNING
+        policy = {
+            "operation": "wait",
+            "cancellation_mode": "bounded_cooperative",
+            "blocking_device_call": False,
+            "device_ids": [],
+            "stop_targets": [],
+            "expected_max_cancel_latency_seconds": 0.1,
+            "hardware_validation_required": False,
+        }
+        event = ExecutionEvent(
+            run_id="run-1",
+            event_type=ExecutionEventType.STEP_STARTED,
+            origin="test",
+            index=1,
+            item=item,
+            data=policy,
+        )
+
+        server._on_execution_event(event)
+
+        self.assertEqual(
+            {
+                "event": "step_started",
+                "index": 1,
+                "name": "wait",
+                "status": "RUNNING",
+                "control_policy": policy,
+            },
+            messages[0],
+        )
+
     def test_step_failure_preserves_structured_handler_result(self):
         server = RobotWebSocketServer(services=SimpleNamespace())
         messages: list[dict] = []

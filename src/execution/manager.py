@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from ..device_runtime import ResourceArbiter, ResourceLease
+from .action_control import ActionControlPolicy
 from .action_handlers import (
     ActionHandlerResult,
     ActionResultCode,
@@ -31,7 +32,7 @@ ExecutionListener = Callable[[ExecutionEvent], None]
 
 @dataclass(frozen=True, slots=True)
 class EngineCallbacks:
-    on_step_started: Callable[[int, Any], None]
+    on_step_started: Callable[[int, Any, ActionControlPolicy], None]
     on_step_completed: Callable[[int, Any], None]
     on_step_failed: Callable[[int, Any, ActionHandlerResult], None]
     on_loop_progress: Callable[[str, int, int], None]
@@ -223,11 +224,12 @@ class ExecutionManager:
         self._emit(run_id, ExecutionEventType.STARTED)
 
         callbacks = EngineCallbacks(
-            on_step_started=lambda index, item: self._emit(
+            on_step_started=lambda index, item, policy: self._emit(
                 run_id,
                 ExecutionEventType.STEP_STARTED,
                 index=index,
                 item=item,
+                data=policy.to_event_data(),
             ),
             on_step_completed=lambda index, item: self._emit(
                 run_id,

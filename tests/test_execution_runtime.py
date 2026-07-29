@@ -25,6 +25,7 @@ from src.execution import (
     ExecutionManager,
     ExecutionState,
 )
+from src.execution.action_control import resolve_wait_control_policy
 
 
 class _CloseTracker:
@@ -65,7 +66,11 @@ class _BlockingEngine:
         callbacks: EngineCallbacks,
     ) -> EngineResult:
         self.started.set()
-        callbacks.on_step_started(0, sequence[0])
+        callbacks.on_step_started(
+            0,
+            sequence[0],
+            resolve_wait_control_policy({}),
+        )
         while not self.release.is_set():
             if not control.sleep(0.01):
                 return EngineResult(success=False, cancelled=True)
@@ -182,6 +187,27 @@ class DeviceRuntimeTests(unittest.TestCase):
         runtime = DeviceRuntime()
         with self.assertRaises(ValueError):
             runtime.stop_all(StopMode.CONTROLLED)
+
+    def test_declared_stop_modes_come_from_registration_capabilities(self):
+        runtime = DeviceRuntime()
+        runtime.register(
+            DeviceRegistration(
+                device_id="quick-only",
+                capabilities=frozenset(
+                    {
+                        DeviceCapability.MOTION,
+                        DeviceCapability.QUICK_STOP,
+                    }
+                ),
+                factory=_CloseTracker,
+                close=lambda device: device.close(),
+            )
+        )
+
+        self.assertEqual(
+            frozenset({StopMode.QUICK}),
+            runtime.declared_stop_modes("quick-only"),
+        )
 
 
 class ExecutionManagerTests(unittest.TestCase):

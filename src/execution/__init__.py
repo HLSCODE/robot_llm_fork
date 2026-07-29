@@ -1,3 +1,9 @@
+from .action_control import (
+    ActionCancellationMode,
+    ActionControlPolicy,
+    ActionControlPolicyResolver,
+    ActionStopTarget,
+)
 from .action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -29,7 +35,10 @@ from .models import (
 )
 
 __all__ = [
+    "ActionCancellationMode",
     "ActionCancelledError",
+    "ActionControlPolicy",
+    "ActionControlPolicyResolver",
     "ActionExecutionContext",
     "ActionHandler",
     "ActionHandlerNotFoundError",
@@ -37,6 +46,7 @@ __all__ = [
     "ActionHandlerRegistry",
     "ActionResultCode",
     "ActionResultStatus",
+    "ActionStopTarget",
     "ActionTimeoutError",
     "EngineCallbacks",
     "EngineResult",

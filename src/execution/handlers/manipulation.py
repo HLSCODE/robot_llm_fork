@@ -119,6 +119,10 @@ class ManipulateActionHandler:
         if not self._handlers:
             raise ValueError("manipulation handlers must not be empty")
 
+    @property
+    def registered_executors(self) -> frozenset[str]:
+        return frozenset(self._handlers)
+
     def __call__(
         self,
         parameters: ActionParameters,

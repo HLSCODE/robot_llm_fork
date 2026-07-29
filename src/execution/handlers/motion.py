@@ -58,6 +58,10 @@ class MoveActionHandler:
             "身体": body_handler,
         }
 
+    @property
+    def registered_targets(self) -> frozenset[str]:
+        return frozenset(self._target_handlers)
+
     def __call__(
         self,
         parameters: ActionParameters,
@@ -264,6 +268,14 @@ class BaseMoveActionHandler:
 
     def __init__(self, device_runtime: DeviceRuntime) -> None:
         self._device_runtime = device_runtime
+        self._mode_handlers = {
+            "position": self._move_to_position,
+            "distance": self._move_by_distance,
+        }
+
+    @property
+    def registered_modes(self) -> frozenset[str]:
+        return frozenset(self._mode_handlers)
 
     def __call__(
         self,
@@ -271,11 +283,7 @@ class BaseMoveActionHandler:
         context: ActionExecutionContext,
     ) -> ActionHandlerResult:
         move_mode = str(parameters.get("move_mode", "position")).strip()
-        mode_handlers = {
-            "position": self._move_to_position,
-            "distance": self._move_by_distance,
-        }
-        handler = mode_handlers.get(move_mode)
+        handler = self._mode_handlers.get(move_mode)
         if handler is None:
             message = f"未知的移动方式: {move_mode}"
             return context.failure(

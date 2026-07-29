@@ -177,6 +177,42 @@ IDLE
 本矩阵当前覆盖连续运动设备；继电器、快换手、移液枪等离散输出的断电安全态和
 停机策略由总计划 `B-017` 单独跟踪，不能直接套用“停止运动”语义。
 
+### 3.3 动作控制策略
+
+`ActionHandlerRegistry` 现在同时绑定 handler 和不可变
+`ActionControlPolicy`。每次执行会先按参数解析实际动作路径，再校验策略要求的
+设备停止模式是否已由 `DeviceRuntime` 注册；不一致时不初始化设备，直接返回
+`control_policy_mismatch`。策略随 `step_started` 事件传递，并由 WebSocket
+作为 `control_policy` 输出。应用组装时还会校验 MOVE 目标、BASE_MOVE 模式和
+MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增或删除一侧而
+遗漏另一侧会直接导致启动失败。
+
+取消模式：
+
+| 模式 | 语义 | 延迟声明 |
+|---|---|---|
+| `bounded_cooperative` | 不进入同步硬件调用，在统一检查点响应取消 | 当前预期上限 0.1 秒 |
+| `after_blocking_call` | 在同步 SDK/协议调用前后检查；调用返回前不能承诺即时取消 | 上限未知，明确不支持即时取消 |
+| `device_assisted` | 除调用前后检查外，可由 SafetyService 对声明目标发送 quick/emergency stop | 软件能力已校验；最大物理响应延迟待真实硬件验收 |
+
+当前动作策略矩阵：
+
+| 动作路径 | 取消模式 | 涉及设备 | 设备级停止 | 当前结论 |
+|---|---|---|---|---|
+| WAIT、INSPECT | `bounded_cooperative` | 无 | 不需要 | simulation 预期最大响应 0.1 秒 |
+| MOVE/机械臂 | `device_assisted` | robot-system | quick + emergency | 注册能力执行前校验；RealMan 时延待验收 |
+| MOVE/身体 | `after_blocking_call` | body-axis | 不支持 | 阻塞调用返回前不承诺取消 |
+| BASE_MOVE/position、distance | `after_blocking_call` | mobile-base | 不支持 | 阻塞调用返回前不承诺取消 |
+| MANIPULATE/快换手、继电器、夹爪、吸液枪、表情屏、智能加粉、加粉装置 | `after_blocking_call` | 对应设备 | 不支持统一运动停止 | 离散输出安全态另由 B-017 跟踪 |
+| MANIPULATE/右臂转圈注液 | `device_assisted` | robot-system + pipette | robot-system quick + emergency | 机械臂可辅助停止；移液枪离散输出安全态待定义 |
+| CHANGE_GUN | `device_assisted` | robot-system | quick + emergency | 工具架运动可辅助停止；RealMan 时延待验收 |
+| VISION_CAPTURE、VISION_RELOCALIZE | `device_assisted` | robot-system + camera | robot-system quick + emergency | 内部同步视觉流程仍需真实场景验证 |
+| TRAJECTORY | `device_assisted` | robot-system | quick + emergency | 轮询可取消；在途 SDK 调用由机械臂停止辅助 |
+
+`expected_max_cancel_latency_seconds = null` 不是遗漏，而是禁止在硬件验证前
+伪造上限。真实验收必须记录“发出停止请求—运动停止/SDK 返回”的测量值和设备
+最终状态。
+
 ## 4. 优先级与工作项
 
 状态：`TODO`、`DOING`、`BLOCKED`、`DONE`、`DROPPED`。
@@ -193,7 +229,7 @@ IDLE
 | ER-008 | P1 | DONE | DeviceRuntime 和 capability | 状态和生命周期唯一 |
 | ER-009 | P1 | DONE | 统一 simulation runtime | 与真实模式共用状态机 |
 | ER-010 | P1 | DONE | ActionHandlerRegistry | 全部具体动作 handler 已迁出 ActionEngine，并统一返回结构化 ActionHandlerResult |
-| ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 统一 deadline/cancel 已落地，继续补齐设备级停止声明与验证 |
+| ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 全动作控制策略、执行前能力校验和事件输出已落地；待 RealMan 最大停止延迟验收 |
 | ER-012 | P1 | DOING | camera session/resource | 预览和视觉任务不争用 |
 | ER-013 | P1 | DONE | 机械臂能力接口补强 | GUI、执行、视觉、示教和数据采集不依赖 RM 原生字段 |
 | ER-014 | P1 | TODO | WebSocket contract tests | 事件顺序、终态和错误稳定 |
@@ -210,9 +246,9 @@ IDLE
 
 1. 已定义运动设备的 quick-stop/emergency-stop 能力声明和显式能力矩阵。
 2. 已区分 `not_ready`、`unsupported`、`stopped`、`failed`；不把 SDK 成功返回表述为设备停稳确认。
-3. 已建立覆盖全部 ActionType 的动作级硬 deadline 和 cooperative cancel
-   上下文；deadline 不会通过脱离资源租约的后台线程伪中断 SDK 调用。
-   待逐路径增加更细的检查点、设备级停止能力和最大取消延迟测试。
+3. 已建立覆盖全部 ActionType 和参数分支的动作控制策略；deadline 不会通过
+   脱离资源租约的后台线程伪中断 SDK 调用。纯协作路径声明 0.1 秒预期上限，
+   其他路径明确标记为“调用返回后取消”或“设备停止辅助”。
 4. 待在真实设备上验证 cancel、quick-stop、emergency-stop。
 5. handler 失败已关联稳定 code、operation、device_id，并通过带 `run_id`
    的执行事件和快照向入口传播；待底层设备错误进一步细分。
@@ -286,6 +322,8 @@ git diff --check
 - teleop session 阻止 sequence。
 - quick-stop 取消 active execution、释放 teleop lease 并调用 ready robot。
 - DeviceRuntime 对停止成功、未就绪、不支持和失败逐项报告，单设备失败不阻断其他设备。
+- 全动作控制策略矩阵、矛盾声明拒绝和设备注册能力执行前校验。
+- `step_started` 执行事件及 WebSocket 协议输出当前动作控制策略。
 - RealMan adapter 停止双臂且不等待被阻塞运动持有的普通 SDK 锁。
 - presentation/transport/execution 层不得导入具体硬件。
 - CompositionService 并发动作写入、任务编辑、防御性快照和跨入口事件广播。
@@ -321,6 +359,26 @@ git diff --check
 - run_id、执行入口和动作参数。
 - 状态转换、最终结果和原始错误。
 - 停止延迟与设备最终状态。
+
+RealMan 停止专项验收：
+
+1. 在空载、限速、无人员进入运动范围且物理急停可立即触达的条件下进行。
+2. 测试前由项目安全负责人给出 quick-stop 和 emergency-stop 各自允许的
+   最大响应时间；代码在完成测量前保持延迟字段为 `null`，不得自行假定阈值。
+3. 分别对左臂、右臂和双臂并行运动执行 MOVE 与 TRAJECTORY；CHANGE_GUN、
+   VISION_CAPTURE、VISION_RELOCALIZE 仅在其真实流程会驱动机械臂时执行。
+4. 每条适用路径分别触发 quick-stop 和 emergency-stop，至少重复三次，
+   同时记录请求发出、SDK 返回、确认停止运动三个时间点。
+5. 验证 worker 最终状态、资源租约释放、设备告警/使能状态，以及再次执行前
+   必须完成的恢复操作；任何单臂未停止、超时、状态未知都判定失败。
+6. 只有全部适用路径满足预先批准的阈值，才能将 ER-006、ER-011 和 B-007
+   标记为 DONE，并把测得的最坏值写回动作策略或对应 provider 配置。
+
+记录模板：
+
+| 日期 | provider/固件 | 动作路径 | 臂 | 停止模式 | 请求→SDK 返回 | 请求→确认停稳 | worker 终态 | 恢复步骤 | 结果 |
+|---|---|---|---|---|---:|---:|---|---|---|
+| 待填写 | RealMan / 待填写 | MOVE/机械臂 | 左/右/双臂 | quick/emergency | - | - | - | - | 待验收 |
 
 ## 8. 风险
 
@@ -362,3 +420,4 @@ git diff --check
 | 2026-07-29 | manipulation handlers 收敛 | ER-010/ER-011 保持 DOING | MANIPULATE 使用二级执行器注册表；末端执行器、智能加粉和转圈注液移出引擎；移液 typed command 在设备初始化前校验，智能加粉等待可取消且 finally 安全回位 |
 | 2026-07-29 | domain handlers 收敛 | ER-010/ER-011 保持 DOING | 换枪、轨迹、视觉抓取和视觉重定位移出 ActionEngine；轨迹轮询配置化，参数校验前置，视觉流程改为可注入 executor，四类调用统一透传取消与超时 |
 | 2026-07-29 | 结构化 handler result | ER-010 DOING → DONE | 全部 handler 直接切换为 ActionHandlerResult，不保留 bool 兼容；失败 code、message、operation、device_id 贯通 EngineResult、ExecutionSnapshot 和执行事件 |
+| 2026-07-29 | 动作控制策略矩阵 | ER-011 保持 DOING | 注册表直接绑定 handler 与控制策略；全部动作分支声明取消模式、设备和停止目标，执行前拒绝能力矛盾，并通过运行时事件/WebSocket 输出；RealMan 最大停止延迟仍待硬件验收 |
