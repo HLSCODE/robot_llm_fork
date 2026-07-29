@@ -307,8 +307,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   Origin 限制和服务端 TLS/可信反向代理部署验收。
 - 多客户端写操作已由单控制客户端租约串行化；公开查询和已认证的相机/聊天
   读取会话仍允许观察者并行访问。
-- API version、幂等和破坏性变更策略尚未定义。
-- 大部分事件广播给所有客户端，发起者和观察者边界不清晰。
+- 请求幂等语义尚未定义。
+- 执行与编排事件按设计广播给观察者；后续若增加更多高频事件，需要扩展显式
+  订阅类别。
 - `RobotWebSocketServer` 同时处理执行、任务、AI、相机、聊天、设备、遥操作和数据采集。
 - handler 内部混合协议解析、业务逻辑、线程创建和硬件调用。
 - 聊天协议已经明确存在不支持并发请求的限制。
@@ -331,13 +332,13 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | C-003 | P0 | DONE | 权限拒绝、同步完成/拒绝、执行接受与最终成功/失败/取消均记录结构化 client/request/action/run/outcome，且不含凭据或请求 payload |
 | C-004 | P1 | DONE | 所有请求直接响应关联 request_id/action；执行接受、步骤、日志和终态继续关联同一 run_id/request_id |
 | C-005 | P1 | DONE | 请求错误统一为带稳定 code/message/request_id/action 的 error 信封；专用模块错误在协议边界归一，内部异常不向客户端泄露 |
-| C-006 | P1 | TODO | 定义 API version 和破坏性变更策略 |
-| C-007 | P1 | TODO | 限制消息大小、频率和并发 |
-| C-008 | P1 | TODO | 明确事件单播/广播/订阅语义 |
+| C-006 | P1 | DONE | 所有请求强制声明 api_version=1.0，所有响应携带版本；不维护旧协议适配器，破坏性变更要求客户端与服务端同步升级 |
+| C-007 | P1 | DONE | 配置化限制单消息大小、每客户端频率、全服务并发和入站队列；慢客户端发送有 deadline，限流/繁忙返回稳定错误码 |
+| C-008 | P1 | DONE | 请求结果单播、系统/执行事件广播、相机帧显式订阅；广播与订阅发送并发隔离慢客户端 |
 | C-009 | P2 | TODO | 拆分领域 handler 和 service |
 | C-010 | P2 | TODO | 使用 typed request/response DTO |
 | C-011 | P2 | TODO | 增加 Origin/TLS/反向代理部署方案 |
-| C-012 | P2 | TODO | 增加协议 contract tests |
+| C-012 | P2 | DOING | 已覆盖版本、限流、投递范围、权限、请求/执行关联和同步快速终态；待固化全部 action DTO |
 | C-013 | P3 | TODO | 增加 API 指标和慢客户端监控 |
 | C-014 | P1 | DONE | WebSocket 改为 GUI 同进程的可选附加服务，共用唯一 ApplicationServices 和受管理 asyncio 生命周期 |
 | C-015 | P1 | DONE | 动作库、任务库和当前编排序列已收敛到线程安全 CompositionService；JSON 原子替换并向 GUI/网络入口发布 revision 事件 |
@@ -891,14 +892,15 @@ M4 工程治理与清理
 | 2026-07-29 | M2 | B | 机械臂 Provider 与工具架配置收敛 | B-015 TODO → DOING；B-016 TODO → DONE | 建立 Provider 注册表和共享核心契约测试；RealMan 连接、型号、运动/夹爪及工具架参数强类型化，换枪工作流移入 adapter，删除 controller 旧方法与 `arm_sdk/config.py` | - |
 | 2026-07-29 | M3 | C/F | WebSocket 写安全边界 | C-001/C-002 TODO → DONE；C-003 TODO → DOING | 新增共享密钥认证、单控制客户端租约、心跳/超时/断线释放和结构化安全审计；未配置密钥时写操作默认拒绝，观察者断线不再停止控制者遥操作 | - |
 | 2026-07-29 | M3 | A/C | WebSocket 请求与执行关联 | C-003/C-004/C-005 DOING/TODO → DONE | 新增请求上下文和统一错误信封；直接响应与执行 accepted/step/log/terminal 贯通 request_id/action/run_id，执行接受及最终成功/失败/取消形成两阶段审计；未预期异常被连接边界隔离 | - |
+| 2026-07-29 | M3 | C | WebSocket 版本、流控与投递语义 | C-006/C-007/C-008 TODO → DONE；C-012 TODO → DOING | 强制 api_version=1.0 且不保留旧协议；配置消息/频率/并发/队列/发送超时，明确请求单播、系统广播和相机订阅投递并增加协议契约测试 | - |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **C-006/C-007/C-008**：定义 API version 与破坏性变更策略，补消息大小、
-   频率、并发限制和事件单播/广播/订阅语义。
+3. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
+   typed DTO，继续固化全部 action 的协议契约。
 4. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。
 5. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
 6. 完成 simulation smoke test 后执行逐设备真实硬件验收。

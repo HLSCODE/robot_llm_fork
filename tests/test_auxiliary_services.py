@@ -181,9 +181,14 @@ class WebSocketServiceLifecycleTests(unittest.TestCase):
         binding = _FakeWebSocketBinding()
         captured: dict[str, object] = {}
 
-        async def fake_serve(handler, host, port):
+        async def fake_serve(handler, host, port, **options):
             captured.update(
-                {"handler": handler, "host": host, "port": port}
+                {
+                    "handler": handler,
+                    "host": host,
+                    "port": port,
+                    "options": options,
+                }
             )
             return binding
 
@@ -216,6 +221,8 @@ class WebSocketServiceLifecycleTests(unittest.TestCase):
 
         self.assertEqual("127.0.0.1", captured["host"])
         self.assertEqual(9876, captured["port"])
+        self.assertEqual(1_048_576, captured["options"]["max_size"])
+        self.assertEqual(16, captured["options"]["max_queue"])
         self.assertTrue(binding.closed)
         self.assertTrue(binding.waited)
 

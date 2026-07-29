@@ -142,6 +142,11 @@ WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
 WEBSOCKET_AUTH_TOKEN=
 WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
+WEBSOCKET_MAX_MESSAGE_SIZE_BYTES=1048576
+WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
+WEBSOCKET_MAX_CONCURRENT_REQUESTS=16
+WEBSOCKET_MAX_QUEUED_MESSAGES=16
+WEBSOCKET_SEND_TIMEOUT_SECONDS=2.0
 AUXILIARY_SERVICE_START_TIMEOUT_SECONDS=5.0
 AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=10.0
 
@@ -174,6 +179,11 @@ MINICPM_ASK_MODEL=qwen-turbo
 | `WEBSOCKET_PORT` | WebSocket 监听端口 | 默认 `8765` |
 | `WEBSOCKET_AUTH_TOKEN` | 写操作共享认证密钥 | 留空时服务保持可读，但所有写操作均被拒绝；不得提交真实值 |
 | `WEBSOCKET_CONTROL_LEASE_SECONDS` | 单一控制客户端租约时长 | 默认 30 秒；控制指令或心跳会续期 |
+| `WEBSOCKET_MAX_MESSAGE_SIZE_BYTES` | 单条入站消息上限 | 默认 1048576 字节；超限连接由 WebSocket 层以 1009 关闭 |
+| `WEBSOCKET_MAX_REQUESTS_PER_SECOND` | 每客户端每秒请求上限 | 默认 120，包含高频遥操作余量 |
+| `WEBSOCKET_MAX_CONCURRENT_REQUESTS` | 全服务同时处理的请求上限 | 默认 16；超限返回 `server_busy` |
+| `WEBSOCKET_MAX_QUEUED_MESSAGES` | 每连接入站排队上限 | 默认 16，由 WebSocket 库施加背压 |
+| `WEBSOCKET_SEND_TIMEOUT_SECONDS` | 单次出站发送超时 | 默认 2 秒；慢客户端会被断开并释放其会话资源 |
 | `AUXILIARY_SERVICE_START_TIMEOUT_SECONDS` | 单个附加服务启动超时 | 默认 5 秒 |
 | `AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS` | 单个附加服务停止超时 | 默认 10 秒 |
 | `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
@@ -223,6 +233,8 @@ ws.onerror = (err) => {
 ```json
 {
   "event": "connected",
+  "api_version": "1.0",
+  "api_version_required": true,
   "client_id": "6cbd...",
   "authentication_configured": true,
   "control_lease_seconds": 30.0
@@ -235,8 +247,8 @@ ws.onerror = (err) => {
 必须依次完成认证和控制权申请：
 
 ```json
-{"action": "authenticate", "token": "<运行时注入的密钥>", "request_id": "auth-1"}
-{"action": "acquire_control", "request_id": "control-1"}
+{"api_version": "1.0", "action": "authenticate", "token": "<运行时注入的密钥>", "request_id": "auth-1"}
+{"api_version": "1.0", "action": "acquire_control", "request_id": "control-1"}
 ```
 
 认证成功返回 `authenticated`，取得控制权返回 `control_acquired`。同一时刻只有
@@ -246,13 +258,13 @@ ws.onerror = (err) => {
 控制客户端应在租约过期前发送心跳：
 
 ```json
-{"action": "control_heartbeat", "request_id": "heartbeat-1"}
+{"api_version": "1.0", "action": "control_heartbeat", "request_id": "heartbeat-1"}
 ```
 
 主动释放：
 
 ```json
-{"action": "release_control", "request_id": "release-1"}
+{"api_version": "1.0", "action": "release_control", "request_id": "release-1"}
 ```
 
 租约到期、持有者断线或发送失败都会释放控制权，并停止该控制者持有的遥操作或
@@ -278,6 +290,7 @@ ws.onerror = (err) => {
 
 ```json
 {
+  "api_version": "1.0",
   "action": "status",
   "request_id": "status-1"
 }
@@ -287,6 +300,7 @@ ws.onerror = (err) => {
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
+| `api_version` | `string` | 是 | 当前只接受 `1.0`；缺失或不支持的版本会被直接拒绝 |
 | `action` | `string` | 是 | 接口动作名 |
 | `request_id` | `string` | 否 | 1..128 位字母、数字、`.`、`_`、`:`、`-`；缺省时由服务端生成 |
 | 其他字段 | 任意 | 否 | 由具体接口决定 |
@@ -298,6 +312,7 @@ ws.onerror = (err) => {
 ```json
 {
   "event": "status",
+  "api_version": "1.0",
   "request_id": "status-1",
   "action": "status"
 }
@@ -308,6 +323,7 @@ ws.onerror = (err) => {
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `event` | `string` | 是 | 事件名 |
+| `api_version` | `string` | 是 | 产生该消息的服务端协议版本 |
 | `request_id` | `string` | 请求直接响应是 | 与发起请求相同；客户端未提供时使用服务端生成值 |
 | `action` | `string` | 请求直接响应是 | 产生当前响应的请求 action |
 | `run_id` | `string` | 执行事件是 | 一次统一执行的唯一 ID；从 `accepted` 贯通到步骤、日志和终态 |
@@ -316,6 +332,15 @@ ws.onerror = (err) => {
 控制租约超时、其他客户端发起的广播等非请求型事件可以没有
 `request_id/action`。客户端应优先用 `request_id` 关联直接响应，用 `run_id`
 关联完整执行事件流，不能依赖消息到达顺序猜测归属。
+
+版本策略：
+
+- 当前协议版本是 `1.0`，所有请求必须显式声明完全相同的版本。
+- 本项目不维护旧协议兼容适配器；协议字段、事件或语义发生破坏性变化时，
+  服务端和客户端必须同步升级到新的版本值。
+- 仅增加可选字段且不改变已有语义时可以保持当前版本。
+- 本文后续较长的业务请求片段可能省略公共字段；实际客户端必须通过统一发送
+  函数补齐 `api_version` 和 `request_id`。
 
 ### 3.5 前端一定要注意的协议特点
 
@@ -365,6 +390,19 @@ ws.onmessage = (event) => {
   if (fn) fn(data);
 };
 ```
+
+### 3.6 消息投递与流量边界
+
+| 类型 | 接收者 | 典型事件 |
+|---|---|---|
+| 请求单播 | 仅请求发起连接 | `status`、CRUD 结果、`error`、`access_denied` |
+| 系统广播 | 当前全部连接 | `composition_changed`、执行 accepted/step/log/terminal、控制权释放 |
+| 显式订阅 | 仅已订阅连接 | `camera_frames` |
+
+广播和订阅投递并发发送，一个慢客户端不会串行阻塞其他客户端；超过
+`WEBSOCKET_SEND_TIMEOUT_SECONDS` 的连接会被清理。请求频率超过限制时返回
+`rate_limited` 和 `retry_after_seconds`；全服务并发达到上限时返回
+`server_busy`。客户端遇到这两类错误不得立即无界重试。
 
 ---
 
@@ -2862,6 +2900,7 @@ function handleChatData(data) {
 ```json
 {
   "event": "error",
+  "api_version": "1.0",
   "code": "request_failed",
   "message": "...",
   "request_id": "execute-1",
@@ -2879,7 +2918,11 @@ function handleChatData(data) {
 |---|---|
 | `invalid_request` | 消息不是合法请求对象或 JSON |
 | `invalid_request_id` | 请求 ID 格式或长度不合法 |
+| `api_version_required` | 请求未声明 `api_version` |
+| `unsupported_api_version` | 请求版本不在服务端支持列表中 |
 | `unknown_action` | action 不存在 |
+| `rate_limited` | 当前客户端请求频率超过配置上限 |
+| `server_busy` | 全服务并发请求达到配置上限 |
 | `request_failed` | 通用校验或业务前置条件失败 |
 | `teleoperation_failed` | 遥操作请求失败 |
 | `camera_failed` | 相机请求失败 |
@@ -2891,6 +2934,7 @@ function handleChatData(data) {
 ```json
 {
   "event": "access_denied",
+  "api_version": "1.0",
   "code": "authentication_required",
   "action": "execute",
   "request_id": "execute-1",
@@ -2943,7 +2987,19 @@ function handleChatData(data) {
 ```javascript
 const ws = new WebSocket("ws://localhost:8765");
 const websocketToken = window.runtimeConfig.websocketToken;
+const API_VERSION = "1.0";
 let hasControl = false;
+let requestSequence = 0;
+
+function sendRequest(action, payload = {}) {
+  requestSequence += 1;
+  ws.send(JSON.stringify({
+    api_version: API_VERSION,
+    action,
+    request_id: `${action}-${requestSequence}`,
+    ...payload
+  }));
+}
 
 ws.onopen = () => console.log("WebSocket 已连接");
 
@@ -2952,22 +3008,15 @@ ws.onmessage = (event) => {
 
   switch (data.event) {
     case "connected":
-      ws.send(JSON.stringify({
-        action: "authenticate",
-        token: websocketToken,
-        request_id: "auth-1"
-      }));
+      sendRequest("authenticate", { token: websocketToken });
       break;
     case "authenticated":
-      ws.send(JSON.stringify({
-        action: "acquire_control",
-        request_id: "control-1"
-      }));
+      sendRequest("acquire_control");
       break;
     case "control_acquired":
       hasControl = true;
-      ws.send(JSON.stringify({ action: "status" }));
-      ws.send(JSON.stringify({ action: "list_actions" }));
+      sendRequest("status");
+      sendRequest("list_actions");
       break;
     case "control_released":
       hasControl = false;
@@ -2999,9 +3048,7 @@ ws.onmessage = (event) => {
 
 function executeDemo() {
   if (!hasControl) throw new Error("当前客户端没有控制权");
-  ws.send(JSON.stringify({
-    action: "execute",
-    request_id: "execute-demo-1",
+  sendRequest("execute", {
     sequence: [
       {
         name: "移动到A点",
@@ -3014,7 +3061,7 @@ function executeDemo() {
         }
       }
     ]
-  }));
+  });
 }
 ```
 

@@ -5,10 +5,17 @@ from enum import Enum
 from typing import Any
 
 
+WEBSOCKET_API_VERSION = "1.0"
+
+
 class WebSocketErrorCode(str, Enum):
     INVALID_REQUEST = "invalid_request"
     INVALID_REQUEST_ID = "invalid_request_id"
+    API_VERSION_REQUIRED = "api_version_required"
+    UNSUPPORTED_API_VERSION = "unsupported_api_version"
     UNKNOWN_ACTION = "unknown_action"
+    RATE_LIMITED = "rate_limited"
+    SERVER_BUSY = "server_busy"
     REQUEST_FAILED = "request_failed"
     TELEOPERATION_FAILED = "teleoperation_failed"
     CAMERA_FAILED = "camera_failed"

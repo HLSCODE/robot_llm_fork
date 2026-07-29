@@ -345,13 +345,14 @@ setTimeout(() => {
 - ✅ 关节数量验证：检查是否为6个关节角度
 - ⚠️ **未实现**：关节限位检查
 - ⚠️ **未实现**：速度限制检查
-- ⚠️ **未实现**：心跳检测和超时停止
+- ✅ **已实现**：WebSocket 控制租约心跳、超时释放和遥操作停止
+- ⚠️ **未实现**：独立于控制租约的关节指令流 watchdog
 
 ### 后续增强（Phase 2）
 需要添加以下安全措施：
 1. **关节限位检查**：每个关节的角度范围限制
 2. **速度限制检查**：相邻指令的变化率限制
-3. **心跳检测**：超过一定时间未收到指令则自动停止
+3. **指令流 watchdog**：在控制租约之外检测关节指令中断
 4. **紧急停止**：新增 `teleop_emergency_stop` 接口
 
 ### 使用建议
@@ -371,7 +372,12 @@ WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
 WEBSOCKET_AUTH_TOKEN=<运行时强随机密钥>
 WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
+WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
 ```
+
+当前 WebSocket API 版本为 `1.0`。包括 50Hz 关节指令在内的每个请求都必须
+携带 `api_version: "1.0"` 和唯一 `request_id`；默认每客户端上限为每秒
+120 个请求。
 
 启动服务：
 ```bash

@@ -142,9 +142,11 @@ from .access_control import (
 )
 from .protocol import (
     RequestCorrelation,
+    WEBSOCKET_API_VERSION,
     WebSocketErrorCode,
     WebSocketRequestContext,
 )
+from .request_limits import WebSocketRequestLimiter
 
 
 if TYPE_CHECKING:
@@ -165,6 +167,26 @@ class _WebSocketRoute:
     handler: Callable[[Any, dict[str, Any]], Awaitable[None]]
     access_level: WebSocketAccessLevel
     audited: bool = True
+
+
+class _BoundedWebSocket:
+    """Apply a send deadline while preserving the websocket interface."""
+
+    def __init__(self, websocket: Any, timeout_seconds: float) -> None:
+        self._websocket = websocket
+        self._timeout_seconds = timeout_seconds
+
+    def __aiter__(self):
+        return self._websocket.__aiter__()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._websocket, name)
+
+    async def send(self, message: str) -> None:
+        await asyncio.wait_for(
+            self._websocket.send(message),
+            timeout=self._timeout_seconds,
+        )
 
 
 class MiniCPMChatConfig:
@@ -256,6 +278,11 @@ class RobotWebSocketServer:
         *,
         auth_token: str = "",
         control_lease_seconds: float = 30.0,
+        max_message_size_bytes: int = 1_048_576,
+        max_requests_per_second: int = 120,
+        max_concurrent_requests: int = 16,
+        max_queued_messages: int = 16,
+        send_timeout_seconds: float = 2.0,
         audit_sink: AuditSink | None = None,
     ) -> None:
         normalized_host = host.strip()
@@ -263,10 +290,19 @@ class RobotWebSocketServer:
             raise ValueError("WebSocket host must not be empty")
         if not 1 <= port <= 65535:
             raise ValueError("WebSocket port must be in range 1..65535")
+        if max_message_size_bytes <= 0:
+            raise ValueError("max_message_size_bytes must be positive")
+        if max_queued_messages <= 0:
+            raise ValueError("max_queued_messages must be positive")
+        if send_timeout_seconds <= 0:
+            raise ValueError("send_timeout_seconds must be positive")
 
         self._services = services
         self._host = normalized_host
         self._port = port
+        self._max_message_size_bytes = max_message_size_bytes
+        self._max_queued_messages = max_queued_messages
+        self._send_timeout_seconds = send_timeout_seconds
         self._server: Any = None
         self._composition_unsubscribe = None
 
@@ -280,6 +316,10 @@ class RobotWebSocketServer:
         self._audit_sink = audit_sink or log_websocket_audit_event
         self._execution_requests: dict[str, RequestCorrelation] = {}
         self._execution_requests_lock = threading.RLock()
+        self._request_limiter = WebSocketRequestLimiter(
+            max_requests_per_second=max_requests_per_second,
+            max_concurrent_requests=max_concurrent_requests,
+        )
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -372,6 +412,8 @@ class RobotWebSocketServer:
             self._handler,
             self._host,
             self._port,
+            max_size=self._max_message_size_bytes,
+            max_queue=self._max_queued_messages,
         )
         self._schedule_background_task(
             self._control_lease_monitor(),
@@ -630,7 +672,10 @@ class RobotWebSocketServer:
 
     async def _handler(self, websocket) -> None:
         """所有连接统一进入主控处理器，通过 action 字段分发指令。"""
-        await self._handle_frontend_ws(websocket)
+        await self._handle_frontend_ws(_BoundedWebSocket(
+            websocket,
+            self._send_timeout_seconds,
+        ))
 
     async def _handle_frontend_ws(self, websocket) -> None:
         """处理前端主控 WebSocket 连接"""
@@ -650,6 +695,7 @@ class RobotWebSocketServer:
             "control_lease_seconds": (
                 self._access.control_lease_seconds
             ),
+            "api_version_required": True,
         }))
 
         try:
@@ -956,6 +1002,25 @@ class RobotWebSocketServer:
 
         action_value = data.get("action")
         action = action_value if isinstance(action_value, str) else ""
+        api_version = data.get("api_version")
+        if api_version != WEBSOCKET_API_VERSION:
+            code = (
+                WebSocketErrorCode.API_VERSION_REQUIRED.value
+                if api_version is None
+                else WebSocketErrorCode.UNSUPPORTED_API_VERSION.value
+            )
+            await websocket.send(self._json_msg({
+                "event": "error",
+                "code": code,
+                "action": action,
+                "request_id": request_id,
+                "message": (
+                    f"请求必须声明 api_version={WEBSOCKET_API_VERSION}"
+                ),
+                "supported_api_versions": [WEBSOCKET_API_VERSION],
+            }))
+            return
+
         route = self._routes.get(action)
         if route is None:
             await websocket.send(self._json_msg({
@@ -980,7 +1045,32 @@ class RobotWebSocketServer:
             )
         )
         context_token = _CURRENT_REQUEST.set(request_context)
+        admission = self._request_limiter.admit(client_id)
         try:
+            if not admission.accepted:
+                await websocket.send(self._json_msg({
+                    "event": "error",
+                    "code": admission.code,
+                    "message": (
+                        "请求频率超过限制"
+                        if admission.code
+                        == WebSocketErrorCode.RATE_LIMITED.value
+                        else "服务器并发请求已达到上限"
+                    ),
+                    "retry_after_seconds": (
+                        admission.retry_after_seconds
+                    ),
+                }))
+                if route.audited:
+                    self._audit(
+                        client_id=client_id,
+                        action=action,
+                        request_id=request_id,
+                        outcome="rejected",
+                        code=admission.code,
+                    )
+                return
+
             expired_client_id = self._access.expire_control()
             if expired_client_id is not None:
                 await self._release_control_side_effects(
@@ -1054,6 +1144,8 @@ class RobotWebSocketServer:
                     run_id=request_context.run_id,
                 )
         finally:
+            if admission.accepted:
+                self._request_limiter.release(client_id)
             _CURRENT_REQUEST.reset(context_token)
 
     def _register_client(self, websocket: Any, remote: object) -> str:
@@ -1073,11 +1165,13 @@ class RobotWebSocketServer:
         self._camera_frame_subs.discard(websocket)
         self._stop_camera_if_idle()
         client_id = self._client_ids.pop(websocket, None)
-        if client_id is not None and self._access.unregister(client_id):
-            await self._release_control_side_effects(
-                client_id,
-                reason=reason,
-            )
+        if client_id is not None:
+            self._request_limiter.unregister(client_id)
+            if self._access.unregister(client_id):
+                await self._release_control_side_effects(
+                    client_id,
+                    reason=reason,
+                )
         await self._close_minicpm_session(websocket)
 
     async def _release_control_side_effects(
@@ -2996,7 +3090,7 @@ class RobotWebSocketServer:
                 if session is not None and session.active:
                     jpegs = session.camera.get_latest_jpegs()
                     if jpegs:
-                        payload = json.dumps({
+                        payload = {
                             "event": "camera_frames",
                             "frames": [
                                 {
@@ -3011,15 +3105,11 @@ class RobotWebSocketServer:
                                     jpegs
                                 )
                             ],
-                        }, ensure_ascii=False)
-                        dead: List = []
-                        for ws in list(self._camera_frame_subs):
-                            try:
-                                await ws.send(payload)
-                            except Exception:
-                                dead.append(ws)
-                        for ws in dead:
-                            self._camera_frame_subs.discard(ws)
+                        }
+                        await self._send_to_subscribers(
+                            payload,
+                            self._camera_frame_subs,
+                        )
                 await asyncio.sleep(interval)
         except asyncio.CancelledError:
             raise
@@ -3540,20 +3630,61 @@ class RobotWebSocketServer:
 
     async def _broadcast(self, data: dict) -> None:
         """广播消息到所有已连接的客户端"""
-        if not self._clients:
-            return
-        msg = self._json_msg(data)
-        disconnected = []
-        for client in list(self._clients):
-            try:
-                await client.send(msg)
-            except Exception:
-                disconnected.append(client)
+        disconnected = await self._deliver(
+            data,
+            tuple(self._clients),
+        )
         for client in disconnected:
             await self._unregister_client(
                 client,
                 reason="send_failed",
             )
+
+    async def _send_to_subscribers(
+        self,
+        data: dict[str, Any],
+        subscribers: set[Any],
+    ) -> None:
+        """Send an event only to an explicit subscription set."""
+        disconnected = await self._deliver(
+            data,
+            tuple(subscribers),
+        )
+        for client in disconnected:
+            await self._unregister_client(
+                client,
+                reason="send_failed",
+            )
+
+    async def _deliver(
+        self,
+        data: dict[str, Any],
+        recipients: tuple[Any, ...],
+    ) -> tuple[Any, ...]:
+        if not recipients:
+            return ()
+        message = self._json_msg(data)
+
+        async def send(client: Any) -> Any | None:
+            try:
+                await client.send(message)
+                return None
+            except Exception as exc:
+                logger.warning(
+                    "WebSocket 事件发送失败: client_id=%s error=%s",
+                    self._client_ids.get(client, "unknown"),
+                    type(exc).__name__,
+                )
+                return client
+
+        results = await asyncio.gather(
+            *(send(client) for client in recipients),
+        )
+        return tuple(
+            client
+            for client in results
+            if client is not None
+        )
 
     # ==================================================================
     # 遥操作控制
@@ -4244,8 +4375,9 @@ class RobotWebSocketServer:
         payload = (
             request_context.decorate(data)
             if request_context is not None
-            else data
+            else dict(data)
         )
+        payload.setdefault("api_version", WEBSOCKET_API_VERSION)
         return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod

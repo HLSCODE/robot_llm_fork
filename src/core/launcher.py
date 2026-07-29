@@ -92,6 +92,31 @@ def build_auxiliary_service_host(
                         30.0,
                     )
                 ),
+                max_message_size_bytes=int(getattr(
+                    config,
+                    "WEBSOCKET_MAX_MESSAGE_SIZE_BYTES",
+                    1_048_576,
+                )),
+                max_requests_per_second=int(getattr(
+                    config,
+                    "WEBSOCKET_MAX_REQUESTS_PER_SECOND",
+                    120,
+                )),
+                max_concurrent_requests=int(getattr(
+                    config,
+                    "WEBSOCKET_MAX_CONCURRENT_REQUESTS",
+                    16,
+                )),
+                max_queued_messages=int(getattr(
+                    config,
+                    "WEBSOCKET_MAX_QUEUED_MESSAGES",
+                    16,
+                )),
+                send_timeout_seconds=float(getattr(
+                    config,
+                    "WEBSOCKET_SEND_TIMEOUT_SECONDS",
+                    2.0,
+                )),
             )
         )
 

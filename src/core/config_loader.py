@@ -256,6 +256,11 @@ class Config:
     WEBSOCKET_PORT: int = 8765
     WEBSOCKET_AUTH_TOKEN: str = ""
     WEBSOCKET_CONTROL_LEASE_SECONDS: float = 30.0
+    WEBSOCKET_MAX_MESSAGE_SIZE_BYTES: int = 1048576
+    WEBSOCKET_MAX_REQUESTS_PER_SECOND: int = 120
+    WEBSOCKET_MAX_CONCURRENT_REQUESTS: int = 16
+    WEBSOCKET_MAX_QUEUED_MESSAGES: int = 16
+    WEBSOCKET_SEND_TIMEOUT_SECONDS: float = 2.0
     AUXILIARY_SERVICE_START_TIMEOUT_SECONDS: float = 5.0
     AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS: float = 10.0
 
@@ -768,6 +773,21 @@ class Config:
         instance.WEBSOCKET_CONTROL_LEASE_SECONDS = float(
             os.getenv("WEBSOCKET_CONTROL_LEASE_SECONDS", "30.0")
         )
+        instance.WEBSOCKET_MAX_MESSAGE_SIZE_BYTES = int(
+            os.getenv("WEBSOCKET_MAX_MESSAGE_SIZE_BYTES", "1048576")
+        )
+        instance.WEBSOCKET_MAX_REQUESTS_PER_SECOND = int(
+            os.getenv("WEBSOCKET_MAX_REQUESTS_PER_SECOND", "120")
+        )
+        instance.WEBSOCKET_MAX_CONCURRENT_REQUESTS = int(
+            os.getenv("WEBSOCKET_MAX_CONCURRENT_REQUESTS", "16")
+        )
+        instance.WEBSOCKET_MAX_QUEUED_MESSAGES = int(
+            os.getenv("WEBSOCKET_MAX_QUEUED_MESSAGES", "16")
+        )
+        instance.WEBSOCKET_SEND_TIMEOUT_SECONDS = float(
+            os.getenv("WEBSOCKET_SEND_TIMEOUT_SECONDS", "2.0")
+        )
         instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS = float(
             os.getenv("AUXILIARY_SERVICE_START_TIMEOUT_SECONDS", "5.0")
         )
@@ -1111,6 +1131,21 @@ class Config:
             "auth_token": instance.WEBSOCKET_AUTH_TOKEN,
             "control_lease_seconds": (
                 instance.WEBSOCKET_CONTROL_LEASE_SECONDS
+            ),
+            "max_message_size_bytes": (
+                instance.WEBSOCKET_MAX_MESSAGE_SIZE_BYTES
+            ),
+            "max_requests_per_second": (
+                instance.WEBSOCKET_MAX_REQUESTS_PER_SECOND
+            ),
+            "max_concurrent_requests": (
+                instance.WEBSOCKET_MAX_CONCURRENT_REQUESTS
+            ),
+            "max_queued_messages": (
+                instance.WEBSOCKET_MAX_QUEUED_MESSAGES
+            ),
+            "send_timeout_seconds": (
+                instance.WEBSOCKET_SEND_TIMEOUT_SECONDS
             ),
             "start_timeout_seconds": (
                 instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS

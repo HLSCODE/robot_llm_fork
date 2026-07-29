@@ -305,9 +305,11 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 1. WebSocket 已增加认证、控制所有者、`request_id` 和稳定错误码。
 2. `execution_finished` 已明确返回 `run_id/state/success/error/failure`，
    并通过同一 request/run 完成两阶段审计。
-3. 拆分 execution/device/camera/teleop/data-collection handler。
-4. GUI 提取 execution/device view-model。
-5. 建立 WebSocket contract test 和 GUI simulation smoke test。
+3. API 1.0 强制版本校验、消息/频率/并发/发送限制，以及
+   单播/广播/相机订阅语义已落地。
+4. 拆分 execution/device/camera/teleop/data-collection handler。
+5. GUI 提取 execution/device view-model。
+6. 继续补全 action contract test 和 GUI simulation smoke test。
 
 ## 6. 自动化验证
 
@@ -433,3 +435,4 @@ RealMan 停止专项验收：
 | 2026-07-29 | 精确资源租约与相机会话 | ER-012 DOING → DONE | ExecutionManager 按动作策略申请实际设备集合；设备初始化/关闭纳入仲裁；相机测试、语音、WebSocket 预览和数据采集直接切换到 CameraAccessService/CameraSession，不保留 manager_factory 兼容入口 |
 | 2026-07-29 | 机械臂 Provider 配置收敛 | B-015 TODO → DOING；B-016 TODO → DONE | Provider 注册表和共享核心契约测试落地；RealMan 型号、连接、运动/夹爪及工具架参数强类型化，删除 controller 换枪硬编码、旧配置模块和旧环境键 |
 | 2026-07-29 | WebSocket 安全与执行关联 | ER-007 TODO → DONE；ER-014 TODO → DOING | 写操作认证和单控制租约落地；直接响应、执行事件及业务终态贯通 request_id/action/run_id，错误信封稳定且内部异常不泄露，补充同步快速终态竞态测试 |
+| 2026-07-29 | WebSocket 协议治理 | ER-014 保持 DOING | 强制 API 1.0 版本声明且不保留旧协议兼容；消息大小、频率、并发、排队和发送超时配置化，明确请求单播、系统广播和相机订阅语义 |

@@ -19,6 +19,7 @@ from src.execution import (
     ExecutionSnapshot,
     ExecutionState,
 )
+from src.robot_server.protocol import WEBSOCKET_API_VERSION
 from src.robot_server.ws_server import RobotWebSocketServer
 
 
@@ -177,6 +178,7 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
         asyncio.run(server._dispatch(
             websocket,
             {
+                "api_version": WEBSOCKET_API_VERSION,
                 "action": "execute",
                 "request_id": "execute-42",
                 "sequence": [{

@@ -14,6 +14,7 @@ from src.robot_server.access_control import (
 )
 from src.robot_server.protocol import (
     RequestCorrelation,
+    WEBSOCKET_API_VERSION,
     WebSocketRequestContext,
 )
 from src.robot_server.ws_server import RobotWebSocketServer
@@ -60,6 +61,19 @@ class _FakeTeleoperation:
     def stop(self) -> None:
         self.active = False
         self.stop_count += 1
+
+
+def _request(
+    action: str,
+    request_id: str,
+    **payload,
+) -> dict:
+    return {
+        "api_version": WEBSOCKET_API_VERSION,
+        "action": action,
+        "request_id": request_id,
+        **payload,
+    }
 
 
 class WebSocketAccessControllerTests(unittest.TestCase):
@@ -162,38 +176,35 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
         async def scenario() -> None:
             await self.server._dispatch(
                 websocket,
-                {"action": "pause", "request_id": "pause-0"},
+                _request("pause", "pause-0"),
             )
             await self.server._dispatch(
                 websocket,
-                {
-                    "action": "authenticate",
-                    "token": "wrong-secret",
-                    "request_id": "auth-0",
-                },
+                _request(
+                    "authenticate",
+                    "auth-0",
+                    token="wrong-secret",
+                ),
             )
             await self.server._dispatch(
                 websocket,
-                {
-                    "action": "authenticate",
-                    "token": "correct-secret",
-                    "request_id": "auth-1",
-                },
+                _request(
+                    "authenticate",
+                    "auth-1",
+                    token="correct-secret",
+                ),
             )
             await self.server._dispatch(
                 websocket,
-                {"action": "pause", "request_id": "pause-1"},
+                _request("pause", "pause-1"),
             )
             await self.server._dispatch(
                 websocket,
-                {
-                    "action": "acquire_control",
-                    "request_id": "control-1",
-                },
+                _request("acquire_control", "control-1"),
             )
             await self.server._dispatch(
                 websocket,
-                {"action": "pause", "request_id": "pause-2"},
+                _request("pause", "pause-2"),
             )
 
         asyncio.run(scenario())
@@ -235,7 +246,7 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
 
         asyncio.run(self.server._dispatch(
             websocket,
-            {"action": "pause", "request_id": "pause-invalid"},
+            _request("pause", "pause-invalid"),
         ))
 
         response = websocket.payloads[-1]
@@ -265,7 +276,7 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
         with patch("src.robot_server.ws_server.logger.exception"):
             asyncio.run(self.server._dispatch(
                 websocket,
-                {"action": "pause", "request_id": "pause-failed"},
+                _request("pause", "pause-failed"),
             ))
 
         response = websocket.payloads[-1]
