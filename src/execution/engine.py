@@ -2,7 +2,6 @@
 
 from collections.abc import Sequence
 import logging
-from pathlib import Path
 from typing import Any
 
 from ..core.execution_context import ExecutionContext
@@ -13,24 +12,11 @@ from ..core.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ..device_runtime import (
-    ArmId,
-    CameraSource,
-    DepthCameraSource,
-    DeviceRuntime,
-    RobotSystem,
-    ToolRackControl,
-    TrajectoryControl,
-)
-from ..device_runtime.ids import (
-    CAMERA,
-    ROBOT_SYSTEM,
-)
+from ..device_runtime import DeviceRuntime
 from .action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,
     ActionHandlerRegistry,
-    ActionParameters,
     ActionTimeoutError,
     InspectActionHandler,
     WaitActionHandler,
@@ -39,10 +25,15 @@ from .control import ExecutionControl
 from .handlers import (
     BaseMoveActionHandler,
     BodyMoveActionHandler,
+    ChangeToolActionHandler,
     ManipulationHandlerOptions,
     MotionHandlerOptions,
     MoveActionHandler,
     RobotMoveActionHandler,
+    TrajectoryActionHandler,
+    TrajectoryHandlerOptions,
+    VisionCaptureActionHandler,
+    VisionRelocalizationActionHandler,
     create_manipulation_handler,
 )
 from .manager import EngineCallbacks
@@ -109,6 +100,15 @@ class ActionEngine:
                 )
             ),
         )
+        self._trajectory_handler_options = TrajectoryHandlerOptions(
+            poll_interval_seconds=float(
+                getattr(
+                    config,
+                    "EXECUTION_TRAJECTORY_POLL_INTERVAL_SECONDS",
+                    0.5,
+                )
+            )
+        )
         tapping_config_getter = getattr(
             config,
             "get_tapping_config",
@@ -151,16 +151,28 @@ class ActionEngine:
         )
         registry.register(ActionType.INSPECT, InspectActionHandler())
         registry.register(ActionType.WAIT, WaitActionHandler())
-        registry.register(ActionType.CHANGE_GUN, self._execute_change_gun)
+        registry.register(
+            ActionType.CHANGE_GUN,
+            ChangeToolActionHandler(self._device_runtime),
+        )
         registry.register(
             ActionType.VISION_CAPTURE,
-            self._execute_vision_capture,
+            VisionCaptureActionHandler(self._device_runtime),
         )
         registry.register(
             ActionType.VISION_RELOCALIZE,
-            self._execute_vision_relocalize,
+            VisionRelocalizationActionHandler(
+                self._device_runtime,
+                self.execution_context,
+            ),
         )
-        registry.register(ActionType.TRAJECTORY, self._execute_trajectory)
+        registry.register(
+            ActionType.TRAJECTORY,
+            TrajectoryActionHandler(
+                self._device_runtime,
+                self._trajectory_handler_options,
+            ),
+        )
         registry.validate_complete()
         return registry
 
@@ -323,113 +335,4 @@ class ActionEngine:
             return False
         except Exception as exc:
             self._on_log(f"执行错误: {str(exc)}", "error")
-            return False
-
-    def _execute_trajectory(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        robot_name = params.get("robot", "robot1")
-        file_path = params.get("file_path", "")
-
-        self._on_log(f"执行轨迹动作: robot={robot_name}, file={file_path}")
-
-        if not file_path or not Path(file_path).exists():
-            self._on_log(f"轨迹文件不存在: {file_path}", "error")
-            return False
-
-        try:
-            arm = ArmId.parse(robot_name)
-            trajectory = self._device_runtime.require(
-                ROBOT_SYSTEM,
-                TrajectoryControl,
-            )
-            context.invoke(
-                "trajectory.send",
-                lambda: trajectory.send_trajectory(arm, file_path),
-            )
-
-            while True:
-                context.checkpoint()
-                if trajectory.is_trajectory_complete(arm):
-                    self._on_log("轨迹执行完成")
-                    return True
-                context.sleep(0.5)
-        except Exception as e:
-            self._on_log(f"轨迹执行异常: {e}", "error")
-            return False
-
-    # ------------------------------------------------------------------
-    # 换枪类动作
-    # ------------------------------------------------------------------
-
-    def _execute_change_gun(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行换枪动作"""
-        gun_position = params.get('Gun_Position', 1)
-        operation = params.get('Operation', '取')
-
-        self._on_log(f"换枪动作: 枪位={gun_position}, 操作={operation}")
-
-        try:
-            if gun_position not in (1, 2) or operation not in ('取', '放'):
-                self._on_log(f"未知的换枪参数组合: 枪位={gun_position}, 操作={operation}", "error")
-                return False
-            tool_rack = self._device_runtime.require(
-                ROBOT_SYSTEM,
-                ToolRackControl,
-            )
-            tool_rack.change_tool(
-                int(gun_position),
-                attach=operation == '取',
-            )
-            self._on_log(
-                f"工具架操作完成: slot={gun_position}, operation={operation}"
-            )
-            return True
-        except Exception as e:
-            self._on_log(f"执行换枪出错: {str(e)}", "error")
-            return False
-
-    # ------------------------------------------------------------------
-    # 视觉抓取动作
-    # ------------------------------------------------------------------
-
-    def _execute_vision_capture(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行视觉抓取动作（委托共用模块）"""
-        from ..vision.executor import execute_vision_capture
-        camera = self._device_runtime.require(CAMERA, DepthCameraSource)
-        return execute_vision_capture(
-            self._device_runtime.require(ROBOT_SYSTEM, RobotSystem),
-            camera,
-            params,
-            self._on_log,
-        )
-
-    def _execute_vision_relocalize(
-        self,
-        params: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> bool:
-        """执行视觉重定位动作。"""
-        from ..vision.relocalization import execute_vision_relocalization
-
-        try:
-            return execute_vision_relocalization(
-                self._device_runtime.require(ROBOT_SYSTEM, RobotSystem),
-                self._device_runtime.require(CAMERA, CameraSource),
-                params,
-                self.execution_context,
-                self._on_log,
-            )
-        except Exception as exc:
-            self._on_log(f"视觉重定位失败: {exc}", "error")
             return False

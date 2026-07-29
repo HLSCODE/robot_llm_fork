@@ -163,6 +163,7 @@ class Config:
     EXECUTION_BODY_POLL_INTERVAL_SECONDS: float = 0.1
     EXECUTION_GRIPPER_MAX_ATTEMPTS: int = 3
     EXECUTION_GRIPPER_RETRY_DELAY_SECONDS: float = 0.5
+    EXECUTION_TRAJECTORY_POLL_INTERVAL_SECONDS: float = 0.5
     SAFETY_STOP_WAIT_TIMEOUT_SECONDS: float = 2.0
     MAX_ATTEMPTS: int = 5
     GRIPPER_PICK_SPEED: int = 200
@@ -583,6 +584,12 @@ class Config:
         instance.EXECUTION_GRIPPER_RETRY_DELAY_SECONDS = float(
             os.getenv(
                 "EXECUTION_GRIPPER_RETRY_DELAY_SECONDS",
+                "0.5",
+            )
+        )
+        instance.EXECUTION_TRAJECTORY_POLL_INTERVAL_SECONDS = float(
+            os.getenv(
+                "EXECUTION_TRAJECTORY_POLL_INTERVAL_SECONDS",
                 "0.5",
             )
         )

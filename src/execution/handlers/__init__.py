@@ -19,10 +19,20 @@ from .motion import (
     MoveActionHandler,
     RobotMoveActionHandler,
 )
+from .tooling import ChangeToolActionHandler
+from .trajectory import (
+    TrajectoryActionHandler,
+    TrajectoryHandlerOptions,
+)
+from .vision import (
+    VisionCaptureActionHandler,
+    VisionRelocalizationActionHandler,
+)
 
 __all__ = [
     "BaseMoveActionHandler",
     "BodyMoveActionHandler",
+    "ChangeToolActionHandler",
     "CircleDispenseActionHandler",
     "ExpressionDisplayActionHandler",
     "GripperActionHandler",
@@ -37,5 +47,9 @@ __all__ = [
     "RobotMoveActionHandler",
     "TappingActionHandler",
     "ToolChangerActionHandler",
+    "TrajectoryActionHandler",
+    "TrajectoryHandlerOptions",
+    "VisionCaptureActionHandler",
+    "VisionRelocalizationActionHandler",
     "create_manipulation_handler",
 ]
