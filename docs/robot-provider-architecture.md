@@ -46,6 +46,8 @@ GUI / WebSocket / Vision / Data Collection
 
 可选能力按具体设备声明：
 
+- `ArmTelemetryReader`：提供带 UTC/monotonic 时间的实际关节、夹爪及可选
+  速度、电流和末端 wrench，数据采集不读取厂商 SDK 字典
 - `RobotTeleoperation`
 - `TrajectoryControl`
 - `ToolRackControl`
@@ -59,6 +61,8 @@ GUI / WebSocket / Vision / Data Collection
 
 - 左/右机械臂与 RealMan 双控制器的映射。
 - `MotionOptions` 到 RealMan 运动参数的转换。
+- 夹爪实际位置/力、关节电流和末端六维力的单位归一化，以及基于相邻实际
+  关节样本和 monotonic 时间推导关节速度。
 - SDK 调用锁和连接状态检查。
 - 状态、夹爪、遥操作、拖动示教、轨迹下发和工具架工作流。
 - SDK 返回码到 `RobotOperationError` 的转换。

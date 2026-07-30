@@ -4,7 +4,7 @@ from typing import Any
 
 from ..core.storage import JsonCompositionRepository
 from ..device_runtime import (
-    ArmStateReader,
+    ArmTelemetryReader,
     DepthCameraSource,
     ResourceArbiter,
 )
@@ -105,7 +105,7 @@ def create_application_services(
 
 
 def _create_data_collection_recorder(
-    robot_state_reader: ArmStateReader,
+    robot_state_reader: ArmTelemetryReader,
     camera_source: DepthCameraSource,
 ) -> DataCollectionRecorder:
     """Load optional data-collection infrastructure only when requested."""

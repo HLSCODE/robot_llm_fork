@@ -70,6 +70,7 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
                 DeviceCapability.EMERGENCY_STOP,
                 DeviceCapability.ARM_MOTION,
                 DeviceCapability.ARM_STATE,
+                DeviceCapability.ARM_TELEMETRY,
                 DeviceCapability.GRIPPER,
                 DeviceCapability.ROBOT_TELEOPERATION,
                 DeviceCapability.TRAJECTORY,

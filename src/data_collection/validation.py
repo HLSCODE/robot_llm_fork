@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import pickle
 import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 import cv2
 import numpy as np
@@ -99,23 +101,17 @@ def validate_episode(
     *,
     verify_checksums: bool = True,
     require_canonical_name: bool = True,
+    trusted_native: bool = False,
 ) -> EpisodeValidationReport:
     path = Path(episode_path)
     issues: list[ValidationIssue] = []
-    metadata: EpisodeMetadata | None = None
-    checked_files = 0
-
     if not path.is_dir():
         return EpisodeValidationReport(
             episode_path=path,
             metadata=None,
             checked_files=0,
             issues=(
-                _error(
-                    "episode_not_found",
-                    "episode path is not a directory",
-                    path,
-                ),
+                _error("episode_not_found", "episode path is not a directory", path),
             ),
         )
 
@@ -123,21 +119,26 @@ def validate_episode(
     try:
         raw_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         if not isinstance(raw_metadata, dict):
-            raise ValueError("episode metadata root must be an object")
+            raise TypeError("episode metadata root must be an object")
         metadata = EpisodeMetadata.from_dict(raw_metadata)
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
-        issues.append(
-            _error(
-                "metadata_invalid",
-                f"unable to load episode metadata: {exc}",
-                metadata_path,
-            )
-        )
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ) as exc:
         return EpisodeValidationReport(
             episode_path=path,
             metadata=None,
             checked_files=0,
-            issues=tuple(issues),
+            issues=(
+                _error(
+                    "metadata_invalid",
+                    f"unable to load episode metadata: {exc}",
+                    metadata_path,
+                ),
+            ),
         )
 
     if require_canonical_name:
@@ -146,79 +147,41 @@ def validate_episode(
             issues.append(
                 _error(
                     "episode_directory_mismatch",
-                    (
-                        "episode directory name does not match metadata "
-                        f"episode_id {metadata.episode_id}"
-                    ),
+                    "episode directory name does not match metadata episode_id",
                     path,
                 )
             )
 
-    listed_paths: set[str] = set()
-    for item in metadata.files:
-        listed_paths.add(item.path)
-        file_path = _resolve_episode_file(path, item.path, issues)
-        if file_path is None:
-            continue
-        if not file_path.is_file():
-            issues.append(
-                _error(
-                    "file_missing",
-                    f"required episode file is missing: {item.path}",
-                    file_path,
-                )
-            )
-            continue
-        checked_files += 1
-        size_bytes = file_path.stat().st_size
-        if size_bytes != item.size_bytes:
-            issues.append(
-                _error(
-                    "file_size_mismatch",
-                    (f"expected {item.size_bytes} bytes, found {size_bytes}"),
-                    file_path,
-                )
-            )
-        if verify_checksums:
-            digest = _sha256(file_path)
-            if digest != item.sha256:
-                issues.append(
-                    _error(
-                        "checksum_mismatch",
-                        "file SHA-256 does not match episode metadata",
-                        file_path,
-                    )
-                )
-
-    actual_paths = {
-        file_path.relative_to(path).as_posix()
-        for file_path in path.rglob("*")
-        if file_path.is_file() and file_path.name != EPISODE_METADATA_FILENAME
-    }
-    for unlisted in sorted(actual_paths - listed_paths):
-        issues.append(
-            _error(
-                "unlisted_file",
-                "episode contains a file not declared in metadata",
-                path / unlisted,
-            )
-        )
-
+    checked_files = _validate_manifest_files(
+        path,
+        metadata,
+        issues,
+        verify_checksums=verify_checksums,
+    )
     _validate_required_images(path, metadata, issues)
     _validate_metadata_contract(path, metadata, issues)
-    _validate_format_payload(path, metadata, issues)
+    _validate_format_payload(
+        path,
+        metadata,
+        issues,
+        trusted_native=trusted_native,
+    )
+    if metadata.camera_extrinsics is None:
+        issues.append(
+            _warning(
+                "camera_extrinsics_absent",
+                "camera extrinsics were not supplied; robot-frame projection is unavailable",
+                metadata_path,
+            )
+        )
     if metadata.capture_error_count:
         issues.append(
             _warning(
                 "capture_errors_recorded",
-                (
-                    f"recorder reported {metadata.capture_error_count} "
-                    "capture errors during this episode"
-                ),
+                f"recorder reported {metadata.capture_error_count} capture errors",
                 path,
             )
         )
-
     return EpisodeValidationReport(
         episode_path=path,
         metadata=metadata,
@@ -232,6 +195,7 @@ def validate_dataset(
     *,
     task: str | None = None,
     verify_checksums: bool = True,
+    trusted_native: bool = False,
 ) -> DatasetValidationReport:
     root = Path(dataset_path)
     issues: list[ValidationIssue] = []
@@ -241,14 +205,9 @@ def validate_dataset(
             dataset_path=root,
             episodes=(),
             issues=(
-                _error(
-                    "dataset_not_found",
-                    "dataset path is not a directory",
-                    root,
-                ),
+                _error("dataset_not_found", "dataset path is not a directory", root),
             ),
         )
-
     if task is not None:
         task_path = root / validate_task_name(task)
         if not task_path.is_dir():
@@ -288,6 +247,7 @@ def validate_dataset(
                     validate_episode(
                         candidate,
                         verify_checksums=verify_checksums,
+                        trusted_native=trusted_native,
                     )
                 )
             elif _INCOMPLETE_DIRECTORY_PATTERN.fullmatch(candidate.name):
@@ -298,7 +258,6 @@ def validate_dataset(
                         candidate,
                     )
                 )
-
     if not episodes:
         issues.append(
             _error(
@@ -307,12 +266,61 @@ def validate_dataset(
                 root,
             )
         )
-
     return DatasetValidationReport(
         dataset_path=root,
         episodes=tuple(episodes),
         issues=tuple(issues),
     )
+
+
+def _validate_manifest_files(
+    path: Path,
+    metadata: EpisodeMetadata,
+    issues: list[ValidationIssue],
+    *,
+    verify_checksums: bool,
+) -> int:
+    checked_files = 0
+    listed_paths: set[str] = set()
+    for item in metadata.files:
+        listed_paths.add(item.path)
+        file_path = _resolve_episode_file(path, item.path, issues)
+        if file_path is None:
+            continue
+        if not file_path.is_file():
+            issues.append(_error("file_missing", "manifest file is missing", file_path))
+            continue
+        checked_files += 1
+        if file_path.stat().st_size != item.size_bytes:
+            issues.append(
+                _error(
+                    "file_size_mismatch",
+                    f"expected {item.size_bytes} bytes",
+                    file_path,
+                )
+            )
+        if verify_checksums and _sha256(file_path) != item.sha256:
+            issues.append(
+                _error(
+                    "checksum_mismatch",
+                    "file SHA-256 does not match episode metadata",
+                    file_path,
+                )
+            )
+    actual_paths = {
+        file_path.relative_to(path).as_posix()
+        for file_path in path.rglob("*")
+        if file_path.is_file() and file_path.name != EPISODE_METADATA_FILENAME
+    }
+    for unlisted in sorted(actual_paths - listed_paths):
+        issues.append(
+            _error(
+                "unlisted_file",
+                "episode contains a file not declared in metadata",
+                path / unlisted,
+            )
+        )
+    return checked_files
 
 
 def _validate_required_images(
@@ -321,27 +329,18 @@ def _validate_required_images(
     issues: list[ValidationIssue],
 ) -> None:
     if metadata.frame_count <= 0:
-        issues.append(
-            _error(
-                "empty_episode",
-                "episode must contain at least one frame",
-                path,
-            )
-        )
+        issues.append(_error("empty_episode", "episode must contain frames", path))
         return
-
-    expected_rgb_shape = metadata.dimensions.get("front_rgb")
-    expected_depth_shape = metadata.dimensions.get("front_depth")
     for index in range(metadata.frame_count):
         _validate_image(
             path / "front_rgb" / f"{index}.png",
-            expected_rgb_shape,
+            metadata.dimensions.get("front_rgb"),
             "front_rgb",
             issues,
         )
         _validate_image(
             path / "front_depth" / f"{index}.png",
-            expected_depth_shape,
+            metadata.dimensions.get("front_depth"),
             "front_depth",
             issues,
         )
@@ -352,16 +351,31 @@ def _validate_metadata_contract(
     metadata: EpisodeMetadata,
     issues: list[ValidationIssue],
 ) -> None:
-    required_fields = {
-        "timestamp",
+    required = {
+        "timestamp_utc_ns",
         "front_rgb",
         "front_depth",
         "camera_intrinsics",
-        "joint_positions",
-        "gripper_open",
-        "gripper_pose",
+        "camera_distortion_coefficients",
+        "depth_scale_metres",
+        "camera_hardware_timestamps",
+        "camera_frame_numbers",
+        "sample_sync_skew_ms",
     }
-    for field in sorted(required_fields):
+    for arm_name in metadata.source_arms:
+        prefix = f"{arm_name}_"
+        required.update(
+            {
+                f"{prefix}sampled_at_utc_ns",
+                f"{prefix}sampled_at_monotonic_ns",
+                f"{prefix}joint_positions",
+                f"{prefix}gripper_open",
+                f"{prefix}gripper_force_newtons",
+                f"{prefix}gripper_raw_position",
+                f"{prefix}gripper_pose",
+            }
+        )
+    for field in sorted(required):
         if metadata.fields.get(field) != "required":
             issues.append(
                 _error(
@@ -370,10 +384,8 @@ def _validate_metadata_contract(
                     path / EPISODE_METADATA_FILENAME,
                 )
             )
-
-    valid_field_states = {"required", "present", "absent"}
-    for field, state in sorted(metadata.fields.items()):
-        if state not in valid_field_states:
+    for field, state in metadata.fields.items():
+        if state not in {"required", "present", "absent"}:
             issues.append(
                 _error(
                     "field_state_invalid",
@@ -381,10 +393,7 @@ def _validate_metadata_contract(
                     path / EPISODE_METADATA_FILENAME,
                 )
             )
-
-    required_units = required_fields
-    for field in sorted(required_units):
-        if not metadata.units.get(field):
+        if field not in metadata.units:
             issues.append(
                 _error(
                     "field_unit_missing",
@@ -392,15 +401,20 @@ def _validate_metadata_contract(
                     path / EPISODE_METADATA_FILENAME,
                 )
             )
-
-    required_dimensions = {
+    dimension_fields = {
         "front_rgb",
         "front_depth",
         "camera_intrinsics",
-        "joint_positions",
-        "gripper_pose",
+        "camera_distortion_coefficients",
     }
-    for field in sorted(required_dimensions):
+    for arm_name in metadata.source_arms:
+        dimension_fields.update(
+            {
+                f"{arm_name}_joint_positions",
+                f"{arm_name}_gripper_pose",
+            }
+        )
+    for field in sorted(dimension_fields):
         if not metadata.dimensions.get(field):
             issues.append(
                 _error(
@@ -411,73 +425,43 @@ def _validate_metadata_contract(
             )
 
 
-def _validate_image(
-    path: Path,
-    expected_shape: tuple[int, ...] | None,
-    modality: str,
-    issues: list[ValidationIssue],
-) -> None:
-    if not path.is_file():
-        issues.append(
-            _error(
-                "image_missing",
-                f"required {modality} frame is missing",
-                path,
-            )
-        )
-        return
-    image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
-    if image is None:
-        issues.append(
-            _error(
-                "image_decode_failed",
-                f"unable to decode {modality} image",
-                path,
-            )
-        )
-        return
-    if expected_shape is not None and tuple(image.shape) != expected_shape:
-        issues.append(
-            _error(
-                "image_shape_mismatch",
-                (
-                    f"expected {modality} shape {expected_shape}, "
-                    f"found {tuple(image.shape)}"
-                ),
-                path,
-            )
-        )
-
-
 def _validate_format_payload(
     path: Path,
     metadata: EpisodeMetadata,
     issues: list[ValidationIssue],
+    *,
+    trusted_native: bool,
 ) -> None:
     if metadata.format_variant is DataCollectionFormat.PORTABLE_SIMPLIFIED:
         _validate_portable_payload(path, metadata, issues)
-        forbidden = (
+        for filename in (
             NATIVE_LOW_DIM_FILENAME,
             VARIATION_NUMBER_FILENAME,
             VARIATION_DESCRIPTIONS_FILENAME,
-        )
-        for filename in forbidden:
+        ):
             if (path / filename).exists():
                 issues.append(
                     _error(
                         "format_payload_mixed",
-                        "portable episode contains native RLBench payload",
+                        "portable episode contains native payload",
                         path / filename,
                     )
                 )
         return
 
-    required = (
+    if len(metadata.source_arms) != 1:
+        issues.append(
+            _error(
+                "native_arm_count_invalid",
+                "native RLBench episodes require exactly one source arm",
+                path,
+            )
+        )
+    for filename in (
         NATIVE_LOW_DIM_FILENAME,
         VARIATION_NUMBER_FILENAME,
         VARIATION_DESCRIPTIONS_FILENAME,
-    )
-    for filename in required:
+    ):
         if not (path / filename).is_file():
             issues.append(
                 _error(
@@ -494,16 +478,16 @@ def _validate_format_payload(
                 path / PORTABLE_LOW_DIM_FILENAME,
             )
         )
-    issues.append(
-        _warning(
-            "native_pickle_not_inspected",
-            (
-                "native RLBench pickle contents were not deserialized; "
-                "only manifest integrity was checked"
-            ),
-            path,
+    if trusted_native:
+        _validate_trusted_native_payload(path, metadata, issues)
+    else:
+        issues.append(
+            _warning(
+                "native_pickle_not_inspected",
+                "native pickle was not loaded; use --trusted-native only for trusted data",
+                path,
+            )
         )
-    )
 
 
 def _validate_portable_payload(
@@ -521,107 +505,60 @@ def _validate_portable_payload(
             )
         )
         return
+    required_shapes: dict[str, tuple[int, ...]] = {
+        "timestamps_utc_ns": (metadata.frame_count,),
+        "camera_received_at_monotonic_ns": (metadata.frame_count,),
+        "color_hardware_timestamps_ms": (metadata.frame_count,),
+        "depth_hardware_timestamps_ms": (metadata.frame_count,),
+        "color_frame_numbers": (metadata.frame_count,),
+        "depth_frame_numbers": (metadata.frame_count,),
+        "sample_sync_skew_ms": (metadata.frame_count,),
+        "camera_intrinsics": (
+            metadata.frame_count,
+            *metadata.dimensions.get("camera_intrinsics", ()),
+        ),
+        "camera_distortion_coefficients": (
+            metadata.frame_count,
+            *metadata.dimensions.get("camera_distortion_coefficients", ()),
+        ),
+        "depth_scale_metres": (metadata.frame_count,),
+    }
+    for arm_name in metadata.source_arms:
+        prefix = f"{arm_name}_"
+        for name in (
+            "sampled_at_utc_ns",
+            "sampled_at_monotonic_ns",
+            "gripper_open",
+            "gripper_force_newtons",
+            "gripper_raw_position",
+        ):
+            required_shapes[f"{prefix}{name}"] = (metadata.frame_count,)
+        for name in ("joint_positions", "gripper_pose"):
+            required_shapes[f"{prefix}{name}"] = (
+                metadata.frame_count,
+                *metadata.dimensions.get(f"{prefix}{name}", ()),
+            )
     try:
         with np.load(low_dim_path, allow_pickle=False) as arrays:
-            required = {
-                "timestamps",
-                "joint_positions",
-                "gripper_open",
-                "gripper_pose",
-                "camera_intrinsics",
-            }
-            missing = sorted(required - set(arrays.files))
-            if missing:
-                issues.append(
-                    _error(
-                        "portable_field_missing",
-                        "missing NPZ arrays: " + ", ".join(missing),
-                        low_dim_path,
-                    )
-                )
-                return
-            for name in required:
-                if arrays[name].shape[0] != metadata.frame_count:
+            for name, expected_shape in required_shapes.items():
+                if name not in arrays.files:
                     issues.append(
                         _error(
-                            "portable_frame_count_mismatch",
-                            (
-                                f"array {name} has {arrays[name].shape[0]} "
-                                f"rows; expected {metadata.frame_count}"
-                            ),
+                            "portable_field_missing",
+                            f"missing NPZ array: {name}",
                             low_dim_path,
                         )
                     )
-            expected_shapes = {
-                "timestamps": (metadata.frame_count,),
-                "gripper_open": (metadata.frame_count,),
-                "joint_positions": (
-                    metadata.frame_count,
-                    *metadata.dimensions.get("joint_positions", ()),
-                ),
-                "gripper_pose": (
-                    metadata.frame_count,
-                    *metadata.dimensions.get("gripper_pose", ()),
-                ),
-                "camera_intrinsics": (
-                    metadata.frame_count,
-                    *metadata.dimensions.get("camera_intrinsics", ()),
-                ),
-            }
-            for name, expected_shape in expected_shapes.items():
-                if arrays[name].shape != expected_shape:
+                elif arrays[name].shape != expected_shape:
                     issues.append(
                         _error(
                             "portable_field_shape_mismatch",
-                            (
-                                f"array {name} has shape {arrays[name].shape}; "
-                                f"expected {expected_shape}"
-                            ),
+                            f"{name} has shape {arrays[name].shape}; expected {expected_shape}",
                             low_dim_path,
                         )
                     )
-            optional_fields = {
-                "joint_velocities",
-                "joint_forces",
-                "gripper_matrix",
-                "gripper_joint_positions",
-            }
-            for name in optional_fields:
-                state = metadata.fields.get(name)
-                included = name in arrays.files
-                if state == "present" and not included:
-                    issues.append(
-                        _error(
-                            "portable_optional_field_missing",
-                            f"metadata declares {name}, but NPZ does not contain it",
-                            low_dim_path,
-                        )
-                    )
-                elif state == "absent" and included:
-                    issues.append(
-                        _error(
-                            "portable_optional_field_unexpected",
-                            f"metadata declares {name} absent, but NPZ contains it",
-                            low_dim_path,
-                        )
-                    )
-                if included:
-                    expected_shape = (
-                        metadata.frame_count,
-                        *metadata.dimensions.get(name, ()),
-                    )
-                    if arrays[name].shape != expected_shape:
-                        issues.append(
-                            _error(
-                                "portable_field_shape_mismatch",
-                                (
-                                    f"array {name} has shape "
-                                    f"{arrays[name].shape}; expected "
-                                    f"{expected_shape}"
-                                ),
-                                low_dim_path,
-                            )
-                        )
+            _validate_portable_optional_fields(arrays, metadata, low_dim_path, issues)
+            _validate_portable_calibration(arrays, metadata, low_dim_path, issues)
             for name in arrays.files:
                 value = arrays[name]
                 if not np.issubdtype(value.dtype, np.number):
@@ -640,21 +577,200 @@ def _validate_portable_payload(
                             low_dim_path,
                         )
                     )
-            timestamps = arrays["timestamps"]
-            if np.all(np.isfinite(timestamps)) and np.any(np.diff(timestamps) < 0):
-                issues.append(
-                    _error(
-                        "timestamp_order_invalid",
-                        "timestamps are not monotonically increasing",
-                        low_dim_path,
-                    )
-                )
+            _validate_portable_timing(arrays, metadata, low_dim_path, issues)
     except (OSError, ValueError, KeyError) as exc:
         issues.append(
             _error(
                 "portable_payload_invalid",
                 f"unable to validate portable NPZ payload: {exc}",
                 low_dim_path,
+            )
+        )
+
+
+def _validate_portable_optional_fields(
+    arrays: Any,
+    metadata: EpisodeMetadata,
+    path: Path,
+    issues: list[ValidationIssue],
+) -> None:
+    for arm_name in metadata.source_arms:
+        for field in (
+            "joint_velocities",
+            "joint_currents",
+            "end_effector_wrench",
+        ):
+            name = f"{arm_name}_{field}"
+            mask_name = f"{name}_valid"
+            state = metadata.fields.get(name)
+            included = name in arrays.files
+            mask_included = mask_name in arrays.files
+            if state == "present" and (not included or not mask_included):
+                issues.append(
+                    _error(
+                        "portable_optional_field_missing",
+                        f"{name} requires both data and validity mask",
+                        path,
+                    )
+                )
+                continue
+            if state == "absent" and (included or mask_included):
+                issues.append(
+                    _error(
+                        "portable_optional_field_unexpected",
+                        f"metadata declares {name} absent",
+                        path,
+                    )
+                )
+                continue
+            if not included:
+                continue
+            expected_shape = (
+                metadata.frame_count,
+                *metadata.dimensions.get(name, ()),
+            )
+            if arrays[name].shape != expected_shape:
+                issues.append(
+                    _error(
+                        "portable_field_shape_mismatch",
+                        f"{name} has shape {arrays[name].shape}; expected {expected_shape}",
+                        path,
+                    )
+                )
+            mask = arrays[mask_name]
+            if mask.shape != (metadata.frame_count,) or not np.all(
+                np.isin(mask, (0, 1))
+            ):
+                issues.append(
+                    _error(
+                        "portable_validity_mask_invalid",
+                        f"{mask_name} must be a binary frame mask",
+                        path,
+                    )
+                )
+
+
+def _validate_portable_calibration(
+    arrays: Any,
+    metadata: EpisodeMetadata,
+    path: Path,
+    issues: list[ValidationIssue],
+) -> None:
+    included = "camera_extrinsics" in arrays.files
+    expected = metadata.camera_extrinsics is not None
+    if included != expected:
+        issues.append(
+            _error(
+                "portable_calibration_mismatch",
+                "NPZ camera_extrinsics does not match metadata calibration",
+                path,
+            )
+        )
+    elif included and arrays["camera_extrinsics"].shape != (4, 4):
+        issues.append(
+            _error(
+                "portable_field_shape_mismatch",
+                "camera_extrinsics must have shape (4, 4)",
+                path,
+            )
+        )
+
+
+def _validate_portable_timing(
+    arrays: Any,
+    metadata: EpisodeMetadata,
+    path: Path,
+    issues: list[ValidationIssue],
+) -> None:
+    if "timestamps_utc_ns" in arrays.files and np.any(
+        np.diff(arrays["timestamps_utc_ns"]) < 0
+    ):
+        issues.append(
+            _error(
+                "timestamp_order_invalid",
+                "timestamps are not monotonically increasing",
+                path,
+            )
+        )
+    if "sample_sync_skew_ms" in arrays.files and np.any(
+        arrays["sample_sync_skew_ms"] > metadata.maximum_sync_skew_ms
+    ):
+        issues.append(
+            _error(
+                "sample_sync_skew_exceeded",
+                "captured sample exceeds configured synchronization bound",
+                path,
+            )
+        )
+
+
+def _validate_trusted_native_payload(
+    path: Path,
+    metadata: EpisodeMetadata,
+    issues: list[ValidationIssue],
+) -> None:
+    try:
+        observation_type, demo_type = _native_rlbench_types()
+        with (path / NATIVE_LOW_DIM_FILENAME).open("rb") as file:
+            demo = pickle.load(file)
+        with (path / VARIATION_NUMBER_FILENAME).open("rb") as file:
+            variation_number = pickle.load(file)
+        with (path / VARIATION_DESCRIPTIONS_FILENAME).open("rb") as file:
+            descriptions = pickle.load(file)
+        if not isinstance(demo, demo_type):
+            raise TypeError(f"low_dim_obs.pkl is not {demo_type.__name__}")
+        observations = list(
+            demo.observations if hasattr(demo, "observations") else demo
+        )
+        if len(observations) != metadata.frame_count:
+            raise ValueError("RLBench Demo frame count does not match metadata")
+        if not all(isinstance(item, observation_type) for item in observations):
+            raise TypeError("RLBench Demo contains a non-Observation value")
+        if variation_number != metadata.variation_id:
+            raise ValueError("variation_number.pkl does not match metadata")
+        if (
+            not isinstance(descriptions, list)
+            or not all(isinstance(item, str) for item in descriptions)
+            or tuple(descriptions) != metadata.descriptions
+        ):
+            raise ValueError("variation_descriptions.pkl does not match metadata")
+    except Exception as exc:  # noqa: BLE001 - unpickling failures are not standardized
+        issues.append(
+            _error(
+                "native_payload_invalid",
+                f"trusted native RLBench validation failed: {exc}",
+                path,
+            )
+        )
+
+
+def _native_rlbench_types():
+    from rlbench.backend.observation import Observation
+    from rlbench.demo import Demo
+
+    return Observation, Demo
+
+
+def _validate_image(
+    path: Path,
+    expected_shape: tuple[int, ...] | None,
+    modality: str,
+    issues: list[ValidationIssue],
+) -> None:
+    if not path.is_file():
+        issues.append(_error("image_missing", f"{modality} image is missing", path))
+        return
+    image = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if image is None:
+        issues.append(
+            _error("image_decode_failed", f"unable to decode {modality}", path)
+        )
+    elif expected_shape is not None and tuple(image.shape) != expected_shape:
+        issues.append(
+            _error(
+                "image_shape_mismatch",
+                f"expected {expected_shape}, found {tuple(image.shape)}",
+                path,
             )
         )
 
@@ -701,81 +817,52 @@ def _sha256(path: Path) -> str:
 
 
 def _error(code: str, message: str, path: Path) -> ValidationIssue:
-    return ValidationIssue(
-        severity=ValidationSeverity.ERROR,
-        code=code,
-        message=message,
-        path=str(path),
-    )
+    return ValidationIssue(ValidationSeverity.ERROR, code, message, str(path))
 
 
 def _warning(code: str, message: str, path: Path) -> ValidationIssue:
-    return ValidationIssue(
-        severity=ValidationSeverity.WARNING,
-        code=code,
-        message=message,
-        path=str(path),
-    )
+    return ValidationIssue(ValidationSeverity.WARNING, code, message, str(path))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=(
-            "Validate robot-llm data-collection episode manifests and files "
-            "without deserializing pickle payloads."
-        )
+        description="Validate robot-llm data-collection episode manifests and files."
     )
     parser.add_argument("dataset_path", type=Path)
     parser.add_argument("--task")
+    parser.add_argument("--no-checksums", action="store_true")
     parser.add_argument(
-        "--no-checksums",
+        "--trusted-native",
         action="store_true",
-        help="skip SHA-256 verification",
+        help=(
+            "deserialize and type-check native RLBench pickle files; "
+            "never use this for untrusted datasets"
+        ),
     )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        help="print the complete report as JSON",
-    )
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     try:
         report = validate_dataset(
             args.dataset_path,
             task=args.task,
             verify_checksums=not args.no_checksums,
+            trusted_native=args.trusted_native,
         )
     except ValueError as exc:
         parser.error(str(exc))
-
     if args.json:
-        print(
-            json.dumps(
-                report.to_dict(),
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
     else:
-        status = "VALID" if report.valid else "INVALID"
         print(
-            f"{status}: {len(report.episodes)} episode(s), "
-            f"{len(report.issues)} dataset issue(s)"
+            f"{'VALID' if report.valid else 'INVALID'}: "
+            f"{len(report.episodes)} episode(s)"
         )
         for issue in report.issues:
-            print(
-                f"[{issue.severity.value}] {issue.code}: {issue.message} ({issue.path})"
-            )
+            print(f"[{issue.severity.value}] {issue.code}: {issue.message}")
         for episode in report.episodes:
-            episode_status = "VALID" if episode.valid else "INVALID"
-            print(
-                f"{episode_status}: {episode.episode_path} "
-                f"({len(episode.issues)} issue(s))"
-            )
+            print(f"{'VALID' if episode.valid else 'INVALID'}: {episode.episode_path}")
             for issue in episode.issues:
-                print(
-                    f"  [{issue.severity.value}] {issue.code}: "
-                    f"{issue.message} ({issue.path})"
-                )
+                print(f"  [{issue.severity.value}] {issue.code}: {issue.message}")
     return 0 if report.valid else 1
 
 

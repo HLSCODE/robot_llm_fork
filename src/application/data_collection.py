@@ -6,7 +6,7 @@ from enum import Enum
 from threading import RLock
 from typing import Any, Protocol
 
-from ..device_runtime import ArmStateReader, DepthCameraSource
+from ..device_runtime import ArmTelemetryReader, DepthCameraSource
 from ..device_runtime.ids import ROBOT_SYSTEM
 from .camera_access import CameraAccessService, CameraSession
 
@@ -16,7 +16,7 @@ class _DeviceManagementPort(Protocol):
 
 
 class _RobotQueryPort(Protocol):
-    def state_reader(self) -> ArmStateReader: ...
+    def telemetry_reader(self) -> ArmTelemetryReader: ...
 
 
 class _TeleoperationPort(Protocol):
@@ -102,7 +102,7 @@ class DataCollectionRecorder(Protocol):
 
 
 DataCollectionRecorderFactory = Callable[
-    [ArmStateReader, DepthCameraSource],
+    [ArmTelemetryReader, DepthCameraSource],
     DataCollectionRecorder,
 ]
 
@@ -218,7 +218,7 @@ class DataCollectionService:
                 camera_session = self._camera_access.open_depth("data-collection")
                 self._devices.initialize(ROBOT_SYSTEM)
                 recorder = self._recorder_factory(
-                    self._robot_query.state_reader(),
+                    self._robot_query.telemetry_reader(),
                     camera_session.camera,
                 )
                 result = self._successful_result(

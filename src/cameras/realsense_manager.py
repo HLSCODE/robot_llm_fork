@@ -11,8 +11,10 @@
 
 import logging
 import threading
+import time
 import traceback
-from typing import Optional
+
+from ..device_runtime.camera_models import DepthCameraFrame
 
 logger = logging.getLogger(__name__)
 
@@ -78,22 +80,21 @@ class RealSenseManager:
         self._align_depth_to_color = align_depth_to_color
 
         # (serial, name, pipeline)
-        self._pipelines: list[tuple[str, str, "rs.pipeline"]] = []
+        self._pipelines: list[tuple[str, str, rs.pipeline]] = []
         # 启动失败的相机: {"serial": ..., "name": ..., "error": ...}
         self._failed_cameras: list[dict] = []
 
         self._running = False
         # 每路相机独立采集线程 + 独立编码线程
         self._cam_threads: list[threading.Thread] = []
-        self._encode_thread: Optional[threading.Thread] = None
-        # 各相机最新原始帧: serial -> (name, color_bgr, depth_uint16, intrinsics)
-        # intrinsics 格式: {"fx": float, "fy": float, "ppx": float, "ppy": float}
-        self._raw_frames: dict[str, tuple[str, "np.ndarray", "np.ndarray", dict]] = {}
+        self._encode_thread: threading.Thread | None = None
+        # 各相机最新原始帧及其硬件/主机时间元数据。
+        self._raw_frames: dict[str, DepthCameraFrame] = {}
         self._intrinsics_cache: dict[str, dict] = {}  # serial -> intrinsics dict
         self._raw_lock = threading.Lock()
         # 编码结果，由编码线程写入，外部只读
         self._lock = threading.Lock()
-        self._latest_jpeg: Optional[bytes] = None
+        self._latest_jpeg: bytes | None = None
         # (serial, name, jpeg_bytes)
         self._latest_jpegs: list[tuple[str, str, bytes]] = []
 
@@ -281,7 +282,7 @@ class RealSenseManager:
             self._latest_jpeg = None
             self._latest_jpegs.clear()
 
-    def get_latest_jpeg(self) -> Optional[bytes]:
+    def get_latest_jpeg(self) -> bytes | None:
         """返回最新拼接 JPEG 帧（线程安全）。"""
         with self._lock:
             return self._latest_jpeg
@@ -337,8 +338,8 @@ class RealSenseManager:
                     if fail_count > 0:
                         logger.info("相机 %s (%s) 帧恢复，之前连续失败 %d 次", name, serial, fail_count)
                     fail_count = 0
-                    color_arr = np.asanyarray(color_frame.get_data())
-                    depth_arr = np.asanyarray(depth_frame.get_data())
+                    color_arr = np.asanyarray(color_frame.get_data()).copy()
+                    depth_arr = np.asanyarray(depth_frame.get_data()).copy()
                     # 内参首次获取后缓存（同一相机内参不变）
                     if serial not in self._intrinsics_cache:
                         profile = color_frame.get_profile()
@@ -346,10 +347,52 @@ class RealSenseManager:
                         self._intrinsics_cache[serial] = {
                             "fx": intr.fx, "fy": intr.fy,
                             "ppx": intr.ppx, "ppy": intr.ppy,
+                            "distortion_coefficients": list(intr.coeffs),
+                            "distortion_model": _enum_name(intr.model),
                         }
                         logger.info("相机 %s (%s) 内参已缓存: fx=%.1f fy=%.1f", name, serial, intr.fx, intr.fy)
+                    intrinsics = self._intrinsics_cache[serial]
+                    color_domain = _enum_name(color_frame.get_frame_timestamp_domain())
+                    depth_domain = _enum_name(depth_frame.get_frame_timestamp_domain())
+                    timestamp_domain = (
+                        color_domain
+                        if color_domain == depth_domain
+                        else f"color:{color_domain};depth:{depth_domain}"
+                    )
+                    captured = DepthCameraFrame(
+                        camera_name=name,
+                        camera_serial=serial,
+                        color_bgr=color_arr,
+                        depth_uint16=depth_arr,
+                        intrinsics=np.asarray(
+                            [
+                                [intrinsics["fx"], 0.0, intrinsics["ppx"]],
+                                [0.0, intrinsics["fy"], intrinsics["ppy"]],
+                                [0.0, 0.0, 1.0],
+                            ],
+                            dtype=np.float64,
+                        ),
+                        distortion_coefficients=np.asarray(
+                            intrinsics["distortion_coefficients"],
+                            dtype=np.float64,
+                        ),
+                        distortion_model=str(intrinsics["distortion_model"]),
+                        depth_scale_metres=float(depth_frame.get_units()),
+                        color_hardware_timestamp_ms=float(
+                            color_frame.get_timestamp()
+                        ),
+                        depth_hardware_timestamp_ms=float(
+                            depth_frame.get_timestamp()
+                        ),
+                        color_frame_number=int(color_frame.get_frame_number()),
+                        depth_frame_number=int(depth_frame.get_frame_number()),
+                        hardware_timestamp_domain=timestamp_domain,
+                        received_at_utc_ns=time.time_ns(),
+                        received_at_monotonic_ns=time.monotonic_ns(),
+                        depth_aligned_to_color=self._align_depth_to_color,
+                    )
                     with self._raw_lock:
-                        self._raw_frames[serial] = (name, color_arr, depth_arr, self._intrinsics_cache[serial])
+                        self._raw_frames[serial] = captured
                 else:
                     fail_count += 1
                     if fail_count <= 3:
@@ -372,24 +415,46 @@ class RealSenseManager:
         Returns:
             (color_bgr: np.ndarray, depth_uint16: np.ndarray, intrinsics: dict) 或 None
         """
+        frame = self.get_latest_depth_frame(camera_name)
+        if frame is None:
+            return None
+        return (
+            frame.color_bgr,
+            frame.depth_uint16,
+            {
+                "fx": float(frame.intrinsics[0, 0]),
+                "fy": float(frame.intrinsics[1, 1]),
+                "ppx": float(frame.intrinsics[0, 2]),
+                "ppy": float(frame.intrinsics[1, 2]),
+            },
+        )
+
+    def get_latest_depth_frame(
+        self,
+        camera_name: str | None = None,
+    ) -> DepthCameraFrame | None:
+        """Return a detached RGB/depth frameset with timing metadata."""
+
         with self._raw_lock:
             if not self._raw_frames:
                 return None
             if camera_name is not None:
-                for serial, (name, color, depth, intr) in self._raw_frames.items():
-                    if name == camera_name or serial == camera_name:
-                        return (color.copy(), depth.copy(), dict(intr))
+                for serial, frame in self._raw_frames.items():
+                    if frame.camera_name == camera_name or serial == camera_name:
+                        return frame.detached_copy()
                 return None
-            # 返回第一路
-            _, (_, color, depth, intr) = next(iter(self._raw_frames.items()))
-            return (color.copy(), depth.copy(), dict(intr))
+            frame = next(iter(self._raw_frames.values()))
+            return frame.detached_copy()
 
     def _encode_loop(self) -> None:
         """编码线程：读取所有相机最新原始帧，编码为 JPEG 写入公开缓冲区。"""
         interval = 1.0 / max(self._encode_fps, 1)
         while self._running:
             with self._raw_lock:
-                snapshot = [(serial, name, color) for serial, (name, color, _depth, _intr) in self._raw_frames.items()]
+                snapshot = [
+                    (serial, frame.camera_name, frame.color_bgr)
+                    for serial, frame in self._raw_frames.items()
+                ]
             if snapshot:
                 jpeg = self._encode_stitched(snapshot)
                 individual = self._encode_individual(snapshot)
@@ -413,7 +478,7 @@ class RealSenseManager:
 
     def _encode_stitched(
         self, raw_frames: list[tuple[str, str, "np.ndarray"]]
-    ) -> Optional[bytes]:
+    ) -> bytes | None:
         if not raw_frames:
             return None
         imgs = [img for _, _, img in raw_frames]
@@ -451,3 +516,10 @@ class RealSenseManager:
             ".jpg", stitched, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality]
         )
         return bytes(buf) if ok else None
+
+
+def _enum_name(value: object) -> str:
+    name = getattr(value, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return str(value)

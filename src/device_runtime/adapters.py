@@ -10,7 +10,9 @@ from typing import Any
 from .arm_models import (
     ArmId,
     ArmState,
+    ArmTelemetry,
     CartesianPose,
+    GripperTelemetry,
     JointVector,
     MotionMode,
     MotionOptions,
@@ -18,6 +20,8 @@ from .arm_models import (
     TrajectorySaveResult,
 )
 from .models import StopMode
+
+_GRAM_FORCE_TO_NEWTONS = 0.00980665
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +108,11 @@ class RealManRobotAdapter:
         self._tool_rack_options = tool_rack_options
         self._eject_tool = eject_tool
         self._stop_lock = RLock()
+        self._telemetry_history_lock = RLock()
+        self._telemetry_history: dict[
+            ArmId,
+            tuple[int, tuple[float, ...]],
+        ] = {}
 
     @property
     def supported_stop_modes(self) -> frozenset[StopMode]:
@@ -178,6 +187,20 @@ class RealManRobotAdapter:
         finally:
             arm_controller.sdk_lock.release()
         return self._state_from_response(arm, code, state)
+
+    def read_arm_telemetry(self, arm: ArmId) -> ArmTelemetry:
+        arm_controller, robot = self._arm_backend(arm)
+        with arm_controller.sdk_lock:
+            return self._read_arm_telemetry_locked(arm, robot)
+
+    def try_read_arm_telemetry(self, arm: ArmId) -> ArmTelemetry | None:
+        arm_controller, robot = self._arm_backend(arm)
+        if not arm_controller.sdk_lock.acquire(blocking=False):
+            return None
+        try:
+            return self._read_arm_telemetry_locked(arm, robot)
+        finally:
+            arm_controller.sdk_lock.release()
 
     def open_gripper(self, arm: ArmId) -> None:
         options = self._gripper_options
@@ -419,7 +442,11 @@ class RealManRobotAdapter:
                 arm,
                 detail="SDK returned an invalid state payload",
             )
-        device_error = int(state.get("error_code", 0))
+        device_error = max(
+            int(state.get("error_code", 0)),
+            int(state.get("arm_err", 0)),
+            int(state.get("sys_err", 0)),
+        )
         if device_error:
             raise RobotOperationError(
                 "read_arm_state",
@@ -441,10 +468,175 @@ class RealManRobotAdapter:
             device_error_code=device_error,
         )
 
+    def _read_arm_telemetry_locked(
+        self,
+        arm: ArmId,
+        robot: Any,
+    ) -> ArmTelemetry:
+        code, raw_state = robot.rm_get_current_arm_state()
+        state = self._state_from_response(arm, code, raw_state)
+        if state.joints is None:
+            raise RobotOperationError(
+                "read_arm_telemetry",
+                arm,
+                detail="SDK state does not contain joint positions",
+            )
+
+        gripper = self._read_gripper_telemetry(arm, robot)
+        joint_currents = self._read_optional_joint_currents(
+            robot,
+            len(state.joints.positions_deg),
+        )
+        wrench = self._read_optional_end_effector_wrench(robot)
+        sampled_at_monotonic_ns = time.monotonic_ns()
+        sampled_at_utc_ns = time.time_ns()
+        velocities = self._derive_joint_velocities(
+            arm,
+            sampled_at_monotonic_ns,
+            state.joints.positions_deg,
+        )
+        return ArmTelemetry(
+            state=state,
+            sampled_at_utc_ns=sampled_at_utc_ns,
+            sampled_at_monotonic_ns=sampled_at_monotonic_ns,
+            gripper=gripper,
+            joint_velocities_deg_s=velocities,
+            joint_currents_amperes=joint_currents,
+            end_effector_wrench=wrench,
+        )
+
+    @staticmethod
+    def _read_gripper_telemetry(
+        arm: ArmId,
+        robot: Any,
+    ) -> GripperTelemetry:
+        method = getattr(robot, "rm_get_gripper_state", None)
+        if not callable(method):
+            raise RobotOperationError(
+                "read_gripper_telemetry",
+                arm,
+                detail="provider does not expose gripper telemetry",
+            )
+        code, payload = method()
+        if code != 0:
+            raise RobotOperationError(
+                "read_gripper_telemetry",
+                arm,
+                code=int(code),
+            )
+        if not isinstance(payload, dict):
+            raise RobotOperationError(
+                "read_gripper_telemetry",
+                arm,
+                detail="SDK returned an invalid gripper payload",
+            )
+        if int(payload.get("status", 0)) != 1:
+            raise RobotOperationError(
+                "read_gripper_telemetry",
+                arm,
+                detail="gripper is offline",
+            )
+        gripper_error = int(payload.get("error", 0))
+        if gripper_error:
+            raise RobotOperationError(
+                "read_gripper_telemetry",
+                arm,
+                code=gripper_error,
+                detail="gripper reported an error",
+            )
+        raw_position = int(payload.get("actpos", -1))
+        if not 0 <= raw_position <= 1000:
+            raise RobotOperationError(
+                "read_gripper_telemetry",
+                arm,
+                detail=f"invalid gripper position: {raw_position}",
+            )
+        force_grams = float(payload.get("current_force", 0.0))
+        if force_grams < 0:
+            raise RobotOperationError(
+                "read_gripper_telemetry",
+                arm,
+                detail=f"invalid gripper force: {force_grams}",
+            )
+        return GripperTelemetry(
+            position_normalized=raw_position / 1000.0,
+            force_newtons=force_grams * _GRAM_FORCE_TO_NEWTONS,
+            raw_position=raw_position,
+        )
+
+    @staticmethod
+    def _read_optional_joint_currents(
+        robot: Any,
+        joint_count: int,
+    ) -> tuple[float, ...] | None:
+        method = getattr(robot, "rm_get_current_joint_current", None)
+        if not callable(method):
+            return None
+        code, payload = method()
+        if code != 0:
+            return None
+        try:
+            values = _numeric_tuple(payload, expected_length=joint_count)
+        except (TypeError, ValueError):
+            return None
+        return tuple(value / 1000.0 for value in values)
+
+    @staticmethod
+    def _read_optional_end_effector_wrench(
+        robot: Any,
+    ) -> tuple[float, ...] | None:
+        method = getattr(robot, "rm_get_force_data", None)
+        if not callable(method):
+            return None
+        code, payload = method()
+        if code != 0 or not isinstance(payload, dict):
+            return None
+        try:
+            return _numeric_tuple(payload.get("force_data"), expected_length=6)
+        except (TypeError, ValueError):
+            return None
+
+    def _derive_joint_velocities(
+        self,
+        arm: ArmId,
+        sampled_at_monotonic_ns: int,
+        positions_deg: tuple[float, ...],
+    ) -> tuple[float, ...] | None:
+        with self._telemetry_history_lock:
+            previous = self._telemetry_history.get(arm)
+            self._telemetry_history[arm] = (
+                sampled_at_monotonic_ns,
+                positions_deg,
+            )
+        if previous is None:
+            return None
+        previous_ns, previous_positions = previous
+        elapsed_seconds = (sampled_at_monotonic_ns - previous_ns) / 1_000_000_000
+        if elapsed_seconds <= 0 or len(previous_positions) != len(positions_deg):
+            return None
+        return tuple(
+            (current - prior) / elapsed_seconds
+            for current, prior in zip(positions_deg, previous_positions)
+        )
+
     @staticmethod
     def _ensure_success(operation: str, arm: ArmId, code: int) -> None:
         if code != 0:
             raise RobotOperationError(operation, arm, code=int(code))
+
+
+def _numeric_tuple(
+    payload: Any,
+    *,
+    expected_length: int,
+) -> tuple[float, ...]:
+    if not isinstance(payload, (list, tuple)) or len(payload) != expected_length:
+        raise ValueError(
+            f"SDK telemetry must contain {expected_length} numeric values"
+        )
+    values = tuple(float(value) for value in payload)
+    return values
+
 
 class RelayBankAdapter:
     """Expose numbered digital outputs without leaking relay method names."""

@@ -10,7 +10,7 @@ import shutil
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -28,7 +28,7 @@ from .schema import (
     EpisodeMetadata,
     FrameRecord,
     normalize_descriptions,
-    validate_source_arm,
+    validate_source_arms,
     validate_task_name,
 )
 from .validation import validate_episode
@@ -113,7 +113,11 @@ class DataCollectionEpisodeWriter:
         format_variant: DataCollectionFormat,
         storage_policy: DataCollectionStoragePolicy,
         random_seed: int,
-        source_arm: str,
+        source_arms: Sequence[str],
+        maximum_sync_skew_ms: float,
+        camera_extrinsics: tuple[float, ...] | None = None,
+        camera_extrinsics_reference_frame: str | None = None,
+        calibration_id: str | None = None,
         clock: Callable[[], float] = time.time,
         identifier_factory: Callable[[], str] = lambda: uuid4().hex,
     ) -> None:
@@ -121,7 +125,18 @@ class DataCollectionEpisodeWriter:
         self._format_variant = format_variant
         self._storage_policy = storage_policy
         self._random_seed = random_seed
-        self._source_arm = validate_source_arm(source_arm)
+        self._source_arms = validate_source_arms(source_arms)
+        if (
+            self._format_variant is DataCollectionFormat.RLBENCH_NATIVE
+            and len(self._source_arms) != 1
+        ):
+            raise ValueError("rlbench_native format requires exactly one source arm")
+        if not math.isfinite(maximum_sync_skew_ms) or maximum_sync_skew_ms <= 0:
+            raise ValueError("maximum_sync_skew_ms must be positive and finite")
+        self._maximum_sync_skew_ms = maximum_sync_skew_ms
+        self._camera_extrinsics = camera_extrinsics
+        self._camera_extrinsics_reference_frame = camera_extrinsics_reference_frame
+        self._calibration_id = calibration_id
         self._clock = clock
         self._identifier_factory = identifier_factory
 
@@ -169,7 +184,11 @@ class DataCollectionEpisodeWriter:
         _require_nonnegative_int(variation_id, "variation_id")
         _require_nonnegative_int(capture_error_count, "capture_error_count")
         self._ensure_format_available()
-        fields, dimensions = _validate_frames(frames)
+        fields, dimensions = _validate_frames(
+            frames,
+            source_arms=self._source_arms,
+            maximum_sync_skew_ms=self._maximum_sync_skew_ms,
+        )
         estimated_bytes = self.estimate_episode_bytes(frames)
 
         episodes_path = self._episodes_path(normalized_task)
@@ -220,10 +239,11 @@ class DataCollectionEpisodeWriter:
                 variation_id=variation_id,
             )
             files = self._episode_files(temp_path)
+            first_frame = frames[0]
             metadata = EpisodeMetadata(
                 format_variant=self._format_variant,
                 task=normalized_task,
-                source_arm=self._source_arm,
+                source_arms=self._source_arms,
                 episode_id=episode_id,
                 variation_id=variation_id,
                 descriptions=normalize_descriptions(description),
@@ -231,12 +251,31 @@ class DataCollectionEpisodeWriter:
                 capture_error_count=capture_error_count,
                 created_at_utc=datetime.fromtimestamp(
                     self._clock(),
-                    timezone.utc,
+                    UTC,
                 ).isoformat(),
                 fields=fields,
-                units=_episode_units(self._format_variant),
+                units=_episode_units(
+                    self._format_variant,
+                    self._source_arms,
+                ),
                 dimensions=dimensions,
                 files=files,
+                camera_name=first_frame.camera_name,
+                camera_serial=first_frame.camera_serial,
+                camera_distortion_model=first_frame.camera_distortion_model,
+                camera_hardware_timestamp_domain=(
+                    first_frame.camera_hardware_timestamp_domain
+                ),
+                depth_aligned_to_color=first_frame.depth_aligned_to_color,
+                maximum_sync_skew_ms=self._maximum_sync_skew_ms,
+                observed_maximum_sync_skew_ms=max(
+                    frame.sample_sync_skew_ms for frame in frames
+                ),
+                camera_extrinsics=self._camera_extrinsics,
+                camera_extrinsics_reference_frame=(
+                    self._camera_extrinsics_reference_frame
+                ),
+                calibration_id=self._calibration_id,
             )
             self._write_json(
                 temp_path / EPISODE_METADATA_FILENAME,
@@ -319,15 +358,20 @@ class DataCollectionEpisodeWriter:
                 frame.front_rgb,
                 frame.front_depth,
                 frame.camera_intrinsics,
-                frame.joint_positions,
-                frame.joint_velocities,
-                frame.gripper_pose,
-                frame.joint_forces,
-                frame.gripper_matrix,
-                frame.gripper_joint_positions,
+                frame.camera_distortion_coefficients,
             ):
                 if isinstance(value, np.ndarray):
                     raw_bytes += value.nbytes
+            for arm in frame.arms.values():
+                for value in (
+                    arm.joint_positions,
+                    arm.joint_velocities,
+                    arm.joint_currents,
+                    arm.gripper_pose,
+                    arm.end_effector_wrench,
+                ):
+                    if isinstance(value, np.ndarray):
+                        raw_bytes += value.nbytes
         return math.ceil(raw_bytes * self._storage_policy.overhead_factor)
 
     def _ensure_capacity(
@@ -394,28 +438,33 @@ class DataCollectionEpisodeWriter:
         frames: Sequence[FrameRecord],
     ) -> None:
         arrays: dict[str, np.ndarray] = {
-            "timestamps": np.asarray(
-                [frame.timestamp for frame in frames],
+            "timestamps_utc_ns": np.asarray(
+                [frame.timestamp_utc_ns for frame in frames],
+                dtype=np.int64,
+            ),
+            "camera_received_at_monotonic_ns": np.asarray(
+                [frame.camera_received_at_monotonic_ns for frame in frames],
+                dtype=np.int64,
+            ),
+            "color_hardware_timestamps_ms": np.asarray(
+                [frame.color_hardware_timestamp_ms for frame in frames],
                 dtype=np.float64,
             ),
-            "joint_positions": np.stack(
-                [
-                    _required_array(
-                        frame.joint_positions,
-                        "joint_positions",
-                    )
-                    for frame in frames
-                ]
+            "depth_hardware_timestamps_ms": np.asarray(
+                [frame.depth_hardware_timestamp_ms for frame in frames],
+                dtype=np.float64,
             ),
-            "gripper_open": np.asarray(
-                [frame.gripper_open for frame in frames],
-                dtype=np.float32,
+            "color_frame_numbers": np.asarray(
+                [frame.color_frame_number for frame in frames],
+                dtype=np.int64,
             ),
-            "gripper_pose": np.stack(
-                [
-                    _required_array(frame.gripper_pose, "gripper_pose")
-                    for frame in frames
-                ]
+            "depth_frame_numbers": np.asarray(
+                [frame.depth_frame_number for frame in frames],
+                dtype=np.int64,
+            ),
+            "sample_sync_skew_ms": np.asarray(
+                [frame.sample_sync_skew_ms for frame in frames],
+                dtype=np.float64,
             ),
             "camera_intrinsics": np.stack(
                 [
@@ -426,16 +475,68 @@ class DataCollectionEpisodeWriter:
                     for frame in frames
                 ]
             ),
+            "camera_distortion_coefficients": np.stack(
+                [
+                    _required_array(
+                        frame.camera_distortion_coefficients,
+                        "camera_distortion_coefficients",
+                    )
+                    for frame in frames
+                ]
+            ),
+            "depth_scale_metres": np.asarray(
+                [frame.depth_scale_metres for frame in frames],
+                dtype=np.float64,
+            ),
         }
-        for name in (
-            "joint_velocities",
-            "joint_forces",
-            "gripper_matrix",
-            "gripper_joint_positions",
-        ):
-            optional = _optional_stack(frames, name)
-            if optional is not None:
-                arrays[name] = optional
+        if self._camera_extrinsics is not None:
+            arrays["camera_extrinsics"] = np.asarray(
+                self._camera_extrinsics,
+                dtype=np.float64,
+            ).reshape(4, 4)
+
+        for arm_name in self._source_arms:
+            samples = [frame.arms[arm_name] for frame in frames]
+            prefix = f"{arm_name}_"
+            arrays.update(
+                {
+                    f"{prefix}sampled_at_utc_ns": np.asarray(
+                        [sample.sampled_at_utc_ns for sample in samples],
+                        dtype=np.int64,
+                    ),
+                    f"{prefix}sampled_at_monotonic_ns": np.asarray(
+                        [sample.sampled_at_monotonic_ns for sample in samples],
+                        dtype=np.int64,
+                    ),
+                    f"{prefix}joint_positions": np.stack(
+                        [sample.joint_positions for sample in samples]
+                    ),
+                    f"{prefix}gripper_open": np.asarray(
+                        [sample.gripper_open for sample in samples],
+                        dtype=np.float64,
+                    ),
+                    f"{prefix}gripper_force_newtons": np.asarray(
+                        [sample.gripper_force_newtons for sample in samples],
+                        dtype=np.float64,
+                    ),
+                    f"{prefix}gripper_raw_position": np.asarray(
+                        [sample.gripper_raw_position for sample in samples],
+                        dtype=np.int64,
+                    ),
+                    f"{prefix}gripper_pose": np.stack(
+                        [sample.gripper_pose for sample in samples]
+                    ),
+                }
+            )
+            for field_name in (
+                "joint_velocities",
+                "joint_currents",
+                "end_effector_wrench",
+            ):
+                values, valid = _masked_optional_stack(samples, field_name)
+                if values is not None:
+                    arrays[f"{prefix}{field_name}"] = values
+                    arrays[f"{prefix}{field_name}_valid"] = valid
 
         buffer = io.BytesIO()
         np.savez_compressed(buffer, **arrays)
@@ -453,13 +554,7 @@ class DataCollectionEpisodeWriter:
         variation_id: int,
     ) -> None:
         observation_type, demo_type = _native_rlbench_types()
-        first_frame = frames[0]
-        misc = {
-            "front_camera_intrinsics": _required_array(
-                first_frame.camera_intrinsics,
-                "camera_intrinsics",
-            ),
-        }
+        arm_name = self._source_arms[0]
         observations = [
             observation_type(
                 left_shoulder_rgb=None,
@@ -483,24 +578,28 @@ class DataCollectionEpisodeWriter:
                 wrist_mask=None,
                 front_mask=None,
                 joint_velocities=(
-                    np.deg2rad(frame.joint_velocities)
-                    if frame.joint_velocities is not None
+                    np.deg2rad(frame.arms[arm_name].joint_velocities)
+                    if frame.arms[arm_name].joint_velocities is not None
                     else None
                 ),
-                joint_positions=np.deg2rad(frame.joint_positions),
-                joint_forces=frame.joint_forces,
-                gripper_open=frame.gripper_open,
-                gripper_pose=frame.gripper_pose,
-                gripper_matrix=frame.gripper_matrix,
+                joint_positions=np.deg2rad(frame.arms[arm_name].joint_positions),
+                joint_forces=None,
+                gripper_open=frame.arms[arm_name].gripper_open,
+                gripper_pose=frame.arms[arm_name].gripper_pose,
+                gripper_matrix=None,
                 gripper_touch_forces=None,
-                gripper_joint_positions=(
-                    np.deg2rad(frame.gripper_joint_positions)
-                    if frame.gripper_joint_positions is not None
-                    else None
-                ),
+                gripper_joint_positions=None,
                 task_low_dim_state=None,
                 ignore_collisions=True,
-                misc=misc,
+                misc=_native_misc(
+                    frame,
+                    arm_name=arm_name,
+                    camera_extrinsics=self._camera_extrinsics,
+                    camera_extrinsics_reference_frame=(
+                        self._camera_extrinsics_reference_frame
+                    ),
+                    calibration_id=self._calibration_id,
+                ),
             )
             for frame in frames
         ]
@@ -598,49 +697,67 @@ class DataCollectionEpisodeWriter:
 
 def _validate_frames(
     frames: Sequence[FrameRecord],
+    *,
+    source_arms: tuple[str, ...],
+    maximum_sync_skew_ms: float,
 ) -> tuple[dict[str, str], dict[str, tuple[int, ...]]]:
     if not frames:
         raise EpisodeIntegrityError("episode must contain at least one captured frame")
-    required_arrays = (
-        "front_rgb",
-        "front_depth",
-        "camera_intrinsics",
-        "joint_positions",
-        "gripper_pose",
-    )
-    optional_arrays = (
-        "joint_velocities",
-        "joint_forces",
-        "gripper_matrix",
-        "gripper_joint_positions",
-    )
     dimensions: dict[str, tuple[int, ...]] = {}
     fields = {
-        "timestamp": "required",
-        "gripper_open": "required",
+        "timestamp_utc_ns": "required",
+        "front_rgb": "required",
+        "front_depth": "required",
+        "camera_intrinsics": "required",
+        "camera_distortion_coefficients": "required",
+        "depth_scale_metres": "required",
+        "camera_hardware_timestamps": "required",
+        "camera_frame_numbers": "required",
+        "sample_sync_skew_ms": "required",
     }
-    previous_timestamp: float | None = None
+    previous_timestamp: int | None = None
+    first_frame = frames[0]
     for index, frame in enumerate(frames):
-        timestamp = float(frame.timestamp)
-        if not math.isfinite(timestamp):
-            raise EpisodeIntegrityError(f"frame {index} timestamp must be finite")
+        timestamp = frame.timestamp_utc_ns
+        if (
+            isinstance(timestamp, bool)
+            or not isinstance(timestamp, int)
+            or timestamp <= 0
+        ):
+            raise EpisodeIntegrityError(
+                f"frame {index} timestamp_utc_ns must be a positive integer"
+            )
         if previous_timestamp is not None and timestamp < previous_timestamp:
             raise EpisodeIntegrityError(
                 f"frame {index} timestamp is earlier than the previous frame"
             )
         previous_timestamp = timestamp
-        if not math.isfinite(float(frame.gripper_open)):
-            raise EpisodeIntegrityError(f"frame {index} gripper_open must be finite")
-        if not 0.0 <= float(frame.gripper_open) <= 1.0:
+        if set(frame.arms) != set(source_arms):
             raise EpisodeIntegrityError(
-                f"frame {index} gripper_open must be in range 0..1"
+                f"frame {index} arms do not match configured source_arms"
             )
-        for name in required_arrays:
-            array = _required_array(getattr(frame, name), name)
-            _require_consistent_shape(dimensions, name, array, index)
+        if not frame.depth_aligned_to_color:
+            raise EpisodeIntegrityError(
+                f"frame {index} depth must be aligned to the color stream"
+            )
 
         rgb = _required_array(frame.front_rgb, "front_rgb")
         depth = _required_array(frame.front_depth, "front_depth")
+        intrinsics = _required_array(
+            frame.camera_intrinsics,
+            "camera_intrinsics",
+        )
+        distortion = _required_array(
+            frame.camera_distortion_coefficients,
+            "camera_distortion_coefficients",
+        )
+        for name, array in (
+            ("front_rgb", rgb),
+            ("front_depth", depth),
+            ("camera_intrinsics", intrinsics),
+            ("camera_distortion_coefficients", distortion),
+        ):
+            _require_consistent_shape(dimensions, name, array, index)
         if rgb.ndim != 3 or rgb.shape[2] != 3 or rgb.dtype != np.uint8:
             raise EpisodeIntegrityError(
                 f"frame {index} front_rgb must be an HxWx3 uint8 BGR image"
@@ -651,55 +768,202 @@ def _validate_frames(
             )
         if rgb.shape[:2] != depth.shape:
             raise EpisodeIntegrityError(
-                f"frame {index} RGB/depth image dimensions do not match"
+                f"frame {index} aligned RGB/depth image dimensions do not match"
             )
-        if frame.camera_intrinsics is None or (frame.camera_intrinsics.shape != (3, 3)):
+        if intrinsics.shape != (3, 3):
             raise EpisodeIntegrityError(
                 f"frame {index} camera_intrinsics must have shape (3, 3)"
             )
-        if frame.camera_intrinsics[0, 0] <= 0 or frame.camera_intrinsics[1, 1] <= 0:
+        if intrinsics[0, 0] <= 0 or intrinsics[1, 1] <= 0:
             raise EpisodeIntegrityError(
                 f"frame {index} camera focal lengths must be positive"
             )
-        joint_positions = _required_array(
-            frame.joint_positions,
-            "joint_positions",
+        if distortion.ndim != 1:
+            raise EpisodeIntegrityError(
+                f"frame {index} distortion coefficients must be one-dimensional"
+            )
+        _require_finite_positive(
+            frame.depth_scale_metres,
+            f"frame {index} depth_scale_metres",
         )
-        if joint_positions.ndim != 1:
+        for name, value in (
+            ("color_hardware_timestamp_ms", frame.color_hardware_timestamp_ms),
+            ("depth_hardware_timestamp_ms", frame.depth_hardware_timestamp_ms),
+        ):
+            if not math.isfinite(value) or value < 0:
+                raise EpisodeIntegrityError(
+                    f"frame {index} {name} must be finite and non-negative"
+                )
+        for name, value in (
+            ("color_frame_number", frame.color_frame_number),
+            ("depth_frame_number", frame.depth_frame_number),
+            (
+                "camera_received_at_monotonic_ns",
+                frame.camera_received_at_monotonic_ns,
+            ),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise EpisodeIntegrityError(
+                    f"frame {index} {name} must be a non-negative integer"
+                )
+        if (
+            not math.isfinite(frame.sample_sync_skew_ms)
+            or frame.sample_sync_skew_ms < 0
+            or frame.sample_sync_skew_ms > maximum_sync_skew_ms
+        ):
             raise EpisodeIntegrityError(
-                f"frame {index} joint_positions must be one-dimensional"
+                f"frame {index} sample synchronization skew is out of bounds"
             )
-        gripper_pose = _required_array(frame.gripper_pose, "gripper_pose")
-        if gripper_pose.shape != (7,):
-            raise EpisodeIntegrityError(
-                f"frame {index} gripper_pose must be xyz + quaternion xyzw"
-            )
-        quaternion_norm = float(np.linalg.norm(gripper_pose[3:]))
-        if not math.isclose(quaternion_norm, 1.0, rel_tol=1e-5, abs_tol=1e-5):
-            raise EpisodeIntegrityError(
-                f"frame {index} gripper pose quaternion must be normalized"
+        for field_name in (
+            "camera_name",
+            "camera_serial",
+            "camera_distortion_model",
+            "camera_hardware_timestamp_domain",
+            "depth_aligned_to_color",
+        ):
+            if getattr(frame, field_name) != getattr(first_frame, field_name):
+                raise EpisodeIntegrityError(
+                    f"frame {index} camera metadata changed for {field_name}"
+                )
+        for arm_name in source_arms:
+            _validate_arm_sample(
+                frame.arms[arm_name],
+                arm_name=arm_name,
+                frame_index=index,
+                dimensions=dimensions,
             )
 
-    for name in required_arrays:
-        fields[name] = "required"
-    for name in optional_arrays:
-        values = [getattr(frame, name) for frame in frames]
-        present = [value is not None for value in values]
-        if any(present) and not all(present):
-            raise EpisodeIntegrityError(
-                f"optional field {name} must be present for all frames or none"
+    for arm_name in source_arms:
+        prefix = f"{arm_name}_"
+        for name in (
+            "sampled_at_utc_ns",
+            "sampled_at_monotonic_ns",
+            "joint_positions",
+            "gripper_open",
+            "gripper_force_newtons",
+            "gripper_raw_position",
+            "gripper_pose",
+        ):
+            fields[f"{prefix}{name}"] = "required"
+        for name in (
+            "joint_velocities",
+            "joint_currents",
+            "end_effector_wrench",
+        ):
+            values = [getattr(frame.arms[arm_name], name) for frame in frames]
+            fields[f"{prefix}{name}"] = (
+                "present" if any(value is not None for value in values) else "absent"
             )
-        fields[name] = "present" if all(present) else "absent"
-        if all(present):
             for index, value in enumerate(values):
-                array = _required_array(value, name)
+                if value is None:
+                    continue
+                array = _required_array(value, f"{prefix}{name}")
                 _require_consistent_shape(
                     dimensions,
-                    name,
+                    f"{prefix}{name}",
                     array,
                     index,
                 )
     return fields, dimensions
+
+
+def _validate_arm_sample(
+    sample: object,
+    *,
+    arm_name: str,
+    frame_index: int,
+    dimensions: dict[str, tuple[int, ...]],
+) -> None:
+    prefix = f"{arm_name}_"
+    for name in ("sampled_at_utc_ns", "sampled_at_monotonic_ns"):
+        value = getattr(sample, name)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise EpisodeIntegrityError(
+                f"frame {frame_index} {prefix}{name} must be a positive integer"
+            )
+    joint_positions = _required_array(
+        sample.joint_positions,
+        f"{prefix}joint_positions",
+    )
+    gripper_pose = _required_array(
+        sample.gripper_pose,
+        f"{prefix}gripper_pose",
+    )
+    _require_consistent_shape(
+        dimensions,
+        f"{prefix}joint_positions",
+        joint_positions,
+        frame_index,
+    )
+    _require_consistent_shape(
+        dimensions,
+        f"{prefix}gripper_pose",
+        gripper_pose,
+        frame_index,
+    )
+    if joint_positions.ndim != 1:
+        raise EpisodeIntegrityError(
+            f"frame {frame_index} {prefix}joint_positions must be one-dimensional"
+        )
+    if gripper_pose.shape != (7,):
+        raise EpisodeIntegrityError(
+            f"frame {frame_index} {prefix}gripper_pose must contain xyz + quaternion"
+        )
+    gripper_open = float(sample.gripper_open)
+    if not math.isfinite(gripper_open) or not 0.0 <= gripper_open <= 1.0:
+        raise EpisodeIntegrityError(
+            f"frame {frame_index} {prefix}gripper_open must be in range 0..1"
+        )
+    _require_finite_nonnegative(
+        float(sample.gripper_force_newtons),
+        f"frame {frame_index} {prefix}gripper_force_newtons",
+    )
+    raw_position = sample.gripper_raw_position
+    if (
+        isinstance(raw_position, bool)
+        or not isinstance(raw_position, int)
+        or raw_position < 0
+    ):
+        raise EpisodeIntegrityError(
+            f"frame {frame_index} {prefix}gripper_raw_position is invalid"
+        )
+    quaternion_norm = float(np.linalg.norm(gripper_pose[3:]))
+    if not math.isclose(quaternion_norm, 1.0, rel_tol=1e-5, abs_tol=1e-5):
+        raise EpisodeIntegrityError(
+            f"frame {frame_index} {prefix}gripper pose quaternion is not normalized"
+        )
+    for name in (
+        "joint_velocities",
+        "joint_currents",
+        "end_effector_wrench",
+    ):
+        value = getattr(sample, name)
+        if value is None:
+            continue
+        array = _required_array(value, f"{prefix}{name}")
+        if array.ndim != 1:
+            raise EpisodeIntegrityError(
+                f"frame {frame_index} {prefix}{name} must be one-dimensional"
+            )
+        if name in {"joint_velocities", "joint_currents"}:
+            if array.shape != joint_positions.shape:
+                raise EpisodeIntegrityError(
+                    f"frame {frame_index} {prefix}{name} must match joint count"
+                )
+        elif array.shape != (6,):
+            raise EpisodeIntegrityError(
+                f"frame {frame_index} {prefix}{name} must contain 6 values"
+            )
+
+
+def _require_finite_positive(value: float, name: str) -> None:
+    if not math.isfinite(value) or value <= 0:
+        raise EpisodeIntegrityError(f"{name} must be positive and finite")
+
+
+def _require_finite_nonnegative(value: float, name: str) -> None:
+    if not math.isfinite(value) or value < 0:
+        raise EpisodeIntegrityError(f"{name} must be finite and non-negative")
 
 
 def _require_consistent_shape(
@@ -731,14 +995,67 @@ def _required_array(
     return value
 
 
-def _optional_stack(
-    frames: Sequence[FrameRecord],
+def _masked_optional_stack(
+    samples: Sequence[object],
     name: str,
-) -> np.ndarray | None:
-    values = [getattr(frame, name) for frame in frames]
-    if not all(isinstance(value, np.ndarray) for value in values):
-        return None
-    return np.stack(values)
+) -> tuple[np.ndarray | None, np.ndarray]:
+    values = [getattr(sample, name) for sample in samples]
+    template = next(
+        (value for value in values if isinstance(value, np.ndarray)),
+        None,
+    )
+    valid = np.asarray(
+        [isinstance(value, np.ndarray) for value in values],
+        dtype=np.uint8,
+    )
+    if template is None:
+        return None, valid
+    stacked = np.stack(
+        [
+            value if isinstance(value, np.ndarray) else np.zeros_like(template)
+            for value in values
+        ]
+    )
+    return stacked, valid
+
+
+def _native_misc(
+    frame: FrameRecord,
+    *,
+    arm_name: str,
+    camera_extrinsics: tuple[float, ...] | None,
+    camera_extrinsics_reference_frame: str | None,
+    calibration_id: str | None,
+) -> dict[str, object]:
+    arm = frame.arms[arm_name]
+    misc: dict[str, object] = {
+        "front_camera_intrinsics": frame.camera_intrinsics,
+        "front_camera_distortion_coefficients": (frame.camera_distortion_coefficients),
+        "front_depth_scale_metres": frame.depth_scale_metres,
+        "front_color_hardware_timestamp_ms": (frame.color_hardware_timestamp_ms),
+        "front_depth_hardware_timestamp_ms": (frame.depth_hardware_timestamp_ms),
+        "front_color_frame_number": frame.color_frame_number,
+        "front_depth_frame_number": frame.depth_frame_number,
+        "host_timestamp_utc_ns": frame.timestamp_utc_ns,
+        "host_camera_received_at_monotonic_ns": (frame.camera_received_at_monotonic_ns),
+        "arm_sampled_at_utc_ns": arm.sampled_at_utc_ns,
+        "arm_sampled_at_monotonic_ns": arm.sampled_at_monotonic_ns,
+        "sample_sync_skew_ms": frame.sample_sync_skew_ms,
+        "gripper_force_newtons": arm.gripper_force_newtons,
+        "gripper_raw_position": arm.gripper_raw_position,
+        "joint_currents_amperes": arm.joint_currents,
+        "end_effector_wrench": arm.end_effector_wrench,
+    }
+    if camera_extrinsics is not None:
+        misc["robot_llm_camera_extrinsics"] = np.asarray(
+            camera_extrinsics,
+            dtype=np.float64,
+        ).reshape(4, 4)
+        misc["robot_llm_camera_extrinsics_reference_frame"] = (
+            camera_extrinsics_reference_frame
+        )
+        misc["robot_llm_calibration_id"] = calibration_id
+    return misc
 
 
 def _require_nonnegative_int(value: int, name: str) -> None:
@@ -764,6 +1081,7 @@ def _file_role(path: Path) -> str:
 
 def _episode_units(
     format_variant: DataCollectionFormat,
+    source_arms: tuple[str, ...],
 ) -> dict[str, str]:
     joint_angle_unit = (
         "radians"
@@ -775,19 +1093,34 @@ def _episode_units(
         if format_variant is DataCollectionFormat.RLBENCH_NATIVE
         else "degrees_per_second"
     )
-    return {
-        "timestamp": "unix_seconds_utc",
+    units = {
+        "timestamp_utc_ns": "unix_nanoseconds_utc",
         "front_rgb": "uint8_bgr",
         "front_depth": "camera_device_units_uint16",
         "camera_intrinsics": "pixels",
-        "joint_positions": joint_angle_unit,
-        "joint_velocities": joint_velocity_unit,
-        "gripper_open": "normalized_0_closed_1_open",
-        "gripper_pose": "xyz_metres_quaternion_xyzw",
-        "joint_forces": "provider_reported_units",
-        "gripper_matrix": "homogeneous_transform_metres",
-        "gripper_joint_positions": joint_angle_unit,
+        "camera_distortion_coefficients": "camera_model_coefficients",
+        "depth_scale_metres": "metres_per_depth_unit",
+        "camera_hardware_timestamps": "milliseconds_camera_clock",
+        "camera_frame_numbers": "camera_sequence_number",
+        "sample_sync_skew_ms": "milliseconds_host_monotonic_clock",
     }
+    for arm_name in source_arms:
+        prefix = f"{arm_name}_"
+        units.update(
+            {
+                f"{prefix}sampled_at_utc_ns": "unix_nanoseconds_utc",
+                f"{prefix}sampled_at_monotonic_ns": "host_monotonic_nanoseconds",
+                f"{prefix}joint_positions": joint_angle_unit,
+                f"{prefix}joint_velocities": joint_velocity_unit,
+                f"{prefix}joint_currents": "amperes",
+                f"{prefix}gripper_open": "normalized_0_closed_1_open",
+                f"{prefix}gripper_force_newtons": "newtons",
+                f"{prefix}gripper_raw_position": "provider_position_units",
+                f"{prefix}gripper_pose": "xyz_metres_quaternion_xyzw",
+                f"{prefix}end_effector_wrench": "fx_fy_fz_newtons_mx_my_mz_newton_metres",
+            }
+        )
+    return units
 
 
 def _sha256(path: Path) -> str:

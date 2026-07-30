@@ -6,11 +6,13 @@ import unittest
 from pathlib import Path
 from threading import RLock
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.device_runtime import (
     ArmId,
+    ArmTelemetryReader,
     CartesianPose,
     DeviceCapability,
     DeviceInitializationError,
@@ -59,6 +61,20 @@ class _FakeSdkRobot:
 
     def rm_get_current_arm_state(self):
         return self.state_code, self.state
+
+    def rm_get_gripper_state(self):
+        return 0, {
+            "status": 1,
+            "error": 0,
+            "current_force": 500,
+            "actpos": 250,
+        }
+
+    def rm_get_current_joint_current(self):
+        return 0, [100 * (index + 1) for index in range(len(self.state["joint"]))]
+
+    def rm_get_force_data(self):
+        return 0, {"force_data": [1, 2, 3, 4, 5, 6]}
 
     def rm_set_gripper_release(self, **kwargs):
         self.calls.append(("gripper_release", None, kwargs))
@@ -253,6 +269,7 @@ class RealManRobotAdapterTests(unittest.TestCase):
 
     def test_adapter_implements_vendor_neutral_contract(self):
         self.assertIsInstance(self.adapter, RobotSystem)
+        self.assertIsInstance(self.adapter, ArmTelemetryReader)
         pose = CartesianPose.from_iterable((1, 2, 3, 4, 5, 6))
         self.adapter.move_to_pose(
             ArmId.LEFT,
@@ -303,6 +320,30 @@ class RealManRobotAdapterTests(unittest.TestCase):
         self.assertEqual(_pose(10).to_list(), tool_calls[0][1])
         self.assertEqual(_pose(30).to_list(), tool_calls[1][1])
         self.assertEqual(_pose(10).to_list(), tool_calls[2][1])
+
+    def test_adapter_reports_real_telemetry_and_derives_velocity(self):
+        with (
+            patch(
+                "src.device_runtime.adapters.time.monotonic_ns",
+                side_effect=(1_000_000_000, 2_000_000_000),
+            ),
+            patch(
+                "src.device_runtime.adapters.time.time_ns",
+                side_effect=(10_000_000_000, 11_000_000_000),
+            ),
+        ):
+            first = self.adapter.read_arm_telemetry(ArmId.LEFT)
+            self.controller.robot1_ctrl.robot.state["joint"] = [
+                value + 1 for value in range(1, 7)
+            ]
+            second = self.adapter.read_arm_telemetry(ArmId.LEFT)
+
+        self.assertIsNone(first.joint_velocities_deg_s)
+        self.assertEqual((1.0,) * 6, second.joint_velocities_deg_s)
+        self.assertEqual((0.1, 0.2, 0.3, 0.4, 0.5, 0.6), first.joint_currents_amperes)
+        self.assertEqual((1.0, 2.0, 3.0, 4.0, 5.0, 6.0), first.end_effector_wrench)
+        self.assertAlmostEqual(0.25, first.gripper.position_normalized)
+        self.assertAlmostEqual(4.903325, first.gripper.force_newtons)
 
     def test_tool_rack_uses_configured_arm_and_slot_poses(self):
         adapter = RealManRobotAdapter(
@@ -402,6 +443,7 @@ class RobotProviderTests(unittest.TestCase):
             DeviceCapability.MOTION,
             DeviceCapability.ARM_MOTION,
             DeviceCapability.ARM_STATE,
+            DeviceCapability.ARM_TELEMETRY,
             DeviceCapability.GRIPPER,
             DeviceCapability.TOOL_RACK,
         }.issubset(provider.capabilities))

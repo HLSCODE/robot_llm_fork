@@ -6,12 +6,14 @@ from typing import Any, Protocol, runtime_checkable
 from .arm_models import (
     ArmId,
     ArmState,
+    ArmTelemetry,
     CartesianPose,
     JointVector,
     MotionMode,
     MotionOptions,
     TrajectorySaveResult,
 )
+from .camera_models import DepthCameraFrame
 from .models import StopMode
 
 
@@ -43,6 +45,12 @@ class ArmMotion(Protocol):
 class ArmStateReader(Protocol):
     def read_arm_state(self, arm: ArmId) -> ArmState: ...
     def try_read_arm_state(self, arm: ArmId) -> ArmState | None: ...
+
+
+@runtime_checkable
+class ArmTelemetryReader(Protocol):
+    def read_arm_telemetry(self, arm: ArmId) -> ArmTelemetry: ...
+    def try_read_arm_telemetry(self, arm: ArmId) -> ArmTelemetry | None: ...
 
 
 @runtime_checkable
@@ -191,6 +199,10 @@ class CameraSource(Protocol):
 @runtime_checkable
 class DepthCameraSource(CameraSource, Protocol):
     def get_latest_raw_frames(self, camera_name: str | None = None) -> Any: ...
+    def get_latest_depth_frame(
+        self,
+        camera_name: str | None = None,
+    ) -> DepthCameraFrame | None: ...
 
 
 @runtime_checkable

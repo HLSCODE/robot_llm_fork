@@ -80,7 +80,7 @@ class RealManProviderSettings:
             raise ValueError("RealMan model must not be empty")
 
     @classmethod
-    def from_config(cls, config: Any) -> "RealManProviderSettings":
+    def from_config(cls, config: Any) -> RealManProviderSettings:
         try:
             return cls(
                 model=str(config.ROBOT_MODEL).strip(),
@@ -237,6 +237,7 @@ _REALMAN_CAPABILITIES = frozenset({
     DeviceCapability.EMERGENCY_STOP,
     DeviceCapability.ARM_MOTION,
     DeviceCapability.ARM_STATE,
+    DeviceCapability.ARM_TELEMETRY,
     DeviceCapability.GRIPPER,
     DeviceCapability.ROBOT_TELEOPERATION,
     DeviceCapability.TRAJECTORY,

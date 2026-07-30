@@ -45,7 +45,7 @@ class _FakeDevices:
 class _FakeRobotQuery:
     reader = object()
 
-    def state_reader(self):
+    def telemetry_reader(self):
         return self.reader
 
 

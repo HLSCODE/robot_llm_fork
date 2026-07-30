@@ -2,230 +2,236 @@
 
 > 文档状态：Active
 >
-> Schema：`robot-llm.data-collection.episode` v1
+> Schema：`robot-llm.data-collection.episode` v2
 >
 > 最近更新：2026-07-30
 
-## 1. 当前能力与边界
+## 1. 当前能力
 
-数据采集在遥操作期间同步记录机械臂状态、前置 RGB 图像和深度图像。当前实现
-已经具备：
+数据采集在共享遥操作会话中记录一台 RealSense 深度相机和一条或两条机械臂的
+实际遥测。当前实现具备：
 
-- 应用层 session/episode 状态机；
-- 相机与遥操作资源的统一租约和清理；
-- 显式、版本化的数据格式；
-- 容量预检、临时目录写入、完整性校验和原子发布；
-- 中断残留恢复、SHA-256 manifest 和离线验证 CLI；
-- 可配置采集机械臂，不依赖 RealMan 原生 SDK 数据结构。
+- 应用层 session/episode 状态机和统一资源租约；
+- 单臂或双臂采集；
+- 使用主机 monotonic clock 计算并限制相机、左臂、右臂样本的最大时间偏差；
+- RGB、原始深度、深度比例、内参、畸变参数、设备时间戳、帧号和时间戳域；
+- 实际关节位置、推导关节速度、关节电流、夹爪位置/力和末端六维力；
+- 可选 `T_reference_camera` 相机外参及标定版本；
+- portable NPZ 与 Native RLBench 两种显式格式；
+- 容量预检、同目录 staged write、完整性校验、原子发布和残留恢复；
+- 默认不反序列化 pickle 的离线校验，以及显式受信 Native smoke test。
 
-系统不再把“缺少 RLBench 依赖时生成的自定义 pickle”称为 RLBench 数据，也
-不存在隐式格式回退。格式必须通过配置明确选择。
+系统不提供 schema v1、`DATA_COLLECTION_ARM` 或旧帧字段的兼容读取。需要保留的
+历史数据应使用独立迁移工具转换，运行时代码不承担历史格式分支。
 
-## 2. 架构职责
+## 2. 模块职责
 
 ```text
 WebSocket handler
        |
-DataCollectionService                 application
-  |        |             |
-  |   CameraSession   TeleoperationService
-  |        |             |
-  +---- DemonstrationRecorder         infrastructure
-                |
-       DataCollectionEpisodeWriter
-          |        |          |
-       schema   validation   filesystem
+DataCollectionService                    application
+  |        |                 |
+  |   CameraSession       TeleoperationService
+  |        |                 |
+  +---- DemonstrationRecorder            sampling
+            |          |
+   DepthCameraSource  ArmTelemetryReader
+            |
+   DataCollectionEpisodeWriter           persistence
+       |          |          |
+     schema    validation    filesystem
 ```
 
 | 模块 | 职责 |
 |---|---|
-| `src/application/data_collection.py` | 用例状态机、资源所有权、稳定错误和结果；不处理文件格式 |
-| `src/data_collection/recorder.py` | 定时采样、帧缓存和调用持久化端口 |
-| `src/data_collection/episode_writer.py` | 容量预检、帧校验、格式编码、manifest、原子发布和残留清理 |
-| `src/data_collection/schema.py` | schema、格式枚举、强类型元数据和路径/字段约束 |
-| `src/data_collection/validation.py` | episode/dataset 完整性验证及 CLI |
+| `src/application/data_collection.py` | 用例状态、资源所有权、错误和结果 |
+| `src/data_collection/recorder.py` | 定时采样、跨设备偏差检查、内存帧缓冲 |
+| `src/data_collection/episode_writer.py` | 帧校验、编码、manifest、事务写入 |
+| `src/data_collection/schema.py` | schema、元数据和字段约束 |
+| `src/data_collection/validation.py` | episode/dataset 校验和 CLI |
 | `src/data_collection/config.py` | 数据采集强类型配置 |
+| `src/device_runtime/camera_models.py` | 厂商无关的深度相机帧 |
+| `src/device_runtime/arm_models.py` | 厂商无关的机械臂遥测 |
 
-`DataCollectionService` 是 recorder、相机会话、采集状态和共享遥操作会话的唯一
-应用层所有者。WebSocket 只负责协议 DTO 与应用结果之间的映射。
+`DataCollectionService` 是 recorder、相机会话和共享遥操作会话的唯一应用层
+所有者。WebSocket 只负责协议 DTO 映射。
 
-## 3. 会话与 Episode 生命周期
+## 3. 采样与同步语义
 
-状态主路径：
+每次采样按以下顺序执行：
 
-```text
-idle
-  -> starting_session -> session_ready
-  -> starting_episode -> recording
-  -> stopping_episode -> session_ready
-  -> ending_session -> idle
-```
+1. 从相机 source 取得最新的完整 RGB/depth frameset；
+2. 依次查询配置中的每条机械臂；
+3. 收集相机主机接收时间和机械臂采样时间；
+4. 使用同一进程的 monotonic clock 计算 `max(timestamp) - min(timestamp)`；
+5. 偏差超过 `DATA_COLLECTION_MAX_SYNC_SKEW_MS` 时丢弃整帧并增加
+   `capture_error_count`。
 
-协议 action：
+该机制提供有界时间偏差，但不等于硬件触发同步。相机硬件时间戳和机械臂 SDK
+没有共享时钟，因此训练或融合流程应同时参考：
 
-| action | 作用 |
-|---|---|
-| `demo_session_start` | 获取相机资源、初始化机械臂查询能力、执行存储预检并创建会话 |
-| `demo_record_start` | 共享遥操作控制会话并启动采集线程 |
-| `demo_record_stop` | 停止采集，校验并原子发布一个 episode |
-| `demo_session_end` | 结束会话并释放 recorder、遥操作和相机资源 |
+- `*_hardware_timestamps_ms` 和 `hardware_timestamp_domain`：相机设备时钟；
+- `*_received/sample_at_monotonic_ns`：同一采集进程内的同步依据；
+- `*_utc_ns`：跨进程、日志和数据集定位时间。
 
-业务保存失败后采集线程已经停止，状态返回 `session_ready`，调用方可以修复容量
-或配置问题后重新采集。recorder 协议损坏或无法确定线程状态时进入 `faulted`，
-必须结束会话进行统一清理。
+双臂模式要求同一帧中两臂数据都有效；任一机械臂查询失败或超时均丢弃整帧，
+不会写入不完整的双臂 observation。
 
-## 4. 数据格式
+采集要求 RealSense depth 已对齐到 color；未对齐帧没有可复用的单一内参语义，
+因此会被拒绝，而不是把 color 内参错误地用于原始 depth 像素。
 
-### 4.1 格式选择
+## 4. 机械臂遥测语义
 
-| 配置值 | 默认 | 低维数据 | pickle | 适用范围 |
-|---|---:|---|---:|---|
-| `portable_simplified` | 是 | `low_dim_obs.npz` | 否 | 本项目采集、检查、转换和后续训练预处理 |
-| `rlbench_native` | 否 | `low_dim_obs.pkl` 等三个文件 | 是 | 已安装 RLBench、明确需要原生 `Demo`/`Observation` 序列化的受信环境 |
+`ArmTelemetryReader` 是采集使用的最小设备能力，不依赖 RealMan SDK 类型。
+RealMan adapter 当前映射如下：
 
-两种格式共同使用 PNG 图像、`episode.json` 和同一目录层级。一个 episode 只能
-包含一种低维格式；混合文件会被验证器拒绝。
+| 统一字段 | RealMan 来源 | 单位/说明 |
+|---|---|---|
+| `joint_positions` | 当前机械臂状态 | degree |
+| `joint_velocities` | 相邻两次实际关节位置与 monotonic 时间差推导 | degree/s；第一帧可能无效 |
+| `joint_currents` | `rm_get_current_joint_current` | SDK mA 转换为 A |
+| `gripper_open` | `rm_get_gripper_state.actpos` | 0..1000 归一化为 0..1 |
+| `gripper_force_newtons` | `current_force` | 克力转换为 N |
+| `gripper_raw_position` | `actpos` | SDK 原始位置 |
+| `gripper_pose` | 当前末端位姿 | metre + quaternion xyzw |
+| `end_effector_wrench` | `rm_get_force_data.force_data` | Fx/Fy/Fz N，Mx/My/Mz N·m |
 
-`portable_simplified` 是默认和推荐格式。NPZ 使用 `allow_pickle=False` 即可
-读取，不依赖 RLBench。
+关节电流不是关节力矩，末端 wrench 也不是关节力。因此 Native RLBench 的
+`Observation.joint_forces` 保持 `None`，不会用语义不一致的数据填充。真实扩展
+字段保存在 portable 数组或 Native `Observation.misc` 中。
 
-`rlbench_native` 使用真实 RLBench Python 类型序列化。启动采集 session 时会
-检查依赖，缺失时以 `format_unavailable` 失败，不会回退到 portable 格式。
-它表示“原生对象序列化”，不表示数据等价于 RLBench 仿真环境的完整 observation：
-当前真实硬件采集没有 mask、point cloud、任务低维状态、相机外参等仿真字段。
-pickle 只应在可信数据和受控环境中反序列化。
+可选传感器字段允许部分帧缺失。portable 格式为每个可选数组保存对应的
+`*_valid` 二值掩码，缺失行使用零占位；消费者必须先检查掩码。
 
-### 4.2 目录结构
+## 5. 相机与标定语义
 
-Portable：
-
-```text
-data/demos/
-└─ pick_bottle/
-   └─ all_variations/
-      └─ episodes/
-         └─ episode0/
-            ├─ episode.json
-            ├─ front_rgb/
-            │  ├─ 0.png
-            │  └─ ...
-            ├─ front_depth/
-            │  ├─ 0.png
-            │  └─ ...
-            └─ low_dim_obs.npz
-```
-
-Native RLBench serialization：
+原始深度 PNG 保持相机 `uint16` 设备单位。转换到米：
 
 ```text
-episode0/
-├─ episode.json
-├─ front_rgb/
-├─ front_depth/
-├─ low_dim_obs.pkl
-├─ variation_number.pkl
-└─ variation_descriptions.pkl
+depth_metres = front_depth_uint16 * depth_scale_metres
 ```
 
-任务名只能包含 ASCII 字母、数字、点、下划线和连字符，且必须以字母或数字开头。
-绝对路径、`..` 和其他目录穿越形式会在创建任何 episode 前被拒绝。
+如果配置相机外参，16 个数按行展开并表示：
 
-### 4.3 `episode.json`
+```text
+p_reference = T_reference_camera @ p_camera
+```
 
-每个成功发布的 episode 都包含独立 manifest，主要字段如下：
+必须同时提供 reference frame 和 calibration ID。外参缺失时仍允许采集，但
+校验器输出 `camera_extrinsics_absent` 警告，明确表示数据不能直接投影到机器人
+参考坐标系。代码不会从视觉重定位配置中猜测或复用语义不明确的矩阵。
+
+## 6. 格式与目录
+
+| 格式 | 低维数据 | pickle | 机械臂数量 |
+|---|---|---:|---:|
+| `portable_simplified` | `low_dim_obs.npz` | 否 | 1 或 2 |
+| `rlbench_native` | `low_dim_obs.pkl` 等三个文件 | 是 | 必须为 1 |
+
+```text
+data/demos/<task>/all_variations/episodes/episode0/
+├── episode.json
+├── front_rgb/
+│   ├── 0.png
+│   └── ...
+├── front_depth/
+│   ├── 0.png
+│   └── ...
+└── low_dim_obs.npz
+```
+
+Native 格式将 NPZ 替换为：
+
+```text
+low_dim_obs.pkl
+variation_number.pkl
+variation_descriptions.pkl
+```
+
+Native 使用真实 RLBench `Demo`/`Observation` 类型，缺少 RLBench 依赖时 session
+预检直接返回 `format_unavailable`，不会回退为 portable 或生成伪 pickle。
+
+## 7. Schema v2
+
+`episode.json` 的关键结构：
 
 ```json
 {
   "schema_name": "robot-llm.data-collection.episode",
-  "schema_version": 1,
+  "schema_version": 2,
   "format_variant": "portable_simplified",
-  "format_version": 1,
+  "format_version": 2,
   "task": "pick_bottle",
-  "source_arm": "left",
+  "source_arms": ["left", "right"],
   "episode_id": 0,
-  "variation_id": 0,
-  "descriptions": ["pick bottle"],
   "frame_count": 300,
-  "capture_error_count": 0,
-  "created_at_utc": "2026-07-30T12:00:00+00:00",
-  "fields": {
-    "front_rgb": "required",
-    "joint_velocities": "absent"
+  "camera": {
+    "name": "monitor1",
+    "serial": "419522071147",
+    "distortion_model": "brown_conrady",
+    "hardware_timestamp_domain": "hardware_clock",
+    "depth_aligned_to_color": true
   },
-  "units": {
-    "joint_positions": "degrees",
-    "gripper_pose": "xyz_metres_quaternion_xyzw"
+  "synchronization": {
+    "maximum_skew_ms": 100.0,
+    "observed_maximum_skew_ms": 12.4
   },
-  "dimensions": {
-    "front_rgb": [480, 640, 3],
-    "front_depth": [480, 640]
-  },
-  "files": [
-    {
-      "path": "front_rgb/0.png",
-      "role": "front_rgb",
-      "size_bytes": 12345,
-      "sha256": "..."
-    }
-  ]
+  "calibration": {
+    "camera_extrinsics": [
+      [1, 0, 0, 0],
+      [0, 1, 0, 0],
+      [0, 0, 1, 0],
+      [0, 0, 0, 1]
+    ],
+    "reference_frame": "robot_base",
+    "calibration_id": "front-camera-2026-07"
+  }
 }
 ```
 
-manifest 记录每个 payload 文件的相对路径、角色、字节数和 SHA-256。未知
-schema/format 版本会被显式拒绝；当前没有静默兼容或猜测迁移逻辑。将来修改
-字段语义时必须提升版本，并提供独立迁移工具或对应版本 reader。
+`fields` 为每个字段声明 `required`、`present` 或 `absent`；`units` 和
+`dimensions` 使用完整字段名，例如 `left_joint_currents`。
+`files` 记录每个 payload 的相对路径、角色、字节数和 SHA-256。
 
-### 4.4 字段和单位
+Portable 全局数组包括：
 
-| 字段 | Portable 表示 | Native 表示 | 当前状态 |
-|---|---|---|---|
-| `timestamps` | Unix UTC 秒，`float64` | 不进入 RLBench observation | 已采集 |
-| `front_rgb` | H×W×3 BGR `uint8` PNG | 同左 | 已采集 |
-| `front_depth` | H×W 原始设备单位 `uint16` PNG | 同左 | 已采集 |
-| `camera_intrinsics` | 3×3 像素内参 | `Observation.misc` | 已采集 |
-| `joint_positions` | 角度，degree | 写入前转换为 radian | 已采集 |
-| `gripper_pose` | 米 + `xyzw` 四元数 | 同左 | 已采集 |
-| `gripper_open` | 0 关闭、1 打开 | 同左 | 当前状态端口未提供真实值，暂为 0 |
-| `joint_velocities` | degree/s | 写入前转换为 radian/s | 当前缺失 |
-| `joint_forces` | provider 原始单位 | provider 原始单位 | 当前缺失 |
-| `gripper_matrix` | 米制 4×4 齐次矩阵 | 同左 | 当前缺失 |
-| `gripper_joint_positions` | degree | 写入前转换为 radian | 当前缺失 |
+- `timestamps_utc_ns`、`camera_received_at_monotonic_ns`；
+- `color_hardware_timestamps_ms`、`depth_hardware_timestamps_ms`；
+- `color_frame_numbers`、`depth_frame_numbers`；
+- `camera_intrinsics`、`camera_distortion_coefficients`；
+- `depth_scale_metres`、`sample_sync_skew_ms`；
+- 可选的 `camera_extrinsics`。
 
-写入前会拒绝空 episode、非有限数值、时间倒序、帧间 shape 不一致、不规范
-RGB/depth dtype、无效相机内参、非归一化四元数和部分帧才出现的可选字段。
+每条机械臂使用 `left_` 或 `right_` 前缀，包括采样时间、关节位置/速度/电流、
+夹爪位置/力、末端位姿和末端 wrench。
 
-当前深度图仍是 RealSense 的原始 `uint16` 设备单位，manifest 不宣称其为毫米；
-在用于三维训练前需要补充并应用相机 depth scale。当前也没有保存相机外参。
+## 8. 事务写入
 
-## 5. 事务写入、容量与恢复
+保存 episode 时：
 
-保存一个 episode 时按以下顺序执行：
+1. 校验所有帧、字段 shape、单位范围和同步上限；
+2. 执行容量预检；
+3. 在目标 `episodes` 目录创建 `.episodeN.tmp-<hex>`；
+4. 写入并 `fsync` 每个 payload；
+5. 生成包含哈希的 manifest；
+6. 对 staged episode 运行完整性校验；
+7. 使用同文件系统 `os.replace` 原子发布为 `episodeN`。
 
-1. 校验任务、episode 编号、所有帧及字段一致性。
-2. 根据原始数组大小和 overhead factor 估算空间。
-3. 要求可用空间不少于“保留空间 + 本 episode 估算空间”。
-4. 在同一 `episodes` 目录创建 `.episodeN.tmp-<hex>` 临时目录。
-5. 对每个文件写入、flush 并 `fsync`。
-6. 生成 manifest，并在临时目录上运行完整性验证。
-7. 使用同文件系统的 `os.replace` 将临时目录发布为 `episodeN`。
+已存在的 `episodeN` 永不覆盖。session 预检只清理当前任务目录内、名称严格匹配
+且超过 `DATA_COLLECTION_STALE_WRITE_SECONDS` 的临时目录。
 
-已存在的 `episodeN` 永不覆盖。写入或验证失败时不会出现可见的半成品
-episode，并会删除本次临时目录。
-
-启动 session 时只清理当前任务 `episodes` 目录中、名称严格匹配且超过
-`DATA_COLLECTION_STALE_WRITE_SECONDS` 的临时目录；不会递归扫描或删除其他
-路径。未过期临时目录会保留并由验证器报告警告。
-
-## 6. 配置
-
-配置来自项目根目录 `config.env`：
+## 9. 配置
 
 ```env
 DATA_COLLECTION_FPS=30
 DATA_COLLECTION_CAMERA_INDEX=0
-DATA_COLLECTION_ARM=left
+DATA_COLLECTION_ARMS=left,right
 DATA_COLLECTION_SAVE_PATH=data/demos
 DATA_COLLECTION_FORMAT_VARIANT=portable_simplified
+DATA_COLLECTION_MAX_SYNC_SKEW_MS=100
+DATA_COLLECTION_CAMERA_EXTRINSICS=
+DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME=
+DATA_COLLECTION_CALIBRATION_ID=
 DATA_COLLECTION_MIN_FREE_BYTES=1073741824
 DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR=1.25
 DATA_COLLECTION_STALE_WRITE_SECONDS=3600
@@ -233,22 +239,12 @@ DATA_COLLECTION_RANDOM_SEED=42
 DATA_COLLECTION_STOP_TIMEOUT_SECONDS=5
 ```
 
-| 配置 | 约束与说明 |
-|---|---|
-| `DATA_COLLECTION_FPS` | 1..240 Hz |
-| `DATA_COLLECTION_CAMERA_INDEX` | 在线相机列表中的非负索引；超过列表长度时选择最后一台 |
-| `DATA_COLLECTION_ARM` | `left` 或 `right` |
-| `DATA_COLLECTION_SAVE_PATH` | 数据集根目录；空值和当前目录被拒绝 |
-| `DATA_COLLECTION_FORMAT_VARIANT` | 只能是表中两个显式值 |
-| `DATA_COLLECTION_MIN_FREE_BYTES` | 发布前必须保留的空间；默认 1 GiB |
-| `DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR` | 估算放大系数，必须不小于 1 |
-| `DATA_COLLECTION_STALE_WRITE_SECONDS` | 临时目录被视为残留前的最小年龄 |
-| `DATA_COLLECTION_RANDOM_SEED` | Native RLBench `Demo` 的 seed |
-| `DATA_COLLECTION_STOP_TIMEOUT_SECONDS` | 等待采集线程退出的上限 |
+`DATA_COLLECTION_ARMS` 只接受逗号分隔的 `left`/`right` 且不能重复。Native
+格式必须只配置一条机械臂。外参是 4×4 齐次矩阵，按行填写 16 个有限数值。
 
-## 7. 完整性验证
+## 10. 校验和受信 Native smoke test
 
-安装项目后：
+默认校验不会反序列化 pickle：
 
 ```powershell
 robot-data-validate data/demos
@@ -256,46 +252,21 @@ robot-data-validate data/demos --task pick_bottle
 robot-data-validate data/demos --json
 ```
 
-也可直接运行：
+在已安装 RLBench 且数据来源完全可信的隔离环境中，可执行：
 
 ```powershell
-python -m src.data_collection.validation data/demos
+robot-data-validate data/demos --trusted-native
 ```
 
-空数据集或通过 `--task` 指定不存在的任务也视为验证失败。退出码：
+`--trusted-native` 会加载 pickle，检查 `Demo`/`Observation` 类型、帧数、
+variation number 和 descriptions。pickle 可执行任意代码，禁止对下载、外部
+提交或来源不明的数据使用此开关。
 
-- `0`：所有 episode 通过；
-- `1`：存在完整性错误。
+## 11. 已知限制
 
-验证内容包括 schema/format 版本、目录名与 episode ID、manifest 安全相对路径、
-文件存在性、大小、SHA-256、未登记文件、PNG 解码和 shape、NPZ 必填数组、帧数、
-时间戳及格式混用。Native pickle 默认不会反序列化，只验证 manifest 完整性并
-输出 `native_pickle_not_inspected` 警告。
-
-## 8. 稳定错误
-
-应用层保存相关 `detail_code`：
-
-| code | 含义 |
-|---|---|
-| `insufficient_storage` | 可用空间不足 |
-| `episode_conflict` | 目标 episode 已存在 |
-| `data_integrity_failed` | 输入帧或 staged episode 未通过校验 |
-| `format_unavailable` | 所选格式的依赖不可用 |
-| `persistence_failed` | 其他确定的持久化失败 |
-
-其他生命周期错误包括 `invalid_state`、`session_start_failed`、
-`episode_start_failed`、`episode_stop_failed`、`session_end_failed`、
-`recorder_protocol_error` 和 `cleanup_failed`。
-
-## 9. 已知限制与后续方向
-
-- 一次 session 只采集配置指定的一条机械臂，尚不支持双臂严格时间同步。
-- 机械臂查询端口尚未提供真实夹爪开合、关节速度、力矩和夹爪关节状态。
-- 尚未记录 depth scale、相机外参、点云、mask 和硬件/标定版本。
-- 相机帧与机械臂状态当前为采样时读取的最近值，没有硬件时间戳对齐。
-- Native 格式的语义完整性需要在受信 RLBench 环境中另做训练读取 smoke test。
-- 数据清洗、episode 回放、关键帧标注和训练集导出尚未实现。
-
-这些限制不会通过伪造字段或隐式格式兼容掩盖；新增语义必须进入新 schema/
-format 版本和对应验证规则。
+- 当前是主机 monotonic clock 上的有界软件同步，不是硬件触发同步；
+- RealMan 关节速度由轮询样本推导，不是控制器原生速度流；
+- 末端六维力只在对应机械臂型号/传感器支持时出现；
+- 尚未采集点云、mask、触觉、任务低维状态和标注；
+- Native smoke test 已具备工具和自动化类型测试，但仍需在实际安装 RLBench 的
+  受信训练环境以及真实硬件数据上执行验收。

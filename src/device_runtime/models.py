@@ -19,6 +19,7 @@ class DeviceCapability(str, Enum):
     EMERGENCY_STOP = "emergency_stop"
     ARM_MOTION = "arm_motion"
     ARM_STATE = "arm_state"
+    ARM_TELEMETRY = "arm_telemetry"
     GRIPPER = "gripper"
     ROBOT_TELEOPERATION = "robot_teleoperation"
     TRAJECTORY = "trajectory"

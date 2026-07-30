@@ -10,6 +10,7 @@ from ..device_runtime import (
     ArmId,
     ArmState,
     ArmStateReader,
+    ArmTelemetryReader,
     DeviceRuntime,
     DigitalOutputs,
     GripperControl,
@@ -329,6 +330,10 @@ class RobotQueryService:
     def state_reader(self) -> ArmStateReader:
         """Return the normalized read capability for a read-only session."""
         return self._runtime.require(ROBOT_SYSTEM, ArmStateReader)
+
+    def telemetry_reader(self) -> ArmTelemetryReader:
+        """Return timestamped telemetry for data acquisition."""
+        return self._runtime.require(ROBOT_SYSTEM, ArmTelemetryReader)
 
     def read_state(self, arm: str | ArmId) -> ArmState:
         return self.state_reader().read_arm_state(_arm_id(arm))

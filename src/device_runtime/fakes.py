@@ -1,17 +1,21 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
 from .arm_models import (
     ArmId,
     ArmState,
+    ArmTelemetry,
     CartesianPose,
+    GripperTelemetry,
     JointVector,
     MotionMode,
     MotionOptions,
     TrajectorySaveResult,
 )
+from .camera_models import DepthCameraFrame
 from .models import StopMode
 
 
@@ -20,7 +24,11 @@ class SimulatedRobotSystem:
         self.closed = False
         initial_pose = CartesianPose(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         self.states = {
-            arm: ArmState(arm=arm, pose=initial_pose)
+            arm: ArmState(
+                arm=arm,
+                pose=initial_pose,
+                joints=JointVector.from_iterable((0.0,) * 7),
+            )
             for arm in ArmId
         }
         self.gripper_positions = {arm: 1000 for arm in ArmId}
@@ -54,6 +62,26 @@ class SimulatedRobotSystem:
 
     def try_read_arm_state(self, arm: ArmId) -> ArmState:
         return self.read_arm_state(arm)
+
+    def read_arm_telemetry(self, arm: ArmId) -> ArmTelemetry:
+        state = self.read_arm_state(arm)
+        joint_count = len(state.joints.positions_deg) if state.joints else 0
+        return ArmTelemetry(
+            state=state,
+            sampled_at_utc_ns=time.time_ns(),
+            sampled_at_monotonic_ns=time.monotonic_ns(),
+            gripper=GripperTelemetry(
+                position_normalized=self.gripper_positions[arm] / 1000.0,
+                force_newtons=0.0,
+                raw_position=self.gripper_positions[arm],
+            ),
+            joint_velocities_deg_s=(0.0,) * joint_count,
+            joint_currents_amperes=(0.0,) * joint_count,
+            end_effector_wrench=(0.0,) * 6,
+        )
+
+    def try_read_arm_telemetry(self, arm: ArmId) -> ArmTelemetry:
+        return self.read_arm_telemetry(arm)
 
     def open_gripper(self, arm: ArmId) -> None:
         self.gripper_positions[arm] = 1000
@@ -298,6 +326,12 @@ class SimulatedCamera:
         return []
 
     def get_latest_raw_frames(self, _camera_name: str | None = None) -> None:
+        return None
+
+    def get_latest_depth_frame(
+        self,
+        _camera_name: str | None = None,
+    ) -> DepthCameraFrame | None:
         return None
 
 
