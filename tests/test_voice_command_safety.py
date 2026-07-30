@@ -175,7 +175,7 @@ class VoiceCommandSafetyTests(unittest.TestCase):
             broadcasts.append(payload)
 
         server._broadcast = record
-        asyncio.run(server._emit_interaction_event({
+        asyncio.run(server._interaction_handler._emit_interaction_event({
             "type": "command_preview",
             "text": "preview",
             "data": {"sequence": [_sequence_item().to_dict()]},
@@ -190,7 +190,7 @@ class VoiceCommandSafetyTests(unittest.TestCase):
         )
         websocket = _RecordingWebSocket()
 
-        asyncio.run(server._handle_ai_confirm(websocket, {}))
+        asyncio.run(server._interaction_handler._handle_ai_confirm(websocket, {}))
 
         payload = json.loads(websocket.messages[0])
         self.assertEqual("invalid_preview_reference", payload["code"])
@@ -209,7 +209,7 @@ class VoiceCommandSafetyTests(unittest.TestCase):
         )
         websocket = _RecordingWebSocket()
 
-        asyncio.run(server._handle_ai_confirm(websocket, {
+        asyncio.run(server._interaction_handler._handle_ai_confirm(websocket, {
             "preview_id": preview.preview_id,
             "version": preview.version,
         }))

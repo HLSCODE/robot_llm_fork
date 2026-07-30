@@ -30,7 +30,10 @@ src/
   gui/
     main_window.py      # 主窗口（PyQt6）
   robot_server/
-    ws_server.py        # WebSocket 服务端
+    ws_server.py        # WebSocket 连接生命周期、鉴权、路由和投递
+    protocol.py         # typed request/response 与全部 action schema
+    routing.py          # 唯一 action → handler 注册表
+    handlers/           # execution/composition/interaction/device/teleoperation
   devices/              # 串口/Modbus 设备驱动（ADP、快换手、ModbusMotor、PWMNeckController 等）
   pwm_sdk/              # 颈部双轴舵机 SDK（第三方，勿改业务逻辑）
   arm_sdk/              # RealMan driver，仅允许 device_runtime adapter 访问

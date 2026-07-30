@@ -43,6 +43,23 @@
 WebSocket 作为 GUI 应用的可选附加服务运行，与 GUI 共用同一套
 `ApplicationServices`、执行运行时和设备运行时。
 
+服务端内部按领域拆分：
+
+```text
+ws_server.py                 连接生命周期、鉴权、限流、顶层路由和消息投递
+protocol.py                  WebSocketRequest / WebSocketResponse 与 action schema
+routing.py                   唯一 action → handler 注册表
+handlers/execution.py        执行控制与执行事件映射
+handlers/composition.py      动作库、序列和任务编排
+handlers/interaction.py      AI、LLM 聊天和交互会话
+handlers/device.py           设备状态、初始化和相机订阅
+handlers/teleoperation.py    遥操作与数据采集
+```
+
+所有请求先转换为 `WebSocketRequest` 并按 action schema 完整校验，再进入
+鉴权和领域 handler；所有出站消息经 `WebSocketResponse` 统一序列化。新增
+action 时必须同时注册路由和 schema，否则服务初始化失败。
+
 协议基本约定：
 
 - 客户端发给服务端的 JSON 必须包含 `action`
@@ -302,8 +319,12 @@ ws.onerror = (err) => {
 |---|---|---|---|
 | `api_version` | `string` | 是 | 当前只接受 `2.0`；缺失或不支持的版本会被直接拒绝 |
 | `action` | `string` | 是 | 接口动作名 |
-| `request_id` | `string` | 否 | 1..128 位字母、数字、`.`、`_`、`:`、`-`；缺省时由服务端生成 |
-| 其他字段 | 任意 | 否 | 由具体接口决定 |
+| `request_id` | `string` | 是 | 1..128 位字母、数字、`.`、`_`、`:`、`-` |
+| action payload | 见具体接口 | 由接口决定 | 字段名和类型必须符合对应 action schema；未知字段会被拒绝 |
+
+请求采用严格 schema，不接受未声明字段，也不做字符串到数字/布尔值的隐式
+转换。payload 校验发生在鉴权之前；校验失败返回 `invalid_payload`，领域
+handler 不会被调用。
 
 ### 3.4 响应/事件消息格式
 
@@ -324,7 +345,7 @@ ws.onerror = (err) => {
 |---|---|---|---|
 | `event` | `string` | 是 | 事件名 |
 | `api_version` | `string` | 是 | 产生该消息的服务端协议版本 |
-| `request_id` | `string` | 请求直接响应是 | 与发起请求相同；客户端未提供时使用服务端生成值 |
+| `request_id` | `string` | 请求直接响应是 | 与发起请求相同 |
 | `action` | `string` | 请求直接响应是 | 产生当前响应的请求 action |
 | `run_id` | `string` | 执行事件是 | 一次统一执行的唯一 ID；从 `accepted` 贯通到步骤、日志和终态 |
 | 其他字段 | 任意 | 否 | 由具体事件决定 |
@@ -427,6 +448,8 @@ ws.onmessage = (event) => {
 | `execute` | 执行动作序列 |
 | `execute_task` | 直接执行已保存任务 |
 | `stop` | 停止当前执行 |
+| `quick_stop` | 向支持的设备发送软件快停 |
+| `emergency_stop` | 向支持的设备发送软件急停 |
 | `pause` | 暂停当前执行 |
 | `resume` | 恢复当前执行 |
 
@@ -2627,9 +2650,16 @@ function toImageSrc(frame) {
 |---|---|---|---|
 | `action` | `string` | 是 | 固定值 `chat` |
 | `provider` | `string` | 否 | 覆盖本次调用使用的 provider，支持 `openai` / `deepseek` / `dashscope` / `minicpm` |
-| `messages` | `array` | 是 | 聊天消息列表 |
+| `messages` | `array` | 与 `role/content` 二选一 | 聊天消息列表 |
+| `role` / `content` | `string` / `string \| array` | 与 `messages` 二选一 | 单条消息简写 |
 | `streaming` | `boolean` | 否 | 是否流式 |
-| 其他字段 | 任意 | 否 | 会作为 LLM options 传给 provider |
+| `route_to_interaction` / `robot_interaction` | `boolean` | 否 | 显式把用户文本路由到机器人交互入口 |
+| `temperature` / `length_penalty` | `number` | 否 | 已声明的采样参数 |
+| `max_tokens` / `max_new_tokens` / `image_max_slice_nums` | `integer` | 否 | 已声明的长度/图像参数 |
+| `omni_mode` / `tts_enabled` / `tts` / `use_tts_template` / `enable_thinking` | `boolean` | 否 | 已声明的 provider 选项 |
+
+未列出的 provider 扩展字段不会透传，而是返回 `invalid_payload`。需要新增
+选项时，应先扩展服务端 action schema 和本文档。
 
 说明：
 
@@ -2997,6 +3027,7 @@ function handleChatData(data) {
 |---|---|
 | `invalid_request` | 消息不是合法请求对象或 JSON |
 | `invalid_request_id` | 请求 ID 格式或长度不合法 |
+| `invalid_payload` | action payload 缺少必填字段、类型错误或包含未知字段 |
 | `api_version_required` | 请求未声明 `api_version` |
 | `unsupported_api_version` | 请求版本不在服务端支持列表中 |
 | `unknown_action` | action 不存在 |

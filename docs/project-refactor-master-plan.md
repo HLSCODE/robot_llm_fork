@@ -308,8 +308,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - 请求幂等语义尚未定义。
 - 执行与编排事件按设计广播给观察者；后续若增加更多高频事件，需要扩展显式
   订阅类别。
-- `RobotWebSocketServer` 同时处理执行、任务、AI、相机、聊天、设备、遥操作和数据采集。
-- handler 内部混合协议解析、业务逻辑、线程创建和硬件调用。
+- 数据采集流程已进入独立 teleoperation handler，但会话状态仍由 WebSocket
+  host context 持有，还不是独立的 application service/state machine。
 - 聊天协议已经明确存在不支持并发请求的限制。
 
 ### 8.2 目标
@@ -333,10 +333,10 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | C-006 | P1 | DONE | 所有请求强制声明 api_version=2.0，所有响应携带版本；不维护旧协议适配器，破坏性变更要求客户端与服务端同步升级 |
 | C-007 | P1 | DONE | 配置化限制单消息大小、每客户端频率、全服务并发和入站队列；慢客户端发送有 deadline，限流/繁忙返回稳定错误码 |
 | C-008 | P1 | DONE | 请求结果单播、系统/执行事件广播、相机帧显式订阅；广播与订阅发送并发隔离慢客户端 |
-| C-009 | P2 | TODO | 拆分领域 handler 和 service |
-| C-010 | P2 | TODO | 使用 typed request/response DTO |
+| C-009 | P2 | DONE | Server 的业务处理方法已清空，仅保留连接、鉴权、限流、顶层路由、投递及 handler host context；执行、编排、交互、设备、遥操作/采集拆为独立 handler，并复用 ApplicationServices |
+| C-010 | P2 | DONE | 请求在边界转换为不可变 WebSocketRequest，响应经 WebSocketResponse 统一序列化 |
 | C-011 | P2 | TODO | 增加 Origin/TLS/反向代理部署方案 |
-| C-012 | P2 | DOING | 已覆盖版本、限流、投递范围、权限、请求/执行关联和同步快速终态；待固化全部 action DTO |
+| C-012 | P2 | DONE | 全部 action 具有唯一 payload schema；缺失字段、错误类型和未知字段在鉴权/handler 前统一拒绝，路由缺少 schema 时启动失败 |
 | C-013 | P3 | TODO | 增加 API 指标和慢客户端监控 |
 | C-014 | P1 | DONE | WebSocket 改为 GUI 同进程的可选附加服务，共用唯一 ApplicationServices 和受管理 asyncio 生命周期 |
 | C-015 | P1 | DONE | 动作库、任务库和当前编排序列已收敛到线程安全 CompositionService；JSON 原子替换并向 GUI/网络入口发布 revision 事件 |
@@ -899,15 +899,16 @@ M4 工程治理与清理
 | 2026-07-29 | M3 | E | Skill action type 显式校验 | E-005 TODO → DONE | 删除未知类型回退 MOVE；映射从 `ActionType` 自动生成，校验结果增加稳定 `ValidationCode`，非法技能不会生成预览 | - |
 | 2026-07-29 | M3 | E/C | Action/Skill Schema 收敛 | E-006 TODO → DONE | 提取覆盖全部 ActionType 的唯一 action schema；WebSocket 删除内联副本；Skill 参数改为强类型、单位和显式绑定，展开前拒绝未知输入、无效绑定、单位冲突及越界动作参数 | - |
 | 2026-07-29 | M3 | E/C | AI/语音命令治理整批收口 | A-010/E-002/E-003/E-004/E-007/E-008/E-009 TODO/DOING → DONE | 新增进程级 CommandRuntime；删除 GUI/WS 私有预览缓存和重复 SkillEngine；预览使用 ID/版本/TTL/来源隔离/单次消费，高风险二次确认；会话与执行控制分离；统一交互超时、取消和 LLM close | 159 tests + 26 subtests |
+| 2026-07-30 | M3 | C | WebSocket 领域拆分与 typed contract | C-009/C-010/C-012 TODO/DOING → DONE | 将执行、编排、AI/聊天、设备/相机、遥操作/采集整体迁入领域 handler；Server 从 4222 行降至约 1400 行；新增 route registry、不可变 request DTO、response DTO 和覆盖全部 action 的严格 payload schema，不保留裸字典/未知字段兼容 | 162 tests + 26 subtests |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **C-009/C-010/C-012**：按领域拆分 WebSocket handler，并为请求/响应引入
-   typed DTO，继续固化全部 action 的协议契约。
+3. **F-D-001/F-D-002/F-D-003**：将采集状态和流程从 transport handler
+   继续下沉为 application service，并建立显式 session/episode 状态机。
 4. **E-010/E-011/E-012**：补 provider health/降级、prompt/模型/技能版本记录和固定规划回归数据集。
-5. **F-D-001/F-D-002/F-D-003**：将采集状态和流程移出 WebSocket，并建立显式 session/episode 状态机。
+5. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
 6. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
 7. 完成 simulation smoke test 后执行逐设备真实硬件验收。

@@ -5,7 +5,19 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from src.robot_server.protocol import WEBSOCKET_API_VERSION
+from src.robot_server.handlers import (
+    CompositionWebSocketHandler,
+    DeviceWebSocketHandler,
+    ExecutionWebSocketHandler,
+    InteractionWebSocketHandler,
+    TeleoperationWebSocketHandler,
+)
+from src.robot_server.protocol import (
+    ACTION_REQUEST_SCHEMAS,
+    WEBSOCKET_API_VERSION,
+    WebSocketRequest,
+    WebSocketResponse,
+)
 from src.robot_server.request_limits import WebSocketRequestLimiter
 from src.robot_server.ws_server import (
     RobotWebSocketServer,
@@ -81,6 +93,74 @@ class WebSocketRequestLimiterTests(unittest.TestCase):
 
 
 class WebSocketProtocolContractTests(unittest.TestCase):
+    def test_every_route_has_an_action_schema_and_domain_handler(self):
+        server = RobotWebSocketServer(services=SimpleNamespace())
+
+        self.assertEqual(
+            set(server._routes),
+            set(ACTION_REQUEST_SCHEMAS),
+        )
+        expected_handler_types = {
+            "execute": ExecutionWebSocketHandler,
+            "create_action": CompositionWebSocketHandler,
+            "ai_chat": InteractionWebSocketHandler,
+            "camera_status": DeviceWebSocketHandler,
+            "teleop_joint": TeleoperationWebSocketHandler,
+        }
+        for action, handler_type in expected_handler_types.items():
+            self.assertIsInstance(
+                server._routes[action].handler.__self__,
+                handler_type,
+            )
+
+    def test_request_and_response_dtos_preserve_validated_contract(self):
+        request = WebSocketRequest.parse(
+            _request("execute_task", "execute-task-1") | {"name": "demo.task"},
+            known_actions={"execute_task"},
+        )
+        response = WebSocketResponse.from_payload(
+            {
+                "event": "task_loaded",
+                "name": request["name"],
+            }
+        )
+
+        self.assertEqual("execute_task", request.action)
+        self.assertEqual("demo.task", request.payload["name"])
+        self.assertEqual(
+            {
+                "event": "task_loaded",
+                "name": "demo.task",
+            },
+            response.to_dict(),
+        )
+
+    def test_action_payload_is_validated_before_authorization(self):
+        server = RobotWebSocketServer(services=SimpleNamespace())
+        websocket = _RecordingWebSocket()
+        server._register_client(websocket, websocket.remote_address)
+
+        async def scenario() -> None:
+            await server._dispatch(
+                websocket,
+                _request("execute_task", "wrong-type") | {"name": 42},
+            )
+            await server._dispatch(
+                websocket,
+                _request("control_status", "unknown-field") | {"debug": True},
+            )
+
+        asyncio.run(scenario())
+
+        self.assertEqual(
+            ["invalid_payload", "invalid_payload"],
+            [payload["code"] for payload in websocket.payloads],
+        )
+        self.assertEqual(
+            ["wrong-type", "unknown-field"],
+            [payload["request_id"] for payload in websocket.payloads],
+        )
+
     def test_live_connection_send_has_a_deadline(self):
         class SlowWebSocket:
             async def send(self, _message: str) -> None:
@@ -127,19 +207,18 @@ class WebSocketProtocolContractTests(unittest.TestCase):
                 "api_version_required",
                 "unsupported_api_version",
             ],
-            [
-                payload["code"]
-                for payload in websocket.payloads[:2]
-            ],
+            [payload["code"] for payload in websocket.payloads[:2]],
         )
         self.assertEqual(
             "control_status",
             websocket.payloads[-1]["event"],
         )
-        self.assertTrue(all(
-            payload["api_version"] == WEBSOCKET_API_VERSION
-            for payload in websocket.payloads
-        ))
+        self.assertTrue(
+            all(
+                payload["api_version"] == WEBSOCKET_API_VERSION
+                for payload in websocket.payloads
+            )
+        )
 
     def test_rate_limit_response_keeps_request_correlation(self):
         server = RobotWebSocketServer(
@@ -193,10 +272,12 @@ class WebSocketProtocolContractTests(unittest.TestCase):
         )
 
         async def scenario() -> None:
-            first_task = asyncio.create_task(server._dispatch(
-                first,
-                _request("hold", "hold-1"),
-            ))
+            first_task = asyncio.create_task(
+                server._dispatch(
+                    first,
+                    _request("hold", "hold-1"),
+                )
+            )
             await entered.wait()
             await server._dispatch(
                 second,

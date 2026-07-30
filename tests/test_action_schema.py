@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from types import SimpleNamespace
 
 from src.core.action_schema import (
     ActionParameterIssueCode,
@@ -83,10 +84,10 @@ class _RecordingWebSocket:
 
 class ActionSchemaWebSocketTests(unittest.IsolatedAsyncioTestCase):
     async def test_websocket_returns_the_canonical_schema(self):
-        server = object.__new__(RobotWebSocketServer)
+        server = RobotWebSocketServer(SimpleNamespace())
         websocket = _RecordingWebSocket()
 
-        await server._handle_get_action_schema(websocket, {})
+        await server._composition_handler._handle_get_action_schema(websocket, {})
 
         payload = json.loads(websocket.messages[0])
         self.assertEqual("action_schema", payload["event"])

@@ -210,7 +210,7 @@ class CompositionWebSocketTests(unittest.TestCase):
             client = _FakeWebSocket()
 
             async def scenario() -> None:
-                await server._handle_create_action(
+                await server._composition_handler._handle_create_action(
                     client,
                     {
                         "name": "Wait",
@@ -219,11 +219,11 @@ class CompositionWebSocketTests(unittest.TestCase):
                     },
                 )
                 action_id = composition.list_actions()[0].id
-                await server._handle_add_to_sequence(
+                await server._composition_handler._handle_add_to_sequence(
                     client,
                     {"action_ids": [action_id]},
                 )
-                await server._handle_save_task(
+                await server._composition_handler._handle_save_task(
                     client,
                     {"name": "shared"},
                 )

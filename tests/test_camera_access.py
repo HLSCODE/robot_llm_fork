@@ -166,10 +166,10 @@ class CameraWebSocketSessionTests(unittest.TestCase):
         websocket = _RecordingWebSocket()
 
         async def scenario() -> None:
-            await server._handle_subscribe_camera_frames(websocket, {})
+            await server._device_handler._handle_subscribe_camera_frames(websocket, {})
             self.assertIsNotNone(services.resources.owner_of(CAMERA))
 
-            await server._handle_unsubscribe_camera_frames(websocket, {})
+            await server._device_handler._handle_unsubscribe_camera_frames(websocket, {})
             self.assertIsNone(services.resources.owner_of(CAMERA))
             await server._cancel_background_tasks()
 
@@ -186,7 +186,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
         websocket = _RecordingWebSocket()
 
         async def scenario() -> None:
-            await server._handle_subscribe_camera_frames(websocket, {})
+            await server._device_handler._handle_subscribe_camera_frames(websocket, {})
             session = server._camera_preview_session
             self.assertIsNotNone(session)
 
@@ -256,27 +256,27 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                     "src.data_collection.config": config_module,
                 },
             ):
-                await server._handle_demo_session_start(
+                await server._teleoperation_handler._handle_demo_session_start(
                     websocket,
                     {"task": "pick", "description": "test"},
                 )
                 self.assertIsNotNone(services.resources.owner_of(CAMERA))
 
                 services.trajectory_teaching.start("left")
-                await server._handle_demo_record_start(websocket, {})
+                await server._teleoperation_handler._handle_demo_record_start(websocket, {})
                 self.assertFalse(server._demo_recorder.recording)
                 self.assertFalse(services.teleoperation.active)
                 services.trajectory_teaching.cancel()
 
-                await server._handle_demo_record_start(websocket, {})
+                await server._teleoperation_handler._handle_demo_record_start(websocket, {})
                 self.assertTrue(services.teleoperation.active)
                 self.assertEqual(
                     "teleoperation",
                     services.resources.owner_of(ROBOT_SYSTEM),
                 )
 
-                await server._handle_demo_record_stop(websocket, {})
-                await server._handle_demo_session_end(websocket, {})
+                await server._teleoperation_handler._handle_demo_record_stop(websocket, {})
+                await server._teleoperation_handler._handle_demo_session_end(websocket, {})
 
             self.assertIsNone(services.resources.owner_of(CAMERA))
             self.assertFalse(services.teleoperation.active)

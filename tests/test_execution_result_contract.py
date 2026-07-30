@@ -55,7 +55,7 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
             data=policy,
         )
 
-        server._on_execution_event(event)
+        server._execution_handler._on_execution_event(event)
 
         self.assertEqual(
             {
@@ -98,7 +98,7 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
             data=failure.to_event_data(),
         )
 
-        server._on_execution_event(event)
+        server._execution_handler._on_execution_event(event)
 
         self.assertEqual(
             {
@@ -139,7 +139,7 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
         server = RobotWebSocketServer(services=services)
         websocket = _RecordingWebSocket()
 
-        asyncio.run(server._handle_status(websocket, {}))
+        asyncio.run(server._device_handler._handle_status(websocket, {}))
 
         response = json.loads(websocket.messages[0])
         self.assertEqual(
