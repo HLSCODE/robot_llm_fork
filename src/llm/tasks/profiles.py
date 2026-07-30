@@ -6,6 +6,7 @@ template plus default generation options.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from string import Template
 from typing import Any, Dict, Literal, Optional, Tuple, Union
@@ -25,6 +26,7 @@ class TaskProfile:
     """A reusable prompt and option set for a fixed LLM task."""
 
     name: str
+    version: str
     system_prompt_template: str
     temperature: float = 0.3
     max_tokens: int = 512
@@ -35,6 +37,21 @@ class TaskProfile:
     enable_thinking: Optional[bool] = None
     reasoning_effort: Optional[ReasoningEffort] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("TaskProfile.name must not be empty")
+        if not self.version.strip():
+            raise ValueError("TaskProfile.version must not be empty")
+        if self.max_tokens < 1:
+            raise ValueError("TaskProfile.max_tokens must be positive")
+
+    @property
+    def template_sha256(self) -> str:
+        """Return the stable content fingerprint of the prompt template."""
+        return hashlib.sha256(
+            self.system_prompt_template.encode("utf-8")
+        ).hexdigest()
 
     def render_system_prompt(self, **context: Any) -> str:
         """Render the profile system prompt with optional context values."""
@@ -81,6 +98,7 @@ class TaskProfile:
 
 GENERAL_CHAT_PROFILE = TaskProfile(
     name="general_chat",
+    version="1.0.0",
     temperature=0.7,
     max_tokens=512,
     default_provider="dashscope",
@@ -103,6 +121,7 @@ GENERAL_CHAT_PROFILE = TaskProfile(
 
 VOICE_FEEDBACK_PROFILE = TaskProfile(
     name="voice_feedback",
+    version="1.0.0",
     temperature=0.4,
     max_tokens=80,
     default_provider="dashscope",

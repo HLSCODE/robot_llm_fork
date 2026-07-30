@@ -9,10 +9,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional
 
 from ..base import BaseLLMClient, LLMPlanResult
 from ..errors import LLMError
+from ..fingerprints import fingerprint_json
 from ..types import LLMCapability, LLMMessage
 from .profiles import TaskProfile
 
@@ -22,6 +25,7 @@ ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 ROBOT_PLANNER_PROFILE = TaskProfile(
     name="robot_skill_planner",
+    version="1.0.0",
     temperature=0.3,
     max_tokens=800,
     response_format="json",
@@ -103,7 +107,15 @@ class SkillPlanner:
                 **active_profile.chat_options(**chat_options),
             )
             logger.debug("LLM 规划原始响应: %s", result.text)
-            return self._parse_response(result.text)
+            parsed = parse_skill_plan_response(result.text)
+            if result.provenance is None:
+                return parsed
+            provenance = result.provenance.with_artifact(
+                name="skill_catalog",
+                version="1",
+                sha256=fingerprint_json(skill_summaries),
+            )
+            return replace(parsed, provenance=provenance)
         except asyncio.CancelledError:
             raise
         except TimeoutError:
@@ -163,50 +175,49 @@ class SkillPlanner:
 
 请分析用户意图并返回技能调用参数（仅返回JSON）："""
 
-    def _parse_response(self, text: str) -> LLMPlanResult:
-        try:
-            data = json.loads(self._strip_json_text(text))
 
-            skill_id = data.get("skill_id")
-            if skill_id is not None:
-                skill_id = str(skill_id)
+def parse_skill_plan_response(text: str) -> LLMPlanResult:
+    """Parse one planner response into the stable planning result."""
+    try:
+        data = json.loads(_strip_json_text(text))
+        if not isinstance(data, dict):
+            raise TypeError("规划结果必须是 JSON 对象")
 
-            return LLMPlanResult(
-                skill_id=skill_id,
-                skill_name=data.get("skill_name", ""),
-                parameters=data.get("parameters", {}),
-                reasoning=data.get("reasoning", ""),
-                confidence=float(data.get("confidence", 0.0)),
-                error=data.get("error"),
-                fallback_suggestion=data.get("fallback_suggestion"),
-            )
+        skill_id = data.get("skill_id")
+        if skill_id is not None:
+            skill_id = str(skill_id)
+        parameters = data.get("parameters", {})
+        if not isinstance(parameters, dict):
+            raise TypeError("parameters 必须是 JSON 对象")
+        confidence = float(data.get("confidence", 0.0))
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise ValueError("confidence 必须是 0.0 到 1.0 的有限数值")
 
-        except json.JSONDecodeError as exc:
-            logger.error("JSON 解析失败: %s, 原始文本: %s", exc, text)
-            return LLMPlanResult(
-                skill_id=None,
-                skill_name="",
-                parameters={},
-                reasoning="",
-                confidence=0.0,
-                error=f"无法解析 LLM 返回结果: {str(exc)}",
-            )
-        except Exception as exc:
-            logger.error("解析 LLM 响应时发生错误: %s", exc)
-            return LLMPlanResult(
-                skill_id=None,
-                skill_name="",
-                parameters={},
-                reasoning="",
-                confidence=0.0,
-                error=f"解析错误: {str(exc)}",
-            )
+        return LLMPlanResult(
+            skill_id=skill_id,
+            skill_name=str(data.get("skill_name", "")),
+            parameters=parameters,
+            reasoning=str(data.get("reasoning", "")),
+            confidence=confidence,
+            error=data.get("error"),
+            fallback_suggestion=data.get("fallback_suggestion"),
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.error("解析 LLM 规划响应失败: %s", exc)
+        return LLMPlanResult(
+            skill_id=None,
+            skill_name="",
+            parameters={},
+            reasoning="",
+            confidence=0.0,
+            error=f"无法解析 LLM 返回结果: {str(exc)}",
+        )
 
-    @staticmethod
-    def _strip_json_text(text: str) -> str:
-        text = (text or "").strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if len(lines) >= 2:
-                text = "\n".join(lines[1:-1]).strip()
-        return text
+
+def _strip_json_text(text: str) -> str:
+    text = (text or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if len(lines) >= 2:
+            text = "\n".join(lines[1:-1]).strip()
+    return text

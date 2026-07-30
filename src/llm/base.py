@@ -8,7 +8,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from .types import LLMCapability, LLMChatResult, LLMMessage, LLMStreamEvent
+from .types import (
+    LLMCallProvenance,
+    LLMCapability,
+    LLMChatResult,
+    LLMMessage,
+    LLMStreamEvent,
+)
 
 
 @dataclass
@@ -21,10 +27,32 @@ class LLMPlanResult:
     confidence: float               # 置信度 0.0 ~ 1.0
     error: Optional[str] = None    # 无法理解时的错误信息
     fallback_suggestion: Optional[str] = None  # 降级建议
+    provenance: Optional[LLMCallProvenance] = None
 
     def is_valid(self) -> bool:
         """是否有效匹配"""
-        return self.confidence >= 0.5 and self.error is None
+        return (
+            self.skill_id is not None
+            and self.confidence >= 0.5
+            and self.error is None
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a transport-safe planning result."""
+        return {
+            "skill_id": self.skill_id,
+            "skill_name": self.skill_name,
+            "parameters": dict(self.parameters),
+            "reasoning": self.reasoning,
+            "confidence": self.confidence,
+            "error": self.error,
+            "fallback_suggestion": self.fallback_suggestion,
+            "provenance": (
+                self.provenance.to_dict()
+                if self.provenance is not None
+                else None
+            ),
+        }
 
 
 class BaseLLMClient(ABC):

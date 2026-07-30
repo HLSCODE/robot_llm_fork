@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from threading import Lock, RLock
 
 from ...application.command_runtime import CommandRuntime
+from ...llm.errors import LLMError
 from .router import VoiceIntentRouter
 from .session import VoiceSession
 from .types import VoiceEvent, VoiceSessionState
@@ -165,6 +166,20 @@ class VoiceInteractionController:
             raise
         except TimeoutError:
             raise
+        except LLMError as exc:
+            logger.warning(
+                "intent classification service failed: %s",
+                type(exc).__name__,
+            )
+            yield VoiceEvent(
+                type="error",
+                text="AI 意图识别服务暂时不可用，请稍后重试。",
+                data={
+                    "code": "llm_classification_unavailable",
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return
         except ValueError as exc:
             logger.warning("intent classification failed: %s", exc)
             intent = {

@@ -16,6 +16,7 @@ ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 VISION_FUSION_PROFILE = TaskProfile(
     name="vision_fusion",
+    version="1.0.0",
     temperature=0.1,
     max_tokens=512,
     default_provider="minicpm",

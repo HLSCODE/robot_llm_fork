@@ -55,13 +55,30 @@ class WakeFeedback:
 
     @staticmethod
     def _from_llm_event(event: LLMStreamEvent) -> VoiceEvent:
+        provenance = (
+            event.provenance.to_dict()
+            if event.provenance is not None
+            else None
+        )
         if event.type == "text_delta":
-            return VoiceEvent(type="text_delta", text_delta=event.text_delta, data={"raw": event.raw})
+            return VoiceEvent(
+                type="text_delta",
+                text_delta=event.text_delta,
+                data={"raw": event.raw, "provenance": provenance},
+            )
         if event.type == "audio_delta":
-            return VoiceEvent(type="audio_delta", audio_data=event.audio_data, data={"raw": event.raw})
+            return VoiceEvent(
+                type="audio_delta",
+                audio_data=event.audio_data,
+                data={"raw": event.raw, "provenance": provenance},
+            )
         return VoiceEvent(
             type="done",
             text=event.text,
             audio_data=event.audio_data,
-            data={"metrics": event.metrics, "raw": event.raw},
+            data={
+                "metrics": event.metrics,
+                "raw": event.raw,
+                "provenance": provenance,
+            },
         )

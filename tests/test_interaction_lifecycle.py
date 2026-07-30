@@ -8,7 +8,7 @@ from src.application import CommandRuntime
 from src.execution import ExecutionSnapshot, ExecutionState
 from src.llm.providers.openai_compatible import OpenAICompatibleClient
 from src.llm.registry import LLMRegistry
-from src.llm.tasks.classifier import _normalize_result
+from src.llm.tasks.classifier import normalize_instruction_classification
 from src.llm.types import LLMMessage
 from src.voice_interaction import VoiceInteractionController
 
@@ -139,11 +139,11 @@ class InteractionLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 class ClassifierContractTests(unittest.TestCase):
     def test_session_and_execution_control_are_distinct(self):
-        session = _normalize_result({
+        session = normalize_instruction_classification({
             "intent": "session_control",
             "session_action": "pause_session",
         })
-        execution = _normalize_result({
+        execution = normalize_instruction_classification({
             "intent": "execution_control",
             "execution_action": "pause",
         })

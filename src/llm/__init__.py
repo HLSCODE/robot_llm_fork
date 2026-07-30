@@ -6,6 +6,7 @@ from .base import BaseLLMClient, LLMPlanResult
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
 from .registry import LLMRegistry
+from .routing import ProviderHealthSnapshot, ProviderHealthStatus
 from .tasks import (
     GENERAL_CHAT_PROFILE,
     INSTRUCTION_CLASSIFIER_PROFILE,
@@ -24,6 +25,8 @@ from .tasks import (
     VisionFusionTask,
 )
 from .types import (
+    LLMArtifactVersion,
+    LLMCallProvenance,
     LLMCapability,
     LLMChatResult,
     LLMContentPart,
@@ -34,12 +37,16 @@ from .types import (
 __all__ = [
     "BaseLLMClient",
     "LLMPlanResult",
+    "LLMArtifactVersion",
+    "LLMCallProvenance",
     "LLMCapability",
     "LLMChatResult",
     "LLMContentPart",
     "LLMMessage",
     "LLMStreamEvent",
     "LLMRegistry",
+    "ProviderHealthSnapshot",
+    "ProviderHealthStatus",
     "TaskRunner",
     "SkillPlanner",
     "InstructionClassifier",

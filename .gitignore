@@ -7,6 +7,10 @@
 *.pb
 # ��������ݼ��ļ��У�����Ҳ�ų�
 data/
+!data/
+data/*
+!data/regression/
+!data/regression/llm_planning_cases.json
 temp_models/
 models/
 

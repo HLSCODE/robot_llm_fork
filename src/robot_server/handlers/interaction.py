@@ -273,6 +273,11 @@ class InteractionWebSocketHandler:
                     )
                     if self._server._llm_registry
                     else [],
+                    "provider_health": (
+                        self._server._llm_registry.get_provider_health()
+                        if self._server._llm_registry
+                        else {}
+                    ),
                     "capabilities": capabilities,
                     "chat_available": chat_available,
                     "chat_provider": chat_client.get_provider_name()
@@ -876,7 +881,15 @@ class InteractionWebSocketHandler:
 
     @staticmethod
     def _llm_stream_event_to_chat_data(event: LLMStreamEvent) -> dict:
-        base_event = {"event": "chat_data", "packet": event.raw}
+        base_event = {
+            "event": "chat_data",
+            "packet": event.raw,
+            "provenance": (
+                event.provenance.to_dict()
+                if event.provenance is not None
+                else None
+            ),
+        }
         if event.type == "session_started":
             return {**base_event, "type": "session_started"}
         if event.type == "text_delta":
@@ -904,6 +917,7 @@ class InteractionWebSocketHandler:
                 "event": "error",
                 "message": event.error or "LLM 聊天失败",
                 "packet": event.raw,
+                "provenance": base_event["provenance"],
             }
         return {
             **base_event,

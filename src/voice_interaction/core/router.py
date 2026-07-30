@@ -109,7 +109,7 @@ class VoiceIntentRouter:
             if not plan.is_valid():
                 async for event in self._stream_feedback(
                     plan.error or "没有匹配到可执行技能，请换一种说法。",
-                    data={"plan": plan.__dict__},
+                    data={"plan": plan.to_dict()},
                 ):
                     yield event
                 return
@@ -123,14 +123,14 @@ class VoiceIntentRouter:
                     reasoning=plan.reasoning,
                 ),
                 source=self.source,
-                plan=plan.__dict__,
+                plan=plan.to_dict(),
             )
             if preparation.preview is None:
                 validation = preparation.validation
                 async for event in self._stream_feedback(
                     validation.message or "动作参数校验未通过。",
                     data={
-                        "plan": plan.__dict__,
+                        "plan": plan.to_dict(),
                         "validation": validation.to_dict(),
                     },
                 ):
@@ -406,33 +406,46 @@ class VoiceIntentRouter:
 
     @staticmethod
     def _from_llm_event(event: LLMStreamEvent) -> VoiceEvent:
+        provenance = (
+            event.provenance.to_dict()
+            if event.provenance is not None
+            else None
+        )
         if event.type == "text_delta":
             return VoiceEvent(
                 type="text_delta",
                 text_delta=event.text_delta,
-                data={"raw": event.raw},
+                data={"raw": event.raw, "provenance": provenance},
             )
         if event.type == "audio_delta":
             return VoiceEvent(
                 type="audio_delta",
                 audio_data=event.audio_data,
-                data={"raw": event.raw},
+                data={"raw": event.raw, "provenance": provenance},
             )
         if event.type == "done":
             return VoiceEvent(
                 type="done",
                 text=event.text,
                 audio_data=event.audio_data,
-                data={"metrics": event.metrics, "raw": event.raw},
+                data={
+                    "metrics": event.metrics,
+                    "raw": event.raw,
+                    "provenance": provenance,
+                },
             )
         if event.type == "error":
             return VoiceEvent(
                 type="error",
                 text=event.error or "LLM 调用失败",
-                data={"raw": event.raw},
+                data={"raw": event.raw, "provenance": provenance},
             )
         return VoiceEvent(
             type="done",
             text=event.text,
-            data={"raw": event.raw, "event_type": event.type},
+            data={
+                "raw": event.raw,
+                "event_type": event.type,
+                "provenance": provenance,
+            },
         )

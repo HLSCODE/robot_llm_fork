@@ -18,7 +18,7 @@
 | A. 执行运行时与安全 | [统一执行运行时重构实施计划](execution-runtime-refactor-plan.md) |
 | B. 机械臂供应商适配 | [机械臂供应商适配架构](robot-provider-architecture.md) |
 | C. WebSocket API | [WebSocket API 文档](websocket-api.md) |
-| E. LLM 能力层 | [LLM 重构集成说明](llm-refactor-integration.md) |
+| E. LLM 能力层 | [LLM Provider 治理与规划回归](llm-provider-governance.md)、[LLM 重构集成说明](llm-refactor-integration.md) |
 | E. 语音交互 | [语音交互实现说明](voice-interaction-implementation.md) |
 | F. 遥操作 | [遥操作说明](teleop.md) |
 | F. 数据采集 | [数据采集说明](data-collection.md) |
@@ -415,12 +415,14 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   WebSocket 使用独立交互会话，但复用相同 CommandRuntime 策略。
 - OpenAI-compatible 请求使用统一 transport timeout；交互轮次支持总超时和主动
   cancel，GUI/附加服务关闭时通过 `LLMRegistry.close()` 统一释放已加载 provider。
+- 所有 task 通过统一路由代理执行；provider health、熔断、显式 fallback 和
+  Prompt/provider/model/技能目录来源追踪已贯通非流式、流式和命令预览。
+- 已建立严格 schema v1 的离线 golden 数据集和 runner，固定验证分类、规划、
+  Prompt 快照、技能目录及动作展开。
 
 ### 10.2 当前问题
 
-- provider health、自动降级和熔断策略尚未建立。
-- Prompt、模型配置和规划结果缺少版本化回归基线。
-- 缺少固定分类/规划数据集以及延迟、token、失败率和成本指标。
+- 缺少在线语义评测，以及延迟、token、失败率和成本指标。
 
 ### 10.3 目标
 
@@ -444,9 +446,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | E-007 | P1 | DONE | 物理运动/操作/换枪/重定位/轨迹动作标记为 high risk；GUI 和 WebSocket 必须提交独立风险确认 |
 | E-008 | P2 | DONE | GUI 文本与真实语音共享 controller/session/history，互斥处理单轮请求；WebSocket 会话独立、审批策略共享 |
 | E-009 | P2 | DONE | 统一 provider request timeout、interaction turn timeout、跨线程 cancel 和 Registry/provider 幂等 close |
-| E-010 | P2 | TODO | provider health 和降级策略 |
-| E-011 | P2 | TODO | prompt、模型和技能版本记录 |
-| E-012 | P2 | TODO | 建立分类、规划和技能回归数据集 |
+| E-010 | P2 | DONE | 所有 task 统一经过 RoutedLLMClient；支持共享 health、连续失败熔断、半开探测和显式 fallback，单次显式 provider 禁止暗中跨厂商降级 |
+| E-011 | P2 | DONE | TaskProfile 强制显式版本；结果记录 Prompt 模板/请求哈希、实际 provider/model、尝试顺序及技能目录版本与指纹，并贯通命令预览和流式协议 |
+| E-012 | P2 | DONE | 建立 strict schema v1 固定数据集和离线 runner，覆盖分类/规划解析、Prompt 快照、技能目录及技能参数校验/动作展开 |
 | E-013 | P3 | TODO | LLM 延迟、token、失败率和成本指标 |
 
 ### 10.5 完成标准
@@ -915,15 +917,15 @@ M4 工程治理与清理
 | 2026-07-30 | M3 | F | 数据采集应用服务与状态机 | F-D-001/F-D-002/F-D-003 TODO → DONE | 新增 DataCollectionService 和显式 session/episode/故障状态；recorder、相机会话及共享遥操作控制从 WebSocket 下沉，阻塞操作移出事件循环；控制租约释放、安全停止和设备关闭统一清理，不保留 host 旧状态 | 170 tests + 26 subtests |
 | 2026-07-30 | M3 | F/G | 数据采集格式与存储治理 | F-D-004/F-D-005/F-D-006/F-D-007 TODO → DONE | 新增 schema v1、来源/单位/文件哈希 manifest、portable NPZ 与 Native RLBench 显式格式；同目录 staged write 校验后原子发布，加入容量预检、范围受限残留恢复和离线验证 CLI；删除旧 recorder/formatter 与伪 RLBench 回退 | 183 tests + 26 subtests |
 | 2026-07-30 | M3 | B/F | 多臂真实遥测与采集时间语义 | F-D-008/F-D-009 TODO → DONE | schema 直接升级 v2；新增统一 ArmTelemetry/DepthCameraFrame，记录 depth scale、畸变、设备/主机时间、可选外参和实际夹爪/电流/末端力；单/双臂采样强制最大 monotonic 偏差，可选字段使用 validity mask；Native 不伪造 joint_forces，并增加显式受信 pickle 类型 smoke test | 187 tests |
+| 2026-07-30 | M3 | E | LLM Provider 治理与规划回归 | E-010/E-011/E-012 TODO → DONE | 新增所有 task 共用的 provider health、熔断、半开和显式 fallback；记录 Prompt/请求/provider/model/技能目录来源；分类失败不再静默伪装成功；建立 strict schema v1 离线 golden runner | 195 tests，14 golden cases |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **E-010/E-011/E-012**：补 provider health/降级、prompt/模型/技能版本记录和固定规划回归数据集。
-4. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
-5. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
-6. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+3. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
+4. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
+5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
-7. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+6. 完成 simulation smoke test 后执行逐设备真实硬件验收。

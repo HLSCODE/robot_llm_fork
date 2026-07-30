@@ -81,6 +81,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         return {
             LLMCapability.CHAT,
             LLMCapability.STREAM_CHAT,
+            LLMCapability.VISION_CHAT,
             LLMCapability.PLANNING,
         }
 

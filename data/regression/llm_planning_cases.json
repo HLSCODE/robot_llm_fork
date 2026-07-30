@@ -1,0 +1,245 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "name": "instruction_classifier",
+      "version": "1.0.0",
+      "template_sha256": "406386012f912535f28b049092164b55bf058de5534f45b4daf11b57cd26a260"
+    },
+    {
+      "name": "robot_skill_planner",
+      "version": "1.0.0",
+      "template_sha256": "c5dd1ea52d657175a94ac70bfd832cfb2545c2f032b7e59f89bf90323fee408f"
+    }
+  ],
+  "classification_cases": [
+    {
+      "id": "chat_question",
+      "input": "你今天怎么样？",
+      "model_response": {
+        "intent": "chat",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "none",
+        "execution_action": "none"
+      },
+      "expected": {
+        "intent": "chat",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "none",
+        "execution_action": "none"
+      }
+    },
+    {
+      "id": "robot_command",
+      "input": "回到安全位置",
+      "model_response": {
+        "intent": "command",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "pause_session",
+        "execution_action": "cancel"
+      },
+      "expected": {
+        "intent": "command",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "none",
+        "execution_action": "none"
+      }
+    },
+    {
+      "id": "session_end_overrides_intent",
+      "input": "没事了",
+      "model_response": {
+        "intent": "chat",
+        "is_addressed_to_robot": true,
+        "should_end_session": true,
+        "session_action": "none",
+        "execution_action": "none"
+      },
+      "expected": {
+        "intent": "session_control",
+        "is_addressed_to_robot": true,
+        "should_end_session": true,
+        "session_action": "end_session",
+        "execution_action": "none"
+      }
+    },
+    {
+      "id": "execution_cancel",
+      "input": "停止动作",
+      "model_response": {
+        "intent": "execution_control",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "end_session",
+        "execution_action": "cancel"
+      },
+      "expected": {
+        "intent": "execution_control",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "none",
+        "execution_action": "cancel"
+      }
+    },
+    {
+      "id": "invalid_enum_is_safe",
+      "input": "做点什么",
+      "model_response": {
+        "intent": "unknown",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "invalid",
+        "execution_action": "invalid"
+      },
+      "expected": {
+        "intent": "chat",
+        "is_addressed_to_robot": true,
+        "should_end_session": false,
+        "session_action": "none",
+        "execution_action": "none"
+      }
+    }
+  ],
+  "planning_cases": [
+    {
+      "id": "move_home",
+      "input": "回到安全位置",
+      "model_response": {
+        "skill_id": "move_to_home",
+        "skill_name": "回到安全位置",
+        "parameters": {},
+        "reasoning": "用户明确要求机械臂回到安全位置。",
+        "confidence": 0.98
+      },
+      "expected": {
+        "skill_id": "move_to_home",
+        "skill_name": "回到安全位置",
+        "parameters": {},
+        "reasoning": "用户明确要求机械臂回到安全位置。",
+        "confidence": 0.98,
+        "error": null,
+        "fallback_suggestion": null
+      }
+    },
+    {
+      "id": "absorb_liquid_parameter",
+      "input": "吸取5毫升液体",
+      "model_response": {
+        "skill_id": "absorb_liquid",
+        "skill_name": "吸取液体",
+        "parameters": {
+          "volume": 5
+        },
+        "reasoning": "匹配吸液技能并提取容量。",
+        "confidence": 0.96
+      },
+      "expected": {
+        "skill_id": "absorb_liquid",
+        "skill_name": "吸取液体",
+        "parameters": {
+          "volume": 5
+        },
+        "reasoning": "匹配吸液技能并提取容量。",
+        "confidence": 0.96,
+        "error": null,
+        "fallback_suggestion": null
+      }
+    },
+    {
+      "id": "no_matching_skill",
+      "input": "给我讲个笑话",
+      "model_response": {
+        "skill_id": null,
+        "skill_name": "",
+        "parameters": {},
+        "reasoning": "当前技能库没有聊天技能。",
+        "confidence": 0.1,
+        "error": "未匹配到技能",
+        "fallback_suggestion": "作为普通聊天处理"
+      },
+      "expected": {
+        "skill_id": null,
+        "skill_name": "",
+        "parameters": {},
+        "reasoning": "当前技能库没有聊天技能。",
+        "confidence": 0.1,
+        "error": "未匹配到技能",
+        "fallback_suggestion": "作为普通聊天处理"
+      }
+    }
+  ],
+  "skill_catalog": {
+    "version": "1",
+    "sha256": "d1d2e950c4dff1cf212d5844e933fa1bb6f176ec00acb682a262ddde94462a49"
+  },
+  "skill_cases": [
+    {
+      "id": "move_home_expansion",
+      "skill_id": "move_to_home",
+      "parameters": {},
+      "expected": {
+        "validation_code": "valid",
+        "actions": [
+          {
+            "name": "hengzhejia",
+            "type": "MOVE",
+            "parameters": {
+              "目标": "机械臂",
+              "臂": "左",
+              "模式": "move_j",
+              "点位": "pos_hengzhejia = [0.277553,-0.002143,-0.436172,2.441000,1.486000,-0.628000]"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "absorb_liquid_expansion",
+      "skill_id": "absorb_liquid",
+      "parameters": {
+        "volume": 5
+      },
+      "expected": {
+        "validation_code": "valid",
+        "actions": [
+          {
+            "name": "qu1",
+            "type": "CHANGE_GUN",
+            "parameters": {
+              "Gun_Position": 1,
+              "Operation": "取"
+            }
+          },
+          {
+            "name": "xiye",
+            "type": "MANIPULATE",
+            "parameters": {
+              "执行器": "吸液枪",
+              "操作": "吸",
+              "容量": 5,
+              "吸液速度": 1200,
+              "吐液速度": 800,
+              "吐液容量模式": "指定容量",
+              "全吐": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "absorb_liquid_rejects_float",
+      "skill_id": "absorb_liquid",
+      "parameters": {
+        "volume": 5.0
+      },
+      "expected": {
+        "validation_code": "invalid_skill_parameters",
+        "actions": []
+      }
+    }
+  ]
+}

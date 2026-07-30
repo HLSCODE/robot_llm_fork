@@ -204,6 +204,9 @@ MINICPM_ASK_MODEL=qwen-turbo
 | `AUXILIARY_SERVICE_START_TIMEOUT_SECONDS` | 单个附加服务启动超时 | 默认 5 秒 |
 | `AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS` | 单个附加服务停止超时 | 默认 10 秒 |
 | `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
+| `LLM_FALLBACK_PROVIDERS` | 未显式指定 provider 时的降级顺序 | 逗号分隔；默认留空，不跨厂商转发 |
+| `LLM_CIRCUIT_FAILURE_THRESHOLD` | provider 连续失败熔断阈值 | 默认 3 |
+| `LLM_CIRCUIT_RECOVERY_SECONDS` | 熔断后的半开探测等待时间 | 默认 30 秒 |
 | `OPENAI_API_KEY` | OpenAI-compatible API Key | `openai` / `deepseek` / `dashscope` 使用 |
 | `OPENAI_BASE_URL` | OpenAI-compatible Base URL | 留空时使用 provider 默认值 |
 | `OPENAI_MODEL` | OpenAI-compatible 模型名 | 如 `qwen-turbo` / `gpt-4o` |
@@ -678,6 +681,7 @@ ws.onmessage = (event) => {
 | `audio_data` | `string \| null` | Base64 编码的音频片段或完整音频，仅语音输出时可能出现 |
 | `packet` | `object \| array \| string \| number \| boolean \| null` | 上游 MiniCPM 网关返回的完整已解析 JSON 包，前端如需兼容新增字段，优先从这里读取 |
 | `raw` | `string` | 可选调试字段，仅在 `error` / `unknown` / 非 JSON 兜底场景返回；正常业务逻辑不要依赖它 |
+| `provenance` | `object \| null` | 当前 LLM 调用的 Prompt 版本/哈希、实际 provider/model、尝试顺序和是否发生 fallback；不包含 Prompt 原文或密钥 |
 
 注意：每条上游帧对应一次 `chat_data` 推送，流式响应时会收到多条。正常业务应优先消费顶层稳定字段，`packet` 作为完整透传补充，`raw` 只用于联调排查。
 
@@ -2370,6 +2374,17 @@ AI 执行流程结束示例：
   "default_provider": "dashscope",
   "providers": ["openai", "deepseek", "dashscope", "minicpm"],
   "loaded_providers": ["dashscope"],
+  "provider_health": {
+    "dashscope": {
+      "provider": "dashscope",
+      "status": "healthy",
+      "successful_calls": 12,
+      "failed_calls": 1,
+      "consecutive_failures": 0,
+      "circuit_retry_after_s": 0.0,
+      "last_failure_type": null
+    }
+  },
   "capabilities": ["chat", "stream_chat", "planning"],
   "chat_available": true,
   "chat_provider": "minicpm",
@@ -2407,6 +2422,7 @@ AI 执行流程结束示例：
 | `default_provider` | `string` | `LLM_DEFAULT_PROVIDER` 解析后的 provider |
 | `providers` | `array` | 当前 registry 已注册的 provider 名称 |
 | `loaded_providers` | `array` | 当前进程已经懒加载实例化的 provider 名称 |
+| `provider_health` | `object` | 各 provider 的运行时健康、成功/失败计数和熔断恢复等待；未加载 provider 为 `unknown` |
 | `capabilities` | `array` | 聊天 provider 支持的能力 |
 | `chat_available` | `boolean` | 聊天 provider 是否可用 |
 | `chat_provider` | `string` | 当前聊天 profile 解析到的 provider |

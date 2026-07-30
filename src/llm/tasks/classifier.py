@@ -3,21 +3,20 @@
 """
 from __future__ import annotations
 
-import asyncio
 import json
-import logging
 from typing import Any, Callable, Dict, Optional
 
 from ..base import BaseLLMClient
+from ..errors import LLMConfigError, LLMResponseParseError
 from ..types import LLMCapability, LLMMessage
 from .profiles import TaskProfile
 
-logger = logging.getLogger(__name__)
 ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 
 INSTRUCTION_CLASSIFIER_PROFILE = TaskProfile(
     name="instruction_classifier",
+    version="1.0.0",
     temperature=0.1,
     max_tokens=200,
     response_format="json",
@@ -97,29 +96,24 @@ class InstructionClassifier:
         active_profile = profile or self._profile
         llm = self._resolve_llm(active_profile, provider)
         if not llm.is_available():
-            logger.info("指令分类 LLM 不可用，跳过分类")
-            return _fallback_result()
-
-        try:
-            result = await llm.chat(
-                [
-                    LLMMessage(
-                        role="system",
-                        content=system_prompt or active_profile.render_system_prompt(),
-                    ),
-                    LLMMessage(role="user", content=user_input),
-                ],
-                **active_profile.chat_options(**chat_options),
+            raise LLMConfigError(
+                f"{llm.get_provider_name()} 指令分类服务不可用"
             )
-            data = json.loads(_strip_json_text(result.text))
-            return _normalize_result(data)
-        except asyncio.CancelledError:
-            raise
-        except TimeoutError:
-            raise
-        except Exception as exc:
-            logger.warning("指令分类失败 (%s)，按非指令处理", exc)
-            return _fallback_result()
+
+        result = await llm.chat(
+            [
+                LLMMessage(
+                    role="system",
+                    content=system_prompt or active_profile.render_system_prompt(),
+                ),
+                LLMMessage(role="user", content=user_input),
+            ],
+            **active_profile.chat_options(**chat_options),
+        )
+        classified = parse_instruction_classification(result.text)
+        if result.provenance is not None:
+            classified["provenance"] = result.provenance.to_dict()
+        return classified
 
     def _resolve_llm(
         self,
@@ -133,7 +127,9 @@ class InstructionClassifier:
         return self._llm
 
 
-def _normalize_result(data: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_instruction_classification(
+    data: Dict[str, Any],
+) -> Dict[str, Any]:
     intent = str(data.get("intent", "chat") or "chat").strip()
     if intent not in {
         "chat",
@@ -158,8 +154,18 @@ def _normalize_result(data: Dict[str, Any]) -> Dict[str, Any]:
     if execution_action not in {"none", "cancel", "pause", "resume"}:
         execution_action = "none"
 
-    is_addressed_to_robot = bool(data.get("is_addressed_to_robot", True))
-    should_end_session = bool(data.get("should_end_session", False))
+    raw_addressed = data.get("is_addressed_to_robot", True)
+    is_addressed_to_robot = (
+        raw_addressed
+        if isinstance(raw_addressed, bool)
+        else True
+    )
+    raw_should_end = data.get("should_end_session", False)
+    should_end_session = (
+        raw_should_end
+        if isinstance(raw_should_end, bool)
+        else False
+    )
     if should_end_session:
         intent = "session_control"
         session_action = "end_session"
@@ -175,6 +181,19 @@ def _normalize_result(data: Dict[str, Any]) -> Dict[str, Any]:
         "session_action": session_action,
         "execution_action": execution_action,
     }
+
+
+def parse_instruction_classification(text: str) -> Dict[str, Any]:
+    """Parse and normalize one classifier model response."""
+    try:
+        data = json.loads(_strip_json_text(text))
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise LLMResponseParseError(
+            f"指令分类返回了非法 JSON: {exc}"
+        ) from exc
+    if not isinstance(data, dict):
+        raise LLMResponseParseError("指令分类结果必须是 JSON 对象")
+    return normalize_instruction_classification(data)
 
 
 def _fallback_result() -> Dict[str, Any]:

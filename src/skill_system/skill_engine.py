@@ -506,12 +506,8 @@ class SkillEngine:
         skills = []
         for skill in self._registry.list_skills():
             skills.append({
-                "id": skill.id,
-                "name": skill.name,
-                "category": skill.category.value,
-                "description": skill.description,
+                **skill.get_summary(),
                 "icon": skill.icon,
-                "step_count": len(skill.steps),
                 "estimated_time": skill.estimate_total_time(),
             })
         return skills

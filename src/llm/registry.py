@@ -7,6 +7,9 @@ task call. Resolution priority is:
 1. Explicit provider passed by the caller.
 2. TaskProfile.default_provider.
 3. LLM_DEFAULT_PROVIDER from config.
+
+Calls without an explicit provider may use the configured fallback provider
+order. Provider health and circuit state are shared by every task.
 """
 from __future__ import annotations
 
@@ -18,6 +21,11 @@ from typing import Any, Dict, Optional, Sequence
 from .base import BaseLLMClient
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
+from .routing import (
+    ProviderHealthSnapshot,
+    ProviderHealthTracker,
+    RoutedLLMClient,
+)
 from .tasks import (
     GENERAL_CHAT_PROFILE,
     REPEAT_PROFILE,
@@ -54,6 +62,17 @@ class LLMRegistry:
         self._providers: Dict[str, BaseLLMClient] = {}
         self._lock = RLock()
         self._closed = False
+        self._fallback_providers = self._parse_provider_names(
+            getattr(config, "LLM_FALLBACK_PROVIDERS", ())
+        )
+        self._health = ProviderHealthTracker(
+            failure_threshold=int(
+                getattr(config, "LLM_CIRCUIT_FAILURE_THRESHOLD", 3)
+            ),
+            recovery_seconds=float(
+                getattr(config, "LLM_CIRCUIT_RECOVERY_SECONDS", 30.0)
+            ),
+        )
 
         if providers:
             self._providers.update(
@@ -62,6 +81,7 @@ class LLMRegistry:
                     for name, client in providers.items()
                 }
             )
+        self._validate_configured_providers()
 
         self.repeat_task = RepeatTask(client_resolver=self.get_client_for_profile)
         self.task_runner = TaskRunner(
@@ -99,6 +119,25 @@ class LLMRegistry:
     @staticmethod
     def _normalize_provider(provider: Optional[str]) -> str:
         return (provider or "openai").strip().lower()
+
+    @classmethod
+    def _parse_provider_names(
+        cls,
+        providers: object,
+    ) -> tuple[str, ...]:
+        if isinstance(providers, str):
+            values = providers.split(",")
+        elif isinstance(providers, (tuple, list)):
+            values = providers
+        elif providers is None:
+            values = ()
+        else:
+            raise ValueError("LLM_FALLBACK_PROVIDERS 必须是逗号分隔字符串或列表")
+        return tuple(dict.fromkeys(
+            cls._normalize_provider(str(provider))
+            for provider in values
+            if str(provider).strip()
+        ))
 
     @classmethod
     def _create_provider(cls, config, provider: str) -> BaseLLMClient:
@@ -194,8 +233,13 @@ class LLMRegistry:
             if client is None:
                 parts.append(f"{name}:lazy")
                 continue
-            status = "ok" if client.is_available() else "unavailable"
-            parts.append(f"{name}/{client.get_model_name()}:{status}")
+            snapshot = self._health.snapshot(
+                name,
+                available=client.is_available(),
+            )
+            parts.append(
+                f"{name}/{client.get_model_name()}:{snapshot.status.value}"
+            )
         return ", ".join(parts)
 
     def get_provider(self, provider: Optional[str] = None) -> BaseLLMClient:
@@ -222,10 +266,36 @@ class LLMRegistry:
         profile: TaskProfile,
         provider: Optional[str] = None,
     ) -> BaseLLMClient:
-        provider_name = provider or profile.default_provider or self.default_provider
-        client = self.get_provider(provider_name)
-        self._warn_if_capabilities_missing(profile, client)
-        return client
+        provider_name = self._normalize_provider(
+            provider or profile.default_provider or self.default_provider
+        )
+        return RoutedLLMClient(
+            profile=profile,
+            primary_provider=provider_name,
+            fallback_providers=self._fallback_providers,
+            explicit_provider=provider is not None,
+            provider_loader=self.get_provider,
+            health=self._health,
+        )
+
+    def get_provider_health(self) -> dict[str, dict[str, Any]]:
+        """Return health snapshots without forcing lazy provider creation."""
+        with self._lock:
+            providers = dict(self._providers)
+        names = tuple(dict.fromkeys(
+            (*SUPPORTED_PROVIDERS, *providers, *self._fallback_providers)
+        ))
+        snapshots: dict[str, ProviderHealthSnapshot] = {}
+        for name in names:
+            client = providers.get(name)
+            snapshots[name] = self._health.snapshot(
+                name,
+                available=client.is_available() if client is not None else None,
+            )
+        return {
+            name: snapshot.to_dict()
+            for name, snapshot in snapshots.items()
+        }
 
     async def close(self) -> None:
         """Close every loaded provider and clear the registry."""
@@ -244,24 +314,20 @@ class LLMRegistry:
                     provider.get_provider_name(),
                 )
 
-    def _warn_if_capabilities_missing(
-        self,
-        profile: TaskProfile,
-        client: BaseLLMClient,
-    ) -> None:
-        required = set(profile.required_capabilities)
-        if not required:
-            return
-        missing = required - client.capabilities()
-        if not missing:
-            return
-        missing_text = ", ".join(capability.value for capability in missing)
-        logger.warning(
-            "TaskProfile %s 使用 provider %s 时缺少能力: %s",
-            profile.name,
-            client.get_provider_name(),
-            missing_text,
-        )
+    def _validate_configured_providers(self) -> None:
+        known = set(SUPPORTED_PROVIDERS) | set(self._providers)
+        unknown = [
+            provider
+            for provider in (
+                self.default_provider,
+                *self._fallback_providers,
+            )
+            if provider not in known
+        ]
+        if unknown:
+            raise ValueError(
+                "未知 LLM provider 配置: " + ", ".join(unknown)
+            )
 
     def is_available(self) -> bool:
         return self.get_provider().is_available()

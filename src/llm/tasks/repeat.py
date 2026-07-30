@@ -16,6 +16,7 @@ ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 REPEAT_PROFILE = TaskProfile(
     name="repeat",
+    version="1.0.0",
     temperature=0.0,
     max_tokens=512,
     default_provider="minicpm",

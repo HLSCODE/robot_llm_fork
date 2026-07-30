@@ -26,6 +26,9 @@ class Config:
     LLM_DEFAULT_TEMPERATURE: float = 0.3
     LLM_DEFAULT_MAX_TOKENS: int = 512
     LLM_REQUEST_TIMEOUT_S: float = 60.0
+    LLM_FALLBACK_PROVIDERS: tuple[str, ...] = ()
+    LLM_CIRCUIT_FAILURE_THRESHOLD: int = 3
+    LLM_CIRCUIT_RECOVERY_SECONDS: float = 30.0
     INTERACTION_TURN_TIMEOUT_S: float = 90.0
     COMMAND_PREVIEW_TTL_SECONDS: float = 120.0
     VOICE_SESSION_TIMEOUT_S: float = 30.0
@@ -332,6 +335,21 @@ class Config:
         instance.LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.3"))
         instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
         instance.LLM_REQUEST_TIMEOUT_S = float(os.getenv("LLM_REQUEST_TIMEOUT_S", "60"))
+        instance.LLM_FALLBACK_PROVIDERS = tuple(
+            dict.fromkeys(
+                provider.strip().lower()
+                for provider in os.getenv(
+                    "LLM_FALLBACK_PROVIDERS", ""
+                ).split(",")
+                if provider.strip()
+            )
+        )
+        instance.LLM_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv(
+            "LLM_CIRCUIT_FAILURE_THRESHOLD", "3"
+        ))
+        instance.LLM_CIRCUIT_RECOVERY_SECONDS = float(os.getenv(
+            "LLM_CIRCUIT_RECOVERY_SECONDS", "30"
+        ))
         instance.INTERACTION_TURN_TIMEOUT_S = float(os.getenv(
             "INTERACTION_TURN_TIMEOUT_S", "90"
         ))
@@ -1189,6 +1207,9 @@ class Config:
             "minicpm_ws_scheme": instance.MINICPM_WS_SCHEME,
             "minicpm_realtime_path": instance.MINICPM_REALTIME_PATH,
             "timeout_s": instance.LLM_REQUEST_TIMEOUT_S,
+            "fallback_providers": list(instance.LLM_FALLBACK_PROVIDERS),
+            "circuit_failure_threshold": instance.LLM_CIRCUIT_FAILURE_THRESHOLD,
+            "circuit_recovery_seconds": instance.LLM_CIRCUIT_RECOVERY_SECONDS,
         }
 
     @classmethod
