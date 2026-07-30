@@ -51,9 +51,7 @@ class CameraAccessServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(session.active)
-        self.assertTrue(
-            services.resources.owner_of(CAMERA).startswith("camera:test:")
-        )
+        self.assertTrue(services.resources.owner_of(CAMERA).startswith("camera:test:"))
         wait_result = services.execution.start(
             [wait_item],
             origin="test",
@@ -173,7 +171,9 @@ class CameraWebSocketSessionTests(unittest.TestCase):
             await server._device_handler._handle_subscribe_camera_frames(websocket, {})
             self.assertIsNotNone(services.resources.owner_of(CAMERA))
 
-            await server._device_handler._handle_unsubscribe_camera_frames(websocket, {})
+            await server._device_handler._handle_unsubscribe_camera_frames(
+                websocket, {}
+            )
             self.assertIsNone(services.resources.owner_of(CAMERA))
             await server._cancel_background_tasks()
 
@@ -245,19 +245,21 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                 return {"success": True, "message": "session ended"}
 
         async def scenario() -> None:
-            data_collection_module = ModuleType("src.data_collection")
-            data_collection_module.RLBenchRecorder = Recorder
+            recorder_module = ModuleType("src.data_collection.recorder")
+            recorder_module.DemonstrationRecorder = Recorder
             config_module = ModuleType("src.data_collection.config")
-            config_module.DataCollectionConfig = type(
-                "DataCollectionConfig",
-                (),
-                {},
-            )
+
+            class FakeDataCollectionConfig:
+                @classmethod
+                def from_environment(cls):
+                    return cls()
+
+            config_module.DataCollectionConfig = FakeDataCollectionConfig
             with patch.dict(
                 sys.modules,
                 {
-                    "src.data_collection": data_collection_module,
                     "src.data_collection.config": config_module,
+                    "src.data_collection.recorder": recorder_module,
                 },
             ):
                 await server._teleoperation_handler._handle_demo_session_start(
@@ -267,7 +269,9 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                 self.assertIsNotNone(services.resources.owner_of(CAMERA))
 
                 services.trajectory_teaching.start("left")
-                await server._teleoperation_handler._handle_demo_record_start(websocket, {})
+                await server._teleoperation_handler._handle_demo_record_start(
+                    websocket, {}
+                )
                 self.assertEqual(
                     DataCollectionState.SESSION_READY,
                     services.data_collection.snapshot().state,
@@ -275,7 +279,9 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                 self.assertFalse(services.teleoperation.active)
                 services.trajectory_teaching.cancel()
 
-                await server._teleoperation_handler._handle_demo_record_start(websocket, {})
+                await server._teleoperation_handler._handle_demo_record_start(
+                    websocket, {}
+                )
                 self.assertEqual(
                     DataCollectionState.RECORDING,
                     services.data_collection.snapshot().state,
@@ -295,13 +301,17 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                     services.data_collection.snapshot().state,
                 )
 
-                await server._teleoperation_handler._handle_demo_record_stop(websocket, {})
+                await server._teleoperation_handler._handle_demo_record_stop(
+                    websocket, {}
+                )
                 self.assertEqual(
                     DataCollectionState.SESSION_READY,
                     services.data_collection.snapshot().state,
                 )
                 self.assertTrue(services.teleoperation.active)
-                await server._teleoperation_handler._handle_demo_session_end(websocket, {})
+                await server._teleoperation_handler._handle_demo_session_end(
+                    websocket, {}
+                )
                 self.assertEqual(
                     DataCollectionState.IDLE,
                     services.data_collection.snapshot().state,
@@ -342,19 +352,21 @@ class CameraWebSocketSessionTests(unittest.TestCase):
             def end_session(self):
                 return {"success": True, "message": "session ended"}
 
-        data_collection_module = ModuleType("src.data_collection")
-        data_collection_module.RLBenchRecorder = lambda **_kwargs: Recorder()
+        recorder_module = ModuleType("src.data_collection.recorder")
+        recorder_module.DemonstrationRecorder = lambda **_kwargs: Recorder()
         config_module = ModuleType("src.data_collection.config")
-        config_module.DataCollectionConfig = type(
-            "DataCollectionConfig",
-            (),
-            {},
-        )
+
+        class FakeDataCollectionConfig:
+            @classmethod
+            def from_environment(cls):
+                return cls()
+
+        config_module.DataCollectionConfig = FakeDataCollectionConfig
         with patch.dict(
             sys.modules,
             {
-                "src.data_collection": data_collection_module,
                 "src.data_collection.config": config_module,
+                "src.data_collection.recorder": recorder_module,
             },
         ):
             services.data_collection.start_session("pick")

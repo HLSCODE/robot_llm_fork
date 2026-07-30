@@ -37,6 +37,7 @@ openwakeword = []
 
 [project.scripts]
 t5l-dgus = "src.expression_display.t5l_dgusii.cli:main"
+robot-data-validate = "src.data_collection.validation:main"
 
 [build-system]
 requires = ["setuptools>=69"]

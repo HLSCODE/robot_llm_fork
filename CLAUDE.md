@@ -28,7 +28,7 @@ src/
     data_collection.py  # 采集 session/episode 状态机及 recorder/相机/遥操作所有权
   execution/            # 唯一序列执行运行时、状态、事件和 ActionEngine
   device_runtime/       # 设备能力接口、机械臂 provider adapter、fake、生命周期和资源仲裁
-  data_collection/      # RLBench recorder/formatter 基础设施实现
+  data_collection/      # 版本化采集 schema、recorder、事务写入与完整性验证
   gui/
     main_window.py      # 主窗口（PyQt6）
   robot_server/

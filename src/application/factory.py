@@ -110,11 +110,11 @@ def _create_data_collection_recorder(
 ) -> DataCollectionRecorder:
     """Load optional data-collection infrastructure only when requested."""
 
-    from ..data_collection import RLBenchRecorder
     from ..data_collection.config import DataCollectionConfig
+    from ..data_collection.recorder import DemonstrationRecorder
 
-    return RLBenchRecorder(
+    return DemonstrationRecorder(
         robot_state_reader=robot_state_reader,
         camera_source=camera_source,
-        config=DataCollectionConfig(),
+        config=DataCollectionConfig.from_environment(),
     )

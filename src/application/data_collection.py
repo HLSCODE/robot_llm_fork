@@ -50,6 +50,22 @@ class DataCollectionErrorCode(str, Enum):
     SESSION_END_FAILED = "session_end_failed"
     RECORDER_PROTOCOL_ERROR = "recorder_protocol_error"
     CLEANUP_FAILED = "cleanup_failed"
+    INSUFFICIENT_STORAGE = "insufficient_storage"
+    EPISODE_CONFLICT = "episode_conflict"
+    DATA_INTEGRITY_FAILED = "data_integrity_failed"
+    FORMAT_UNAVAILABLE = "format_unavailable"
+    PERSISTENCE_FAILED = "persistence_failed"
+
+
+_RECORDER_PERSISTENCE_ERROR_CODES = frozenset(
+    {
+        DataCollectionErrorCode.INSUFFICIENT_STORAGE,
+        DataCollectionErrorCode.EPISODE_CONFLICT,
+        DataCollectionErrorCode.DATA_INTEGRITY_FAILED,
+        DataCollectionErrorCode.FORMAT_UNAVAILABLE,
+        DataCollectionErrorCode.PERSISTENCE_FAILED,
+    }
+)
 
 
 class DataCollectionError(RuntimeError):
@@ -70,7 +86,7 @@ class DataCollectionError(RuntimeError):
 
 
 class DataCollectionRecorder(Protocol):
-    """Recorder boundary implemented by the RLBench infrastructure adapter."""
+    """Recorder boundary implemented by data-collection infrastructure."""
 
     def start_session(
         self,
@@ -346,9 +362,9 @@ class DataCollectionService:
                 )
             except DataCollectionError as exc:
                 next_state = (
-                    DataCollectionState.SESSION_READY
-                    if exc.code is DataCollectionErrorCode.EPISODE_STOP_FAILED
-                    else DataCollectionState.FAULTED
+                    DataCollectionState.FAULTED
+                    if exc.code is DataCollectionErrorCode.RECORDER_PROTOCOL_ERROR
+                    else DataCollectionState.SESSION_READY
                 )
                 with self._state_lock:
                     self._episode_id = None
@@ -508,8 +524,17 @@ class DataCollectionService:
                 f"{operation} returned a non-mapping result",
             )
         if result.get("success") is not True:
+            error_code = failure_code
+            raw_error_code = result.get("error_code")
+            if isinstance(raw_error_code, str):
+                try:
+                    candidate = DataCollectionErrorCode(raw_error_code)
+                except ValueError:
+                    candidate = failure_code
+                if candidate in _RECORDER_PERSISTENCE_ERROR_CODES:
+                    error_code = candidate
             raise DataCollectionError(
-                failure_code,
+                error_code,
                 cls._message(result, f"{operation} was rejected"),
                 episode_id=cls._optional_nonnegative_int(
                     result,

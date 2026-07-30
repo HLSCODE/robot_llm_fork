@@ -1,736 +1,301 @@
-# 数据采集功能文档
+# 数据采集架构与数据格式
 
-## 功能概述
+> 文档状态：Active
+>
+> Schema：`robot-llm.data-collection.episode` v1
+>
+> 最近更新：2026-07-30
 
-数据采集功能用于在遥操作期间采集机械臂操作数据，并保存为 RLBench
-目标格式。采集用例由独立的 `DataCollectionService` 编排；WebSocket 目前是
-对外入口之一，只负责请求/响应映射，不持有 recorder、相机会话或采集状态。
+## 1. 当前能力与边界
 
-**核心特性**：
-- **30Hz采集频率**：定时采集相机RGB/Depth图像和机械臂关节状态
-- **自动编号**：Episode自动编号，跳过已存在的编号
-- **RLBench标准格式**：保存为RLBench训练数据格式，便于后续强化学习训练
-- **按任务分类**：不同任务的数据独立保存，便于数据管理
+数据采集在遥操作期间同步记录机械臂状态、前置 RGB 图像和深度图像。当前实现
+已经具备：
 
-**适用场景**：
-- 遥操作数据采集（通过VR/键盘控制机械臂）
-- 强化学习训练数据准备
-- 操作轨迹分析与回放
+- 应用层 session/episode 状态机；
+- 相机与遥操作资源的统一租约和清理；
+- 显式、版本化的数据格式；
+- 容量预检、临时目录写入、完整性校验和原子发布；
+- 中断残留恢复、SHA-256 manifest 和离线验证 CLI；
+- 可配置采集机械臂，不依赖 RealMan 原生 SDK 数据结构。
 
-### 当前架构
+系统不再把“缺少 RLBench 依赖时生成的自定义 pickle”称为 RLBench 数据，也
+不存在隐式格式回退。格式必须通过配置明确选择。
+
+## 2. 架构职责
 
 ```text
-WebSocket / 后续 HTTP / GUI
-            |
-   DataCollectionService
-      /       |        \
- Recorder  CameraSession  TeleoperationService
-              |                |
-       CameraAccessService  ResourceArbiter
+WebSocket handler
+       |
+DataCollectionService                 application
+  |        |             |
+  |   CameraSession   TeleoperationService
+  |        |             |
+  +---- DemonstrationRecorder         infrastructure
+                |
+       DataCollectionEpisodeWriter
+          |        |          |
+       schema   validation   filesystem
 ```
 
-`DataCollectionService` 是以下状态和资源的唯一所有者：
+| 模块 | 职责 |
+|---|---|
+| `src/application/data_collection.py` | 用例状态机、资源所有权、稳定错误和结果；不处理文件格式 |
+| `src/data_collection/recorder.py` | 定时采样、帧缓存和调用持久化端口 |
+| `src/data_collection/episode_writer.py` | 容量预检、帧校验、格式编码、manifest、原子发布和残留清理 |
+| `src/data_collection/schema.py` | schema、格式枚举、强类型元数据和路径/字段约束 |
+| `src/data_collection/validation.py` | episode/dataset 完整性验证及 CLI |
+| `src/data_collection/config.py` | 数据采集强类型配置 |
 
-- session/episode 显式状态机；
-- `RLBenchRecorder` 生命周期；
-- session 全周期的独占 `CameraSession`；
-- 首个 episode 启动后与遥操作共享、直到 session 结束才释放的机器人控制会话。
+`DataCollectionService` 是 recorder、相机会话、采集状态和共享遥操作会话的唯一
+应用层所有者。WebSocket 只负责协议 DTO 与应用结果之间的映射。
 
-稳定状态为 `idle`、`session_ready`、`recording` 和 `faulted`；启动/停止过程中
-还会进入 `starting_session`、`starting_episode`、`stopping_episode`、
-`ending_session`、`closing` 等过渡状态。非法状态转换会被应用层直接拒绝。
+## 3. 会话与 Episode 生命周期
 
----
+状态主路径：
 
-## WebSocket协议
-
-数据采集功能通过WebSocket协议控制，支持以下4个action：
-
-这四个 action 均要求客户端先完成 `authenticate` 和 `acquire_control`，并持续
-发送 `control_heartbeat`。控制租约超时或控制者断线时，服务端会停止 recorder、
-遥操作并释放相机会话；观察者断线不会结束当前采集。认证和租约协议见
-[WebSocket API 文档](websocket-api.md#32-写操作认证与控制权)。
-
-### 1. 开始采集会话
-
-**请求格式**：
-```json
-{
-  "action": "demo_session_start",
-  "task": "pick_bottle",
-  "description": "抓取瓶子放到桌上"
-}
+```text
+idle
+  -> starting_session -> session_ready
+  -> starting_episode -> recording
+  -> stopping_episode -> session_ready
+  -> ending_session -> idle
 ```
 
-**参数说明**：
-- `task`（必填）：任务名称，用于数据分类（如"pick_bottle"）
-- `description`（可选）：任务描述，用于后续数据标注
+协议 action：
 
-**响应格式**：
-```json
-{
-  "event": "demo_session_started",
-  "task": "pick_bottle",
-  "next_episode_id": 0,
-  "message": "会话已启动，下一个episode编号为0"
-}
-```
+| action | 作用 |
+|---|---|
+| `demo_session_start` | 获取相机资源、初始化机械臂查询能力、执行存储预检并创建会话 |
+| `demo_record_start` | 共享遥操作控制会话并启动采集线程 |
+| `demo_record_stop` | 停止采集，校验并原子发布一个 episode |
+| `demo_session_end` | 结束会话并释放 recorder、遥操作和相机资源 |
 
-**功能说明**：
-- 初始化数据采集会话，指定任务名称和描述
-- 自动计算下一个episode编号（跳过已存在的编号）
-- 创建数据保存目录结构
+业务保存失败后采集线程已经停止，状态返回 `session_ready`，调用方可以修复容量
+或配置问题后重新采集。recorder 协议损坏或无法确定线程状态时进入 `faulted`，
+必须结束会话进行统一清理。
 
----
+## 4. 数据格式
 
-### 2. 开始记录单条Episode
+### 4.1 格式选择
 
-**请求格式**：
-```json
-{
-  "action": "demo_record_start"
-}
-```
+| 配置值 | 默认 | 低维数据 | pickle | 适用范围 |
+|---|---:|---|---:|---|
+| `portable_simplified` | 是 | `low_dim_obs.npz` | 否 | 本项目采集、检查、转换和后续训练预处理 |
+| `rlbench_native` | 否 | `low_dim_obs.pkl` 等三个文件 | 是 | 已安装 RLBench、明确需要原生 `Demo`/`Observation` 序列化的受信环境 |
 
-**响应格式**：
-```json
-{
-  "event": "demo_record_started",
-  "episode_id": 0,
-  "message": "episode 0 开始记录"
-}
-```
+两种格式共同使用 PNG 图像、`episode.json` 和同一目录层级。一个 episode 只能
+包含一种低维格式；混合文件会被验证器拒绝。
 
-**功能说明**：
-- 自动启动遥操作模式（无需客户端单独发送`teleop_start`）
-- 启动30Hz数据采集线程
-- 实时记录相机帧（RGB/Depth）和机械臂状态（关节角度、末端位姿）
-- 数据缓存到内存，等待保存
+`portable_simplified` 是默认和推荐格式。NPZ 使用 `allow_pickle=False` 即可
+读取，不依赖 RLBench。
 
-**重要提示**：服务端在收到此消息后会自动启动遥操作模式，客户端应立即开始发送关节指令流（50Hz）
+`rlbench_native` 使用真实 RLBench Python 类型序列化。启动采集 session 时会
+检查依赖，缺失时以 `format_unavailable` 失败，不会回退到 portable 格式。
+它表示“原生对象序列化”，不表示数据等价于 RLBench 仿真环境的完整 observation：
+当前真实硬件采集没有 mask、point cloud、任务低维状态、相机外参等仿真字段。
+pickle 只应在可信数据和受控环境中反序列化。
 
----
+### 4.2 目录结构
 
-### 3. 结束记录单条Episode
+Portable：
 
-**请求格式**：
-```json
-{
-  "action": "demo_record_stop"
-}
-```
-
-**响应格式**：
-```json
-{
-  "event": "demo_record_stopped",
-  "episode_id": 0,
-  "frames": 1500,
-  "message": "episode 0 已保存，共1500帧"
-}
-```
-
-**功能说明**：
-- 停止30Hz采集线程
-- 将采集的数据保存为RLBench格式（PNG文件+pkl文件）
-- 自动递增episode编号
-- episode 停止后仍保留共享遥操作控制，便于继续采集下一条 episode；只有
-  `demo_session_end`、控制租约释放或安全停止才会释放控制会话
-
----
-
-### 4. 结束采集会话
-
-**请求格式**：
-```json
-{
-  "action": "demo_session_end"
-}
-```
-
-**响应格式**：
-```json
-{
-  "event": "demo_session_ended",
-  "message": "会话已结束（已自动停止遥操作模式）"
-}
-```
-
-**功能说明**：
-- 自动停止遥操作模式（无需客户端单独发送`teleop_stop`）
-- 清空会话状态
-- 释放数据采集器资源
-
-**重要提示**：服务端在收到此消息后会自动停止遥操作模式，客户端应停止发送关节指令流
-
----
-
-## 资源所有权
-
-- `demo_session_start` 通过 `CameraAccessService.open_depth()` 取得独占相机会话，
-  并在整个数据采集 session 期间持有；相机预览、语音视觉、相机测试和视觉动作
-  会在资源冲突时被明确拒绝。
-- `demo_record_start` 由 `DataCollectionService` 先加入
-  `TeleoperationService` 控制会话，再启动 30Hz recorder；失败时按相反顺序回滚。
-- `demo_record_stop` 只结束并保存当前 episode，不释放共享控制会话。
-  数据采集 session 存续期间，单独的 `teleop_stop` 会被拒绝，避免 recorder
-  与机器人控制状态分离。
-- `demo_session_end` 调用 `end_session()`；控制租约超时/断线、WebSocket
-  服务停止、软件安全停止和 `devices.shutdown_all()` 调用幂等 `close()`。
-  两条路径都由同一个应用服务按相同所有权规则释放资源。
-- recorder 的阻塞启动、停止、保存与结束操作通过工作线程执行，不阻塞
-  WebSocket asyncio 事件循环。
-
----
-
-### 错误响应
-
-当请求失败时，返回错误消息：
-
-```json
-{
-  "event": "demo_record_error",
-  "code": "data_collection_failed",
-  "detail_code": "invalid_state",
-  "message": "..."
-}
-```
-
-`code` 是 WebSocket 通用错误码；`detail_code` 是应用层稳定原因码，当前包括
-`invalid_state`、`session_start_failed`、`episode_start_failed`、
-`episode_stop_failed`、`session_end_failed`、`recorder_protocol_error`
-和 `cleanup_failed`。保存失败时还会尽可能返回 `episode_id` 与 `frames`。
-
-**常见错误场景**：
-- 缺少必填参数（task、description）
-- 会话未启动时尝试记录
-- 机械臂未连接或相机数据获取失败
-
----
-
-## 客户端实现说明
-
-### 触发方式
-
-数据采集通过客户端键盘事件触发，客户端需要监听键盘按键并映射到对应的WebSocket action。
-
-**键盘按键映射表**：
-
-| 键盘按键 | WebSocket Action | 功能说明 |
-|---------|------------------|---------|
-| `'s'` | `demo_session_start` | 进入采集会话（需要指定task和description） |
-| `'r'` | `demo_record_start` | 开始记录单条episode（自动启动遥操作模式） |
-| `'e'` | `demo_record_stop` | 结束记录并保存当前episode |
-| `'q'` | `demo_session_end` | 退出整个采集会话 |
-
----
-
-### 交互流程
-
-客户端实现数据采集的完整交互流程如下：
-
-1. **启动WebSocket连接**：客户端连接到WebSocket服务端
-2. **进入采集会话**：按下`'s'`键，手动指定任务名称和描述，发送`demo_session_start`消息
-3. **开始记录并自动启动遥操作**：按下`'r'`键，发送`demo_record_start`消息，服务端自动启动遥操作模式并开始30Hz数据采集
-4. **执行遥操作**：客户端开始发送关节指令流，专注于数据采集
-5. **结束记录**：按下`'e'`键，发送`demo_record_stop`消息，服务端保存数据并返回episode信息
-6. **重复采集**：可重复步骤3-5采集多条数据（episode自动编号）
-7. **退出会话**：采集完成后按下`'q'`键，发送`demo_session_end`消息，退出整个会话
-
----
-
-### 实现要点
-
-客户端实现数据采集需要注意以下几点：
-
-#### 1. 键盘监听方式
-
-键盘监听应采用非阻塞方式，避免影响遥操作指令的实时发送。推荐使用以下方式：
-
-- **独立线程**：在独立线程中监听键盘事件，不影响主遥操作线程
-- **事件回调**：使用事件回调机制，按键触发时发送WebSocket消息
-- **异步处理**：键盘事件处理采用异步方式，避免阻塞遥操作指令流
-
----
-
-#### 2. 消息发送与响应处理
-
-客户端需要正确处理WebSocket消息的发送和响应：
-
-- **消息发送**：按键触发时立即发送对应action消息
-- **响应处理**：接收服务端响应消息，提取episode_id、frames等信息并显示给用户
-- **状态显示**：实时显示当前采集状态（如"正在记录episode 0"、"已保存1500帧"）
-
----
-
-#### 3. 错误处理
-
-客户端需要处理可能的错误场景：
-
-- **会话未启动**：按下`'r'`或`'e'`键时，如果会话未启动，服务端返回错误消息，客户端应提示用户先启动会话
-- **采集失败**：如果保存失败，客户端应显示错误信息并提示用户重试
-- **机械臂状态**：建议在采集前检查机械臂和相机状态，避免采集失败
-
----
-
-#### 4. 并发处理
-
-数据采集与遥操作并发进行，需要注意：
-
-- **遥操作优先**：遥操作指令发送不应被键盘监听阻塞
-- **独立通道**：数据采集消息与遥操作指令消息使用同一WebSocket连接，但处理逻辑独立
-- **状态同步**：客户端需要维护当前采集状态（是否正在记录），避免重复触发
-
----
-
-### 使用建议
-
-客户端实现时建议遵循以下原则：
-
-1. **按键提示**：在客户端界面显示按键映射（如"按s进入会话，按r开始记录，按e结束记录，按q退出会话"）
-2. **状态反馈**：实时显示服务端响应信息（如episode编号、帧数、遥操作状态）
-3. **错误提示**：错误消息应清晰提示用户问题原因和解决方法
-4. **操作确认**：关键操作（如退出会话）可增加确认提示，避免误操作
-5. **自动遥操作**：服务端在收到`demo_record_start`后会自动启动遥操作模式，客户端无需单独发送`teleop_start`
-
----
-
-## 数据格式说明
-
-### RLBench目录结构
-
-采集的数据按任务分类保存，目录结构如下：
-
-```
+```text
 data/demos/
-  ├── pick_bottle/                    # 任务名称（按任务分类）
-  │   └── all_variations/
-  │       └── episodes/
-  │           ├── episode0/           # 自动编号（跳过已存在的）
-  │           │   ├── front_rgb/      # RGB图像目录
-  │           │   │   ├── 0.png       # 第0帧RGB图像
-  │           │   │   ├── 1.png
-  │           │   │   └── ...
-  │           │   ├── front_depth/    # Depth图像目录
-  │           │   │   ├── 0.png       # 第0帧Depth图像
-  │           │   │   ├── 1.png
-  │           │   │   └── ...
-  │           │   ├── low_dim_obs.pkl         # 低维状态数据（Demo对象）
-  │           │   ├── variation_number.pkl    # Variation编号
-  │           │   └── variation_descriptions.pkl  # 任务描述
-  │           ├── episode1/           # 下一条episode
-  │           ├── episode2/
-  │           └── ...
-  ├── place_bottle/                   # 其他任务
-  │   └── all_variations/
-  │       └── episodes/
-  │           └── ...
+└─ pick_bottle/
+   └─ all_variations/
+      └─ episodes/
+         └─ episode0/
+            ├─ episode.json
+            ├─ front_rgb/
+            │  ├─ 0.png
+            │  └─ ...
+            ├─ front_depth/
+            │  ├─ 0.png
+            │  └─ ...
+            └─ low_dim_obs.npz
 ```
 
----
+Native RLBench serialization：
 
-### 数据文件说明
+```text
+episode0/
+├─ episode.json
+├─ front_rgb/
+├─ front_depth/
+├─ low_dim_obs.pkl
+├─ variation_number.pkl
+└─ variation_descriptions.pkl
+```
 
-#### 1. RGB图像（front_rgb/）
+任务名只能包含 ASCII 字母、数字、点、下划线和连字符，且必须以字母或数字开头。
+绝对路径、`..` 和其他目录穿越形式会在创建任何 episode 前被拒绝。
 
-**格式**：PNG文件（`{frame_id}.png`）
-**内容**：
-- 前置相机采集的RGB图像
-- 采集频率：30Hz
-- 图像分辨率：640×480（默认）
-- 颜色空间：BGR（OpenCV格式）
+### 4.3 `episode.json`
 
-**用途**：
-- 视觉观察数据
-- 强化学习训练输入
+每个成功发布的 episode 都包含独立 manifest，主要字段如下：
 
----
+```json
+{
+  "schema_name": "robot-llm.data-collection.episode",
+  "schema_version": 1,
+  "format_variant": "portable_simplified",
+  "format_version": 1,
+  "task": "pick_bottle",
+  "source_arm": "left",
+  "episode_id": 0,
+  "variation_id": 0,
+  "descriptions": ["pick bottle"],
+  "frame_count": 300,
+  "capture_error_count": 0,
+  "created_at_utc": "2026-07-30T12:00:00+00:00",
+  "fields": {
+    "front_rgb": "required",
+    "joint_velocities": "absent"
+  },
+  "units": {
+    "joint_positions": "degrees",
+    "gripper_pose": "xyz_metres_quaternion_xyzw"
+  },
+  "dimensions": {
+    "front_rgb": [480, 640, 3],
+    "front_depth": [480, 640]
+  },
+  "files": [
+    {
+      "path": "front_rgb/0.png",
+      "role": "front_rgb",
+      "size_bytes": 12345,
+      "sha256": "..."
+    }
+  ]
+}
+```
 
-#### 2. Depth图像（front_depth/）
+manifest 记录每个 payload 文件的相对路径、角色、字节数和 SHA-256。未知
+schema/format 版本会被显式拒绝；当前没有静默兼容或猜测迁移逻辑。将来修改
+字段语义时必须提升版本，并提供独立迁移工具或对应版本 reader。
 
-**格式**：PNG文件（`{frame_id}.png`）
-**内容**：
-- 前置相机采集的Depth图像
-- 采集频率：30Hz
-- 数据格式：16位整数（单位：毫米）
+### 4.4 字段和单位
 
-**用途**：
-- 深度信息
-- 点云重建
+| 字段 | Portable 表示 | Native 表示 | 当前状态 |
+|---|---|---|---|
+| `timestamps` | Unix UTC 秒，`float64` | 不进入 RLBench observation | 已采集 |
+| `front_rgb` | H×W×3 BGR `uint8` PNG | 同左 | 已采集 |
+| `front_depth` | H×W 原始设备单位 `uint16` PNG | 同左 | 已采集 |
+| `camera_intrinsics` | 3×3 像素内参 | `Observation.misc` | 已采集 |
+| `joint_positions` | 角度，degree | 写入前转换为 radian | 已采集 |
+| `gripper_pose` | 米 + `xyzw` 四元数 | 同左 | 已采集 |
+| `gripper_open` | 0 关闭、1 打开 | 同左 | 当前状态端口未提供真实值，暂为 0 |
+| `joint_velocities` | degree/s | 写入前转换为 radian/s | 当前缺失 |
+| `joint_forces` | provider 原始单位 | provider 原始单位 | 当前缺失 |
+| `gripper_matrix` | 米制 4×4 齐次矩阵 | 同左 | 当前缺失 |
+| `gripper_joint_positions` | degree | 写入前转换为 radian | 当前缺失 |
 
----
+写入前会拒绝空 episode、非有限数值、时间倒序、帧间 shape 不一致、不规范
+RGB/depth dtype、无效相机内参、非归一化四元数和部分帧才出现的可选字段。
 
-#### 3. 低维状态数据（low_dim_obs.pkl）
+当前深度图仍是 RealSense 的原始 `uint16` 设备单位，manifest 不宣称其为毫米；
+在用于三维训练前需要补充并应用相机 depth scale。当前也没有保存相机外参。
 
-**格式**：Python pickle文件
-**内容**：
-- `Demo`对象（包含Observation序列）
-- 每个Observation包含机械臂状态数据
+## 5. 事务写入、容量与恢复
 
-**Observation字段**（已实现）：
-- `joint_positions`：7个关节角度（numpy数组）
-- `gripper_open`：夹爪状态（0.0或1.0）
-- `gripper_pose`：末端位姿（numpy数组）
-- `misc`：相机参数（内参矩阵、外参矩阵）
+保存一个 episode 时按以下顺序执行：
 
-**Observation字段**（待完善）：
-- `joint_velocities`：关节速度
-- `joint_forces`：关节力矩
-- `gripper_matrix`：末端变换矩阵（4×4）
-- `gripper_joint_positions`：夹爪关节角度
+1. 校验任务、episode 编号、所有帧及字段一致性。
+2. 根据原始数组大小和 overhead factor 估算空间。
+3. 要求可用空间不少于“保留空间 + 本 episode 估算空间”。
+4. 在同一 `episodes` 目录创建 `.episodeN.tmp-<hex>` 临时目录。
+5. 对每个文件写入、flush 并 `fsync`。
+6. 生成 manifest，并在临时目录上运行完整性验证。
+7. 使用同文件系统的 `os.replace` 将临时目录发布为 `episodeN`。
 
----
+已存在的 `episodeN` 永不覆盖。写入或验证失败时不会出现可见的半成品
+episode，并会删除本次临时目录。
 
-#### 4. 元数据文件
+启动 session 时只清理当前任务 `episodes` 目录中、名称严格匹配且超过
+`DATA_COLLECTION_STALE_WRITE_SECONDS` 的临时目录；不会递归扫描或删除其他
+路径。未过期临时目录会保留并由验证器报告警告。
 
-**variation_number.pkl**：
-- Variation编号（默认为0）
+## 6. 配置
 
-**variation_descriptions.pkl**：
-- 任务描述列表（从`description`参数解析）
-- 支持多个描述（逗号分隔）
-
----
-
-### 数据采集字段概览
-
-| 数据类型 | 字段名称 | 采集来源 | 采集频率 |
-|---------|---------|---------|---------|
-| **视觉数据** | `front_rgb` | RealSense相机 | 30Hz |
-| | `front_depth` | RealSense相机 | 30Hz |
-| | `camera_intrinsics` | RealSense相机内参 | 首帧 |
-| **机械臂状态** | `joint_positions` | 机械臂SDK（7个关节） | 30Hz |
-| | `gripper_open` | 夹爪状态 | 30Hz |
-| | `gripper_pose` | 末端位姿 | 30Hz |
-| **待完善字段** | `joint_velocities` | 机械臂SDK | 待实现 |
-| | `joint_forces` | 机械臂SDK | 待实现 |
-| | `gripper_matrix` | 位姿计算 | 待实现 |
-
----
-
-## 配置说明
-
-数据采集功能通过`config.env`配置文件设置参数：
-
-### 配置项说明
+配置来自项目根目录 `config.env`：
 
 ```env
-# 数据采集频率（Hz）- 低于遥操作频率（50Hz）
 DATA_COLLECTION_FPS=30
-
-# 使用的相机索引（如果有多个相机）
 DATA_COLLECTION_CAMERA_INDEX=0
-
-# 数据保存路径
+DATA_COLLECTION_ARM=left
 DATA_COLLECTION_SAVE_PATH=data/demos
+DATA_COLLECTION_FORMAT_VARIANT=portable_simplified
+DATA_COLLECTION_MIN_FREE_BYTES=1073741824
+DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR=1.25
+DATA_COLLECTION_STALE_WRITE_SECONDS=3600
+DATA_COLLECTION_RANDOM_SEED=42
+DATA_COLLECTION_STOP_TIMEOUT_SECONDS=5
 ```
 
----
+| 配置 | 约束与说明 |
+|---|---|
+| `DATA_COLLECTION_FPS` | 1..240 Hz |
+| `DATA_COLLECTION_CAMERA_INDEX` | 在线相机列表中的非负索引；超过列表长度时选择最后一台 |
+| `DATA_COLLECTION_ARM` | `left` 或 `right` |
+| `DATA_COLLECTION_SAVE_PATH` | 数据集根目录；空值和当前目录被拒绝 |
+| `DATA_COLLECTION_FORMAT_VARIANT` | 只能是表中两个显式值 |
+| `DATA_COLLECTION_MIN_FREE_BYTES` | 发布前必须保留的空间；默认 1 GiB |
+| `DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR` | 估算放大系数，必须不小于 1 |
+| `DATA_COLLECTION_STALE_WRITE_SECONDS` | 临时目录被视为残留前的最小年龄 |
+| `DATA_COLLECTION_RANDOM_SEED` | Native RLBench `Demo` 的 seed |
+| `DATA_COLLECTION_STOP_TIMEOUT_SECONDS` | 等待采集线程退出的上限 |
 
-### 参数详解
+## 7. 完整性验证
 
-#### DATA_COLLECTION_FPS
+安装项目后：
 
-**默认值**：30
-**说明**：数据采集频率（Hz）
-**建议值**：
-- 30Hz：与相机帧率一致，数据完整
-- 15Hz：降低数据量，适合长时间采集
-
-**注意事项**：
-- 采集频率必须低于遥操作频率（50Hz）
-- 过高的频率可能导致数据丢失
-
----
-
-#### DATA_COLLECTION_CAMERA_INDEX
-
-**默认值**：0
-**说明**：使用的相机索引
-**适用场景**：
-- 单相机：固定为0
-- 多相机：选择指定的相机（如0、1、2...）
-
----
-
-#### DATA_COLLECTION_SAVE_PATH
-
-**默认值**：data/demos
-**说明**：数据保存基础路径
-**建议值**：
-- `data/demos`：项目内路径（推荐）
-- `/path/to/external/storage`：外部存储路径
-
-**注意事项**：
-- 路径需要有写入权限
-- 建议使用绝对路径（避免路径混淆）
-
----
-
-### 配置修改方法
-
-1. 打开`config.env`文件
-2. 修改对应配置项的值
-3. 保存文件
-4. 重启WebSocket服务（配置生效）
-
----
-
-## 技术架构
-
-### 核心模块
-
-数据采集功能由以下模块组成：
-
-#### 1. RLBenchRecorder（数据采集器）
-
-**位置**：`src/data_collection/rlbench_recorder.py`
-
-**核心功能**：
-- 30Hz定时采集线程
-- 实时获取相机帧和机械臂状态
-- Episode编号管理（自动递增、跳过已存在）
-- 数据缓存管理（内存缓存）
-
-**数据采集流程**：
-```
-WebSocket请求 → RLBenchRecorder → 启动采集线程
-                   ↓
-             定时循环（30Hz）
-                   ↓
-            获取相机帧（RGB/Depth）
-                   ↓
-            获取机械臂状态（关节/位姿）
-                   ↓
-            缓存到内存（FrameData）
-                   ↓
-        WebSocket停止请求 → 停止采集线程
-                   ↓
-            调用RLBenchFormatter保存
+```powershell
+robot-data-validate data/demos
+robot-data-validate data/demos --task pick_bottle
+robot-data-validate data/demos --json
 ```
 
----
+也可直接运行：
 
-#### 2. RLBenchFormatter（格式转换器）
-
-**位置**：`src/data_collection/rlbench_formatter.py`
-
-**核心功能**：
-- RLBench格式保存（PNG分离）
-- Observation对象构建
-- 元数据文件生成
-
-**保存流程**：
-```
-FrameData列表 → RLBenchFormatter
-                   ↓
-            创建episode目录结构
-                   ↓
-            保存RGB图像（PNG）
-                   ↓
-            保存Depth图像（PNG）
-                   ↓
-            构建Observation列表
-                   ↓
-            保存Demo对象（pkl）
-                   ↓
-            保存元数据（pkl）
+```powershell
+python -m src.data_collection.validation data/demos
 ```
 
----
-
-#### 3. FrameData（数据容器）
-
-**位置**：`src/data_collection/rlbench_recorder.py`
-
-**核心字段**：
-- `timestamp`：时间戳
-- `front_rgb`：RGB图像（numpy数组）
-- `front_depth`：Depth图像（numpy数组）
-- `joint_positions`：关节角度（numpy数组）
-- `gripper_pose`：末端位姿（numpy数组）
-
----
-
-### 与现有框架的集成
-
-数据采集用例位于应用层，WebSocket 只是适配器：
-
-- `src/application/data_collection.py`：状态机、强类型结果、错误分类和资源生命周期；
-- `src/application/factory.py`：延迟组装 `RLBenchRecorder`，未使用采集功能时
-  不加载可选采集依赖；
-- `src/robot_server/handlers/teleoperation.py`：4 个 action 的协议映射；
-- `src/data_collection/`：RLBench recorder/formatter 基础设施实现。
-
-**依赖关系**：
-```
-WebSocket handler → DataCollectionService
-                          ├─ RobotQueryService（统一机械臂状态能力）
-                          ├─ CameraAccessService（独占相机会话）
-                          ├─ TeleoperationService（共享机器人控制会话）
-                          └─ RLBenchRecorder → RLBenchFormatter
-```
-
----
-
-## 已知限制
-
-当前版本为简化实现，部分功能存在限制：
-
-### 1. Observation字段简化
-
-**已实现字段**：
-- ✅ `joint_positions`：7个关节角度
-- ✅ `gripper_open`：夹爪状态（简化版，固定0.0）
-- ✅ `gripper_pose`：末端位姿（简化版，欧拉角表示）
-- ✅ `misc`：相机参数（内参矩阵）
-
-**待完善字段**：
-- ⚠️ `joint_velocities`：关节速度（当前为None）
-- ⚠️ `joint_forces`：关节力矩（当前为None）
-- ⚠️ `gripper_matrix`：末端变换矩阵（当前为None）
-- ⚠️ `gripper_joint_positions`：夹爪关节角度（当前为None）
-
-**影响说明**：
-- 当前简化版仍可用于基本数据采集
-- 待完善字段不影响RLBench格式兼容性
-- 后续可通过迭代完善字段内容
-
----
-
-### 2. 末端位姿表示简化
-
-**当前实现**：欧拉角表示（`[x, y, z, rx, ry, rz, 0.0]`）
-**标准格式**：四元数表示（`[x, y, z, qx, qy, qz, qw]`）
-
-**待完善**：实现欧拉角转四元数转换
-
----
-
-### 3. 夹爪状态简化
-
-**当前实现**：固定值（`0.0`）
-**实际需求**：从SDK获取真实夹爪状态（`0.0`或`1.0`）
-
-**待完善**：从机械臂SDK获取夹爪真实状态
-
----
-
-### 4. 相机外参简化
-
-**当前实现**：单位矩阵（`np.eye(4)`）
-**实际需求**：从手眼标定获取真实外参矩阵
-
-**待完善**：集成手眼标定参数（从`config.env`读取）
-
----
-
-### 5. 数据同步精度
-
-**当前实现**：宽松同步（±10ms误差）
-**说明**：使用最近可用相机帧，不严格等待帧就绪
-
-**影响说明**：
-- 对30Hz采集频率影响较小
-- 时间戳误差在可接受范围内
-
----
-
-## 后续工作
-
-以下功能计划在后续版本中实现：
-
-### 1. 数据清洗工具
-
-**目标功能**：
-- 删除前N帧（去除启动等待帧）
-- 删除后N帧（去除结束停留帧）
-- 手动标记关键帧（关键动作点）
-- 可视化界面（查看帧内容）
-
-**实现位置**：`src/data_collection/data_cleaner.py`（待创建）
-
----
-
-### 2. Observation字段完善
-
-**待完善字段**：
-- `joint_velocities`：从SDK获取关节速度
-- `joint_forces`：从SDK获取关节力矩
-- `gripper_matrix`：实现位姿转变换矩阵
-- `gripper_joint_positions`：从SDK获取夹爪关节角度
-
-**优先级**：高（影响数据完整性）
-
----
-
-### 3. 位姿表示转换
-
-**待实现**：
-- 欧拉角转四元数算法
-- 位姿转变换矩阵（4×4）
-- 与RLBench标准格式完全兼容
-
----
-
-### 4. 相机参数集成
-
-**待实现**：
-- 从手眼标定读取外参矩阵
-- 相机参数动态更新
-- 多相机支持（选择指定相机）
-
----
-
-### 5. 可视化工具
-
-**目标功能**：
-- Episode回放界面
-- 帧查看器（RGB/Depth显示）
-- 关键帧标记界面
-
-**实现位置**：独立可视化工具（待规划）
-
----
-
-## 使用建议
-
-### 数据采集建议
-
-1. **采集频率**：建议使用30Hz（与相机帧率一致）
-2. **Episode长度**：建议单条Episode控制在30-60秒（避免数据量过大）
-3. **任务命名**：使用清晰的任务名称（如"pick_bottle"、"place_bottle"）
-4. **描述格式**：提供明确的任务描述（便于后续标注）
-
----
-
-### 数据管理建议
-
-1. **定期备份**：采集的数据定期备份（避免数据丢失）
-2. **分类保存**：按任务分类保存（便于后续训练）
-3. **数据清洗**：采集后进行数据清洗（去除无用帧）
-4. **版本管理**：对数据集进行版本管理（便于实验对比）
-
----
-
-### 后续训练建议
-
-1. **数据格式**：当前数据格式兼容RLBench训练框架
-2. **字段完整性**：待完善字段不影响基本训练流程
-3. **数据量**：建议每个任务采集10-20条Episode（便于训练）
-4. **多样性**：采集不同场景的数据（提高训练鲁棒性）
-
----
-
-## 参考文档
-
-- [RLBench官方文档](https://github.com/stepjam/RLBench)
-- [WebSocket API文档](./websocket-api.md)
-- [遥操作控制文档](./teleop.md)
-- [config.env配置说明](../config.env)
-
----
-
-**文档版本**：v1.1
-**最后更新**：2026-07-30
-**维护者**：Robot LLM Project Team
+空数据集或通过 `--task` 指定不存在的任务也视为验证失败。退出码：
+
+- `0`：所有 episode 通过；
+- `1`：存在完整性错误。
+
+验证内容包括 schema/format 版本、目录名与 episode ID、manifest 安全相对路径、
+文件存在性、大小、SHA-256、未登记文件、PNG 解码和 shape、NPZ 必填数组、帧数、
+时间戳及格式混用。Native pickle 默认不会反序列化，只验证 manifest 完整性并
+输出 `native_pickle_not_inspected` 警告。
+
+## 8. 稳定错误
+
+应用层保存相关 `detail_code`：
+
+| code | 含义 |
+|---|---|
+| `insufficient_storage` | 可用空间不足 |
+| `episode_conflict` | 目标 episode 已存在 |
+| `data_integrity_failed` | 输入帧或 staged episode 未通过校验 |
+| `format_unavailable` | 所选格式的依赖不可用 |
+| `persistence_failed` | 其他确定的持久化失败 |
+
+其他生命周期错误包括 `invalid_state`、`session_start_failed`、
+`episode_start_failed`、`episode_stop_failed`、`session_end_failed`、
+`recorder_protocol_error` 和 `cleanup_failed`。
+
+## 9. 已知限制与后续方向
+
+- 一次 session 只采集配置指定的一条机械臂，尚不支持双臂严格时间同步。
+- 机械臂查询端口尚未提供真实夹爪开合、关节速度、力矩和夹爪关节状态。
+- 尚未记录 depth scale、相机外参、点云、mask 和硬件/标定版本。
+- 相机帧与机械臂状态当前为采样时读取的最近值，没有硬件时间戳对齐。
+- Native 格式的语义完整性需要在受信 RLBench 环境中另做训练读取 smoke test。
+- 数据清洗、episode 回放、关键帧标注和训练集导出尚未实现。
+
+这些限制不会通过伪造字段或隐式格式兼容掩盖；新增语义必须进入新 schema/
+format 版本和对应验证规则。

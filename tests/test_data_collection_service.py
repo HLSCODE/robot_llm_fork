@@ -74,6 +74,7 @@ class _FakeRecorder:
         self.start_session_success = True
         self.start_recording_success = True
         self.stop_recording_success = True
+        self.stop_error_code: str | None = None
         self.stop_frames: object = 10
         self.end_session_success = True
         self.stop_count = 0
@@ -105,7 +106,7 @@ class _FakeRecorder:
         self.recording = False
         if self.stop_recording_success:
             self.next_episode_id += 1
-        return {
+        result = {
             "success": self.stop_recording_success,
             "episode_id": episode_id,
             "frames": self.stop_frames,
@@ -113,6 +114,9 @@ class _FakeRecorder:
                 "recording stopped" if self.stop_recording_success else "save failed"
             ),
         }
+        if self.stop_error_code is not None:
+            result["error_code"] = self.stop_error_code
+        return result
 
     def end_session(self):
         self.end_count += 1
@@ -268,6 +272,25 @@ class DataCollectionServiceTests(unittest.TestCase):
         self.assertEqual(DataCollectionState.IDLE, self.service.snapshot().state)
         self.assertFalse(self.teleoperation.active)
         self.assertFalse(self.camera_access.sessions[0].active)
+
+    def test_storage_failure_code_is_preserved_at_application_boundary(self):
+        self.service.start_session("pick")
+        self.service.start_episode()
+        self.recorder.stop_recording_success = False
+        self.recorder.stop_error_code = "insufficient_storage"
+
+        with self.assertRaises(DataCollectionError) as raised:
+            self.service.stop_episode()
+
+        self.assertEqual(
+            DataCollectionErrorCode.INSUFFICIENT_STORAGE,
+            raised.exception.code,
+        )
+        self.assertEqual(
+            DataCollectionState.SESSION_READY,
+            self.service.snapshot().state,
+        )
+        self.service.end_session()
 
     def test_close_is_idempotent_and_releases_an_active_episode(self):
         self.service.start_session("pick")

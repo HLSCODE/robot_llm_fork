@@ -3056,7 +3056,9 @@ function handleChatData(data) {
 数据采集错误还会通过 `detail_code` 提供应用层稳定原因，例如
 `invalid_state`、`session_start_failed`、`episode_start_failed`、
 `episode_stop_failed`、`session_end_failed`、`recorder_protocol_error`
-或 `cleanup_failed`；保存失败时可能同时携带 `episode_id` 和 `frames`。
+或 `cleanup_failed`。持久化阶段还可能返回 `insufficient_storage`、
+`episode_conflict`、`data_integrity_failed`、`format_unavailable` 或
+`persistence_failed`；保存失败时可能同时携带 `episode_id` 和 `frames`。
 
 权限拒绝使用独立事件：
 

@@ -2,8 +2,9 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-29
-> 当前里程碑：M2/M3 — 入口资源所有权已收敛，供应商验证与领域服务拆分进行中
+> 最近更新：2026-07-30
+>
+> 当前里程碑：M3 — 领域服务、协议边界和数据治理继续收口
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -34,7 +35,7 @@
 - 双机械臂、底盘、身体升降、夹爪、吸液枪、换枪、加粉装置和表情屏。
 - RealSense/OpenCV 相机、视觉抓取和视觉重定位。
 - LLM provider、自然语言意图、技能规划、语音唤醒、ASR/VAD/KWS/TTS。
-- 遥操作与 RLBench 数据采集。
+- 遥操作与版本化示教数据采集。
 - 动作库、任务库、技能库和本地配置。
 
 当前主要问题不是“功能不存在”，而是功能快速增长后缺少统一的运行时所有权和工程边界。首轮收敛已经将主要入口切换为：
@@ -70,6 +71,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - `DataCollectionService` 已成为 recorder、相机会话、session/episode 状态和
   共享遥操作控制会话的唯一应用层所有者；WebSocket 只做协议映射，安全停止、
   控制租约释放和设备关闭共用同一清理入口。
+- 数据采集已建立版本化 schema、portable/native 显式格式、事务写入、容量预检、
+  残留恢复和完整性验证工具；缺失 RLBench 时不再生成冒充原生格式的替代 pickle。
 - 序列提交根据动作控制策略计算实际设备租约，不再锁定全部已注册设备；
   纯软件动作可与相机预览并行，视觉动作会与其他相机会话显式互斥。
 - 已删除无引用的 legacy GUI、旧底盘控制器和独立 ADP 控制脚本。
@@ -504,8 +507,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 - 应用服务、显式 session/episode 状态机和共享遥操作控制会话已经完成；
   transport 不再持有 recorder、相机会话或采集状态。
-- 缺少磁盘容量、原子落盘、失败恢复和 schema 版本治理。
-- `rlbench` 缺失时使用简化结构，交付差异需要明确。
+- schema、原子发布、容量预检、失败恢复、显式格式和完整性工具已完成。
+- 仍缺少双臂/硬件时间戳同步、depth scale/相机外参、真实夹爪及力/速度字段。
+- Native RLBench 序列化仍需在受信训练环境中完成读取 smoke test。
 
 工作项：
 
@@ -514,10 +518,12 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | F-D-001 | P1 | DONE | 提取 DataCollectionService |
 | F-D-002 | P1 | DONE | 建立 session/episode 状态机 |
 | F-D-003 | P1 | DONE | 采集与遥操作共享控制会话 |
-| F-D-004 | P2 | TODO | 数据 schema 和版本元数据 |
-| F-D-005 | P2 | TODO | 原子落盘、恢复和磁盘容量检查 |
-| F-D-006 | P2 | TODO | 明确完整 RLBench 与简化格式差异 |
-| F-D-007 | P2 | TODO | 数据完整性验证工具 |
+| F-D-004 | P2 | DONE | 数据 schema、版本、来源、字段单位和文件 manifest |
+| F-D-005 | P2 | DONE | 同目录 staged write、校验后原子发布、残留恢复和容量预检 |
+| F-D-006 | P2 | DONE | 显式区分 portable 与 native；删除缺依赖时的伪 RLBench 回退 |
+| F-D-007 | P2 | DONE | episode/dataset 完整性 API 与 `robot-data-validate` CLI |
+| F-D-008 | P1 | TODO | 补 depth scale、相机外参、硬件时间戳和双臂同步采集 |
+| F-D-009 | P1 | TODO | 补真实夹爪、速度/力字段及 Native RLBench 受信读取 smoke test |
 
 ### 11.4 智能加粉领域
 
@@ -902,14 +908,15 @@ M4 工程治理与清理
 | 2026-07-29 | M3 | E/C | AI/语音命令治理整批收口 | A-010/E-002/E-003/E-004/E-007/E-008/E-009 TODO/DOING → DONE | 新增进程级 CommandRuntime；删除 GUI/WS 私有预览缓存和重复 SkillEngine；预览使用 ID/版本/TTL/来源隔离/单次消费，高风险二次确认；会话与执行控制分离；统一交互超时、取消和 LLM close | 159 tests + 26 subtests |
 | 2026-07-30 | M3 | C | WebSocket 领域拆分与 typed contract | C-009/C-010/C-012 TODO/DOING → DONE | 将执行、编排、AI/聊天、设备/相机、遥操作/采集整体迁入领域 handler；Server 从 4222 行降至约 1400 行；新增 route registry、不可变 request DTO、response DTO 和覆盖全部 action 的严格 payload schema，不保留裸字典/未知字段兼容 | 162 tests + 26 subtests |
 | 2026-07-30 | M3 | F | 数据采集应用服务与状态机 | F-D-001/F-D-002/F-D-003 TODO → DONE | 新增 DataCollectionService 和显式 session/episode/故障状态；recorder、相机会话及共享遥操作控制从 WebSocket 下沉，阻塞操作移出事件循环；控制租约释放、安全停止和设备关闭统一清理，不保留 host 旧状态 | 170 tests + 26 subtests |
+| 2026-07-30 | M3 | F/G | 数据采集格式与存储治理 | F-D-004/F-D-005/F-D-006/F-D-007 TODO → DONE | 新增 schema v1、来源/单位/文件哈希 manifest、portable NPZ 与 Native RLBench 显式格式；同目录 staged write 校验后原子发布，加入容量预检、范围受限残留恢复和离线验证 CLI；删除旧 recorder/formatter 与伪 RLBench 回退 | 183 tests + 26 subtests |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **F-D-004/F-D-005/F-D-006/F-D-007**：补数据 schema/版本元数据、
-   原子落盘、容量检查、格式差异说明和完整性验证工具。
+3. **F-D-008/F-D-009**：补采集时间同步、相机标定语义、真实机械臂状态字段，
+   并在受信 RLBench 环境完成 Native 数据读取 smoke test。
 4. **E-010/E-011/E-012**：补 provider health/降级、prompt/模型/技能版本记录和固定规划回归数据集。
 5. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
 6. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。

@@ -1,9 +1,5 @@
-"""
-数据采集模块
-支持WebSocket遥操作下的RLBench格式数据采集
-"""
+"""Versioned, transactional demonstration data-collection infrastructure.
 
-from .rlbench_recorder import RLBenchRecorder
-from .rlbench_formatter import RLBenchFormatter
-
-__all__ = ['RLBenchRecorder', 'RLBenchFormatter']
+Import concrete APIs from their owning submodules so command-line modules can
+start without loading the recorder, storage writer or optional integrations.
+"""
