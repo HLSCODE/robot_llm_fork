@@ -17,7 +17,8 @@
 ```
 run.py              # 统一启动入口（根据 RUN_MODE 分派 GUI / Server）
 config.env          # 环境变量配置
-requirements.txt    # Python 依赖
+pyproject.toml      # Python 依赖唯一声明
+uv.lock             # 可重复安装锁文件
 src/
   core/
     launcher.py         # composition root，组装唯一 ApplicationServices
@@ -67,7 +68,7 @@ data/
 
 ## 常用命令
 ```bash
-uv pip install -r requirements.txt   # 安装依赖（推荐 uv）
+uv sync --frozen                    # 安装锁定依赖
 python run.py                        # WebSocket 服务模式（默认）
 python run.py --simulation           # 模拟模式（不连硬件）
 python run.py --port 9000            # 自定义端口

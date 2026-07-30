@@ -9,6 +9,10 @@ from typing import Optional
 from dotenv import load_dotenv
 
 
+class ConfigLoadError(ValueError):
+    """Configuration could not be parsed into a complete snapshot."""
+
+
 class Config:
     """
     单例配置类
@@ -82,7 +86,10 @@ class Config:
     # 系统配置
     LOG_LEVEL: str = "INFO"
     SIMULATION_MODE: bool = False
-    SKILL_LIBRARY_PATH: str = "data/skills/skill_library.json"
+    ROBOT_DATA_DIR: str = "data"
+    ACTIONS_LIBRARY_PATH: str = ""
+    TASKS_DIRECTORY: str = ""
+    SKILL_LIBRARY_PATH: str = ""
     
     # RealSense 相机配置
     CAMERA_PROVIDER: str = "auto"
@@ -297,6 +304,20 @@ class Config:
 
     @classmethod
     def load(cls, env_path: Optional[str] = None) -> 'Config':
+        """Load a complete snapshot without exposing rejected raw values."""
+        try:
+            return cls._load_unchecked(env_path)
+        except ConfigLoadError:
+            raise
+        except (TypeError, ValueError) as exc:
+            cls._instance = None
+            cls._loaded = False
+            raise ConfigLoadError(
+                "配置包含无法解析的值；请对照 config.env.example 检查类型和格式"
+            ) from exc
+
+    @classmethod
+    def _load_unchecked(cls, env_path: Optional[str] = None) -> 'Config':
         """
         从 .env 文件加载配置
 
@@ -447,7 +468,10 @@ class Config:
         instance.VOICE_OPENWAKEWORD_THRESHOLD = float(os.getenv("VOICE_OPENWAKEWORD_THRESHOLD", "0.6"))
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
         instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
-        instance.SKILL_LIBRARY_PATH = os.getenv("SKILL_LIBRARY_PATH", "data/skills/skill_library.json")
+        instance.ROBOT_DATA_DIR = os.getenv("ROBOT_DATA_DIR", "data")
+        instance.ACTIONS_LIBRARY_PATH = os.getenv("ACTIONS_LIBRARY_PATH", "")
+        instance.TASKS_DIRECTORY = os.getenv("TASKS_DIRECTORY", "")
+        instance.SKILL_LIBRARY_PATH = os.getenv("SKILL_LIBRARY_PATH", "")
         instance.CAMERA_PROVIDER = os.getenv("CAMERA_PROVIDER", "auto")
         instance.REALSENSE_DEVICE_SN = os.getenv("REALSENSE_DEVICE_SN", "")
         instance.REALSENSE_DEVICE_NAMES = os.getenv("REALSENSE_DEVICE_NAMES", "")
@@ -873,15 +897,9 @@ class Config:
     @classmethod
     def get_skill_library_path(cls) -> Path:
         """获取技能库文件的绝对路径"""
-        instance = cls.get_instance()
-        path = Path(instance.SKILL_LIBRARY_PATH)
+        from .data_paths import ApplicationDataPaths
 
-        # 如果是相对路径，转换为相对于项目根目录
-        if not path.is_absolute():
-            _src_dir = Path(__file__).parent.parent.parent
-            path = _src_dir / instance.SKILL_LIBRARY_PATH
-
-        return path
+        return ApplicationDataPaths.from_config(cls.get_instance()).skills_file
 
     @classmethod
     def _parse_float_list(cls, value: str) -> list:

@@ -2,6 +2,7 @@
 Skill 数据模型
 定义技能系统的核心数据结构
 """
+
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 from enum import Enum
@@ -9,11 +10,12 @@ from enum import Enum
 
 class SkillCategory(Enum):
     """技能分类"""
-    GRAB = "抓取"          # 抓取类技能
-    MOVE = "移动"          # 移动类技能
-    INSPECT = "检测"       # 检测类技能
-    TOOL = "工具"          # 工具更换类技能
-    COMPOUND = "复合"      # 复合类技能
+
+    GRAB = "抓取"  # 抓取类技能
+    MOVE = "移动"  # 移动类技能
+    INSPECT = "检测"  # 检测类技能
+    TOOL = "工具"  # 工具更换类技能
+    COMPOUND = "复合"  # 复合类技能
 
 
 class SkillParameterType(str, Enum):
@@ -31,13 +33,14 @@ class SkillParameter:
     技能参数定义
     描述技能需要用户提供的参数信息
     """
-    name: str              # 参数名（英文，用于代码中引用）
-    param_label: str       # 参数显示名称（中文）
+
+    name: str  # 参数名（英文，用于代码中引用）
+    param_label: str  # 参数显示名称（中文）
     type: SkillParameterType
-    description: str       # 参数描述
-    default: Any           # 默认值
+    description: str  # 参数描述
+    default: Any  # 默认值
     required: bool = True  # 是否必填
-    unit: str = ""         # 物理单位，用于校验动作参数绑定
+    unit: str = ""  # 物理单位，用于校验动作参数绑定
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -51,7 +54,7 @@ class SkillParameter:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SkillParameter':
+    def from_dict(cls, data: Dict[str, Any]) -> "SkillParameter":
         return cls(
             name=data["name"],
             param_label=data.get("param_label", data["name"]),
@@ -69,13 +72,14 @@ class SkillStep:
     技能中的单个步骤
     对应现有 ActionDefinition 的一个原子动作
     """
-    step_id: str                        # 步骤ID
-    action_name: str                    # 调用的动作名（对应 actions_library.json 中的 name）
-    action_type: str                     # MOVE / MANIPULATE / INSPECT / CHANGE_GUN
-    parameters: Dict[str, Any]          # 动作参数
+
+    step_id: str  # 步骤ID
+    action_name: str  # 调用的动作名（对应 actions_library.json 中的 name）
+    action_type: str  # MOVE / MANIPULATE / INSPECT / CHANGE_GUN
+    parameters: Dict[str, Any]  # 动作参数
     parameter_bindings: Dict[str, str] = field(default_factory=dict)
-    description: str = ""               # 步骤描述
-    estimated_time: float = 2.0          # 预估执行时间（秒）
+    description: str = ""  # 步骤描述
+    estimated_time: float = 2.0  # 预估执行时间（秒）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -89,7 +93,7 @@ class SkillStep:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SkillStep':
+    def from_dict(cls, data: Dict[str, Any]) -> "SkillStep":
         return cls(
             step_id=data["step_id"],
             action_name=data["action_name"],
@@ -107,15 +111,16 @@ class Skill:
     完整技能定义
     由多个原子动作步骤组成的复合技能
     """
-    id: str                             # 技能唯一标识
-    name: str                           # 技能显示名称
-    category: SkillCategory             # 技能分类
-    description: str                    # 技能描述
-    icon: str = "🤖"                    # 图标
+
+    id: str  # 技能唯一标识
+    name: str  # 技能显示名称
+    category: SkillCategory  # 技能分类
+    description: str  # 技能描述
+    icon: str = "🤖"  # 图标
     parameters: List[SkillParameter] = field(default_factory=list)
     steps: List[SkillStep] = field(default_factory=list)
-    examples: List[str] = field(default_factory=list)    # 示例说法
-    tags: List[str] = field(default_factory=list)       # 标签（用于匹配）
+    examples: List[str] = field(default_factory=list)  # 示例说法
+    tags: List[str] = field(default_factory=list)  # 标签（用于匹配）
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -131,7 +136,7 @@ class Skill:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Skill':
+    def from_dict(cls, data: Dict[str, Any]) -> "Skill":
         return cls(
             id=data["id"],
             name=data["name"],
@@ -150,8 +155,7 @@ class Skill:
         for p in self.parameters:
             unit = f", 单位={p.unit}" if p.unit else ""
             param_info.append(
-                f"- {p.param_label}({p.name}, 类型={p.type.value}{unit}): "
-                f"{p.description}"
+                f"- {p.param_label}({p.name}, 类型={p.type.value}{unit}): {p.description}"
             )
 
         step_descriptions = [s.description or s.action_name for s in self.steps]
@@ -179,12 +183,13 @@ class SkillMatchResult:
     LLM 解析后的结果
     包含匹配的技能ID、提取的参数和置信度
     """
-    skill_id: str                       # 匹配的技能ID
-    skill_name: str                     # 技能名称
-    confidence: float                   # 置信度 0.0 ~ 1.0
-    extracted_params: Dict[str, Any]   # 从用户输入中提取的参数
-    reasoning: str                      # 分析思路
-    error: Optional[str] = None         # 错误信息（无法匹配时）
+
+    skill_id: str  # 匹配的技能ID
+    skill_name: str  # 技能名称
+    confidence: float  # 置信度 0.0 ~ 1.0
+    extracted_params: Dict[str, Any]  # 从用户输入中提取的参数
+    reasoning: str  # 分析思路
+    error: Optional[str] = None  # 错误信息（无法匹配时）
 
     def is_valid(self) -> bool:
         """是否有效匹配（置信度 >= 0.5）"""
@@ -217,6 +222,7 @@ class ValidationCode(str, Enum):
 @dataclass(frozen=True, slots=True)
 class ValidationResult:
     """动作序列验证结果"""
+
     is_valid: bool
     code: ValidationCode
     message: str

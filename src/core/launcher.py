@@ -11,6 +11,12 @@ from .auxiliary_services import (
     AuxiliaryServiceSnapshot,
 )
 from .config_loader import Config
+from .config_loader import ConfigLoadError
+from .config_validation import (
+    ConfigurationReport,
+    StartupOptions,
+    validate_startup_configuration,
+)
 
 
 if TYPE_CHECKING:
@@ -18,9 +24,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
-
 
 def setup_logging(level: str = "INFO") -> None:
     """Configure process-level console and daily file logging."""
@@ -50,21 +53,10 @@ def build_auxiliary_service_host(
 ) -> AuxiliaryServiceHost:
     """Compose enabled optional services around the shared application."""
     auxiliary_services = []
-    websocket_enabled = bool(
-        getattr(config, "WEBSOCKET_ENABLED", True)
-    ) and not args.disable_websocket
-    if websocket_enabled:
+    options = resolve_startup_options(args, config)
+    if options.websocket_enabled:
         from ..robot_server.ws_server import RobotWebSocketServer
 
-        websocket_host = (
-            args.websocket_host
-            or str(getattr(config, "WEBSOCKET_HOST", "127.0.0.1"))
-        )
-        websocket_port = (
-            args.websocket_port
-            if args.websocket_port is not None
-            else int(getattr(config, "WEBSOCKET_PORT", 8765))
-        )
         auth_token = str(
             getattr(config, "WEBSOCKET_AUTH_TOKEN", "")
         )
@@ -73,17 +65,11 @@ def build_auxiliary_service_host(
                 "未配置 WEBSOCKET_AUTH_TOKEN；WebSocket 仅提供公开只读接口，"
                 "所有写操作均会被拒绝"
             )
-        if websocket_host.strip().lower() not in _LOOPBACK_HOSTS:
-            logger.warning(
-                "WebSocket 正在监听非本机地址 %s；使用 ws:// 时认证凭据和"
-                "业务数据不会由 TLS 加密，请通过可信反向代理提供 wss://",
-                websocket_host,
-            )
         auxiliary_services.append(
             RobotWebSocketServer(
                 services=services,
-                host=websocket_host,
-                port=websocket_port,
+                host=options.websocket_host,
+                port=options.websocket_port,
                 auth_token=auth_token,
                 control_lease_seconds=float(
                     getattr(
@@ -135,6 +121,35 @@ def build_auxiliary_service_host(
                 "AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS",
                 10.0,
             )
+        ),
+    )
+
+
+def resolve_startup_options(
+    args: argparse.Namespace,
+    config: Any,
+) -> StartupOptions:
+    return StartupOptions(
+        simulation=bool(
+            getattr(args, "simulation", False)
+            or getattr(config, "SIMULATION_MODE", False)
+        ),
+        websocket_enabled=bool(
+            getattr(config, "WEBSOCKET_ENABLED", True)
+            and not getattr(args, "disable_websocket", False)
+        ),
+        websocket_host=(
+            getattr(args, "websocket_host", None)
+            or str(getattr(config, "WEBSOCKET_HOST", "127.0.0.1"))
+        ),
+        websocket_port=(
+            getattr(args, "websocket_port", None)
+            if getattr(args, "websocket_port", None) is not None
+            else int(getattr(config, "WEBSOCKET_PORT", 8765))
+        ),
+        log_level=(
+            getattr(args, "log_level", None)
+            or str(getattr(config, "LOG_LEVEL", "INFO"))
         ),
     )
 
@@ -244,15 +259,33 @@ def _build_parser() -> argparse.ArgumentParser:
         "--log-level",
         help="日志级别，默认读取配置",
     )
+    parser.add_argument(
+        "--check-config",
+        action="store_true",
+        help="只校验启动配置和数据路径，不启动 GUI 或硬件",
+    )
     return parser
 
 
 def main() -> int:
     args = _build_parser().parse_args()
-    config = Config.get_instance()
-    if config.SIMULATION_MODE:
-        args.simulation = True
-    setup_logging(args.log_level or config.LOG_LEVEL)
+    try:
+        config = Config.get_instance()
+    except ConfigLoadError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    options = resolve_startup_options(args, config)
+    args.simulation = options.simulation
+    setup_logging(options.log_level)
+    report = validate_startup_configuration(config, options)
+    _log_configuration_report(report)
+    if report.errors:
+        logger.error("启动已中止：配置校验发现 %d 个错误", len(report.errors))
+        return 2
+    if args.check_config:
+        logger.info("启动配置校验通过")
+        return 0
     logger.info(
         "启动 GUI 应用: mode=%s websocket=%s",
         "simulation" if args.simulation else "hardware",
@@ -263,6 +296,23 @@ def main() -> int:
         ),
     )
     return run_gui(args, config)
+
+
+def _log_configuration_report(report: ConfigurationReport) -> None:
+    for issue in report.warnings:
+        logger.warning(
+            "配置警告 [%s] %s: %s",
+            issue.code,
+            issue.field,
+            issue.message,
+        )
+    for issue in report.errors:
+        logger.error(
+            "配置错误 [%s] %s: %s",
+            issue.code,
+            issue.field,
+            issue.message,
+        )
 
 
 if __name__ == "__main__":

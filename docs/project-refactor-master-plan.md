@@ -4,7 +4,7 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-30
 >
-> 当前里程碑：M4 — 工程质量门禁已建立，继续扩展静态检查与交付治理
+> 当前里程碑：M4 — 依赖、启动配置和用户数据交付边界已收敛
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -23,7 +23,7 @@
 | F. 遥操作 | [遥操作说明](teleop.md) |
 | F. 数据采集 | [数据采集说明](data-collection.md) |
 | F. 智能加粉 | [智能闭环加粉 Agent](powder_dispense_agent.md) |
-| G. 工程质量 | [工程质量门禁](quality-gates.md) |
+| G. 工程与数据治理 | [工程质量门禁](quality-gates.md)、[依赖、配置与用户数据治理](data-config-governance.md) |
 
 本计划覆盖的是当前仓库可确认的问题。后续发现的新问题应进入对应 Track 的 backlog，不能因为没有列在首版文档中而被忽略。
 
@@ -555,7 +555,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 当前问题：
 
 - `Config` 超过 1000 行，所有配置集中在全局单例。
-- 数值转换和默认值分散，部分错误会导致整个配置加载失败。
+- 已建立启动集中校验和安全解析错误，但数值转换与默认值仍分散在旧单例。
 - 配置项、模板和实际消费位置容易漂移。
 - 配置包含硬件、模型、服务、语音和标定等不同生命周期数据。
 
@@ -570,9 +570,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 当前问题：
 
-- `data/` 被整体 `.gitignore`，默认动作、技能和任务无法可靠交付。
-- JSON/`.task` 文件无 schema version、锁和原子写。
-- 标定、调试图片、任务和用户数据没有明确目录策略。
+- 内置动作/技能与本机用户数据已分离；缺失用户库时只安装一次内置目录。
+- 动作、任务和技能已使用 schema v1、一次性 v0 迁移、原始备份和原子替换。
+- 标定、调试图片和其他运行时数据仍需纳入统一数据根与保留策略。
 
 目标：
 
@@ -584,10 +584,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 当前问题：
 
-- `requirements.txt` 与 `pyproject.toml` 不完全一致。
-- `pyrealsense2` 在 requirements 中重复声明。
+- `pyproject.toml` 已成为唯一依赖声明，`requirements.txt` 和重复 RealSense 声明已删除。
 - GUI、Server、视觉、语音和硬件依赖未充分拆分。
-- `dev` 依赖为空。
+- `dev` 依赖和冻结 lock 已建立。
 - `run.py` 不是标准安装后的项目命令。
 
 目标：
@@ -620,12 +619,12 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 |---|---|---|---|
 | G-001 | P0 | DONE | pytest 统一收集现有测试；Windows/Python 3.12 CI 使用冻结 lock 执行统一质量入口 |
 | G-002 | P0 | DOING | 已建立 fake device/runtime，transport/LLM fake 待补充 |
-| G-003 | P0 | TODO | 确定默认技能和动作数据交付方式 |
+| G-003 | P0 | DONE | 内置动作/技能由应用版本交付；组合根仅在用户库缺失时安装，现有用户文件永不覆盖 |
 | G-004 | P1 | DONE | unit/contract 已覆盖 runtime、资源、执行状态、依赖边界及全部 WebSocket action、错误码和 route/schema 所有权 |
 | G-005 | P1 | DONE | Ruff 覆盖收敛主线与测试；Mypy 覆盖 WebSocket、DeviceRuntime、ExecutionRuntime 和 LLM 核心类型 |
-| G-006 | P1 | TODO | 统一依赖声明并清理重复依赖 |
-| G-007 | P1 | TODO | 配置启动校验和敏感信息策略 |
-| G-008 | P1 | TODO | 持久化原子写、版本和迁移 |
+| G-006 | P1 | DONE | 删除 requirements 副本与重复依赖；pyproject + uv.lock 成为唯一声明和冻结依赖图 |
+| G-007 | P1 | DONE | 增加 `--check-config`、集中活动配置/路径/端口/超时校验、占位凭据拒绝和统一敏感字段脱敏 |
+| G-008 | P1 | DONE | 动作、任务、技能使用 schema v1；旧格式一次性前向迁移并保留 v0 原始备份，所有新写入原子替换 |
 | G-009 | P2 | TODO | 配置按领域拆分 |
 | G-010 | P2 | TODO | optional dependency 分组 |
 | G-011 | P2 | TODO | 标准 CLI 和打包验证 |
@@ -647,7 +646,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | ADR-M-005 | Accepted | 内部迁移策略 | 直接切换，不保留 legacy/v2 双实现、转发模块或兼容开关 |
 | ADR-M-006 | Accepted | simulation | 替换设备实现，不替换状态机 |
 | ADR-M-007 | Proposed | 配置模型 | typed settings + 启动校验 |
-| ADR-M-008 | Proposed | 数据目录 | built-in data 与 user data 分离 |
+| ADR-M-008 | Accepted | 数据目录 | built-in catalog 与可配置 user data root 分离；只初始化缺失文件 |
 | ADR-M-009 | Proposed | GUI 状态管理 | application service + Qt adapter/view-model |
 | ADR-M-010 | Proposed | 四 Agent 粉末方案 | 作为独立立项，不纳入基础重构默认范围 |
 
@@ -869,7 +868,8 @@ M4 工程治理与清理
 - [ ] 无硬件 simulation 可回归主要流程。
 - [ ] 关键真实硬件验收有记录。
 - [ ] 配置、依赖、打包和平台支持策略清晰。
-- [ ] 任务、技能和默认数据可重复交付。
+- [x] 动作、任务和技能具有版本、原子写和一次性前向迁移。
+- [x] 内置动作和技能可重复交付且不覆盖用户数据。
 - [ ] legacy 执行实现和过期文档已清理。
 
 ## 20. 进度维护规则
@@ -924,6 +924,7 @@ M4 工程治理与清理
 | 2026-07-30 | M3 | B/F | 多臂真实遥测与采集时间语义 | F-D-008/F-D-009 TODO → DONE | schema 直接升级 v2；新增统一 ArmTelemetry/DepthCameraFrame，记录 depth scale、畸变、设备/主机时间、可选外参和实际夹爪/电流/末端力；单/双臂采样强制最大 monotonic 偏差，可选字段使用 validity mask；Native 不伪造 joint_forces，并增加显式受信 pickle 类型 smoke test | 187 tests |
 | 2026-07-30 | M3 | E | LLM Provider 治理与规划回归 | E-010/E-011/E-012 TODO → DONE | 新增所有 task 共用的 provider health、熔断、半开和显式 fallback；记录 Prompt/请求/provider/model/技能目录来源；分类失败不再静默伪装成功；建立 strict schema v1 离线 golden runner | 195 tests，14 golden cases |
 | 2026-07-30 | M4 | A/C/G | pytest、协议契约与静态质量门禁 | A-008/G-001/G-004/G-005 TODO/DOING → DONE | 建立本地/CI 唯一质量入口和 Windows/Python 3.12 冻结依赖流水线；Ruff 清零收敛主线基础问题，Mypy 检查核心 typed boundary；全部 WebSocket action 具备独立最小合法请求 golden contract，route/schema、payload 边界、稳定错误码和响应 DTO 纳入 pytest | 262 tests + 26 subtests，14 golden cases |
+| 2026-07-30 | M4 | G | 依赖、配置与用户数据治理 | G-003/G-006/G-007/G-008 TODO → DONE | 删除 requirements 双来源；内置 catalog 与可配置用户数据根分离；动作/任务/技能统一 schema v1、v0 原始备份、一次性迁移和原子替换；启动前集中校验活动端口、超时、路径、网络暴露及占位凭据，诊断统一脱敏 | 280 tests + 26 subtests，14 golden cases |
 
 ## 22. 建议的首批实施顺序
 
@@ -931,7 +932,7 @@ M4 工程治理与清理
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
 3. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
-4. **G-003/G-006/G-007/G-008**：统一默认数据交付、依赖声明、启动配置校验和持久化迁移策略。
+4. **G-009/G-010/G-011**：按领域拆分 typed settings 和 optional dependency，补标准安装命令与 wheel 验证。
 5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
 6. 完成 simulation smoke test 后执行逐设备真实硬件验收。

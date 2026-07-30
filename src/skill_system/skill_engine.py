@@ -66,17 +66,7 @@ class SkillEngine:
             from ..core.config_loader import Config
             json_path = str(Config.get_skill_library_path())
 
-        count = self._registry.load_from_json(json_path)
-        if count == 0:
-            # 尝试加载默认技能
-            from .default_skills import get_default_skills
-            default_skills = get_default_skills()
-            for skill in default_skills:
-                self._registry.register(skill)
-            count = len(default_skills)
-            logger.info(f"使用默认技能库，共 {count} 个技能")
-
-        return count
+        return self._registry.load_from_json(json_path)
 
     def parse_and_expand(
         self,

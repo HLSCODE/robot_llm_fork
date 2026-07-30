@@ -71,6 +71,7 @@ data collection、device runtime、execution、GUI、LLM、WebSocket 和 skill s
 Mypy 先覆盖已完成收敛、类型边界较稳定的核心文件：
 
 - WebSocket protocol、route registry 和 request limiter。
+- 版本化 JSON、用户数据路径、启动配置校验和内置数据安装。
 - DeviceRuntime 的供应商无关模型。
 - ExecutionRuntime 的状态、事件和结果模型。
 - LLM 通用类型与确定性指纹。

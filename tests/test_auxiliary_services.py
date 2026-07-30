@@ -279,7 +279,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
 
         self.assertEqual(["auxiliary", "devices"], calls)
 
-    def test_non_loopback_websocket_binding_emits_security_warning(self):
+    def test_non_loopback_websocket_binding_uses_resolved_endpoint(self):
         args = SimpleNamespace(
             disable_websocket=False,
             websocket_host=None,
@@ -295,20 +295,18 @@ class ApplicationHostCompositionTests(unittest.TestCase):
             AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=0.5,
         )
 
-        with (
-            patch(
-                "src.robot_server.ws_server.RobotWebSocketServer",
-                return_value=_FakeAsyncService("websocket", []),
-            ),
-            self.assertLogs("src.core.launcher", level="WARNING") as logs,
-        ):
+        with patch(
+            "src.robot_server.ws_server.RobotWebSocketServer",
+            return_value=_FakeAsyncService("websocket", []),
+        ) as server_type:
             host = build_auxiliary_service_host(
                 args,
                 config,
                 services=object(),
             )
 
-        self.assertIn("wss://", "\n".join(logs.output))
+        self.assertEqual("0.0.0.0", server_type.call_args.kwargs["host"])
+        self.assertEqual(8765, server_type.call_args.kwargs["port"])
         self.assertEqual("websocket", host.snapshots()[0].name)
 
     def test_missing_websocket_token_warns_that_writes_are_locked(self):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..core.data_paths import ApplicationDataPaths
 from ..core.storage import JsonCompositionRepository
 from ..device_runtime import (
     ArmTelemetryReader,
@@ -13,6 +14,7 @@ from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
 from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
+from .builtin_data import BuiltinDataInstaller
 from .command_runtime import CommandRuntime
 from .composition import CompositionService
 from .data_collection import (
@@ -36,7 +38,14 @@ def create_application_services(
     *,
     simulation: bool,
 ) -> ApplicationServices:
-    composition = CompositionService(JsonCompositionRepository())
+    data_paths = ApplicationDataPaths.from_config(config)
+    BuiltinDataInstaller(data_paths).install_missing()
+    composition = CompositionService(
+        JsonCompositionRepository(
+            actions_file=data_paths.actions_file,
+            tasks_directory=data_paths.tasks_directory,
+        )
+    )
     device_runtime = create_device_runtime(config, simulation=simulation)
     resources = ResourceArbiter()
     engine = ActionEngine(device_runtime, config)
@@ -47,7 +56,7 @@ def create_application_services(
     )
     execution = ExecutionService(manager)
     skill_engine = SkillEngine()
-    skill_engine.load_skills()
+    skill_engine.load_skills(str(data_paths.skills_file))
     commands = CommandRuntime(
         execution=execution,
         skill_engine=skill_engine,

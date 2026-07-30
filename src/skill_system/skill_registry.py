@@ -1,15 +1,25 @@
-"""
-技能注册表
-单例模式，管理所有技能的定义和查询
-"""
-import json
+"""Skill registry and versioned user skill-library persistence."""
+
+from copy import deepcopy
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from ..core.json_documents import (
+    CollectionDocumentSpec,
+    JsonDocumentSchemaError,
+    load_collection_document,
+    migrate_collection_document,
+    write_collection_document,
+)
 from .models import Skill, SkillCategory
 
 logger = logging.getLogger(__name__)
+SKILL_LIBRARY_DOCUMENT = CollectionDocumentSpec(
+    schema="robot_llm.skills",
+    collection_key="skills",
+    legacy_kind="mapping",
+)
 
 
 class SkillRegistry:
@@ -17,7 +27,8 @@ class SkillRegistry:
     技能注册表（单例）
     管理所有技能的定义，支持从 JSON 文件加载和查询
     """
-    _instance: Optional['SkillRegistry'] = None
+
+    _instance: Optional["SkillRegistry"] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -101,75 +112,56 @@ class SkillRegistry:
     # ==================== 加载与保存 ====================
 
     def load_from_json(self, json_path: str | Path) -> int:
-        """
-        从 JSON 文件加载技能库
-
-        Args:
-            json_path: JSON 文件路径
-
-        Returns:
-            加载的技能数量
-        """
+        """Load and atomically replace the registry from a versioned file."""
         json_path = Path(json_path)
+        if not json_path.is_file():
+            raise FileNotFoundError(json_path)
+        document = load_collection_document(
+            json_path,
+            SKILL_LIBRARY_DOCUMENT,
+        )
+        skills_data = (
+            _normalize_legacy_skills(document.collection)
+            if document.requires_migration
+            else document.collection
+        )
+        parsed_skills: dict[str, Skill] = {}
+        for index, skill_data in enumerate(skills_data):
+            if not isinstance(skill_data, dict):
+                raise JsonDocumentSchemaError(
+                    f"{json_path.name} skill at index {index} must be a JSON object"
+                )
+            try:
+                skill = Skill.from_dict(skill_data)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise JsonDocumentSchemaError(
+                    f"{json_path.name} skill at index {index} is invalid"
+                ) from exc
+            if skill.id in parsed_skills:
+                raise JsonDocumentSchemaError(
+                    f"{json_path.name} contains duplicate skill id {skill.id!r}"
+                )
+            parsed_skills[skill.id] = skill
 
-        if not json_path.exists():
-            logger.error(f"技能库文件不存在: {json_path}")
-            return 0
+        if document.requires_migration:
+            migrate_collection_document(
+                json_path,
+                SKILL_LIBRARY_DOCUMENT,
+                [skill.to_dict() for skill in parsed_skills.values()],
+            )
+        self._skills = parsed_skills
+        logger.info("从 %s 加载了 %d 个技能", json_path, len(parsed_skills))
+        return len(parsed_skills)
 
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            skills_data = data.get("skills", [])
-            count = 0
-
-            for skill_data in skills_data:
-                try:
-                    skill = Skill.from_dict(skill_data)
-                    self.register(skill)
-                    count += 1
-                except Exception as e:
-                    logger.error(f"加载技能失败: {skill_data.get('id', 'unknown')}, 错误: {e}")
-
-            logger.info(f"从 {json_path} 加载了 {count} 个技能")
-            return count
-
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON 解析失败: {e}")
-            return 0
-        except Exception as e:
-            logger.error(f"加载技能库失败: {e}")
-            return 0
-
-    def save_to_json(self, json_path: str | Path) -> bool:
-        """
-        将当前技能库保存到 JSON 文件
-
-        Args:
-            json_path: 保存路径
-
-        Returns:
-            是否保存成功
-        """
+    def save_to_json(self, json_path: str | Path) -> None:
+        """Persist the current registry as one versioned atomic document."""
         json_path = Path(json_path)
-
-        try:
-            # 确保目录存在
-            json_path.parent.mkdir(parents=True, exist_ok=True)
-
-            data = {
-                "skills": [skill.to_dict() for skill in self._skills.values()]
-            }
-
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-
-            logger.info(f"技能库已保存到 {json_path}")
-            return True
-
-        except Exception as e:
-            logger.error(f"保存技能库失败: {e}")
-            return False
+        write_collection_document(
+            json_path,
+            SKILL_LIBRARY_DOCUMENT,
+            [skill.to_dict() for skill in self._skills.values()],
+        )
+        logger.info("技能库已保存到 %s", json_path)
 
     # ==================== 查询方法 ====================
 
@@ -223,7 +215,9 @@ class SkillRegistry:
         lines = []
 
         for skill in self._skills.values():
-            param_str = ", ".join([p.param_label for p in skill.parameters]) if skill.parameters else "无"
+            param_str = (
+                ", ".join([p.param_label for p in skill.parameters]) if skill.parameters else "无"
+            )
             example_str = " / ".join(skill.examples[:2]) if skill.examples else ""
 
             lines.append(f"- 技能ID: {skill.id}")
@@ -255,3 +249,18 @@ class SkillRegistry:
         self._skills.clear()
         self._initialized = False
         SkillRegistry._instance = None
+
+
+def _normalize_legacy_skills(skills_data: list[Any]) -> list[Any]:
+    """Add fields introduced before schema v1, without relaxing schema v1."""
+    normalized_skills = deepcopy(skills_data)
+    for skill_data in normalized_skills:
+        if not isinstance(skill_data, dict):
+            continue
+        for parameter in skill_data.get("parameters", []):
+            if isinstance(parameter, dict):
+                parameter.setdefault("unit", "")
+        for step in skill_data.get("steps", []):
+            if isinstance(step, dict):
+                step.setdefault("parameter_bindings", {})
+    return normalized_skills

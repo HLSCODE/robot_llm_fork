@@ -94,7 +94,7 @@ GUI 或其他客户端修改动作库、任务库或当前序列后，所有已�
 ### 2.1 安装依赖
 
 ```bash
-pip install -r requirements.txt
+uv sync --frozen
 ```
 
 ### 2.2 准备配置文件

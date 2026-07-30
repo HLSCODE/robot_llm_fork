@@ -19,7 +19,7 @@
 - 硬件模式需要可访问的机械臂 IP、串口设备、摄像头和模型文件
 - 前端联调或无硬件开发建议使用模拟模式
 
-主要依赖见 `pyproject.toml` 和 `requirements.txt`，包括：
+依赖以 `pyproject.toml` 为唯一声明源，`uv.lock` 固定可重复安装版本。主要包括：
 
 - `PyQt6`
 - `websockets`
@@ -36,27 +36,12 @@
 
 ### 1. 安装依赖
 
-使用 pip：
-
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync --frozen
 ```
 
-Windows PowerShell：
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-如果使用 uv：
-
-```bash
-uv sync
-```
+语音等可选能力按需使用 `uv sync --frozen --extra voice` 安装，不再维护容易漂移的
+`requirements.txt` 副本。
 
 ### 2. 准备配置
 
@@ -82,12 +67,11 @@ WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
 
 OPENAI_API_KEY=
-MODEL_PROVIDER=dashscope
-# 可选：按能力指定 provider，留空则回退到 MODEL_PROVIDER
-LLM_CHAT_PROVIDER=
-LLM_PLANNER_PROVIDER=
+LLM_DEFAULT_PROVIDER=dashscope
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_MODEL=qwen-turbo
+
+ROBOT_DATA_DIR=data
 
 CAMERA_PROVIDER=realsense
 REALSENSE_DEVICE_SN=
@@ -101,6 +85,15 @@ ROBOT2_PORT=8080
 ```
 
 `config.env` 用于本机配置和密钥，默认不应提交到仓库。
+
+启动 GUI 或连接硬件前可以单独校验配置：
+
+```bash
+python run.py --check-config --simulation --disable-websocket
+```
+
+依赖单一来源、用户数据目录、schema v1、自动迁移和敏感信息规则见
+[依赖、配置与用户数据治理](docs/data-config-governance.md)。
 
 ### 3. 启动应用
 
@@ -187,14 +180,15 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 ├── run.py                    # GUI 与附加网络服务的统一入口
 ├── config.env.example         # 配置模板
 ├── pyproject.toml             # Python 版本与依赖声明
-├── requirements.txt           # pip 依赖列表
+├── uv.lock                    # 锁定的完整依赖图
 ├── docs/
 │   └── websocket-api.md       # WebSocket 接口手册
-├── data/
-│   ├── actions_library.json   # 动作库
-│   ├── tasks/                 # 已保存任务序列
-│   └── skills/                # 技能库
+├── data/                      # 本机用户数据，默认不提交
+│   ├── actions_library.json   # versioned 动作库
+│   ├── tasks/                 # versioned 任务
+│   └── skills/                # versioned 技能库
 └── src/
+    ├── application/builtin_data.py # 首次运行安装内置动作/技能
     ├── core/                  # 数据模型、配置加载、存储、启动器
     ├── gui/                   # PyQt6 主界面与执行线程
     ├── widgets/               # GUI 组件与 AI 助手组件
@@ -238,7 +232,7 @@ AI 规划流程：
 4. 用户确认后发送 `ai_confirm`
 5. 服务端执行序列并推送执行事件
 
-LLM 配置通过 `MODEL_PROVIDER` 选择默认 provider，支持 `openai`、`deepseek`、`dashscope` 和 `minicpm`。OpenAI-compatible provider 继续使用 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；MiniCPM Realtime provider 使用 `MINICPM_GATEWAY_*` 配置。需要分开指定聊天和规划模型时，可使用 `LLM_CHAT_PROVIDER`、`LLM_PLANNER_PROVIDER`。
+LLM 配置通过 `LLM_DEFAULT_PROVIDER` 选择默认 provider，支持 `openai`、`deepseek`、`dashscope` 和 `minicpm`。OpenAI-compatible provider 使用 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；MiniCPM Realtime provider 使用 `MINICPM_GATEWAY_*` 配置。固定任务需要指定模型时，由对应 `TaskProfile` 显式声明。
 
 ## 相机与视觉
 
@@ -313,7 +307,7 @@ python run.py --simulation
 
 ### AI 规划不可用
 
-检查 `MODEL_PROVIDER`、`LLM_PLANNER_PROVIDER` 及对应模型配置是否正确，并调用 `ai_status` 查看服务端状态。
+检查 `LLM_DEFAULT_PROVIDER` 及对应模型配置是否正确，并调用 `ai_status` 查看服务端状态。
 
 ### 相机没有画面
 
@@ -322,4 +316,5 @@ python run.py --simulation
 ## 参考文档
 
 - [WebSocket 接口手册](docs/websocket-api.md)
+- [依赖、配置与用户数据治理](docs/data-config-governance.md)
 - [配置模板](config.env.example)

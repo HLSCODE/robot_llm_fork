@@ -1,7 +1,4 @@
-"""
-默认技能定义
-当 skill_library.json 不存在时，使用这里定义的技能
-"""
+"""Immutable built-in skills installed into an empty user data directory."""
 from typing import List
 from .models import (
     Skill,
