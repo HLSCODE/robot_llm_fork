@@ -23,7 +23,6 @@ from PyQt6.QtWidgets import (
 
 from ..ai_integration import AIController, ExecutionBridge
 from ..application import ApplicationServices
-from ..core.config_loader import Config
 from ..gui.dialogs import ActionPreviewDialog
 from ..voice_interaction import (
     AudioOutputGate,
@@ -154,28 +153,28 @@ class AIAssistantWidget(QWidget):
             services,
             self._execution_bridge,
         )
-        config = Config.get_instance()
-        voice_config = Config.get_voice_interaction_config()
+        settings = services.settings
+        self._voice_config = settings.voice.as_runtime_mapping()
         self._voice_controller = VoiceInteractionController(
             llm_registry=self._ai_controller.get_llm_registry(),
             command_runtime=services.commands,
             source="gui-ai",
             camera_provider=CamerasModuleProvider(
                 session_factory=self._camera_capture_session,
-                camera_name=config.VISION_CAMERA_NAME or None,
+                camera_name=settings.vision.vision_camera_name or None,
             ),
-            timeout_s=voice_config["session_timeout_s"],
-            turn_timeout_s=float(
-                getattr(config, "INTERACTION_TURN_TIMEOUT_S", 90.0)
-            ),
-            history_turns=voice_config["session_history_turns"],
-            tts_enabled=voice_config["tts_enabled"],
+            timeout_s=self._voice_config["session_timeout_s"],
+            turn_timeout_s=settings.runtime.interaction_turn_timeout_s,
+            history_turns=self._voice_config["session_history_turns"],
+            tts_enabled=self._voice_config["tts_enabled"],
             wake_feedback=WakeFeedback(
-                enabled=bool(voice_config.get("wake_feedback_enabled", True)),
-                text=str(voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
+                enabled=bool(self._voice_config.get("wake_feedback_enabled", True)),
+                text=str(self._voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
             ),
         )
-        self._voice_input_enabled = bool(voice_config.get("speech_input_enabled"))
+        self._voice_input_enabled = bool(
+            self._voice_config.get("speech_input_enabled")
+        )
         self._voice_thread = None
         self._voice_worker = None
         self._voice_event_source = "voice"
@@ -623,15 +622,14 @@ class AIAssistantWidget(QWidget):
 
     def start_voice_speech_runtime_if_configured(self) -> bool:
         """Auto-start real speech input when ASR and KWS are both enabled."""
-        voice_config = Config.get_voice_interaction_config()
-        if not voice_config.get("speech_input_enabled"):
+        if not self._voice_config.get("speech_input_enabled"):
             return False
         return self._start_voice_speech_runtime(auto_start=True)
 
     def notify_speech_startup_wait_timeout(self):
         if not self._speech_runtime_starting:
             return
-        timeout_s = Config.get_voice_interaction_config().get(
+        timeout_s = self._voice_config.get(
             "speech_startup_wait_timeout_s", 30.0
         )
         self._add_system_message(
@@ -643,8 +641,7 @@ class AIAssistantWidget(QWidget):
         if self._speech_thread is not None:
             return True
 
-        voice_config = Config.get_voice_interaction_config()
-        if not voice_config.get("speech_input_enabled"):
+        if not self._voice_config.get("speech_input_enabled"):
             self._add_system_message("真实语音输入未启用。请在 config.env 中设置 VOICE_INPUT_ENABLED=true，并重启 GUI 后再启动监听。")
             self._update_speech_runtime_controls()
             return False
@@ -661,7 +658,7 @@ class AIAssistantWidget(QWidget):
         self._speech_thread = QThread(self)
         self._speech_worker = VoiceSpeechRuntimeWorker(
             self._voice_controller,
-            voice_config,
+            self._voice_config,
             self._voice_audio_output_gate,
         )
         self._speech_worker.moveToThread(self._speech_thread)

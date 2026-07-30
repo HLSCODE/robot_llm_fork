@@ -36,6 +36,10 @@ QUALITY_CHECKS = (
         name="LLM golden regression",
         arguments=("-m", "src.llm.regression"),
     ),
+    QualityCheck(
+        name="Wheel package smoke",
+        arguments=("scripts/validate_package.py",),
+    ),
 )
 
 

@@ -2,7 +2,6 @@
 
 from collections.abc import Sequence
 import logging
-from typing import Any
 
 from ..core.execution_context import ExecutionContext
 from ..core.models import (
@@ -13,6 +12,12 @@ from ..core.models import (
     SequenceItemStatus,
 )
 from ..device_runtime import DeviceNotRegisteredError, DeviceRuntime
+from ..core.settings import (
+    DeviceSettings,
+    ExecutionSettings,
+    SecretSettings,
+    VisionSettings,
+)
 from .action_control import (
     BASE_MOVE_CONTROL_POLICIES,
     MANIPULATE_CONTROL_POLICIES,
@@ -71,76 +76,40 @@ class ActionEngine:
     def __init__(
         self,
         device_runtime: DeviceRuntime,
-        config: Any,
+        execution_settings: ExecutionSettings,
+        device_settings: DeviceSettings,
+        vision_settings: VisionSettings,
+        secret_settings: SecretSettings,
     ) -> None:
         self._device_runtime = device_runtime
         self.execution_context = ExecutionContext()
         self._callbacks: EngineCallbacks | None = None
-        self._default_action_timeout_seconds = float(
-            getattr(config, "EXECUTION_ACTION_TIMEOUT_SECONDS", 600.0)
-        )
+        self._default_action_timeout_seconds = execution_settings.execution_action_timeout_seconds
         if self._default_action_timeout_seconds <= 0:
-            raise ValueError(
-                "EXECUTION_ACTION_TIMEOUT_SECONDS must be positive"
-            )
+            raise ValueError("EXECUTION_ACTION_TIMEOUT_SECONDS must be positive")
         self._motion_handler_options = MotionHandlerOptions(
-            arm_move_max_attempts=int(
-                getattr(
-                    config,
-                    "EXECUTION_ARM_MOVE_MAX_ATTEMPTS",
-                    3,
-                )
-            ),
+            arm_move_max_attempts=int(execution_settings.execution_arm_move_max_attempts),
             arm_move_retry_delay_seconds=float(
-                getattr(
-                    config,
-                    "EXECUTION_ARM_MOVE_RETRY_DELAY_SECONDS",
-                    0.5,
-                )
+                execution_settings.execution_arm_move_retry_delay_seconds
             ),
             body_poll_interval_seconds=float(
-                getattr(
-                    config,
-                    "EXECUTION_BODY_POLL_INTERVAL_SECONDS",
-                    0.1,
-                )
+                execution_settings.execution_body_poll_interval_seconds
             ),
         )
         self._manipulation_handler_options = ManipulationHandlerOptions(
-            gripper_max_attempts=int(
-                getattr(
-                    config,
-                    "EXECUTION_GRIPPER_MAX_ATTEMPTS",
-                    3,
-                )
-            ),
+            gripper_max_attempts=int(execution_settings.execution_gripper_max_attempts),
             gripper_retry_delay_seconds=float(
-                getattr(
-                    config,
-                    "EXECUTION_GRIPPER_RETRY_DELAY_SECONDS",
-                    0.5,
-                )
+                execution_settings.execution_gripper_retry_delay_seconds
             ),
         )
         self._trajectory_handler_options = TrajectoryHandlerOptions(
             poll_interval_seconds=float(
-                getattr(
-                    config,
-                    "EXECUTION_TRAJECTORY_POLL_INTERVAL_SECONDS",
-                    0.5,
-                )
+                execution_settings.execution_trajectory_poll_interval_seconds
             )
         )
-        tapping_config_getter = getattr(
-            config,
-            "get_tapping_config",
-            None,
-        )
-        self._tapping_config_provider = (
-            tapping_config_getter
-            if callable(tapping_config_getter)
-            else lambda: {}
-        )
+        self._tapping_config_provider = device_settings.tapping_config
+        self._vision_settings = vision_settings
+        self._secret_settings = secret_settings
         self._handler_registry = self._create_handler_registry()
 
     def _create_handler_registry(self) -> ActionHandlerRegistry:
@@ -150,6 +119,7 @@ class ActionEngine:
                 self._device_runtime,
                 self.execution_context,
                 self._motion_handler_options,
+                self._vision_settings,
             ),
             BodyMoveActionHandler(
                 self._device_runtime,
@@ -183,6 +153,7 @@ class ActionEngine:
             self._device_runtime,
             self._manipulation_handler_options,
             self._tapping_config_provider,
+            self._read_balance,
         )
         validate_control_policy_routes(
             "manipulation executors",
@@ -211,7 +182,10 @@ class ActionEngine:
         )
         registry.register(
             ActionType.VISION_CAPTURE,
-            VisionCaptureActionHandler(self._device_runtime),
+            VisionCaptureActionHandler(
+                self._device_runtime,
+                self._vision_settings,
+            ),
             resolve_vision_capture_control_policy,
         )
         registry.register(
@@ -219,6 +193,7 @@ class ActionEngine:
             VisionRelocalizationActionHandler(
                 self._device_runtime,
                 self.execution_context,
+                self._vision_settings,
             ),
             resolve_vision_relocalization_control_policy,
         )
@@ -232,6 +207,17 @@ class ActionEngine:
         )
         registry.validate_complete()
         return registry
+
+    def _read_balance(self) -> float:
+        from ..vision.balance_reader_simple import read_balance
+
+        return read_balance(
+            camera_index=self._vision_settings.balance_camera_index,
+            api_key=self._secret_settings.vveai_api_key,
+            base_url=self._vision_settings.vveai_base_url,
+            model=self._vision_settings.vveai_model,
+            timeout_seconds=(self._vision_settings.balance_request_timeout_seconds),
+        )
 
     def run(
         self,
@@ -467,14 +453,11 @@ class ActionEngine:
     ) -> ActionHandlerResult | None:
         for target in policy.stop_targets:
             try:
-                declared_modes = self._device_runtime.declared_stop_modes(
-                    target.device_id
-                )
+                declared_modes = self._device_runtime.declared_stop_modes(target.device_id)
             except DeviceNotRegisteredError as exc:
                 return ActionHandlerResult.failed(
                     ActionResultCode.CONTROL_POLICY_MISMATCH,
-                    "动作控制策略引用了未注册的停止设备: "
-                    f"{target.device_id}: {exc}",
+                    f"动作控制策略引用了未注册的停止设备: {target.device_id}: {exc}",
                     operation=self._CONTROL_POLICY_OPERATION,
                     device_id=target.device_id,
                 )
@@ -491,8 +474,7 @@ class ActionEngine:
             )
             return ActionHandlerResult.failed(
                 ActionResultCode.CONTROL_POLICY_MISMATCH,
-                "设备停止能力不满足动作控制策略: "
-                f"{target.device_id} 缺少 {missing_values}",
+                f"设备停止能力不满足动作控制策略: {target.device_id} 缺少 {missing_values}",
                 operation=self._CONTROL_POLICY_OPERATION,
                 device_id=target.device_id,
             )

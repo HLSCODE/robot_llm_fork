@@ -35,7 +35,6 @@ from ..application import (
     CompositionEvent,
     CompositionRevisionConflict,
 )
-from ..core.config_loader import Config
 from ..core.models import (
     ActionDefinition,
     ActionType,
@@ -219,7 +218,7 @@ class MainWindow(QMainWindow):
             ActionType.TRAJECTORY: []
         }
         self.is_paused = False
-        self.config = Config.get_instance()
+        self.settings = services.settings
         self.robot1_connected = False
         self.robot2_connected = False
 
@@ -293,9 +292,7 @@ class MainWindow(QMainWindow):
 
             timeout_s = max(
                 0.0,
-                float(self.config.get_voice_interaction_config().get(
-                    "speech_startup_wait_timeout_s", 30.0
-                )),
+                self.settings.voice.voice_speech_startup_wait_timeout_s,
             )
             if timeout_s > 0:
                 self._speech_startup_wait_timer = QTimer(self)
@@ -329,7 +326,7 @@ class MainWindow(QMainWindow):
         self.initialize_robots()
 
         # 初始化底盘移动控制器
-        if self.config.BODY_DI_PAN:
+        if self.settings.devices.body_di_pan:
             self.initialize_move_controller()
 
         # 注释掉下面 2 行，防止启动时升降平台高度变化
@@ -1404,7 +1401,12 @@ class MainWindow(QMainWindow):
             self.create_trajectory_action()
             return
 
-        dialog = ActionConfigDialog(action_type, existing_names=self._collect_action_names(), move_target=move_target)
+        dialog = ActionConfigDialog(
+            action_type,
+            self.settings.vision,
+            existing_names=self._collect_action_names(),
+            move_target=move_target,
+        )
         if dialog.exec():
             action = dialog.get_action_definition()
             self._services.composition.create_action(
@@ -1553,7 +1555,13 @@ class MainWindow(QMainWindow):
             "name": action.name,
             "parameters": action.parameters
         }
-        dialog = ActionConfigDialog(action.type, action_data, self, existing_names=self._collect_action_names())
+        dialog = ActionConfigDialog(
+            action.type,
+            self.settings.vision,
+            action_data,
+            self,
+            existing_names=self._collect_action_names(),
+        )
         if not dialog.exec():
             return
 
@@ -2469,7 +2477,12 @@ class MainWindow(QMainWindow):
             "name": action_def.name,
             "parameters": action_def.parameters,
         }
-        dialog = ActionConfigDialog(action_def.type, action_data, self)
+        dialog = ActionConfigDialog(
+            action_def.type,
+            self.settings.vision,
+            action_data,
+            self,
+        )
         if not dialog.exec():
             return
 
@@ -2579,10 +2592,10 @@ class MainWindow(QMainWindow):
             def run(self):
                 import time
 
-                from src.core.config_loader import Config
-
-                config = Config.get_instance()
-                camera_name = config.VISION_CAMERA_NAME or None
+                camera_name = (
+                    self.settings.vision.vision_camera_name
+                    or None
+                )
                 session = None
 
                 try:

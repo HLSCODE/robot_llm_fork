@@ -5,16 +5,11 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import re
 import urllib.request
 
-API_KEY = os.getenv("VVEAI_API_KEY", "")
-BASE_URL = os.getenv("VVEAI_BASE_URL", "https://api.vveai.com/v1").rstrip("/")
-MODEL = os.getenv("VVEAI_MODEL", "doubao-seed-1-8-251228")
 
-
-def capture_image(camera_index: int = 12):
+def capture_image(camera_index: int):
     import cv2
 
     cap = cv2.VideoCapture(camera_index)
@@ -37,12 +32,19 @@ def image_to_data_url(frame) -> str:
     return f"data:image/jpeg;base64,{b64}"
 
 
-def ask_model(image_url: str) -> str:
-    if not API_KEY:
+def ask_model(
+    image_url: str,
+    *,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout_seconds: float,
+) -> str:
+    if not api_key:
         raise RuntimeError("请先设置环境变量 VVEAI_API_KEY")
 
     payload = {
-        "model": MODEL,
+        "model": model,
         "messages": [
             {
                 "role": "user",
@@ -57,15 +59,15 @@ def ask_model(image_url: str) -> str:
     }
 
     req = urllib.request.Request(
-        f"{BASE_URL}/chat/completions",
+        f"{base_url.rstrip('/')}/chat/completions",
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     return data["choices"][0]["message"]["content"]
 
@@ -77,14 +79,34 @@ def parse_value(text: str) -> float:
     return float(match.group(0))
 
 
-def read_balance(camera_index: int = 12) -> float:
+def read_balance(
+    *,
+    camera_index: int,
+    api_key: str,
+    base_url: str,
+    model: str,
+    timeout_seconds: float,
+) -> float:
     frame = capture_image(camera_index)
-    reply = ask_model(image_to_data_url(frame))
+    reply = ask_model(
+        image_to_data_url(frame),
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        timeout_seconds=timeout_seconds,
+    )
     return parse_value(reply)
 
 
 if __name__ == "__main__":
-    value = read_balance()
-    print(value)
+    from ..core.config_loader import load_application_settings
 
-# 
+    settings = load_application_settings()
+    value = read_balance(
+        camera_index=settings.vision.balance_camera_index,
+        api_key=settings.secrets.vveai_api_key,
+        base_url=settings.vision.vveai_base_url,
+        model=settings.vision.vveai_model,
+        timeout_seconds=settings.vision.balance_request_timeout_seconds,
+    )
+    print(value)

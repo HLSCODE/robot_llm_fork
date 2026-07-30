@@ -14,16 +14,16 @@ def isolate_default_application_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[None]:
     """Keep service-construction tests away from workstation user data."""
-    original_resolver = ApplicationDataPaths.from_config
+    original_resolver = ApplicationDataPaths.from_settings
     with TemporaryDirectory(
         prefix=".pytest-application-data-",
         dir=Path.cwd(),
     ) as temporary_directory:
         root = Path(temporary_directory)
 
-        def resolve(config: object) -> ApplicationDataPaths:
-            if hasattr(config, "ROBOT_DATA_DIR"):
-                return original_resolver(config)
+        def resolve(settings) -> ApplicationDataPaths:
+            if settings.robot_data_dir != "data":
+                return original_resolver(settings)
             return ApplicationDataPaths(
                 root=root,
                 actions_file=root / "actions_library.json",
@@ -33,7 +33,7 @@ def isolate_default_application_data(
 
         monkeypatch.setattr(
             ApplicationDataPaths,
-            "from_config",
+            "from_settings",
             staticmethod(resolve),
         )
         yield

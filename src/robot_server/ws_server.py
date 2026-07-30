@@ -86,7 +86,7 @@ WebSocket 路径:
         error — 执行失败或硬件异常
 
 启动方式:
-    python run.py
+    uv run robot-llm
 """
 
 import asyncio
@@ -391,13 +391,9 @@ class RobotWebSocketServer:
         }
         composition = self._services.composition
         if event.change_type is CompositionChangeType.SEQUENCE:
-            payload["sequence"] = [
-                entry.to_dict() for entry in composition.sequence_entries()
-            ]
+            payload["sequence"] = [entry.to_dict() for entry in composition.sequence_entries()]
         elif event.change_type is CompositionChangeType.ACTIONS:
-            payload["actions"] = [
-                action.to_dict() for action in composition.list_actions()
-            ]
+            payload["actions"] = [action.to_dict() for action in composition.list_actions()]
         elif event.change_type is CompositionChangeType.TASKS:
             payload["tasks"] = [
                 {
@@ -471,9 +467,7 @@ class RobotWebSocketServer:
                 {
                     "event": "connected",
                     "client_id": client_id,
-                    "authentication_configured": (
-                        self._access.authentication_configured
-                    ),
+                    "authentication_configured": (self._access.authentication_configured),
                     "control_lease_seconds": (self._access.control_lease_seconds),
                     "api_version_required": True,
                 }
@@ -649,9 +643,7 @@ class RobotWebSocketServer:
                 control,
             ),
             # AI 助手
-            "ai_chat": WebSocketRoute(
-                self._interaction_handler._handle_ai_chat, control
-            ),
+            "ai_chat": WebSocketRoute(self._interaction_handler._handle_ai_chat, control),
             "ai_confirm": WebSocketRoute(
                 self._interaction_handler._handle_ai_confirm,
                 control,
@@ -885,8 +877,7 @@ class RobotWebSocketServer:
                             "code": admission.code,
                             "message": (
                                 "请求频率超过限制"
-                                if admission.code
-                                == WebSocketErrorCode.RATE_LIMITED.value
+                                if admission.code == WebSocketErrorCode.RATE_LIMITED.value
                                 else "服务器并发请求已达到上限"
                             ),
                             "retry_after_seconds": (admission.retry_after_seconds),
@@ -968,11 +959,7 @@ class RobotWebSocketServer:
                 outcome = (
                     "accepted"
                     if request_context.run_id is not None
-                    else (
-                        "rejected"
-                        if request_context.error_code is not None
-                        else "completed"
-                    )
+                    else ("rejected" if request_context.error_code is not None else "completed")
                 )
                 self._audit(
                     client_id=client_id,
@@ -1022,9 +1009,7 @@ class RobotWebSocketServer:
         try:
             await self._teleoperation_handler.close_data_collection()
             if self._services.teleoperation.active:
-                await asyncio.to_thread(
-                    self._services.teleoperation.stop
-                )
+                await asyncio.to_thread(self._services.teleoperation.stop)
         except Exception as exc:
             logger.error(
                 "释放控制客户端会话失败: client_id=%s reason=%s error=%s",
@@ -1133,9 +1118,7 @@ class RobotWebSocketServer:
                     "event": "control_status",
                     "client_id": client_id,
                     "authenticated": session.authenticated,
-                    "authentication_configured": (
-                        self._access.authentication_configured
-                    ),
+                    "authentication_configured": (self._access.authentication_configured),
                     "control_lease": lease.to_dict() if lease else None,
                     "request_id": data["request_id"],
                 }
@@ -1354,9 +1337,7 @@ class RobotWebSocketServer:
         data: Mapping[str, Any] | WebSocketResponse,
     ) -> str:
         response = (
-            data
-            if isinstance(data, WebSocketResponse)
-            else WebSocketResponse.from_payload(data)
+            data if isinstance(data, WebSocketResponse) else WebSocketResponse.from_payload(data)
         )
         request_context = CURRENT_WEBSOCKET_REQUEST.get()
         response_payload = response.to_dict()

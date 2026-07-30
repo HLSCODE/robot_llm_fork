@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import time
 import unittest
+from dataclasses import replace
 
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.settings import ApplicationSettings, ExecutionSettings
 from src.execution import (
     ActionCancellationMode,
     ActionExecutionContext,
@@ -207,12 +209,13 @@ class ActionExecutionContextTests(unittest.TestCase):
 
 class ActionTimeoutIntegrationTests(unittest.TestCase):
     def test_wait_action_timeout_is_a_failed_terminal_result(self):
-        config = type(
-            "TestConfig",
-            (),
-            {"EXECUTION_ACTION_TIMEOUT_SECONDS": 1.0},
-        )()
-        services = create_application_services(config, simulation=True)
+        settings = replace(
+            ApplicationSettings.defaults(),
+            execution=ExecutionSettings(
+                execution_action_timeout_seconds=1.0,
+            ),
+        )
+        services = create_application_services(settings, simulation=True)
         item = SequenceItem.from_definition(
             ActionDefinition(
                 id="timed-wait",

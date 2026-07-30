@@ -4,19 +4,19 @@ import argparse
 import logging
 from pathlib import Path
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .auxiliary_services import (
     AuxiliaryServiceHost,
     AuxiliaryServiceSnapshot,
 )
-from .config_loader import Config
-from .config_loader import ConfigLoadError
+from .config_loader import ConfigLoadError, load_application_settings
 from .config_validation import (
     ConfigurationReport,
     StartupOptions,
     validate_startup_configuration,
 )
+from .settings import ApplicationSettings
 
 
 if TYPE_CHECKING:
@@ -48,18 +48,16 @@ def setup_logging(level: str = "INFO") -> None:
 
 def build_auxiliary_service_host(
     args: argparse.Namespace,
-    config: Any,
+    settings: ApplicationSettings,
     services: "ApplicationServices",
 ) -> AuxiliaryServiceHost:
     """Compose enabled optional services around the shared application."""
     auxiliary_services = []
-    options = resolve_startup_options(args, config)
+    options = resolve_startup_options(args, settings)
     if options.websocket_enabled:
         from ..robot_server.ws_server import RobotWebSocketServer
 
-        auth_token = str(
-            getattr(config, "WEBSOCKET_AUTH_TOKEN", "")
-        )
+        auth_token = settings.secrets.websocket_auth_token
         if not auth_token:
             logger.warning(
                 "未配置 WEBSOCKET_AUTH_TOKEN；WebSocket 仅提供公开只读接口，"
@@ -71,90 +69,68 @@ def build_auxiliary_service_host(
                 host=options.websocket_host,
                 port=options.websocket_port,
                 auth_token=auth_token,
-                control_lease_seconds=float(
-                    getattr(
-                        config,
-                        "WEBSOCKET_CONTROL_LEASE_SECONDS",
-                        30.0,
-                    )
+                control_lease_seconds=(
+                    settings.server.websocket_control_lease_seconds
                 ),
-                max_message_size_bytes=int(getattr(
-                    config,
-                    "WEBSOCKET_MAX_MESSAGE_SIZE_BYTES",
-                    1_048_576,
-                )),
-                max_requests_per_second=int(getattr(
-                    config,
-                    "WEBSOCKET_MAX_REQUESTS_PER_SECOND",
-                    120,
-                )),
-                max_concurrent_requests=int(getattr(
-                    config,
-                    "WEBSOCKET_MAX_CONCURRENT_REQUESTS",
-                    16,
-                )),
-                max_queued_messages=int(getattr(
-                    config,
-                    "WEBSOCKET_MAX_QUEUED_MESSAGES",
-                    16,
-                )),
-                send_timeout_seconds=float(getattr(
-                    config,
-                    "WEBSOCKET_SEND_TIMEOUT_SECONDS",
-                    2.0,
-                )),
+                max_message_size_bytes=(
+                    settings.server.websocket_max_message_size_bytes
+                ),
+                max_requests_per_second=(
+                    settings.server.websocket_max_requests_per_second
+                ),
+                max_concurrent_requests=(
+                    settings.server.websocket_max_concurrent_requests
+                ),
+                max_queued_messages=(
+                    settings.server.websocket_max_queued_messages
+                ),
+                send_timeout_seconds=(
+                    settings.server.websocket_send_timeout_seconds
+                ),
             )
         )
 
     return AuxiliaryServiceHost(
         tuple(auxiliary_services),
-        start_timeout_seconds=float(
-            getattr(
-                config,
-                "AUXILIARY_SERVICE_START_TIMEOUT_SECONDS",
-                5.0,
-            )
+        start_timeout_seconds=(
+            settings.server.auxiliary_service_start_timeout_seconds
         ),
-        stop_timeout_seconds=float(
-            getattr(
-                config,
-                "AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS",
-                10.0,
-            )
+        stop_timeout_seconds=(
+            settings.server.auxiliary_service_stop_timeout_seconds
         ),
     )
 
 
 def resolve_startup_options(
     args: argparse.Namespace,
-    config: Any,
+    settings: ApplicationSettings,
 ) -> StartupOptions:
     return StartupOptions(
         simulation=bool(
             getattr(args, "simulation", False)
-            or getattr(config, "SIMULATION_MODE", False)
+            or settings.runtime.simulation_mode
         ),
         websocket_enabled=bool(
-            getattr(config, "WEBSOCKET_ENABLED", True)
+            settings.server.websocket_enabled
             and not getattr(args, "disable_websocket", False)
         ),
         websocket_host=(
             getattr(args, "websocket_host", None)
-            or str(getattr(config, "WEBSOCKET_HOST", "127.0.0.1"))
+            or settings.server.websocket_host
         ),
         websocket_port=(
             getattr(args, "websocket_port", None)
             if getattr(args, "websocket_port", None) is not None
-            else int(getattr(config, "WEBSOCKET_PORT", 8765))
+            else settings.server.websocket_port
         ),
         log_level=(
             getattr(args, "log_level", None)
-            or str(getattr(config, "LOG_LEVEL", "INFO"))
+            or settings.runtime.log_level
         ),
     )
 
 
-def run_gui(args: argparse.Namespace, config: Any) -> int:
+def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     """Run the GUI and optional network services in one process."""
     from PyQt6.QtWidgets import QApplication
 
@@ -162,12 +138,12 @@ def run_gui(args: argparse.Namespace, config: Any) -> int:
     from ..gui.main_window import MainWindow
 
     services = create_application_services(
-        config,
+        settings,
         simulation=args.simulation,
     )
     auxiliary_host = build_auxiliary_service_host(
         args,
-        config,
+        settings,
         services,
     )
     try:
@@ -270,15 +246,15 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     try:
-        config = Config.get_instance()
+        settings = load_application_settings()
     except ConfigLoadError as exc:
         print(str(exc), file=sys.stderr)
         return 2
 
-    options = resolve_startup_options(args, config)
+    options = resolve_startup_options(args, settings)
     args.simulation = options.simulation
     setup_logging(options.log_level)
-    report = validate_startup_configuration(config, options)
+    report = validate_startup_configuration(settings, options)
     _log_configuration_report(report)
     if report.errors:
         logger.error("启动已中止：配置校验发现 %d 个错误", len(report.errors))
@@ -291,11 +267,11 @@ def main() -> int:
         "simulation" if args.simulation else "hardware",
         (
             "disabled"
-            if args.disable_websocket or not config.WEBSOCKET_ENABLED
+            if args.disable_websocket or not settings.server.websocket_enabled
             else "enabled"
         ),
     )
-    return run_gui(args, config)
+    return run_gui(args, settings)
 
 
 def _log_configuration_report(report: ConfigurationReport) -> None:

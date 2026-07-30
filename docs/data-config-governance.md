@@ -9,13 +9,14 @@
 `requirements.txt` 已删除，不再维护第二份容易漂移的依赖列表。
 
 ```powershell
-uv sync --frozen
-uv sync --frozen --group dev
-uv sync --frozen --extra voice
+uv sync --frozen --extra gui --extra server --extra ai
+uv sync --frozen --all-extras --group dev
+uv sync --frozen --extra voice --extra kws
 ```
 
 修改依赖后必须运行 `uv lock`，并通过统一质量门禁。可选能力继续由
-`[project.optional-dependencies]` 管理，后续按 GUI、视觉和硬件域进一步拆分。
+`[project.optional-dependencies]` 管理，并按 GUI、Server、AI、数据、视觉、语音、KWS
+和硬件域拆分；`full` 用于需要全部能力的开发机和集成环境。
 
 ## 2. Built-in 与用户数据
 
@@ -99,7 +100,7 @@ SKILL_LIBRARY_PATH=
 可以在不启动 Qt、网络服务和硬件的情况下检查配置：
 
 ```powershell
-python run.py --check-config --simulation --disable-websocket
+uv run robot-llm --check-config --simulation --disable-websocket
 ```
 
 返回码：
@@ -119,4 +120,7 @@ WebSocket 暴露方式以及示例占位凭据。配置解析错误不会回显�
 - 非本机 WebSocket 监听会提示只读暴露或 `wss://` 反向代理要求。
 - 日志、异常和迁移错误只记录字段名、错误类别和文件名，不记录凭据或完整配置快照。
 
-本批没有拆分超过 1000 行的 `Config` 单例；按领域拆分 typed settings 仍由 G-009 跟踪。
+环境解析仅在组合根执行一次，结果冻结为 Runtime、Data、DataCollection、Server、
+Secret、Execution、LLM、Robot、Device、Vision 和 Voice settings。业务模块只接收
+所需快照，不允许读取全局配置或在构造器中回退到环境变量。数据采集配置和视觉天平
+凭据也遵循同一入口；原 `Config` 公共单例和领域 `get_*` 方法已删除。

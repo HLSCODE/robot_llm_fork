@@ -5,11 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config_loader import Config
-
-
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_DEFAULT_STATIONS_FILE = _PROJECT_ROOT / "data" / "vision_stations" / "profiles.json"
 
 
 def normalize_arm_name(arm: str | None) -> str:
@@ -32,22 +28,21 @@ def profile_key(station_id: str, arm: str | None) -> str:
 class VisionStationStorage:
     """Persistent teach profiles keyed by station id and arm."""
 
-    @classmethod
-    def stations_file(cls) -> Path:
-        cfg = Config.get_instance()
-        raw_path = getattr(cfg, "VISION_RELOCALIZATION_STATIONS_FILE", "")
-        path = Path(raw_path) if raw_path else _DEFAULT_STATIONS_FILE
+    def __init__(self, stations_file: str | Path) -> None:
+        path = Path(stations_file)
         if not path.is_absolute():
             path = _PROJECT_ROOT / path
-        return path
+        self._stations_file = path
 
-    @classmethod
-    def ensure_directories(cls) -> None:
-        cls.stations_file().parent.mkdir(parents=True, exist_ok=True)
+    @property
+    def stations_file(self) -> Path:
+        return self._stations_file
 
-    @classmethod
-    def load_profiles(cls) -> list[dict[str, Any]]:
-        path = cls.stations_file()
+    def ensure_directories(self) -> None:
+        self._stations_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def load_profiles(self) -> list[dict[str, Any]]:
+        path = self._stations_file
         if not path.is_file():
             return []
         with open(path, "r", encoding="utf-8") as f:
@@ -56,37 +51,42 @@ class VisionStationStorage:
             profiles = data.get("profiles", [])
         else:
             profiles = data
-        return [cls._normalize_profile(item) for item in profiles if isinstance(item, dict)]
+        return [
+            self._normalize_profile(item)
+            for item in profiles
+            if isinstance(item, dict)
+        ]
 
-    @classmethod
-    def save_profiles(cls, profiles: list[dict[str, Any]]) -> None:
-        cls.ensure_directories()
-        normalized = [cls._normalize_profile(item) for item in profiles]
+    def save_profiles(self, profiles: list[dict[str, Any]]) -> None:
+        self.ensure_directories()
+        normalized = [self._normalize_profile(item) for item in profiles]
         payload = {"version": 1, "profiles": normalized}
-        with open(cls.stations_file(), "w", encoding="utf-8") as f:
+        with open(self._stations_file, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
 
-    @classmethod
-    def get_profile(cls, station_id: str, arm: str | None) -> dict[str, Any] | None:
+    def get_profile(
+        self,
+        station_id: str,
+        arm: str | None,
+    ) -> dict[str, Any] | None:
         key = profile_key(station_id, arm)
-        for profile in cls.load_profiles():
+        for profile in self.load_profiles():
             if profile_key(profile.get("station_id", ""), profile.get("arm")) == key:
                 return profile
         return None
 
-    @classmethod
-    def upsert_profile(cls, profile: dict[str, Any]) -> dict[str, Any]:
+    def upsert_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
         if not profile.get("station_id"):
             raise ValueError("station_id is required")
         if not profile.get("T_B0_M"):
             raise ValueError("T_B0_M is required")
 
         now = time.time()
-        normalized = cls._normalize_profile(profile)
+        normalized = self._normalize_profile(profile)
         normalized.setdefault("created_at", now)
         normalized["updated_at"] = now
 
-        profiles = cls.load_profiles()
+        profiles = self.load_profiles()
         key = profile_key(normalized["station_id"], normalized["arm"])
         replaced = False
         for index, existing in enumerate(profiles):
@@ -97,14 +97,13 @@ class VisionStationStorage:
                 break
         if not replaced:
             profiles.append(normalized)
-        cls.save_profiles(profiles)
+        self.save_profiles(profiles)
         return normalized
 
-    @classmethod
-    def list_station_choices(cls, arm: str | None = None) -> list[tuple[str, str]]:
+    def list_station_choices(self, arm: str | None = None) -> list[tuple[str, str]]:
         target_arm = normalize_arm_name(arm) if arm else None
         choices: list[tuple[str, str]] = []
-        for profile in cls.load_profiles():
+        for profile in self.load_profiles():
             profile_arm = normalize_arm_name(profile.get("arm"))
             if target_arm and profile_arm != target_arm:
                 continue

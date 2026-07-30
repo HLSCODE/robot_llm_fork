@@ -3,55 +3,14 @@
 import threading
 import tkinter as tk
 from tkinter import messagebox
+from collections.abc import Callable
 import serial
 import time
 
-# 延迟加载配置
-_motor_config_cache = None
-
-def _get_motor_config():
-    """延迟加载配置，避免循环导入"""
-    global _motor_config_cache
-    if _motor_config_cache is None:
-        try:
-            from ..core.config_loader import Config
-            config = Config.get_instance()
-            _motor_config_cache = config.get_body_motor_config()
-        except Exception as e:
-            print(f"加载身体控制器配置失败：{e}，使用默认值")
-            _motor_config_cache = {
-                "port": "/dev/ttyUSB1",
-                "baudrate": 115200,
-                "slave_id": 1,
-                "timeout": 1
-            }
-    return _motor_config_cache
-
-
 # ---------- Modbus 驱动器 ----------
 class ModbusMotor:
-    def __init__(self, port=None, baudrate=None, slave_id=None, timeout=None):
-        """
-        初始化身体控制器（ModbusMotor）
-        
-        Args:
-            port: 串口号，默认从 config.env 读取
-            baudrate: 波特率，默认从 config.env 读取
-            slave_id: 从站 ID，默认从 config.env 读取
-            timeout: 超时时间，默认从 config.env 读取
-        """
-        # 如果未提供参数，从配置加载器读取
-        if port is None or baudrate is None or slave_id is None or timeout is None:
-            config = _get_motor_config()
-            if port is None:
-                port = config.get("port", "/dev/ttyUSB1")
-            if baudrate is None:
-                baudrate = config.get("baudrate", 115200)
-            if slave_id is None:
-                slave_id = config.get("slave_id", 1)
-            if timeout is None:
-                timeout = config.get("timeout", 1)
-        
+    def __init__(self, port, baudrate, slave_id, timeout):
+        """Initialize the body axis from explicit device settings."""
         self.slave_id = slave_id
         self.serial = serial.Serial(port=port, baudrate=baudrate,
                                     bytesize=8, parity='N', stopbits=1,
@@ -165,8 +124,9 @@ class ModbusMotor:
 
 # ---------- GUI ----------
 class MotorGUI:
-    def __init__(self, root):
+    def __init__(self, root, motor_factory: Callable[[], ModbusMotor]):
         self.root = root
+        self._motor_factory = motor_factory
         root.title("Motor Control")
         root.geometry("450x450")
         self.motor = None
@@ -221,7 +181,7 @@ class MotorGUI:
     # ---------- 业务 ----------
     def connect_motor(self):
         try:
-            self.motor = ModbusMotor()
+            self.motor = self._motor_factory()
             self.update_status("connected", "green")
             self._disable_buttons()
             threading.Thread(target=self._auto_home, daemon=True).start()
@@ -371,10 +331,3 @@ class MotorGUI:
         if self.motor:
             self.motor.close()
         self.root.destroy()
-
-
-# ---------- main ----------
-if __name__ == "__main__":
-    root = tk.Tk()
-    MotorGUI(root)
-    root.mainloop()

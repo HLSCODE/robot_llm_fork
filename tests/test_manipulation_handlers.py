@@ -4,6 +4,7 @@ import unittest
 
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.settings import ApplicationSettings
 from src.device_runtime import (
     ArmId,
     DeviceCapability,
@@ -478,7 +479,10 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
 
 class ManipulationRuntimeIntegrationTests(unittest.TestCase):
     def test_discrete_manipulation_actions_use_unified_registry(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         definitions = (
             ("tool", {"执行器": "快换手", "操作": "关"}),
             ("relay", {"执行器": "继电器", "编号": 1, "操作": "开"}),

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from src.core.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
     SequenceItem,
+)
+from src.core.settings import (
+    DeviceSettings,
+    ExecutionSettings,
+    SecretSettings,
+    VisionSettings,
 )
 from src.device_runtime import (
     DeviceCapability,
@@ -189,9 +196,7 @@ class ActionControlPolicyTests(unittest.TestCase):
                 self.assertEqual(device_ids, policy.device_ids)
                 self.assertEqual(operation, policy.operation)
                 self.assertTrue(policy.blocking_device_call)
-                self.assertIsNone(
-                    policy.expected_max_cancel_latency_seconds
-                )
+                self.assertIsNone(policy.expected_max_cancel_latency_seconds)
 
     def test_unknown_route_has_no_false_hardware_cancel_claim(self):
         for resolver, parameters in (
@@ -220,9 +225,7 @@ class ActionControlPolicyTests(unittest.TestCase):
             "expression_display",
             "expression",
         ):
-            policy = resolve_manipulate_control_policy(
-                {"执行器": executor}
-            )
+            policy = resolve_manipulate_control_policy({"执行器": executor})
             self.assertEqual(
                 (EXPRESSION_DISPLAY,),
                 policy.device_ids,
@@ -250,9 +253,7 @@ class ActionControlPolicyTests(unittest.TestCase):
         ):
             ActionControlPolicy(
                 operation="invalid",
-                cancellation_mode=(
-                    ActionCancellationMode.BOUNDED_COOPERATIVE
-                ),
+                cancellation_mode=(ActionCancellationMode.BOUNDED_COOPERATIVE),
                 blocking_device_call=False,
             )
 
@@ -300,10 +301,14 @@ class ActionControlPolicyTests(unittest.TestCase):
             )
 
     def test_sequence_resources_are_exact_and_include_loop_children(self):
-        engine = ActionEngine(DeviceRuntime(), object())
-        wait = SequenceItem.from_definition(
-            ActionDefinition("wait", "wait", ActionType.WAIT, {})
+        engine = ActionEngine(
+            DeviceRuntime(),
+            ExecutionSettings(),
+            DeviceSettings(),
+            VisionSettings(),
+            SecretSettings(),
         )
+        wait = SequenceItem.from_definition(ActionDefinition("wait", "wait", ActionType.WAIT, {}))
         vision = SequenceItem.from_definition(
             ActionDefinition(
                 "vision",
@@ -321,6 +326,34 @@ class ActionControlPolicyTests(unittest.TestCase):
         self.assertEqual(
             (ROBOT_SYSTEM, CAMERA),
             engine.required_resources([wait, loop]),
+        )
+
+    def test_balance_reader_receives_injected_settings(self):
+        engine = ActionEngine(
+            DeviceRuntime(),
+            ExecutionSettings(),
+            DeviceSettings(),
+            VisionSettings(
+                balance_camera_index=7,
+                balance_request_timeout_seconds=12.5,
+                vveai_base_url="https://vision.example/v1/",
+                vveai_model="balance-model",
+            ),
+            SecretSettings(vveai_api_key="vision-secret"),
+        )
+
+        with patch(
+            "src.vision.balance_reader_simple.read_balance",
+            return_value=1.25,
+        ) as read_balance:
+            self.assertEqual(1.25, engine._read_balance())
+
+        read_balance.assert_called_once_with(
+            camera_index=7,
+            api_key="vision-secret",
+            base_url="https://vision.example/v1/",
+            model="balance-model",
+            timeout_seconds=12.5,
         )
 
 
@@ -347,7 +380,13 @@ class ActionControlPreflightTests(unittest.TestCase):
                 close=lambda _device: None,
             )
         )
-        engine = ActionEngine(runtime, object())
+        engine = ActionEngine(
+            runtime,
+            ExecutionSettings(),
+            DeviceSettings(),
+            VisionSettings(),
+            SecretSettings(),
+        )
         item = SequenceItem.from_definition(
             ActionDefinition(
                 id="unsafe-move",
@@ -359,15 +398,9 @@ class ActionControlPreflightTests(unittest.TestCase):
         started_policies: list[ActionControlPolicy] = []
         failures = []
         callbacks = EngineCallbacks(
-            on_step_started=(
-                lambda _index, _item, policy: started_policies.append(
-                    policy
-                )
-            ),
+            on_step_started=(lambda _index, _item, policy: started_policies.append(policy)),
             on_step_completed=lambda _index, _item: None,
-            on_step_failed=(
-                lambda _index, _item, failure: failures.append(failure)
-            ),
+            on_step_failed=(lambda _index, _item, failure: failures.append(failure)),
             on_loop_progress=lambda _uuid, _current, _total: None,
             on_log=lambda _message, _level: None,
         )

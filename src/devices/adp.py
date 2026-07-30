@@ -1,52 +1,12 @@
 import serial
 import time
 
-# 延迟加载配置
-_adp_config_cache = None
-
-def _get_adp_config():
-    """延迟加载配置，避免循环导入"""
-    global _adp_config_cache
-    if _adp_config_cache is None:
-        try:
-            from ..core.config_loader import Config
-            config = Config.get_instance()
-            _adp_config_cache = config.get_adp_config()
-        except Exception as e:
-            print(f"加载 ADP 配置失败：{e}，使用默认值")
-            _adp_config_cache = {
-                "port": "/dev/ttyUSB2",
-                "baudrate": 115200,
-                "timeout": 5,
-                "max_retries": 3
-            }
-    return _adp_config_cache
-
 # 全局变量用于跟踪已打开的串口
 _open_ports = {}
 
 class ADP:
-    def __init__(self, port=None, baudrate=None, timeout=None, max_retries=None):
-        """初始化 ADP 控制器
-        
-        Args:
-            port (str): 串口号，默认从 config.env 读取
-            baudrate (int): 波特率，默认从 config.env 读取
-            timeout (int): 超时时间，默认从 config.env 读取
-            max_retries (int): 最大重试次数，默认从 config.env 读取
-        """
-        # 如果未提供参数，从配置加载器读取
-        if port is None or baudrate is None or timeout is None or max_retries is None:
-            config = _get_adp_config()
-            if port is None:
-                port = config.get("port", "/dev/ttyUSB2")
-            if baudrate is None:
-                baudrate = config.get("baudrate", 115200)
-            if timeout is None:
-                timeout = config.get("timeout", 5)
-            if max_retries is None:
-                max_retries = config.get("max_retries", 3)
-        
+    def __init__(self, port, baudrate, timeout, max_retries):
+        """Initialize the ADP from explicit device settings."""
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
@@ -197,31 +157,3 @@ class ADP:
         if self.ser and self.ser.is_open:
             self.ser.close()
             print(f"串口 {self.port} 已关闭")
-
-if __name__ == "__main__":
-    # 测试代码
-    try:
-        print("开始测试ADP功能...")
-        adp = ADP(port='COM4')  # 创建ADP实例
-        
-        # #测试初始化
-        # adp.initialize()
-        # time.sleep(1)
-        
-        # 测试吸液
-        # adp.absorb(800)
-        # time.sleep(1)
-        
-        # 测试吐液
-        adp.dispense(800)
-        time.sleep(1)
-        
-        # # 测试完全吐液
-        # adp.dispense_all()
-        
-    except Exception as e:
-        print(f"测试过程中出现错误: {str(e)}")
-    finally:
-        if 'adp' in locals():
-            adp.close()
-        print("测试完成") 

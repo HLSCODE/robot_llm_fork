@@ -140,12 +140,6 @@ class ExpressionDisplaySettings:
     tx_delay: float = 0.05
 
     @classmethod
-    def from_project_config(cls) -> "ExpressionDisplaySettings":
-        from ..core.config_loader import Config
-
-        return cls.from_mapping(Config.get_expression_display_config())
-
-    @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "ExpressionDisplaySettings":
         config_path_value = str(data.get("config_path", "") or "").strip()
         config_path = Path(config_path_value) if config_path_value else None

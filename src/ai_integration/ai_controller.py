@@ -13,7 +13,6 @@ from ..application import (
     CommandRuntimeError,
     ExecutionControlAction,
 )
-from ..core.config_loader import Config
 from ..llm import LLMRegistry
 from .execution_bridge import ExecutionBridge
 
@@ -35,11 +34,14 @@ class AIController(QObject):
         execution_bridge: ExecutionBridge,
     ) -> None:
         super().__init__()
-        self._config = Config.get_instance()
+        self._settings = services.settings
         self._services = services
         self._commands = services.commands
         self._execution_bridge = execution_bridge
-        self._llm_registry = LLMRegistry.from_config(self._config)
+        self._llm_registry = LLMRegistry.from_settings(
+            self._settings.llm,
+            self._settings.secrets,
+        )
         self._status_client = None
         self._closed = False
         execution_bridge.execution_completed.connect(
@@ -109,10 +111,18 @@ class AIController(QObject):
         client = self._get_status_client()
         if client:
             return client.get_provider_name().upper()
-        return self._config.LLM_DEFAULT_PROVIDER.upper()
+        return self._settings.llm.llm_default_provider.upper()
 
     def is_api_key_set(self) -> bool:
-        return Config.is_api_key_set()
+        provider = self._settings.llm.llm_default_provider.lower()
+        if provider == "minicpm":
+            return bool(self._settings.llm.minicpm_gateway_host)
+        keys = {
+            "openai": self._settings.secrets.openai_api_key,
+            "deepseek": self._settings.secrets.deepseek_api_key,
+            "dashscope": self._settings.secrets.dashscope_api_key,
+        }
+        return bool(keys.get(provider, ""))
 
     async def close_async(self) -> None:
         if self._closed:

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from ...core.execution_context import ExecutionContext
 from ...core.move_compensation import resolve_robot_target_pose
+from ...core.settings import VisionSettings
 from ...device_runtime import (
     ArmId,
     ArmMotion,
@@ -89,10 +90,12 @@ class RobotMoveActionHandler:
         device_runtime: DeviceRuntime,
         execution_context: ExecutionContext,
         options: MotionHandlerOptions,
+        vision_settings: VisionSettings,
     ) -> None:
         self._device_runtime = device_runtime
         self._execution_context = execution_context
         self._options = options
+        self._vision_settings = vision_settings
 
     def __call__(
         self,
@@ -113,6 +116,7 @@ class RobotMoveActionHandler:
                 dict(parameters),
                 arm_name,
                 self._execution_context,
+                self._vision_settings,
                 lambda message: context.log(message, "info"),
             )
             arm = ArmId.parse(arm_name)

@@ -23,7 +23,7 @@ from ..device_control_sdk import (
 )
 from ..device_control_sdk.devices.electric_gripper import MotionStatus
 from ..device_control_sdk.devices.stepper_motor import MotorStatus, MSeriesRegister
-from ..core.config_loader import Config
+from ..core.settings import DeviceSettings
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +47,9 @@ class TappingController:
     rotation_address: int
 
     @classmethod
-    def from_config(cls) -> "TappingController":
-        """从全局配置创建控制器实例。"""
-        cfg = Config.get_tapping_config()
+    def from_settings(cls, settings: DeviceSettings) -> "TappingController":
+        """Create the controller from an explicit device snapshot."""
+        cfg = settings.tapping_config()
         transport = SerialTransport(
             cfg["port"],
             baudrate=cfg["baudrate"],

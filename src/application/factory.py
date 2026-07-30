@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+from functools import partial
 
 from ..core.data_paths import ApplicationDataPaths
+from ..core.settings import ApplicationSettings, DataCollectionSettings
 from ..core.storage import JsonCompositionRepository
 from ..device_runtime import (
     ArmTelemetryReader,
@@ -34,11 +35,11 @@ from .services import (
 
 
 def create_application_services(
-    config: Any,
+    settings: ApplicationSettings,
     *,
     simulation: bool,
 ) -> ApplicationServices:
-    data_paths = ApplicationDataPaths.from_config(config)
+    data_paths = ApplicationDataPaths.from_settings(settings.data)
     BuiltinDataInstaller(data_paths).install_missing()
     composition = CompositionService(
         JsonCompositionRepository(
@@ -46,9 +47,15 @@ def create_application_services(
             tasks_directory=data_paths.tasks_directory,
         )
     )
-    device_runtime = create_device_runtime(config, simulation=simulation)
+    device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
-    engine = ActionEngine(device_runtime, config)
+    engine = ActionEngine(
+        device_runtime,
+        settings.execution,
+        settings.devices,
+        settings.vision,
+        settings.secrets,
+    )
     manager = ExecutionManager(
         engine=engine,
         resource_arbiter=resources,
@@ -60,7 +67,7 @@ def create_application_services(
     commands = CommandRuntime(
         execution=execution,
         skill_engine=skill_engine,
-        preview_ttl_s=float(getattr(config, "COMMAND_PREVIEW_TTL_SECONDS", 120.0)),
+        preview_ttl_s=settings.runtime.command_preview_ttl_seconds,
     )
     manual_control = ManualControlService(device_runtime, resources)
     camera_access = CameraAccessService(device_runtime, resources)
@@ -75,9 +82,7 @@ def create_application_services(
         device_runtime,
         teleoperation,
         trajectory_teaching,
-        wait_timeout_seconds=float(
-            getattr(config, "SAFETY_STOP_WAIT_TIMEOUT_SECONDS", 2.0)
-        ),
+        wait_timeout_seconds=settings.execution.safety_stop_wait_timeout_seconds,
     )
     devices = DeviceManagementService(
         device_runtime,
@@ -89,7 +94,10 @@ def create_application_services(
         devices=devices,
         robot_query=robot_query,
         teleoperation=teleoperation,
-        recorder_factory=_create_data_collection_recorder,
+        recorder_factory=partial(
+            _create_data_collection_recorder,
+            settings=settings.data_collection,
+        ),
     )
     safety.register_control_session(
         "data collection",
@@ -110,12 +118,15 @@ def create_application_services(
         device_runtime=device_runtime,
         resources=resources,
         simulation=simulation,
+        settings=settings,
     )
 
 
 def _create_data_collection_recorder(
     robot_state_reader: ArmTelemetryReader,
     camera_source: DepthCameraSource,
+    *,
+    settings: DataCollectionSettings,
 ) -> DataCollectionRecorder:
     """Load optional data-collection infrastructure only when requested."""
 
@@ -125,5 +136,5 @@ def _create_data_collection_recorder(
     return DemonstrationRecorder(
         robot_state_reader=robot_state_reader,
         camera_source=camera_source,
-        config=DataCollectionConfig.from_environment(),
+        config=DataCollectionConfig.from_settings(settings),
     )

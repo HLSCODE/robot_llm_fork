@@ -52,7 +52,7 @@ class SkillEngine:
         self._registry = registry or SkillRegistry()
         logger.info("SkillEngine 初始化完成")
 
-    def load_skills(self, json_path: Optional[str] = None) -> int:
+    def load_skills(self, json_path: str) -> int:
         """
         从 JSON 文件加载技能库
 
@@ -62,10 +62,6 @@ class SkillEngine:
         Returns:
             加载的技能数量
         """
-        if json_path is None:
-            from ..core.config_loader import Config
-            json_path = str(Config.get_skill_library_path())
-
         return self._registry.load_from_json(json_path)
 
     def parse_and_expand(

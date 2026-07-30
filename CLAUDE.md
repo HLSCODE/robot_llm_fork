@@ -5,8 +5,8 @@
 
 ## 技术栈
 - **语言**: Python 3
-- **GUI**: PyQt6（可选，`RUN_MODE=gui python run.py` 启动）
-- **WebSocket 服务**: asyncio + websockets（默认模式，`python run.py` 启动）
+- **GUI**: PyQt6（主应用，`uv run robot-llm` 启动）
+- **WebSocket 服务**: asyncio + websockets（由 GUI 进程托管的可选附加服务）
 - **机械臂 SDK**: RealMan RM C API (ctypes 封装)
 - **视觉**: RealSense D435 + YOLO + SAM2
 - **串口设备**: 快换手、ADP 吸液枪、继电器、ModbusMotor、PWM 颈部双轴舵机
@@ -15,14 +15,14 @@
 
 ## 项目结构
 ```
-run.py              # 统一启动入口（根据 RUN_MODE 分派 GUI / Server）
 config.env          # 环境变量配置
 pyproject.toml      # Python 依赖唯一声明
 uv.lock             # 可重复安装锁文件
 src/
   core/
     launcher.py         # composition root，组装唯一 ApplicationServices
-    config_loader.py    # 配置单例加载器
+    config_loader.py    # 进程边界环境变量解析器
+    settings.py         # 不可变、按领域拆分的 ApplicationSettings
     models.py           # ActionDefinition, SequenceItem 等数据模型
     storage.py          # 动作库/任务序列 JSON 持久化
   application/          # 执行、设备、采集、手动控制和会话类应用用例
@@ -51,9 +51,9 @@ data/
   tasks/*.task          # 保存的任务序列
 ```
 
-## 两种运行模式
-1. **GUI 模式**: `RUN_MODE=gui python run.py` — PyQt6 图形界面，拖拽编排动作
-2. **WebSocket 服务模式**（默认）: `python run.py` — 无 GUI，前端通过 WebSocket 发送指令控制机器人
+## 运行模式
+
+`robot-llm` 启动唯一 GUI 主应用；WebSocket 与后续 HTTP 服务均作为同一进程内的可选附加服务，由应用宿主统一启停。当前不维护独立 Server 进程入口。
 
 ## WebSocket 协议（与 GUI 功能完全对等）
 前端指令:
@@ -68,11 +68,11 @@ data/
 
 ## 常用命令
 ```bash
-uv sync --frozen                    # 安装锁定依赖
-python run.py                        # WebSocket 服务模式（默认）
-python run.py --simulation           # 模拟模式（不连硬件）
-python run.py --port 9000            # 自定义端口
-RUN_MODE=gui python run.py           # GUI 模式
+uv sync --frozen --all-extras       # 安装锁定的完整功能依赖
+uv run robot-llm                     # GUI + 配置中启用的附加服务
+uv run robot-llm --simulation        # 模拟模式（不连硬件）
+uv run robot-llm --websocket-port 9000
+uv run robot-llm --disable-websocket # 仅启动 GUI
 ```
 
 ## 开发进度

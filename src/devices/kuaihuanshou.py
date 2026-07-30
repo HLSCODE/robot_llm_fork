@@ -2,45 +2,9 @@ import serial
 import time
 import struct
 
-# 延迟加载配置
-_kuaihuanshou_config_cache = None
-
-def _get_kuaihuanshou_config():
-    """延迟加载配置，避免循环导入"""
-    global _kuaihuanshou_config_cache
-    if _kuaihuanshou_config_cache is None:
-        try:
-            from ..core.config_loader import Config
-            config = Config.get_instance()
-            _kuaihuanshou_config_cache = config.get_kuaihuanshou_config()
-        except Exception as e:
-            print(f"加载快换手配置失败：{e}，使用默认值")
-            _kuaihuanshou_config_cache = {
-                "port": "/dev/ttyUSB2",
-                "baudrate": 115200,
-                "timeout": 3
-            }
-    return _kuaihuanshou_config_cache
-
 class Kuaihuanshou:
-    def __init__(self, port=None, baudrate=None, timeout=None):
-        """初始化快换手控制器
-        
-        Args:
-            port (str): 串口号，默认从 config.env 读取
-            baudrate (int): 波特率，默认从 config.env 读取
-            timeout (int): 超时时间，默认从 config.env 读取
-        """
-        # 如果未提供参数，从配置加载器读取
-        if port is None or baudrate is None or timeout is None:
-            config = _get_kuaihuanshou_config()
-            if port is None:
-                port = config.get("port", "/dev/ttyUSB2")
-            if baudrate is None:
-                baudrate = config.get("baudrate", 115200)
-            if timeout is None:
-                timeout = config.get("timeout", 3)
-        
+    def __init__(self, port, baudrate, timeout):
+        """Initialize the tool changer from explicit device settings."""
         self.port = port
         self.baudrate = baudrate
         self.timeout = timeout
@@ -149,22 +113,3 @@ class Kuaihuanshou:
         if self.ser and self.ser.is_open:
             self.ser.close()
             print(f"串口 {self.port} 已关闭")
-
-if __name__ == "__main__":
-    # 测试快换手
-    try:
-        print("\n开始测试快换手功能...")
-        khs = Kuaihuanshou(port='/dev/hand')
-        
-        # print("状态:", khs.send_command('status'))
-        # time.sleep(1)
-        # print("打开:", khs.send_command('open'))
-        time.sleep(1)
-        print("关闭:", khs.send_command('close'))
-        
-    except Exception as e:
-        print(f"快换手测试出错: {str(e)}")
-    finally:
-        if 'khs' in locals():
-            khs.close()
-        print("测试完成") 

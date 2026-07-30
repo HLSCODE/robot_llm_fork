@@ -5,10 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+import math
 from pathlib import Path
-from typing import Any
 
 from .data_paths import ApplicationDataPaths
+from .settings import (
+    ApplicationSettings,
+    DataCollectionSettings,
+    ServerSettings,
+)
 
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -76,7 +81,7 @@ class StartupConfigurationError(ValueError):
 
 
 def validate_startup_configuration(
-    config: Any,
+    settings: ApplicationSettings,
     options: StartupOptions,
 ) -> ConfigurationReport:
     issues: list[ConfigurationIssue] = []
@@ -90,46 +95,48 @@ def validate_startup_configuration(
             f"必须是 {', '.join(sorted(_LOG_LEVELS))} 之一",
         )
 
-    _validate_data_paths(config, issues)
-    _positive(
-        config,
+    _validate_data_paths(settings, issues)
+    _validate_data_collection(settings.data_collection, issues)
+    _positive_value(
+        settings.execution.execution_action_timeout_seconds,
         issues,
         "EXECUTION_ACTION_TIMEOUT_SECONDS",
-        default=600.0,
     )
-    _positive(
-        config,
+    _positive_value(
+        settings.execution.safety_stop_wait_timeout_seconds,
         issues,
         "SAFETY_STOP_WAIT_TIMEOUT_SECONDS",
-        default=2.0,
     )
-    _non_negative(
-        config,
+    _non_negative_value(
+        settings.execution.execution_arm_move_retry_delay_seconds,
         issues,
         "EXECUTION_ARM_MOVE_RETRY_DELAY_SECONDS",
-        default=0.5,
     )
-    _non_negative(
-        config,
+    _non_negative_value(
+        settings.execution.execution_gripper_retry_delay_seconds,
         issues,
         "EXECUTION_GRIPPER_RETRY_DELAY_SECONDS",
-        default=0.5,
     )
 
     if options.websocket_enabled:
-        _validate_websocket(config, options, issues)
+        _validate_websocket(settings.server, settings.secrets.websocket_auth_token, options, issues)
     if not options.simulation:
-        for field in (
-            "ROBOT1_PORT",
-            "ROBOT2_PORT",
-            "MOVE_CONTROLLER_PORT",
-            "VISION_CAMERA_PORT",
-            "MINICPM_GATEWAY_PORT",
+        for field, value in (
+            ("ROBOT1_PORT", settings.robot.robot1_port),
+            ("ROBOT2_PORT", settings.robot.robot2_port),
+            ("MOVE_CONTROLLER_PORT", settings.robot.move_controller_port),
+            ("VISION_CAMERA_PORT", settings.vision.vision_camera_port),
+            ("MINICPM_GATEWAY_PORT", settings.llm.minicpm_gateway_port),
         ):
-            _port(config, issues, field)
+            _port_value(value, issues, field)
 
-    provider = str(getattr(config, "LLM_DEFAULT_PROVIDER", "openai")).strip().lower()
-    api_key = str(getattr(config, "OPENAI_API_KEY", "")).strip()
+    provider = settings.llm.llm_default_provider.strip().lower()
+    api_keys = {
+        "openai": settings.secrets.openai_api_key,
+        "deepseek": (settings.secrets.deepseek_api_key or settings.secrets.openai_api_key),
+        "dashscope": (settings.secrets.dashscope_api_key or settings.secrets.openai_api_key),
+    }
+    api_key = api_keys.get(provider, "").strip()
     if provider in {"openai", "deepseek", "dashscope"}:
         if not api_key:
             _warning(
@@ -145,6 +152,23 @@ def validate_startup_configuration(
                 "OPENAI_API_KEY",
                 "不能使用示例占位凭据",
             )
+    if is_placeholder_secret(settings.secrets.vveai_api_key):
+        _error(
+            issues,
+            "placeholder_secret",
+            "VVEAI_API_KEY",
+            "不能使用示例占位凭据",
+        )
+    _non_negative_value(
+        settings.vision.balance_camera_index,
+        issues,
+        "BALANCE_CAMERA_INDEX",
+    )
+    _positive_value(
+        settings.vision.balance_request_timeout_seconds,
+        issues,
+        "BALANCE_REQUEST_TIMEOUT_SECONDS",
+    )
 
     return ConfigurationReport(tuple(issues))
 
@@ -172,11 +196,11 @@ def is_placeholder_secret(value: str) -> bool:
 
 
 def _validate_data_paths(
-    config: Any,
+    settings: ApplicationSettings,
     issues: list[ConfigurationIssue],
 ) -> None:
     try:
-        paths = ApplicationDataPaths.from_config(config)
+        paths = ApplicationDataPaths.from_settings(settings.data)
     except (OSError, ValueError):
         _error(
             issues,
@@ -215,6 +239,113 @@ def _validate_data_paths(
         )
 
 
+def _validate_data_collection(
+    settings: DataCollectionSettings,
+    issues: list[ConfigurationIssue],
+) -> None:
+    if not 1 <= settings.fps <= 240:
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_FPS",
+            "必须在 1..240 范围内",
+        )
+    _non_negative_value(
+        settings.camera_index,
+        issues,
+        "DATA_COLLECTION_CAMERA_INDEX",
+    )
+    if (
+        not settings.arm_ids
+        or len(settings.arm_ids) != len(set(settings.arm_ids))
+        or any(arm_id not in {"left", "right"} for arm_id in settings.arm_ids)
+    ):
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_ARMS",
+            "必须包含不重复的 left 或 right",
+        )
+    supported_formats = {"portable_simplified", "rlbench_native"}
+    if settings.format_variant not in supported_formats:
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_FORMAT_VARIANT",
+            "必须是 portable_simplified 或 rlbench_native",
+        )
+    elif settings.format_variant == "rlbench_native" and len(settings.arm_ids) != 1:
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_ARMS",
+            "rlbench_native 必须且只能配置一条机械臂",
+        )
+    if not settings.save_path.strip():
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_SAVE_PATH",
+            "不能为空",
+        )
+    _non_negative_value(
+        settings.minimum_free_bytes,
+        issues,
+        "DATA_COLLECTION_MIN_FREE_BYTES",
+    )
+    if not math.isfinite(settings.storage_overhead_factor) or settings.storage_overhead_factor < 1:
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR",
+            "必须是大于等于 1 的有限数",
+        )
+    for field, value in (
+        (
+            "DATA_COLLECTION_STALE_WRITE_SECONDS",
+            settings.stale_write_seconds,
+        ),
+        (
+            "DATA_COLLECTION_STOP_TIMEOUT_SECONDS",
+            settings.recording_stop_timeout_seconds,
+        ),
+        (
+            "DATA_COLLECTION_MAX_SYNC_SKEW_MS",
+            settings.maximum_sync_skew_ms,
+        ),
+    ):
+        _positive_value(value, issues, field)
+
+    has_extrinsics = bool(settings.camera_extrinsics)
+    has_metadata = bool(
+        settings.camera_extrinsics_reference_frame.strip() or settings.calibration_id.strip()
+    )
+    if has_extrinsics and len(settings.camera_extrinsics) != 16:
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_CAMERA_EXTRINSICS",
+            "必须包含 16 个数值",
+        )
+    if has_extrinsics and (
+        not settings.camera_extrinsics_reference_frame.strip()
+        or not settings.calibration_id.strip()
+    ):
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_CAMERA_EXTRINSICS",
+            "配置外参时必须同时配置参考系和标定 ID",
+        )
+    elif not has_extrinsics and has_metadata:
+        _error(
+            issues,
+            "invalid_data_collection",
+            "DATA_COLLECTION_CAMERA_EXTRINSICS",
+            "标定元数据不能脱离外参单独配置",
+        )
+
+
 def _reject_existing_directory(
     path: Path,
     field: str,
@@ -230,7 +361,8 @@ def _reject_existing_directory(
 
 
 def _validate_websocket(
-    config: Any,
+    settings: ServerSettings,
+    auth_token: str,
     options: StartupOptions,
     issues: list[ConfigurationIssue],
 ) -> None:
@@ -246,22 +378,34 @@ def _validate_websocket(
         issues,
         "WEBSOCKET_PORT",
     )
-    for field, default in (
-        ("WEBSOCKET_CONTROL_LEASE_SECONDS", 30.0),
-        ("WEBSOCKET_SEND_TIMEOUT_SECONDS", 2.0),
-        ("AUXILIARY_SERVICE_START_TIMEOUT_SECONDS", 5.0),
-        ("AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS", 10.0),
+    for field, value in (
+        ("WEBSOCKET_CONTROL_LEASE_SECONDS", settings.websocket_control_lease_seconds),
+        ("WEBSOCKET_SEND_TIMEOUT_SECONDS", settings.websocket_send_timeout_seconds),
+        (
+            "AUXILIARY_SERVICE_START_TIMEOUT_SECONDS",
+            settings.auxiliary_service_start_timeout_seconds,
+        ),
+        (
+            "AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS",
+            settings.auxiliary_service_stop_timeout_seconds,
+        ),
     ):
-        _positive(config, issues, field, default=default)
-    for field, default in (
-        ("WEBSOCKET_MAX_MESSAGE_SIZE_BYTES", 1_048_576),
-        ("WEBSOCKET_MAX_REQUESTS_PER_SECOND", 120),
-        ("WEBSOCKET_MAX_CONCURRENT_REQUESTS", 16),
-        ("WEBSOCKET_MAX_QUEUED_MESSAGES", 16),
+        _positive_value(value, issues, field)
+    for field, value in (
+        ("WEBSOCKET_MAX_MESSAGE_SIZE_BYTES", settings.websocket_max_message_size_bytes),
+        (
+            "WEBSOCKET_MAX_REQUESTS_PER_SECOND",
+            settings.websocket_max_requests_per_second,
+        ),
+        (
+            "WEBSOCKET_MAX_CONCURRENT_REQUESTS",
+            settings.websocket_max_concurrent_requests,
+        ),
+        ("WEBSOCKET_MAX_QUEUED_MESSAGES", settings.websocket_max_queued_messages),
     ):
-        _positive(config, issues, field, default=default)
+        _positive_value(value, issues, field)
 
-    auth_token = str(getattr(config, "WEBSOCKET_AUTH_TOKEN", "")).strip()
+    auth_token = auth_token.strip()
     if auth_token and is_placeholder_secret(auth_token):
         _error(
             issues,
@@ -287,14 +431,6 @@ def _validate_websocket(
     )
 
 
-def _port(
-    config: Any,
-    issues: list[ConfigurationIssue],
-    field: str,
-) -> None:
-    _port_value(getattr(config, field, 0), issues, field)
-
-
 def _port_value(
     value: object,
     issues: list[ConfigurationIssue],
@@ -307,33 +443,27 @@ def _port_value(
         _error(issues, "invalid_port", field, "必须在 1..65535 范围内")
 
 
-def _positive(
-    config: Any,
+def _positive_value(
+    value: object,
     issues: list[ConfigurationIssue],
     field: str,
-    *,
-    default: float,
 ) -> None:
-    value = getattr(config, field, default)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         _error(issues, "invalid_number", field, "必须是正数")
         return
-    if value <= 0:
+    if not math.isfinite(value) or value <= 0:
         _error(issues, "invalid_number", field, "必须大于 0")
 
 
-def _non_negative(
-    config: Any,
+def _non_negative_value(
+    value: object,
     issues: list[ConfigurationIssue],
     field: str,
-    *,
-    default: float,
 ) -> None:
-    value = getattr(config, field, default)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         _error(issues, "invalid_number", field, "必须是非负数")
         return
-    if value < 0:
+    if not math.isfinite(value) or value < 0:
         _error(issues, "invalid_number", field, "不能小于 0")
 
 

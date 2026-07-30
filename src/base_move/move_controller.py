@@ -1,22 +1,18 @@
 # -*- coding: utf-8 -*-
 from .tcp_client import TCPClient
-from ..core.config_loader import Config
 
 
 class RobotMoveController:
-    def __init__(self, server_host=None, server_port=None, client_bind_port=None):
-        """
-        初始化移动机器人移动控制器。
-        :param server_host: 服务器 IP 地址（默认从 config.env 读取）
-        :param server_port: 服务器端口（默认从 config.env 读取）
-        :param client_bind_port: 客户端绑定端口（默认从 config.env 读取）
-        """
-        config = Config.get_instance()
-        move_config = config.get_move_controller_config()
-        
-        self.server_host = server_host if server_host is not None else move_config["host"]
-        self.server_port = server_port if server_port is not None else move_config["port"]
-        self.client_bind_port = client_bind_port if client_bind_port is not None else move_config["client_bind_port"]
+    def __init__(
+        self,
+        server_host: str,
+        server_port: int,
+        client_bind_port: int | None,
+    ):
+        """Create a controller from an explicit immutable settings snapshot."""
+        self.server_host = server_host
+        self.server_port = server_port
+        self.client_bind_port = client_bind_port
         self.client = None
         self.last_result = None  # 添加last_result属性
 
@@ -162,19 +158,3 @@ class RobotMoveController:
         except Exception as e:
             print(f"Error in move_slowly: {e}")
             return False
-
-
-if __name__ == "__main__":
-    # 创建移动机器人控制器实例
-    controller = RobotMoveController()
-
-    # 测试移动到底盘指定位置
-    success = controller.move_to_position(0, 0)
-    print(f"Move to position result: {success}")
-
-    # 测试缓慢移动底盘
-    success = controller.move_slowly(0, 10, 0)
-    print(f"Slow move result: {success}")
-
-    # 关闭连接（在所有操作完成后手动关闭）
-    controller.close()

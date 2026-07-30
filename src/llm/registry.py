@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from threading import RLock
 from typing import Any, Dict, Optional, Sequence
 
+from ..core.settings import LLMSettings, SecretSettings
 from .base import BaseLLMClient
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
@@ -53,25 +54,23 @@ class LLMRegistry:
 
     def __init__(
         self,
-        config: Any,
+        settings: LLMSettings,
+        secrets: SecretSettings,
         default_provider: str = "openai",
         providers: Optional[Dict[str, BaseLLMClient]] = None,
     ) -> None:
-        self._config = config
+        self._settings = settings
+        self._secrets = secrets
         self.default_provider = self._normalize_provider(default_provider)
         self._providers: Dict[str, BaseLLMClient] = {}
         self._lock = RLock()
         self._closed = False
         self._fallback_providers = self._parse_provider_names(
-            getattr(config, "LLM_FALLBACK_PROVIDERS", ())
+            settings.llm_fallback_providers
         )
         self._health = ProviderHealthTracker(
-            failure_threshold=int(
-                getattr(config, "LLM_CIRCUIT_FAILURE_THRESHOLD", 3)
-            ),
-            recovery_seconds=float(
-                getattr(config, "LLM_CIRCUIT_RECOVERY_SECONDS", 30.0)
-            ),
+            failure_threshold=settings.llm_circuit_failure_threshold,
+            recovery_seconds=settings.llm_circuit_recovery_seconds,
         )
 
         if providers:
@@ -95,26 +94,23 @@ class LLMRegistry:
         self.vision_fusion = VisionFusionTask(client_resolver=self.get_client_for_profile)
 
     @classmethod
-    def from_config(cls, config) -> "LLMRegistry":
-        """Create a registry from Config or a Config-like object."""
-        config = cls._resolve_config(config)
-        default_provider = (
-            getattr(config, "LLM_DEFAULT_PROVIDER", "")
-            or "openai"
+    def from_settings(
+        cls,
+        settings: LLMSettings,
+        secrets: SecretSettings,
+    ) -> "LLMRegistry":
+        """Create a registry from immutable LLM and secret snapshots."""
+        registry = cls(
+            settings=settings,
+            secrets=secrets,
+            default_provider=settings.llm_default_provider or "openai",
         )
-        registry = cls(config=config, default_provider=default_provider)
         logger.info(
             "LLMRegistry 初始化完成: default=%s, providers=%s",
             registry.default_provider,
             registry.describe_providers(),
         )
         return registry
-
-    @staticmethod
-    def _resolve_config(config):
-        if hasattr(config, "get_instance"):
-            return config.get_instance()
-        return config
 
     @staticmethod
     def _normalize_provider(provider: Optional[str]) -> str:
@@ -140,31 +136,35 @@ class LLMRegistry:
         ))
 
     @classmethod
-    def _create_provider(cls, config, provider: str) -> BaseLLMClient:
+    def _create_provider(
+        cls,
+        settings: LLMSettings,
+        secrets: SecretSettings,
+        provider: str,
+    ) -> BaseLLMClient:
         provider = cls._normalize_provider(provider)
-        timeout_s = float(getattr(config, "LLM_REQUEST_TIMEOUT_S", 60.0))
+        timeout_s = settings.llm_request_timeout_s
 
         if provider == "minicpm":
             return MiniCPMRealtimeClient(
-                gateway_host=getattr(config, "MINICPM_GATEWAY_HOST", "localhost"),
-                gateway_port=getattr(config, "MINICPM_GATEWAY_PORT", 8006),
-                ws_scheme=getattr(config, "MINICPM_WS_SCHEME", "wss"),
-                gateway_path_prefix=getattr(config, "MINICPM_GATEWAY_PATH_PREFIX", ""),
-                realtime_path=getattr(config, "MINICPM_REALTIME_PATH", "/v1/realtime"),
-                model=getattr(config, "MINICPM_MODEL", "minicpm-o"),
+                gateway_host=settings.minicpm_gateway_host,
+                gateway_port=settings.minicpm_gateway_port,
+                ws_scheme=settings.minicpm_ws_scheme,
+                gateway_path_prefix=settings.minicpm_gateway_path_prefix,
+                realtime_path=settings.minicpm_realtime_path,
+                model=settings.minicpm_model,
                 timeout_s=timeout_s,
             )
 
         if provider == "deepseek":
             return OpenAICompatibleClient(
                 provider_name="deepseek",
-                api_key=getattr(config, "DEEPSEEK_API_KEY", "")
-                or getattr(config, "OPENAI_API_KEY", ""),
-                model=getattr(config, "DEEPSEEK_MODEL", "")
-                or getattr(config, "OPENAI_MODEL", "")
+                api_key=secrets.deepseek_api_key or secrets.openai_api_key,
+                model=settings.deepseek_model
+                or settings.openai_model
                 or "deepseek-reasoner",
-                base_url=getattr(config, "DEEPSEEK_BASE_URL", "")
-                or getattr(config, "OPENAI_BASE_URL", "")
+                base_url=settings.deepseek_base_url
+                or settings.openai_base_url
                 or DEEPSEEK_BASE_URL,
                 default_model="deepseek-reasoner",
                 timeout_s=timeout_s,
@@ -173,13 +173,12 @@ class LLMRegistry:
         if provider == "dashscope":
             return OpenAICompatibleClient(
                 provider_name="dashscope",
-                api_key=getattr(config, "DASHSCOPE_API_KEY", "")
-                or getattr(config, "OPENAI_API_KEY", ""),
-                model=getattr(config, "DASHSCOPE_MODEL", "")
-                or getattr(config, "OPENAI_MODEL", "")
+                api_key=secrets.dashscope_api_key or secrets.openai_api_key,
+                model=settings.dashscope_model
+                or settings.openai_model
                 or "qwen-plus",
-                base_url=getattr(config, "DASHSCOPE_BASE_URL", "")
-                or getattr(config, "OPENAI_BASE_URL", "")
+                base_url=settings.dashscope_base_url
+                or settings.openai_base_url
                 or DASHSCOPE_BASE_URL,
                 default_model="qwen-plus",
                 timeout_s=timeout_s,
@@ -187,9 +186,9 @@ class LLMRegistry:
 
         return OpenAICompatibleClient(
             provider_name=provider if provider != "openai" else "openai",
-            api_key=getattr(config, "OPENAI_API_KEY", ""),
-            model=getattr(config, "OPENAI_MODEL", "") or "gpt-4o",
-            base_url=getattr(config, "OPENAI_BASE_URL", ""),
+            api_key=secrets.openai_api_key,
+            model=settings.openai_model or "gpt-4o",
+            base_url=settings.openai_base_url,
             default_model="gpt-4o",
             timeout_s=timeout_s,
         )
@@ -257,7 +256,11 @@ class LLMRegistry:
                 )
 
             logger.info("懒加载 LLM provider: %s", provider_name)
-            client = self._create_provider(self._config, provider_name)
+            client = self._create_provider(
+                self._settings,
+                self._secrets,
+                provider_name,
+            )
             self._providers[provider_name] = client
             return client
 

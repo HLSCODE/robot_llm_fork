@@ -4,7 +4,6 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from ...application import CommandRuntimeError
-from ...core.config_loader import Config
 from ...llm import (
     LLMCapability,
     LLMContentPart,
@@ -239,13 +238,22 @@ class InteractionWebSocketHandler:
         )
 
         try:
-            config = Config.get_instance()
+            settings = self._server._services.settings
             provider = (
                 self._server._llm_registry.default_provider.upper()
                 if self._server._llm_registry
-                else config.LLM_DEFAULT_PROVIDER.upper()
+                else settings.llm.llm_default_provider.upper()
             )
-            api_key_set = Config.is_api_key_set()
+            provider_key = {
+                "openai": settings.secrets.openai_api_key,
+                "deepseek": settings.secrets.deepseek_api_key,
+                "dashscope": settings.secrets.dashscope_api_key,
+            }.get(provider.lower(), "")
+            api_key_set = (
+                bool(settings.llm.minicpm_gateway_host)
+                if provider.lower() == "minicpm"
+                else bool(provider_key)
+            )
         except Exception as exc:
             logger.debug(
                 "读取 AI 状态配置失败，返回未配置状态: %s",
@@ -518,30 +526,31 @@ class InteractionWebSocketHandler:
     def _init_ai(self) -> None:
         """初始化 LLM 客户端和技能引擎"""
         try:
-            config = Config.get_instance()
+            settings = self._server._services.settings
 
             # 初始化技能引擎
             # 初始化 LLM 能力层
-            self._server._llm_registry = LLMRegistry.from_config(config)
+            self._server._llm_registry = LLMRegistry.from_settings(
+                settings.llm,
+                settings.secrets,
+            )
             logger.info(
                 "LLMRegistry 就绪: default=%s, providers=%s",
                 self._server._llm_registry.default_provider,
                 self._server._llm_registry.describe_providers(),
             )
 
-            voice_config = Config.get_voice_interaction_config()
+            voice_config = settings.voice.as_runtime_mapping()
             self._server._interaction_controller = VoiceInteractionController(
                 llm_registry=self._server._llm_registry,
                 command_runtime=self._server._services.commands,
                 source="websocket-ai",
                 camera_provider=CamerasModuleProvider(
                     session_factory=self._camera_capture_session,
-                    camera_name=config.VISION_CAMERA_NAME or None,
+                    camera_name=settings.vision.vision_camera_name or None,
                 ),
                 timeout_s=voice_config["session_timeout_s"],
-                turn_timeout_s=float(
-                    getattr(config, "INTERACTION_TURN_TIMEOUT_S", 90.0)
-                ),
+                turn_timeout_s=settings.runtime.interaction_turn_timeout_s,
                 history_turns=voice_config["session_history_turns"],
                 tts_enabled=voice_config["tts_enabled"],
                 wake_feedback=WakeFeedback(
@@ -780,10 +789,26 @@ class InteractionWebSocketHandler:
             )
 
     def _init_minicpm_config(self) -> None:
-        """从 Config 加载 MiniCPM 相关配置。"""
+        """Load MiniCPM settings from the application snapshot."""
         try:
-            cfg_dict = Config.get_minicpm_config()
-            self._server._minicpm_cfg = MiniCPMChatConfig(**cfg_dict)
+            settings = self._server._services.settings
+            self._server._minicpm_cfg = MiniCPMChatConfig(
+                gateway_host=settings.llm.minicpm_gateway_host,
+                gateway_port=settings.llm.minicpm_gateway_port,
+                ws_scheme=settings.llm.minicpm_ws_scheme,
+                gateway_path_prefix=settings.llm.minicpm_gateway_path_prefix,
+                realtime_path=settings.llm.minicpm_realtime_path,
+                ask_enabled=settings.llm.minicpm_ask_enabled,
+                ask_api_key=(
+                    settings.secrets.minicpm_ask_api_key
+                    or settings.secrets.openai_api_key
+                ),
+                ask_base_url=(
+                    settings.llm.minicpm_ask_base_url
+                    or settings.llm.openai_base_url
+                ),
+                ask_model=settings.llm.minicpm_ask_model,
+            )
             logger.info(
                 "MiniCPM 配置已加载: %s://%s%s%s",
                 self._server._minicpm_cfg.ws_scheme,

@@ -1,8 +1,8 @@
 from .models import ActionDefinition, ActionType, SequenceItem, SequenceItemStatus
-from .config_loader import Config
 from .launcher import main
+from .settings import ApplicationSettings
 
 __all__ = [
     "ActionDefinition", "ActionType", "SequenceItem", "SequenceItemStatus",
-    "Config", "main",
+    "ApplicationSettings", "main",
 ]

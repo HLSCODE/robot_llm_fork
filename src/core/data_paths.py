@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+
+from .settings import DataSettings
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,23 +19,23 @@ class ApplicationDataPaths:
     skills_file: Path
 
     @classmethod
-    def from_config(cls, config: Any) -> ApplicationDataPaths:
+    def from_settings(cls, settings: DataSettings) -> ApplicationDataPaths:
         root = _resolve_path(
-            str(getattr(config, "ROBOT_DATA_DIR", "data")),
+            settings.robot_data_dir,
             base=PROJECT_ROOT,
         )
         return cls(
             root=root,
             actions_file=_resolve_override(
-                getattr(config, "ACTIONS_LIBRARY_PATH", ""),
+                settings.actions_library_path,
                 default=root / "actions_library.json",
             ),
             tasks_directory=_resolve_override(
-                getattr(config, "TASKS_DIRECTORY", ""),
+                settings.tasks_directory,
                 default=root / "tasks",
             ),
             skills_file=_resolve_override(
-                getattr(config, "SKILL_LIBRARY_PATH", ""),
+                settings.skill_library_path,
                 default=root / "skills" / "skill_library.json",
             ),
         )

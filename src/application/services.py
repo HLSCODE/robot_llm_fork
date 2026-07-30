@@ -23,6 +23,7 @@ from ..device_runtime import (
     TrajectoryControl,
     TrajectorySaveResult,
 )
+from ..core.settings import ApplicationSettings
 from ..device_runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from ..execution import (
     ExecutionHandle,
@@ -452,3 +453,4 @@ class ApplicationServices:
     device_runtime: DeviceRuntime
     resources: ResourceArbiter
     simulation: bool
+    settings: ApplicationSettings

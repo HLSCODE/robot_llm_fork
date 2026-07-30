@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import numpy as np
 
+from src.core.settings import DataCollectionSettings
 from src.data_collection.config import DataCollectionConfig
 from src.data_collection.episode_writer import (
     DataCollectionEpisodeWriter,
@@ -61,9 +62,7 @@ class DataCollectionStorageTests(unittest.TestCase):
         self.assertFalse((result.episode_path / "low_dim_obs.pkl").exists())
 
         metadata = json.loads(
-            (result.episode_path / EPISODE_METADATA_FILENAME).read_text(
-                encoding="utf-8"
-            )
+            (result.episode_path / EPISODE_METADATA_FILENAME).read_text(encoding="utf-8")
         )
         self.assertEqual(DATA_COLLECTION_SCHEMA_NAME, metadata["schema_name"])
         self.assertEqual(
@@ -352,27 +351,41 @@ class DataCollectionStorageTests(unittest.TestCase):
             )
         self.assertEqual([], list(self.dataset_path.iterdir()))
 
-    def test_environment_config_is_typed_and_validated(self):
-        config = DataCollectionConfig.from_environment(
-            {
-                "DATA_COLLECTION_FPS": "15",
-                "DATA_COLLECTION_CAMERA_INDEX": "2",
-                "DATA_COLLECTION_ARMS": "left,right",
-                "DATA_COLLECTION_SAVE_PATH": "custom/demos",
-                "DATA_COLLECTION_FORMAT_VARIANT": "portable_simplified",
-                "DATA_COLLECTION_MIN_FREE_BYTES": "2048",
-                "DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR": "1.5",
-                "DATA_COLLECTION_STALE_WRITE_SECONDS": "120",
-                "DATA_COLLECTION_RANDOM_SEED": "7",
-                "DATA_COLLECTION_STOP_TIMEOUT_SECONDS": "3",
-                "DATA_COLLECTION_MAX_SYNC_SKEW_MS": "20",
-                "DATA_COLLECTION_CAMERA_EXTRINSICS": (
-                    "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1"
+    def test_application_settings_are_adapted_and_validated(self):
+        config = DataCollectionConfig.from_settings(
+            DataCollectionSettings(
+                fps=15,
+                camera_index=2,
+                arm_ids=("left", "right"),
+                save_path="custom/demos",
+                format_variant="portable_simplified",
+                minimum_free_bytes=2048,
+                storage_overhead_factor=1.5,
+                stale_write_seconds=120,
+                random_seed=7,
+                recording_stop_timeout_seconds=3,
+                maximum_sync_skew_ms=20,
+                camera_extrinsics=(
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
                 ),
-                "DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME": "robot_base",
-                "DATA_COLLECTION_CALIBRATION_ID": "cal-2026-07",
-            },
-            load_project_dotenv=False,
+                camera_extrinsics_reference_frame="robot_base",
+                calibration_id="cal-2026-07",
+            )
         )
 
         self.assertEqual(15, config.fps)
@@ -392,36 +405,32 @@ class DataCollectionStorageTests(unittest.TestCase):
         self.assertEqual("robot_base", config.camera_extrinsics_reference_frame)
         self.assertEqual("cal-2026-07", config.calibration_id)
 
-        with self.assertRaisesRegex(ValueError, "FPS"):
-            DataCollectionConfig.from_environment(
-                {"DATA_COLLECTION_FPS": "invalid"},
-                load_project_dotenv=False,
+        with self.assertRaisesRegex(ValueError, "fps"):
+            DataCollectionConfig.from_settings(
+                DataCollectionSettings(fps=0),
             )
         with self.assertRaisesRegex(ValueError, "SAVE_PATH"):
-            DataCollectionConfig.from_environment(
-                {"DATA_COLLECTION_SAVE_PATH": "  "},
-                load_project_dotenv=False,
+            DataCollectionConfig.from_settings(
+                DataCollectionSettings(save_path="  "),
             )
         with self.assertRaisesRegex(ValueError, "exactly one arm"):
-            DataCollectionConfig.from_environment(
-                {
-                    "DATA_COLLECTION_ARMS": "left,right",
-                    "DATA_COLLECTION_FORMAT_VARIANT": "rlbench_native",
-                },
-                load_project_dotenv=False,
+            DataCollectionConfig.from_settings(
+                DataCollectionSettings(
+                    arm_ids=("left", "right"),
+                    format_variant="rlbench_native",
+                )
             )
         with self.assertRaisesRegex(ValueError, "requires camera extrinsics"):
-            DataCollectionConfig.from_environment(
-                {"DATA_COLLECTION_CALIBRATION_ID": "missing-transform"},
-                load_project_dotenv=False,
+            DataCollectionConfig.from_settings(
+                DataCollectionSettings(
+                    calibration_id="missing-transform",
+                )
             )
 
     def _writer(
         self,
         *,
-        format_variant: DataCollectionFormat = (
-            DataCollectionFormat.PORTABLE_SIMPLIFIED
-        ),
+        format_variant: DataCollectionFormat = (DataCollectionFormat.PORTABLE_SIMPLIFIED),
         minimum_free_bytes: int = 0,
         stale_seconds: float = 3600.0,
         clock=None,
@@ -486,9 +495,7 @@ def _frames(count: int) -> list[FrameData]:
                     sampled_at_utc_ns=1_000_000_000 + index,
                     sampled_at_monotonic_ns=2_002_000_000 + index * 1_000_000,
                     joint_positions=np.arange(7, dtype=np.float64) + index,
-                    joint_velocities=(
-                        None if index == 0 else np.ones(7, dtype=np.float64)
-                    ),
+                    joint_velocities=(None if index == 0 else np.ones(7, dtype=np.float64)),
                     joint_currents=np.arange(7, dtype=np.float64) / 10.0,
                     gripper_open=0.25,
                     gripper_force_newtons=4.2,

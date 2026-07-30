@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any
 
+from ..core.settings import DeviceSettings, RobotSettings
 from .adapters import (
     RealManGripperOptions,
     RealManRobotAdapter,
@@ -22,7 +22,7 @@ class RobotProviderDefinition:
 
     name: str
     capabilities: frozenset[DeviceCapability]
-    create: Callable[[Any], RobotSystem]
+    create: Callable[[RobotSettings, DeviceSettings], RobotSystem]
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -80,27 +80,45 @@ class RealManProviderSettings:
             raise ValueError("RealMan model must not be empty")
 
     @classmethod
-    def from_config(cls, config: Any) -> RealManProviderSettings:
+    def from_settings(cls, settings: RobotSettings) -> RealManProviderSettings:
         try:
             return cls(
-                model=str(config.ROBOT_MODEL).strip(),
-                left_arm=_arm_connection(config, "ROBOT1"),
-                right_arm=_arm_connection(config, "ROBOT2"),
+                model=settings.robot_model.strip(),
+                left_arm=RealManArmConnection(
+                    ip=settings.robot1_ip,
+                    port=settings.robot1_port,
+                    initial_pose=CartesianPose.from_iterable(
+                        settings.robot1_initial_pose
+                    ),
+                ),
+                right_arm=RealManArmConnection(
+                    ip=settings.robot2_ip,
+                    port=settings.robot2_port,
+                    initial_pose=CartesianPose.from_iterable(
+                        settings.robot2_initial_pose
+                    ),
+                ),
                 motion=MotionOptions(
-                    velocity_percent=int(config.MOVE_VELOCITY),
-                    blend_radius=int(config.MOVE_RADIUS),
-                    connected=_config_bool(config, "MOVE_CONNECT"),
-                    blocking=_config_bool(config, "MOVE_BLOCK"),
+                    velocity_percent=settings.move_velocity,
+                    blend_radius=settings.move_radius,
+                    connected=_binary_flag(
+                        settings.move_connect,
+                        "MOVE_CONNECT",
+                    ),
+                    blocking=_binary_flag(
+                        settings.move_block,
+                        "MOVE_BLOCK",
+                    ),
                 ),
                 gripper=RealManGripperOptions(
-                    pick_speed=int(config.GRIPPER_PICK_SPEED),
-                    pick_force=int(config.GRIPPER_PICK_FORCE),
-                    pick_timeout_s=int(config.GRIPPER_PICK_TIMEOUT),
-                    release_speed=int(config.GRIPPER_RELEASE_SPEED),
-                    release_timeout_s=int(config.GRIPPER_RELEASE_TIMEOUT),
-                    max_attempts=int(config.MAX_ATTEMPTS),
+                    pick_speed=settings.gripper_pick_speed,
+                    pick_force=settings.gripper_pick_force,
+                    pick_timeout_s=settings.gripper_pick_timeout,
+                    release_speed=settings.gripper_release_speed,
+                    release_timeout_s=settings.gripper_release_timeout,
+                    max_attempts=settings.max_attempts,
                 ),
-                tool_rack=_tool_rack_options(config),
+                tool_rack=_tool_rack_options(settings),
             )
         except (AttributeError, TypeError, ValueError) as exc:
             raise DeviceInitializationError(
@@ -108,10 +126,8 @@ class RealManProviderSettings:
             ) from exc
 
 
-def resolve_robot_provider(config: Any) -> RobotProviderDefinition:
-    provider_name = str(
-        getattr(config, "ROBOT_PROVIDER", "realman")
-    ).strip().lower()
+def resolve_robot_provider(settings: RobotSettings) -> RobotProviderDefinition:
+    provider_name = settings.robot_provider.strip().lower()
     try:
         return ROBOT_PROVIDERS[provider_name]
     except KeyError as exc:
@@ -122,14 +138,17 @@ def resolve_robot_provider(config: Any) -> RobotProviderDefinition:
         ) from exc
 
 
-def _create_realman_robot(config: Any) -> RobotSystem:
+def _create_realman_robot(
+    robot_settings: RobotSettings,
+    device_settings: DeviceSettings,
+) -> RobotSystem:
     from ..arm_sdk import RobotController
     from ..devices import yiyeqiang_out
 
     if RobotController is None:
         raise DeviceInitializationError("RobotController SDK unavailable")
 
-    settings = RealManProviderSettings.from_config(config)
+    settings = RealManProviderSettings.from_settings(robot_settings)
     controller = RobotController(
         settings.left_arm.to_controller_config(),
         settings.right_arm.to_controller_config(),
@@ -140,7 +159,7 @@ def _create_realman_robot(config: Any) -> RobotSystem:
         gripper_options=settings.gripper,
         tool_rack_options=settings.tool_rack,
         eject_tool=lambda: yiyeqiang_out.eject_tip(
-            port=str(config.KUAIHUANSHOU_SERIAL_PORT)
+            port=device_settings.kuaihuanshou_serial_port
         ),
     )
     try:
@@ -152,82 +171,54 @@ def _create_realman_robot(config: Any) -> RobotSystem:
         raise
 
 
-def _arm_connection(config: Any, prefix: str) -> RealManArmConnection:
-    return RealManArmConnection(
-        ip=str(getattr(config, f"{prefix}_IP")),
-        port=int(getattr(config, f"{prefix}_PORT")),
-        initial_pose=CartesianPose.from_iterable(
-            getattr(config, f"{prefix}_INITIAL_POSE")
+def _binary_flag(value: int, field_name: str) -> bool:
+    if value not in (0, 1):
+        raise ValueError(f"{field_name} must be 0 or 1")
+    return bool(value)
+
+
+def _tool_rack_options(settings: RobotSettings) -> RealManToolRackOptions:
+    slots = (
+        RealManToolRackSlot(
+            slot_id=1,
+            approach_pose=CartesianPose.from_iterable(
+                settings.robot_tool_rack_slot_1_approach_pose
+            ),
+            attach_pose=CartesianPose.from_iterable(
+                settings.robot_tool_rack_slot_1_attach_pose
+            ),
+            detach_pose=CartesianPose.from_iterable(
+                settings.robot_tool_rack_slot_1_detach_pose
+            ),
+            attach_dwell_seconds=(
+                settings.robot_tool_rack_slot_1_attach_dwell_seconds
+            ),
+            detach_dwell_seconds=(
+                settings.robot_tool_rack_slot_1_detach_dwell_seconds
+            ),
+        ),
+        RealManToolRackSlot(
+            slot_id=2,
+            approach_pose=CartesianPose.from_iterable(
+                settings.robot_tool_rack_slot_2_approach_pose
+            ),
+            attach_pose=CartesianPose.from_iterable(
+                settings.robot_tool_rack_slot_2_attach_pose
+            ),
+            detach_pose=CartesianPose.from_iterable(
+                settings.robot_tool_rack_slot_2_detach_pose
+            ),
+            attach_dwell_seconds=(
+                settings.robot_tool_rack_slot_2_attach_dwell_seconds
+            ),
+            detach_dwell_seconds=(
+                settings.robot_tool_rack_slot_2_detach_dwell_seconds
+            ),
         ),
     )
-
-
-def _config_bool(config: Any, field_name: str) -> bool:
-    value = getattr(config, field_name)
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int) and value in (0, 1):
-        return bool(value)
-    normalized = str(value).strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return True
-    if normalized in {"0", "false", "no", "off"}:
-        return False
-    raise ValueError(
-        f"{field_name} must be a boolean or one of 0/1, got {value!r}"
-    )
-
-
-def _tool_rack_options(config: Any) -> RealManToolRackOptions:
-    slots = tuple(
-        RealManToolRackSlot(
-            slot_id=slot_id,
-            approach_pose=_tool_rack_pose(
-                config,
-                slot_id,
-                "APPROACH",
-            ),
-            attach_pose=_tool_rack_pose(
-                config,
-                slot_id,
-                "ATTACH",
-            ),
-            detach_pose=_tool_rack_pose(
-                config,
-                slot_id,
-                "DETACH",
-            ),
-            attach_dwell_seconds=float(
-                getattr(
-                    config,
-                    f"ROBOT_TOOL_RACK_SLOT_{slot_id}_ATTACH_DWELL_SECONDS",
-                )
-            ),
-            detach_dwell_seconds=float(
-                getattr(
-                    config,
-                    f"ROBOT_TOOL_RACK_SLOT_{slot_id}_DETACH_DWELL_SECONDS",
-                )
-            ),
-        )
-        for slot_id in (1, 2)
-    )
     return RealManToolRackOptions(
-        arm=ArmId.parse(config.ROBOT_TOOL_RACK_ARM),
+        arm=ArmId.parse(settings.robot_tool_rack_arm),
         slots=slots,
-    )
-
-
-def _tool_rack_pose(
-    config: Any,
-    slot_id: int,
-    pose_name: str,
-) -> CartesianPose:
-    return CartesianPose.from_iterable(
-        getattr(
-            config,
-            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_{pose_name}_POSE",
-        )
     )
 
 

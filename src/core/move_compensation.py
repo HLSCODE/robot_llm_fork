@@ -4,6 +4,7 @@ from typing import Callable
 
 from .execution_context import ExecutionContext
 from .pose_compensation import compensate_pose, parse_pose
+from .settings import VisionSettings
 
 
 LogFn = Callable[[str], None]
@@ -34,6 +35,7 @@ def resolve_robot_target_pose(
     params: dict,
     arm: str,
     context: ExecutionContext,
+    vision_settings: VisionSettings,
     log_fn: LogFn | None = None,
 ) -> list[float]:
     """Resolve a robot move target after optional UDP or vision compensation."""
@@ -78,6 +80,7 @@ def resolve_robot_target_pose(
             station_id,
             arm,
             context,
+            vision_settings,
             mode=vision_config.get("mode") or vision_config.get("compensation_mode"),
             planar_constraint=vision_config.get("planar_constraint"),
         )

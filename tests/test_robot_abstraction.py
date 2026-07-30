@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from threading import RLock
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from unittest.mock import patch
 
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.settings import ApplicationSettings, RobotSettings
 from src.device_runtime import (
     ArmId,
     ArmTelemetryReader,
@@ -205,8 +207,8 @@ def _provider_config(**overrides: object) -> SimpleNamespace:
         "ROBOT2_INITIAL_POSE": _pose(2).to_list(),
         "MOVE_VELOCITY": 20,
         "MOVE_RADIUS": 0,
-        "MOVE_CONNECT": "0",
-        "MOVE_BLOCK": "true",
+        "MOVE_CONNECT": 0,
+        "MOVE_BLOCK": 1,
         "GRIPPER_PICK_SPEED": 200,
         "GRIPPER_PICK_FORCE": 1000,
         "GRIPPER_PICK_TIMEOUT": 3,
@@ -428,15 +430,19 @@ class RealManRobotAdapterTests(unittest.TestCase):
 
 class RobotProviderTests(unittest.TestCase):
     def test_unknown_provider_fails_explicitly(self):
-        config = type("Config", (), {"ROBOT_PROVIDER": "unknown"})()
+        settings = replace(
+            ApplicationSettings.defaults(),
+            robot=RobotSettings(robot_provider="unknown"),
+        )
         with self.assertRaisesRegex(
             DeviceInitializationError,
             "unsupported robot provider",
         ):
-            create_device_runtime(config, simulation=False)
+            create_device_runtime(settings, simulation=False)
 
     def test_realman_provider_declares_core_and_optional_capabilities(self):
-        provider = resolve_robot_provider(_provider_config())
+        settings = ApplicationSettings.from_config(_provider_config()).robot
+        provider = resolve_robot_provider(settings)
 
         self.assertEqual("realman", provider.name)
         self.assertTrue({
@@ -449,7 +455,9 @@ class RobotProviderTests(unittest.TestCase):
         }.issubset(provider.capabilities))
 
     def test_realman_settings_validate_model_specific_configuration(self):
-        settings = RealManProviderSettings.from_config(_provider_config())
+        settings = RealManProviderSettings.from_settings(
+            ApplicationSettings.from_config(_provider_config()).robot
+        )
 
         self.assertFalse(settings.motion.connected)
         self.assertTrue(settings.motion.blocking)
@@ -458,18 +466,22 @@ class RobotProviderTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             DeviceInitializationError,
-            "MOVE_CONNECT must be a boolean",
+            "MOVE_CONNECT must be 0 or 1",
         ):
-            RealManProviderSettings.from_config(
-                _provider_config(MOVE_CONNECT="sometimes")
+            RealManProviderSettings.from_settings(
+                ApplicationSettings.from_config(
+                    _provider_config(MOVE_CONNECT="sometimes")
+                ).robot
             )
 
         with self.assertRaisesRegex(
             DeviceInitializationError,
             "cartesian pose requires 6 values",
         ):
-            RealManProviderSettings.from_config(
-                _provider_config(ROBOT1_INITIAL_POSE=[1, 2])
+            RealManProviderSettings.from_settings(
+                ApplicationSettings.from_config(
+                    _provider_config(ROBOT1_INITIAL_POSE=[1, 2])
+                ).robot
             )
 
 
@@ -509,7 +521,10 @@ class RobotProviderContractTests(unittest.TestCase):
 
 class RobotApplicationServiceTests(unittest.TestCase):
     def test_manual_control_and_query_use_normalized_robot_contract(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         services.manual_control.set_gripper("left", position=350)
         robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
         self.assertEqual(350, robot.gripper_positions[ArmId.LEFT])
@@ -518,7 +533,10 @@ class RobotApplicationServiceTests(unittest.TestCase):
         self.assertEqual(ArmId.LEFT, state.arm)
 
     def test_drag_teaching_owns_robot_until_trajectory_is_saved(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         item = SequenceItem.from_definition(
             ActionDefinition(
                 id="move",

@@ -36,11 +36,20 @@
 
 ### 1. 安装依赖
 
+常用 GUI + WebSocket + AI 开发环境：
+
 ```bash
-uv sync --frozen
+uv sync --frozen --extra gui --extra server --extra ai
 ```
 
-语音等可选能力按需使用 `uv sync --frozen --extra voice` 安装，不再维护容易漂移的
+视觉和真实硬件环境再增加 `--extra vision --extra hardware`；语音识别和关键词唤醒
+增加 `--extra voice --extra kws`。需要完整集成环境时：
+
+```bash
+uv sync --frozen --extra full
+```
+
+所有依赖均来自 `pyproject.toml`，`uv.lock` 固定解析结果，不再维护
 `requirements.txt` 副本。
 
 ### 2. 准备配置
@@ -89,7 +98,7 @@ ROBOT2_PORT=8080
 启动 GUI 或连接硬件前可以单独校验配置：
 
 ```bash
-python run.py --check-config --simulation --disable-websocket
+uv run robot-llm --check-config --simulation --disable-websocket
 ```
 
 依赖单一来源、用户数据目录、schema v1、自动迁移和敏感信息规则见
@@ -100,26 +109,29 @@ python run.py --check-config --simulation --disable-websocket
 默认启动 GUI，并在同一进程内启动 WebSocket 附加服务：
 
 ```bash
-python run.py
+uv run robot-llm
 ```
 
 前端联调推荐模拟模式：
 
 ```bash
-python run.py --simulation
+uv run robot-llm --simulation
 ```
 
 指定端口：
 
 ```bash
-python run.py --websocket-port 9000
+uv run robot-llm --websocket-port 9000
 ```
 
 本次启动禁用 WebSocket：
 
 ```bash
-python run.py --disable-websocket
+uv run robot-llm --disable-websocket
 ```
+
+安装 wheel 后可直接使用 `robot-llm`；源码树和模块部署也支持
+`python -m src`。不再维护旧启动脚本。
 
 ## 应用宿主
 
@@ -171,13 +183,12 @@ GUI 主要包含：
 - 执行日志
 
 GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
-`python run.py --simulation` 做界面、接口和流程联调。
+`uv run robot-llm --simulation` 做界面、接口和流程联调。
 
 ## 项目结构
 
 ```text
 .
-├── run.py                    # GUI 与附加网络服务的统一入口
 ├── config.env.example         # 配置模板
 ├── pyproject.toml             # Python 版本与依赖声明
 ├── uv.lock                    # 锁定的完整依赖图
@@ -266,7 +277,7 @@ WebSocket 模式下可通过 `camera_status` 查询相机状态，通过 `subscr
 若只调试前端、接口或 AI 流程，请使用：
 
 ```bash
-python run.py --simulation
+uv run robot-llm --simulation
 ```
 
 模拟模式不会连接真实硬件，可避免机械臂、串口或相机不可用导致启动受阻。
@@ -276,19 +287,19 @@ python run.py --simulation
 安装开发依赖并执行本地/CI 共用的质量门禁：
 
 ```powershell
-uv sync --frozen --group dev
+uv sync --frozen --all-extras --group dev
 uv run --frozen --group dev python scripts/run_quality_checks.py
 ```
 
 该入口依次执行 Python 编译检查、Ruff、核心 Mypy 检查、Pytest 和 LLM 离线 golden
-regression。测试分层、静态检查范围和 CI 规则见
+regression，并构建 wheel、隔离安装后调用标准命令。测试分层、静态检查范围和 CI 规则见
 [工程质量门禁](docs/quality-gates.md)。
 
-- 新增配置项：优先在 `config.env.example` 和 `src/core/config_loader.py` 中同步维护。
+- 新增配置项：同步维护 `config.env.example`、环境适配器和对应领域 settings。
 - 新增动作类型：更新 `ActionType`、动作参数 schema、GUI 表单和 WebSocket 执行器。
 - 新增技能：维护 `data/skills/skill_library.json`，或扩展默认技能定义。
-- 新增 WebSocket 接口：在 `src/robot_server/ws_server.py` 增加 action 处理，并同步更新 `docs/websocket-api.md`。
-- 新增硬件动作：优先复用 `src/actions/`、`src/devices/` 和 `src/arm_sdk/` 中已有封装。
+- 新增 WebSocket 接口：在领域 handler 和 route/payload schema 中注册，并同步更新 `docs/websocket-api.md`。
+- 新增硬件能力：在 `DeviceRuntime` 注册 provider/adapter，由 Application Service 或执行 handler 调用统一协议。
 
 ## 常见问题
 
@@ -297,7 +308,7 @@ regression。测试分层、静态检查范围和 CI 规则见
 确认是否处于真实硬件模式。没有硬件时使用：
 
 ```bash
-python run.py --simulation
+uv run robot-llm --simulation
 ```
 
 ### WebSocket 连不上

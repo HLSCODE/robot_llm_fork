@@ -32,7 +32,10 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install locked development environment
-        run: uv sync --frozen --group dev
+        run: >-
+          uv sync --frozen --group dev
+          --extra gui --extra server --extra ai
+          --extra vision --extra hardware
 
       - name: Run quality gates
         run: uv run --frozen --group dev python scripts/run_quality_checks.py

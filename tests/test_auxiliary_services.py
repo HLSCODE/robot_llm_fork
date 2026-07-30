@@ -15,6 +15,7 @@ from src.core.launcher import (
     _shutdown_application,
     build_auxiliary_service_host,
 )
+from src.core.settings import ApplicationSettings
 from src.robot_server.ws_server import RobotWebSocketServer
 
 
@@ -252,7 +253,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
 
         host = build_auxiliary_service_host(
             args,
-            config,
+            ApplicationSettings.from_config(config),
             services=object(),
         )
 
@@ -301,7 +302,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
         ) as server_type:
             host = build_auxiliary_service_host(
                 args,
-                config,
+                ApplicationSettings.from_config(config),
                 services=object(),
             )
 
@@ -334,7 +335,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
         ):
             build_auxiliary_service_host(
                 args,
-                config,
+                ApplicationSettings.from_config(config),
                 services=object(),
             )
 

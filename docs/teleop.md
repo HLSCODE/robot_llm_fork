@@ -381,7 +381,7 @@ WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
 
 启动服务：
 ```bash
-python run.py
+uv run robot-llm
 ```
 
 ## 调试和测试

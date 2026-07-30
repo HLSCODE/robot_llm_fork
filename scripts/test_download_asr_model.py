@@ -20,12 +20,11 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-    from src.core.config_loader import Config
+    from src.core.config_loader import load_application_settings
     from src.voice_interaction.speech.asr import FunASRRecognizer
     from src.voice_interaction.speech.vad import FunASRVAD
 
-    Config.load()
-    voice_config = Config.get_voice_interaction_config()
+    voice_config = load_application_settings().voice.as_runtime_mapping()
     suppress_model_output = not args.show_model_output
 
     if not args.skip_vad:

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from src.core.config_loader import Config, ConfigLoadError
+from src.core.config_loader import ConfigLoadError, load_application_settings
 from src.core.config_validation import (
     ConfigurationSeverity,
     StartupOptions,
@@ -15,6 +15,7 @@ from src.core.config_validation import (
 )
 from src.core.data_paths import ApplicationDataPaths
 from src.core.launcher import main
+from src.core.settings import ApplicationSettings
 
 
 def _config(root: Path, **overrides):
@@ -41,7 +42,7 @@ def _config(root: Path, **overrides):
         "EXECUTION_GRIPPER_RETRY_DELAY_SECONDS": 0.5,
     }
     values.update(overrides)
-    return SimpleNamespace(**values)
+    return ApplicationSettings.from_config(SimpleNamespace(**values))
 
 
 def _options(**overrides) -> StartupOptions:
@@ -107,6 +108,31 @@ class ConfigurationValidationTests(unittest.TestCase):
             [issue.code for issue in report.warnings],
         )
 
+    def test_data_collection_and_balance_settings_are_validated_at_startup(
+        self,
+    ) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    DATA_COLLECTION_FPS=0,
+                    DATA_COLLECTION_ARMS=("left", "left"),
+                    BALANCE_CAMERA_INDEX=-1,
+                    VVEAI_API_KEY="change-me",
+                ),
+                _options(websocket_enabled=False),
+            )
+
+        self.assertEqual(
+            {
+                "BALANCE_CAMERA_INDEX",
+                "DATA_COLLECTION_ARMS",
+                "DATA_COLLECTION_FPS",
+                "VVEAI_API_KEY",
+            },
+            {issue.field for issue in report.errors},
+        )
+
     def test_data_path_collision_is_rejected_before_file_creation(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -139,20 +165,21 @@ class ConfigurationValidationTests(unittest.TestCase):
         self.assertNotIn("very-secret", repr(redacted))
 
     def test_config_parse_error_does_not_echo_rejected_value(self) -> None:
-        with patch.object(
-            Config,
-            "_load_unchecked",
+        with patch(
+            "src.core.config_loader._EnvironmentConfig._load_unchecked",
             side_effect=ValueError("very-secret-invalid-value"),
         ):
             with self.assertRaises(ConfigLoadError) as error:
-                Config.load()
+                load_application_settings()
 
         self.assertNotIn("very-secret-invalid-value", str(error.exception))
 
     def test_data_paths_follow_root_and_explicit_overrides(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            paths = ApplicationDataPaths.from_config(_config(root, TASKS_DIRECTORY="custom/tasks"))
+            paths = ApplicationDataPaths.from_settings(
+                _config(root, TASKS_DIRECTORY="custom/tasks").data
+            )
 
         self.assertEqual(root.resolve(), paths.root)
         self.assertEqual(root.resolve() / "actions_library.json", paths.actions_file)
@@ -170,8 +197,11 @@ class ConfigurationValidationTests(unittest.TestCase):
                 WEBSOCKET_ENABLED=False,
             )
             with (
-                patch("sys.argv", ["run.py", "--check-config"]),
-                patch.object(Config, "get_instance", return_value=config),
+                patch("sys.argv", ["robot-llm", "--check-config"]),
+                patch(
+                    "src.core.launcher.load_application_settings",
+                    return_value=config,
+                ),
                 patch("src.core.launcher.setup_logging"),
                 patch("src.core.launcher.run_gui") as run_gui,
             ):

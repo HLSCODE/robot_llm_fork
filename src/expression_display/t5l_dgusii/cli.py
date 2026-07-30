@@ -91,9 +91,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _project_settings():
+    from ...core.config_loader import load_application_settings
     from ..display import ExpressionDisplaySettings
 
-    return ExpressionDisplaySettings.from_project_config()
+    settings = load_application_settings()
+    project_root = Path(__file__).resolve().parents[3]
+    return ExpressionDisplaySettings.from_mapping(
+        settings.devices.expression_display_mapping(project_root)
+    )
 
 
 def _config_from_project_settings(settings) -> DgusSdkConfig:

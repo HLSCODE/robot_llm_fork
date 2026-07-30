@@ -265,15 +265,10 @@ class VoiceSpeechRuntime:
 
 def build_voice_speech_runtime(
     controller: VoiceInteractionController,
-    config: Optional[dict[str, Any]] = None,
+    config: dict[str, Any],
     audio_output_gate: Optional[AudioOutputGate] = None,
 ) -> VoiceSpeechRuntime:
-    """Create a runtime from Config.get_voice_interaction_config()."""
-    if config is None:
-        from ...core.config_loader import Config
-
-        config = Config.get_voice_interaction_config()
-
+    """Create a speech runtime from an injected settings snapshot."""
     if not bool(config.get("speech_input_enabled", False)):
         raise RuntimeError("VOICE_INPUT_ENABLED=false，未启用真实语音输入。")
 

@@ -14,6 +14,7 @@ from src.application import (
     create_application_services,
 )
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.settings import ApplicationSettings
 from src.device_runtime import (
     DeviceCapability,
     DeviceContractError,
@@ -31,7 +32,10 @@ from src.voice_interaction import CameraCaptureError, CamerasModuleProvider
 
 class CameraAccessServiceTests(unittest.TestCase):
     def test_camera_session_only_blocks_sequences_that_need_camera(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         session = services.camera_access.open("test")
         wait_item = SequenceItem.from_definition(
             ActionDefinition(
@@ -85,7 +89,10 @@ class CameraAccessServiceTests(unittest.TestCase):
         self.assertIsNone(resources.owner_of(CAMERA))
 
     def test_device_lifecycle_refuses_an_active_camera_session(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         session = services.camera_access.open("lifecycle-test")
 
         with self.assertRaises(ResourceBusyError):
@@ -97,7 +104,10 @@ class CameraAccessServiceTests(unittest.TestCase):
         self.assertFalse(services.devices.shutdown_all())
 
     def test_failed_device_initialization_releases_lifecycle_lease(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
 
         with self.assertRaises(DeviceNotRegisteredError):
             services.devices.initialize("missing-device")
@@ -163,7 +173,10 @@ class CameraProviderSessionTests(unittest.TestCase):
 
 class CameraWebSocketSessionTests(unittest.TestCase):
     def test_preview_holds_camera_until_last_subscriber_leaves(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         server = RobotWebSocketServer(services)
         websocket = _RecordingWebSocket()
 
@@ -171,9 +184,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
             await server._device_handler._handle_subscribe_camera_frames(websocket, {})
             self.assertIsNotNone(services.resources.owner_of(CAMERA))
 
-            await server._device_handler._handle_unsubscribe_camera_frames(
-                websocket, {}
-            )
+            await server._device_handler._handle_unsubscribe_camera_frames(websocket, {})
             self.assertIsNone(services.resources.owner_of(CAMERA))
             await server._cancel_background_tasks()
 
@@ -185,7 +196,10 @@ class CameraWebSocketSessionTests(unittest.TestCase):
         self.assertFalse(services.devices.shutdown_all())
 
     def test_preview_failure_releases_camera_session(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         server = RobotWebSocketServer(services)
         websocket = _RecordingWebSocket()
 
@@ -208,7 +222,10 @@ class CameraWebSocketSessionTests(unittest.TestCase):
         self.assertFalse(services.devices.shutdown_all())
 
     def test_data_collection_holds_camera_and_teleoperation_resources(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         server = RobotWebSocketServer(services)
         websocket = _RecordingWebSocket()
 
@@ -251,7 +268,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
 
             class FakeDataCollectionConfig:
                 @classmethod
-                def from_environment(cls):
+                def from_settings(cls, _settings):
                     return cls()
 
             config_module.DataCollectionConfig = FakeDataCollectionConfig
@@ -269,9 +286,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                 self.assertIsNotNone(services.resources.owner_of(CAMERA))
 
                 services.trajectory_teaching.start("left")
-                await server._teleoperation_handler._handle_demo_record_start(
-                    websocket, {}
-                )
+                await server._teleoperation_handler._handle_demo_record_start(websocket, {})
                 self.assertEqual(
                     DataCollectionState.SESSION_READY,
                     services.data_collection.snapshot().state,
@@ -279,9 +294,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                 self.assertFalse(services.teleoperation.active)
                 services.trajectory_teaching.cancel()
 
-                await server._teleoperation_handler._handle_demo_record_start(
-                    websocket, {}
-                )
+                await server._teleoperation_handler._handle_demo_record_start(websocket, {})
                 self.assertEqual(
                     DataCollectionState.RECORDING,
                     services.data_collection.snapshot().state,
@@ -301,17 +314,13 @@ class CameraWebSocketSessionTests(unittest.TestCase):
                     services.data_collection.snapshot().state,
                 )
 
-                await server._teleoperation_handler._handle_demo_record_stop(
-                    websocket, {}
-                )
+                await server._teleoperation_handler._handle_demo_record_stop(websocket, {})
                 self.assertEqual(
                     DataCollectionState.SESSION_READY,
                     services.data_collection.snapshot().state,
                 )
                 self.assertTrue(services.teleoperation.active)
-                await server._teleoperation_handler._handle_demo_session_end(
-                    websocket, {}
-                )
+                await server._teleoperation_handler._handle_demo_session_end(websocket, {})
                 self.assertEqual(
                     DataCollectionState.IDLE,
                     services.data_collection.snapshot().state,
@@ -324,7 +333,10 @@ class CameraWebSocketSessionTests(unittest.TestCase):
         self.assertFalse(services.devices.shutdown_all())
 
     def test_device_shutdown_closes_active_data_collection_session(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
 
         class Recorder:
             def start_session(self, _task, _description):
@@ -358,7 +370,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
 
         class FakeDataCollectionConfig:
             @classmethod
-            def from_environment(cls):
+            def from_settings(cls, _settings):
                 return cls()
 
         config_module.DataCollectionConfig = FakeDataCollectionConfig

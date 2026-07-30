@@ -5,6 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from src.application import CommandRuntime
+from src.core.settings import LLMSettings, SecretSettings
 from src.execution import ExecutionSnapshot, ExecutionState
 from src.llm.providers.openai_compatible import OpenAICompatibleClient
 from src.llm.registry import LLMRegistry
@@ -159,7 +160,8 @@ class LLMRegistryLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_close_is_idempotent_and_releases_loaded_providers(self):
         provider = _CloseableProvider()
         registry = LLMRegistry(
-            config=SimpleNamespace(),
+            settings=LLMSettings(),
+            secrets=SecretSettings(),
             providers={"openai": provider},
         )
 

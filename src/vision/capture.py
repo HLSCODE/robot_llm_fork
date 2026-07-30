@@ -27,7 +27,7 @@ import numpy as np
 from sklearn.mixture import GaussianMixture
 from ultralytics import YOLO, SAM
 
-from ..core.config_loader import Config
+from ..core.settings import VisionSettings
 from ..device_runtime import (
     ArmId,
     CartesianPose,
@@ -40,18 +40,6 @@ from ..device_runtime import (
 # ---------------------------------------------------------------
 # 从统一配置加载默认值
 # ---------------------------------------------------------------
-try:
-    _config = Config.get_instance()
-    _DEFAULT_YOLO_MODEL_PATH = _config.YOLO_MODEL_PATH
-    _DEFAULT_SAM_MODEL_PATH = _config.SAM_MODEL_PATH
-    _DEFAULT_VISION_DEBUG_SAVE_DIR = _config.VISION_DEBUG_SAVE_DIR
-    _MAX_ATTEMPTS = _config.MAX_ATTEMPTS
-except Exception:
-    _DEFAULT_YOLO_MODEL_PATH = "models/best.pt"
-    _DEFAULT_SAM_MODEL_PATH = "models/sam2.1_l.pt"
-    _DEFAULT_VISION_DEBUG_SAVE_DIR = "pictures"
-    _MAX_ATTEMPTS = 5
-
 # ---------------------------------------------------------------
 # 路径与导入
 # ---------------------------------------------------------------
@@ -63,13 +51,11 @@ from .interface import vertical_catch
 # ---------------------------------------------------------------
 # 调试图片保存根目录（可用 VisionCaptureAction(debug_save_root=...) 覆盖）
 # ---------------------------------------------------------------
-_DEBUG_SAVE_ROOT = _DEFAULT_VISION_DEBUG_SAVE_DIR
-
 # ---------------------------------------------------------------
 # 模型缓存（避免重复加载）
 # ---------------------------------------------------------------
 _model_cache: dict[str, Any] = {}
-_cache_lock  = threading.Lock()
+_cache_lock = threading.Lock()
 
 
 def load_yolo_model(path: str) -> YOLO:
@@ -94,11 +80,8 @@ def load_sam_model(path: str) -> SAM:
 # 核心算法
 # ---------------------------------------------------------------
 
-def process_mask_with_gmm(
-    image: np.ndarray,
-    mask: np.ndarray,
-    n_components: int = 1
-) -> np.ndarray:
+
+def process_mask_with_gmm(image: np.ndarray, mask: np.ndarray, n_components: int = 1) -> np.ndarray:
     """
     使用高斯混合模型(GMM)处理SAM分割掩码，过滤噪声并保留最大连通区域。
 
@@ -124,21 +107,19 @@ def process_mask_with_gmm(
     new_mask = np.zeros_like(mask)
     for i in range(n_components):
         component_mask = np.zeros_like(mask)
-        component_indices = (labels == i)
+        component_indices = labels == i
         component_mask[y_coords[component_indices], x_coords[component_indices]] = 255
 
         num_labels, labels_im = cv2.connectedComponents(component_mask)
         if num_labels > 1:
-            largest_label = 1 + np.argmax(
-                [np.sum(labels_im == j) for j in range(1, num_labels)]
-            )
+            largest_label = 1 + np.argmax([np.sum(labels_im == j) for j in range(1, num_labels)])
             component_mask = (labels_im == largest_label).astype(np.uint8) * 255
 
         new_mask = cv2.bitwise_or(new_mask, component_mask)
 
     kernel = np.ones((5, 5), np.uint8)
     new_mask = cv2.morphologyEx(new_mask, cv2.MORPH_CLOSE, kernel)
-    new_mask = cv2.morphologyEx(new_mask, cv2.MORPH_OPEN,  kernel)
+    new_mask = cv2.morphologyEx(new_mask, cv2.MORPH_OPEN, kernel)
     return new_mask
 
 
@@ -198,8 +179,7 @@ def detect_and_segment(
 
             if debug_save_path is not None:
                 dbg = color_image.copy()
-                cv2.rectangle(dbg, (int(x1), int(y1)), (int(x2), int(y2)),
-                              (0, 255, 0), 2)
+                cv2.rectangle(dbg, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
                 cv2.imwrite(os.path.join(debug_save_path, "detection.jpg"), dbg)
                 cv2.imwrite(os.path.join(debug_save_path, "mask.jpg"), mask)
 
@@ -207,29 +187,13 @@ def detect_and_segment(
 
 
 # ---------------------------------------------------------------
-# 标定 / 运动参数（从 Config 读取，可外部注入覆盖）
+# 标定 / 运动参数（由 VisionSettings 注入）
 # ---------------------------------------------------------------
-def _default_calibration() -> dict:
-    """从 Config 加载手眼标定默认值。"""
-    try:
-        from ..core.config_loader import Config
-        return Config.get_vision_calibration()
-    except Exception:
-        return {
-            "rotation_matrix": [
-                [0.00215684, 0.97503835, 0.22202606],
-                [-0.99995231, -0.0000119, 0.00976617],
-                [0.00952503, -0.22203654, 0.97499182],
-            ],
-            "translation_vector": [-0.10273135, 0.03312807, -0.07214614],
-            "gripper_offset": [3.146, 0.0, 3.128],
-        }
-
-
 def run_pingzi_capture(
     robot_system: RobotSystem,
     camera: DepthCameraSource,
     arm: ArmId,
+    settings: VisionSettings,
     width: int = 640,
     height: int = 480,
 ) -> bool:
@@ -237,11 +201,13 @@ def run_pingzi_capture(
     执行与 grab_pingzi.capture_and_move 相同的「瓶子/白桌」抓取流程。
     """
     from ..actions.grab_pingzi import capture_and_move
+
     return bool(
         capture_and_move(
             robot_system,
             camera,
             arm,
+            settings,
             width,
             height,
         )
@@ -251,6 +217,7 @@ def run_pingzi_capture(
 # ---------------------------------------------------------------
 # 主类：VisionCaptureAction
 # ---------------------------------------------------------------
+
 
 class VisionCaptureAction:
     """
@@ -270,6 +237,7 @@ class VisionCaptureAction:
         self,
         robot_system: RobotSystem,
         camera: DepthCameraSource,
+        settings: VisionSettings,
         yolo_model_path: str = None,
         sam_model_path: str = None,
         target_robot: Literal["robot1", "robot2"] = "robot1",
@@ -284,43 +252,48 @@ class VisionCaptureAction:
         image_height: int = 480,
         save_debug_images: bool = True,
         debug_save_root: str = None,
-        raise_on_error: bool = True
+        raise_on_error: bool = True,
     ):
-        # ── 从 Config 加载默认值 ──
-        _cfg = Config.get_instance()
-        _cal = _default_calibration()
+        # ── 从不可变设置快照加载默认值 ──
+        calibration = settings.calibration_config()
 
-        self.yolo_model_path   = yolo_model_path or _DEFAULT_YOLO_MODEL_PATH
-        self.sam_model_path    = sam_model_path or _DEFAULT_SAM_MODEL_PATH
-        self.robot_system      = robot_system
-        self.camera            = camera
-        self.arm               = ArmId.parse(target_robot)
-        self.target_robot      = target_robot
-        self.workflow          = workflow
+        self.settings = settings
+        self.yolo_model_path = yolo_model_path or settings.yolo_model_path
+        self.sam_model_path = sam_model_path or settings.sam_model_path
+        self.robot_system = robot_system
+        self.camera = camera
+        self.arm = ArmId.parse(target_robot)
+        self.target_robot = target_robot
+        self.workflow = workflow
 
-        self.gripper_offset = list(
-            gripper_offset or _cal["gripper_offset"]
+        self.gripper_offset = list(gripper_offset or calibration["gripper_offset"])
+        self.rotation_matrix = rotation_matrix or calibration["rotation_matrix"]
+        self.translation_vector = translation_vector or calibration["translation_vector"]
+        self.gripper_length = (
+            gripper_length if gripper_length is not None else settings.vision_default_gripper_length
         )
-        self.rotation_matrix = rotation_matrix or _cal["rotation_matrix"]
-        self.translation_vector = (
-            translation_vector or _cal["translation_vector"]
+        self.confidence_threshold = (
+            confidence_threshold
+            if confidence_threshold is not None
+            else settings.vision_default_confidence
         )
-        self.gripper_length    = gripper_length if gripper_length is not None else _cfg.VISION_DEFAULT_GRIPPER_LENGTH
-        self.confidence_threshold = confidence_threshold if confidence_threshold is not None else _cfg.VISION_DEFAULT_CONFIDENCE
-        self.move_velocity     = move_velocity if move_velocity is not None else _cfg.VISION_DEFAULT_VELOCITY
-        self.image_width       = image_width
-        self.image_height      = image_height
+        self.move_velocity = (
+            move_velocity if move_velocity is not None else settings.vision_default_velocity
+        )
+        self.image_width = image_width
+        self.image_height = image_height
         self.save_debug_images = save_debug_images
-        self.debug_save_root   = (debug_save_root or _DEFAULT_VISION_DEBUG_SAVE_DIR)
-        self.raise_on_error   = raise_on_error
+        self.debug_save_root = debug_save_root or settings.vision_debug_save_dir
+        self.max_attempts = settings.max_attempts
+        self.raise_on_error = raise_on_error
 
         self._process_mask_fn: Callable = process_mask_with_gmm
 
         # 运行时状态
         self._yolo_model = None
-        self._sam_model  = None
-        self._last_error : Optional[str] = None
-        self._result     : bool = False
+        self._sam_model = None
+        self._last_error: Optional[str] = None
+        self._result: bool = False
 
     # ---- 公共 API ----
 
@@ -351,6 +324,7 @@ class VisionCaptureAction:
             self.robot_system,
             self.camera,
             self.arm,
+            self.settings,
             self.image_width,
             self.image_height,
         )
@@ -358,8 +332,6 @@ class VisionCaptureAction:
         return bool(ok)
 
     def _execute_vertical(self) -> bool:
-        _cfg = Config.get_instance()
-
         self._ensure_models()
 
         # 1. 打开夹爪 & 记录初始位姿
@@ -372,8 +344,11 @@ class VisionCaptureAction:
         self._validate_frames(color_im, depth_im, intr)
 
         detected, mask = detect_and_segment(
-            color_im, self._yolo_model, self._sam_model,
-            self.image_width, self.image_height,
+            color_im,
+            self._yolo_model,
+            self._sam_model,
+            self.image_width,
+            self.image_height,
             self.confidence_threshold,
             apply_gmm=True,
             debug_save_path=self._debug_dir("first"),
@@ -387,14 +362,17 @@ class VisionCaptureAction:
         cur_pose = self._read_pose()
 
         above, _, final = vertical_catch(
-            mask, depth_im, intr, cur_pose,
+            mask,
+            depth_im,
+            intr,
+            cur_pose,
             self.gripper_length,
             self.gripper_offset,
             self.rotation_matrix,
-            self.translation_vector
+            self.translation_vector,
         )
         prep_pose = above.copy()
-        prep_pose[0] += _cfg.VISION_PREP_OFFSET_X
+        prep_pose[0] += self.settings.vision_prep_offset_x
         self._move(prep_pose, MotionMode.JOINT, "预备位置")
         time.sleep(1)
 
@@ -403,8 +381,11 @@ class VisionCaptureAction:
         self._validate_frames(color_im, depth_im, intr)
 
         detected, mask = detect_and_segment(
-            color_im, self._yolo_model, self._sam_model,
-            self.image_width, self.image_height,
+            color_im,
+            self._yolo_model,
+            self._sam_model,
+            self.image_width,
+            self.image_height,
             self.confidence_threshold,
             apply_gmm=True,
             debug_save_path=self._debug_dir("second"),
@@ -416,11 +397,14 @@ class VisionCaptureAction:
         cur_pose = self._read_pose()
 
         _, adj_angle, adj_final = vertical_catch(
-            mask, depth_im, intr, cur_pose,
+            mask,
+            depth_im,
+            intr,
+            cur_pose,
             self.gripper_length,
             self.gripper_offset,
             self.rotation_matrix,
-            self.translation_vector
+            self.translation_vector,
         )
 
         # 5. XY 平面移动到目标上方
@@ -436,7 +420,7 @@ class VisionCaptureAction:
 
         # 6. Z 轴下降
         adj_final[1] -= 0.015
-        adj_final[2] = _cfg.VISION_GRASP_Z
+        adj_final[2] = self.settings.vision_grasp_z
         self._move(adj_final, MotionMode.LINEAR, "抓取位姿")
 
         # 7. 夹取
@@ -469,7 +453,7 @@ class VisionCaptureAction:
             self._sam_model = load_sam_model(self.sam_model_path)
 
     def _fetch_frames(self):
-        camera_name = Config.get_instance().VISION_CAMERA_NAME or None
+        camera_name = self.settings.vision_camera_name or None
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             frames = self.camera.get_latest_raw_frames(camera_name)
@@ -482,7 +466,7 @@ class VisionCaptureAction:
         return self.robot_system.read_arm_state(self.arm).pose.to_list()
 
     def _gripper_release(self) -> None:
-        for _attempt in range(_MAX_ATTEMPTS):
+        for _attempt in range(self.max_attempts):
             try:
                 self.robot_system.open_gripper(self.arm)
                 print("[VisionCapture] 夹爪已打开")
@@ -492,16 +476,13 @@ class VisionCaptureAction:
         raise RuntimeError("夹爪打开失败")
 
     def _gripper_pick(self) -> None:
-        for attempt in range(_MAX_ATTEMPTS):
+        for attempt in range(self.max_attempts):
             try:
                 self.robot_system.close_gripper(self.arm)
                 print("[VisionCapture] 夹取成功")
                 return
             except Exception:
-                print(
-                    "[VisionCapture] 夹取失败 "
-                    f"(attempt {attempt + 1}), 重试..."
-                )
+                print(f"[VisionCapture] 夹取失败 (attempt {attempt + 1}), 重试...")
                 time.sleep(1)
         raise RuntimeError("夹取失败")
 

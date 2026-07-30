@@ -4,28 +4,44 @@ version = "0.1.0"
 description = "机器人操作编排系统，集成 AI 自然语言任务规划"
 requires-python = ">=3.12"
 dependencies = [
-    "PyQt6>=6.6.0",
-    "openai>=1.0.0",
-    "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "numpy>=1.26",
-    "scipy>=1.11",
-    "opencv-python>=4.10,<5",
-    "pyserial>=3.5",
-    "ultralytics>=8.4.36",
-    "scikit-learn>=1.8.0",
-    "robotic-arm>=1.1.5",
-    "pyrealsense2>=2.57.7.10387",
-    "websockets>=12.0",
-    "sherpa-onnx-core>=1.13.4",
 ]
 
 [project.optional-dependencies]
+gui = [
+    "PyQt6>=6.6.0",
+    "numpy>=1.26",
+]
+server = [
+    "websockets>=12.0",
+]
+ai = [
+    "openai>=1.0.0",
+]
+data = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "opencv-python>=4.10,<5",
+]
+vision = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "opencv-python>=4.10,<5",
+    "ultralytics>=8.4.36",
+    "scikit-learn>=1.8.0",
+]
+hardware = [
+    "pyserial>=3.5",
+    "robotic-arm>=1.1.5",
+    "pyrealsense2>=2.57.7.10387",
+]
 voice = [
     "funasr>=1.2.0",
     "llvmlite>=0.44.0",
+    "numpy>=1.26",
     "numba>=0.61.0",
     "pypinyin>=0.50",
+    "sherpa-onnx-core>=1.13.4",
     "sounddevice>=0.5",
     "torch>=2.3",
     "torchaudio>=2.11.0",
@@ -34,8 +50,31 @@ kws = [
     "sherpa-onnx>=1.10.0",
 ]
 openwakeword = []
+full = [
+    "PyQt6>=6.6.0",
+    "funasr>=1.2.0",
+    "llvmlite>=0.44.0",
+    "numba>=0.61.0",
+    "numpy>=1.26",
+    "openai>=1.0.0",
+    "opencv-python>=4.10,<5",
+    "pypinyin>=0.50",
+    "pyrealsense2>=2.57.7.10387",
+    "pyserial>=3.5",
+    "robotic-arm>=1.1.5",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.11",
+    "sherpa-onnx>=1.10.0",
+    "sherpa-onnx-core>=1.13.4",
+    "sounddevice>=0.5",
+    "torch>=2.3",
+    "torchaudio>=2.11.0",
+    "ultralytics>=8.4.36",
+    "websockets>=12.0",
+]
 
 [project.scripts]
+robot-llm = "src.core.launcher:main"
 t5l-dgus = "src.expression_display.t5l_dgusii.cli:main"
 robot-data-validate = "src.data_collection.validation:main"
 robot-llm-regression = "src.llm.regression:main"
@@ -55,6 +94,7 @@ default = true
 
 [dependency-groups]
 dev = [
+    "build>=1.2",
     "mypy>=1.10",
     "pytest>=8.0",
     "ruff>=0.9",
@@ -74,8 +114,8 @@ addopts = [
 target-version = "py312"
 line-length = 100
 include = [
-    "run.py",
     "scripts/run_quality_checks.py",
+    "scripts/validate_package.py",
     "src/actions/**/*.py",
     "src/application/**/*.py",
     "src/core/**/*.py",
@@ -100,6 +140,7 @@ select = [
 [tool.mypy]
 python_version = "3.12"
 files = [
+    "src/core/settings.py",
     "src/core/json_documents.py",
     "src/core/data_paths.py",
     "src/core/config_validation.py",

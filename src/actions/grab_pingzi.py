@@ -7,7 +7,7 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from ..core.config_loader import Config
+from ..core.settings import VisionSettings
 from ..device_runtime import (
     ArmId,
     CartesianPose,
@@ -73,14 +73,14 @@ def capture_and_move(
     robot_system: RobotSystem,
     camera: DepthCameraSource,
     arm: ArmId,
+    settings: VisionSettings,
     width: int = 640,
     height: int = 480,
 ) -> bool:
     """Capture a bottle, grasp it and place it through project capabilities."""
-    config = Config.get_instance()
-    calibration = config.get_vision_calibration()
+    calibration = settings.calibration_config()
     motion_options = MotionOptions(
-        velocity_percent=config.VISION_DEFAULT_VELOCITY,
+        velocity_percent=settings.vision_default_velocity,
     )
 
     def move(pose: list[float], mode: MotionMode) -> None:
@@ -92,14 +92,14 @@ def capture_and_move(
         )
 
     try:
-        yolo_model = load_yolo_model(config.YOLO_MODEL_PATH)
-        sam_model = load_sam_model(config.SAM_MODEL_PATH)
+        yolo_model = load_yolo_model(settings.yolo_model_path)
+        sam_model = load_sam_model(settings.sam_model_path)
         robot_system.open_gripper(arm)
         initial_pose = robot_system.read_arm_state(arm).pose.to_list()
 
         color_image, depth_image, color_intrinsics = _wait_for_frames(
             camera,
-            config.VISION_CAMERA_NAME or None,
+            settings.vision_camera_name or None,
         )
         PICTURE_DIR.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(str(PICTURE_DIR / "original_image.jpg"), color_image)
@@ -111,7 +111,7 @@ def capture_and_move(
             process_mask_with_gmm,
             width=width,
             height=height,
-            confidence_threshold=config.VISION_DEFAULT_CONFIDENCE,
+            confidence_threshold=settings.vision_default_confidence,
         )
         if not detected:
             cv2.imwrite(
@@ -127,19 +127,19 @@ def capture_and_move(
             depth_image,
             color_intrinsics,
             current_pose,
-            config.VISION_DEFAULT_GRIPPER_LENGTH,
+            settings.vision_default_gripper_length,
             calibration["gripper_offset"],
             calibration["rotation_matrix"],
             calibration["translation_vector"],
         )
         camera_above_pose = above_object_pose.copy()
-        camera_above_pose[0] += config.VISION_PREP_OFFSET_X
+        camera_above_pose[0] += settings.vision_prep_offset_x
         move(camera_above_pose, MotionMode.JOINT)
         time.sleep(1)
 
         color_image, depth_image, color_intrinsics = _wait_for_frames(
             camera,
-            config.VISION_CAMERA_NAME or None,
+            settings.vision_camera_name or None,
         )
         mask, _bounding_box, detected = detect_target(
             color_image,
@@ -148,7 +148,7 @@ def capture_and_move(
             process_mask_with_gmm,
             width=width,
             height=height,
-            confidence_threshold=config.VISION_DEFAULT_CONFIDENCE,
+            confidence_threshold=settings.vision_default_confidence,
         )
         if not detected:
             raise RuntimeError("二次检测未发现目标")
@@ -159,7 +159,7 @@ def capture_and_move(
             depth_image,
             color_intrinsics,
             current_pose,
-            config.VISION_DEFAULT_GRIPPER_LENGTH,
+            settings.vision_default_gripper_length,
             calibration["gripper_offset"],
             calibration["rotation_matrix"],
             calibration["translation_vector"],
@@ -168,12 +168,12 @@ def capture_and_move(
 
         above_target = final_pose.copy()
         above_target[2] = current_pose[2]
-        above_target[0] += config.VISION_BOTTLE_TARGET_OFFSET_X
-        above_target[1] += config.VISION_BOTTLE_TARGET_OFFSET_Y
+        above_target[0] += settings.vision_bottle_target_offset_x
+        above_target[1] += settings.vision_bottle_target_offset_y
         move(above_target, MotionMode.LINEAR)
 
         grasp_pose = above_target.copy()
-        grasp_pose[2] = config.VISION_GRASP_Z
+        grasp_pose[2] = settings.vision_grasp_z
         move(grasp_pose, MotionMode.LINEAR)
         robot_system.close_gripper(arm)
         move(above_target, MotionMode.LINEAR)
@@ -182,7 +182,7 @@ def capture_and_move(
         _place_at_fixed_position(
             robot_system,
             arm,
-            config,
+            settings,
             motion_options,
         )
         return True
@@ -194,7 +194,7 @@ def capture_and_move(
 def _place_at_fixed_position(
     robot_system: RobotSystem,
     arm: ArmId,
-    config,
+    settings: VisionSettings,
     motion_options: MotionOptions,
 ) -> None:
     def move(pose: list[float], mode: MotionMode) -> None:
@@ -205,17 +205,17 @@ def _place_at_fixed_position(
             motion_options,
         )
 
-    move(config.PLACE_TRANSFER_POSE, MotionMode.JOINT)
-    above = list(config.PLACE_ABOVE)
+    move(settings.place_transfer_pose, MotionMode.JOINT)
+    above = list(settings.place_above)
     move(above, MotionMode.LINEAR)
     below = above.copy()
-    below[2] -= config.PLACE_DROP_HEIGHT
+    below[2] -= settings.place_drop_height
     move(below, MotionMode.LINEAR)
     robot_system.open_gripper(arm)
     move(above, MotionMode.LINEAR)
-    move(config.PLACE_TRANSFER_POSE, MotionMode.LINEAR)
-    move(config.PLACE_POS2, MotionMode.JOINT)
-    move(config.INITIAL_POSE, MotionMode.JOINT)
+    move(settings.place_transfer_pose, MotionMode.LINEAR)
+    move(settings.place_pos2, MotionMode.JOINT)
+    move(settings.initial_pose, MotionMode.JOINT)
 
 
 def _wait_for_frames(

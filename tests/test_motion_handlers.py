@@ -5,6 +5,7 @@ import unittest
 from src.application import create_application_services
 from src.core.execution_context import ExecutionContext
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.settings import ApplicationSettings, VisionSettings
 from src.device_runtime import (
     ArmId,
     CartesianPose,
@@ -151,6 +152,7 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
             runtime,
             ExecutionContext(),
             options,
+            VisionSettings(),
         )
         context, logs = _action_context()
 
@@ -182,6 +184,7 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
             runtime,
             ExecutionContext(),
             MotionHandlerOptions(),
+            VisionSettings(),
         )
         context, logs = _action_context()
 
@@ -279,6 +282,7 @@ class BaseMoveActionHandlerTests(unittest.TestCase):
                 DeviceRuntime(),
                 ExecutionContext(),
                 MotionHandlerOptions(),
+                VisionSettings(),
             ),
             BodyMoveActionHandler(
                 DeviceRuntime(),
@@ -303,7 +307,10 @@ class BaseMoveActionHandlerTests(unittest.TestCase):
 
 class MotionHandlerIntegrationTests(unittest.TestCase):
     def test_all_motion_action_routes_use_the_unified_registry(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         services.device_runtime.initialize(BODY_AXIS)
         services.device_runtime.initialize(MOBILE_BASE)
         definitions = (

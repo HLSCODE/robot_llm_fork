@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from ...core.execution_context import ExecutionContext
+from ...core.settings import VisionSettings
 from ...device_runtime import (
     CameraSource,
     DepthCameraSource,
@@ -30,6 +31,7 @@ class VisionCaptureExecutor(Protocol):
         robot_system: RobotSystem,
         camera: DepthCameraSource,
         parameters: dict,
+        settings: VisionSettings,
         log: VisionLog,
     ) -> bool: ...
 
@@ -41,6 +43,7 @@ class VisionRelocalizationExecutor(Protocol):
         camera: CameraSource,
         parameters: dict,
         execution_context: ExecutionContext,
+        settings: VisionSettings,
         log: VisionLog,
     ) -> bool: ...
 
@@ -53,9 +56,11 @@ class VisionCaptureActionHandler:
     def __init__(
         self,
         device_runtime: DeviceRuntime,
+        settings: VisionSettings,
         executor: VisionCaptureExecutor | None = None,
     ) -> None:
         self._device_runtime = device_runtime
+        self._settings = settings
         self._executor = executor
 
     def __call__(
@@ -88,6 +93,7 @@ class VisionCaptureActionHandler:
                     robot_system,
                     camera,
                     dict(parameters),
+                    self._settings,
                     lambda message: context.log(message, "info"),
                 ),
             )
@@ -132,10 +138,12 @@ class VisionRelocalizationActionHandler:
         self,
         device_runtime: DeviceRuntime,
         execution_context: ExecutionContext,
+        settings: VisionSettings,
         executor: VisionRelocalizationExecutor | None = None,
     ) -> None:
         self._device_runtime = device_runtime
         self._execution_context = execution_context
+        self._settings = settings
         self._executor = executor
 
     def __call__(
@@ -166,6 +174,7 @@ class VisionRelocalizationActionHandler:
                     camera,
                     dict(parameters),
                     self._execution_context,
+                    self._settings,
                     lambda message: context.log(message, "info"),
                 ),
             )

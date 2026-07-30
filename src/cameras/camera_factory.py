@@ -10,7 +10,7 @@
 import logging
 from typing import Union, Optional
 
-from ..core.config_loader import Config
+from ..core.settings import VisionSettings
 from .realsense_manager import RealSenseManager
 from .opencv_manager import OpenCVCameraManager
 
@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 CameraManager = Union[RealSenseManager, OpenCVCameraManager]
 
 
-def create_camera_manager() -> Optional[CameraManager]:
+def create_camera_manager(
+    settings: VisionSettings,
+) -> Optional[CameraManager]:
     """根据 CAMERA_PROVIDER 创建并启动相机管理器。
 
     CAMERA_PROVIDER=realsense（默认）→ RealSenseManager
@@ -28,12 +30,11 @@ def create_camera_manager() -> Optional[CameraManager]:
     任何异常均被捕获并记录，返回 None 以保证服务正常启动。
     """
     try:
-        config = Config.get_instance()
-        provider = getattr(config, "CAMERA_PROVIDER", "realsense").lower()
+        provider = settings.camera_provider.lower()
 
         if provider in ("webcam", "opencv"):
-            return _get_opencv_manager(config)
-        return _get_realsense_manager(config)
+            return _get_opencv_manager(settings)
+        return _get_realsense_manager(settings)
 
     except Exception as exc:
         logger.info("相机管理器未启动 (%s)", exc)
@@ -44,21 +45,16 @@ def create_camera_manager() -> Optional[CameraManager]:
 # 内部实现
 # ------------------------------------------------------------------
 
-def _config_int(config, name: str, default: int) -> int:
-    try:
-        return int(getattr(config, name, default))
-    except (TypeError, ValueError):
-        return default
-
-
-def _get_realsense_manager(config) -> Optional[RealSenseManager]:
+def _get_realsense_manager(
+    settings: VisionSettings,
+) -> Optional[RealSenseManager]:
     """初始化 RealSense 相机管理器。
 
     从配置读取 REALSENSE_DEVICE_SN / REALSENSE_DEVICE_NAMES，
     未配置序列号时返回 None。
     """
-    sn_str = getattr(config, "REALSENSE_DEVICE_SN", "")
-    names_str = getattr(config, "REALSENSE_DEVICE_NAMES", "")
+    sn_str = settings.realsense_device_sn
+    names_str = settings.realsense_device_names
     serials = [s.strip() for s in sn_str.split(",") if s.strip()] if sn_str else []
     names = [n.strip() for n in names_str.split(",") if n.strip()] if names_str else []
 
@@ -72,14 +68,14 @@ def _get_realsense_manager(config) -> Optional[RealSenseManager]:
     ]
     # 多相机时降低 FPS 以避免 USB 带宽过载（3+ 路 → 15fps）
     auto_fps = 30 if len(cameras) <= 2 else 15
-    fps = _config_int(config, "REALSENSE_FPS", 0) or auto_fps
-    color_width = _config_int(config, "REALSENSE_COLOR_WIDTH", 640)
-    color_height = _config_int(config, "REALSENSE_COLOR_HEIGHT", 480)
-    depth_width = _config_int(config, "REALSENSE_DEPTH_WIDTH", 640)
-    depth_height = _config_int(config, "REALSENSE_DEPTH_HEIGHT", 480)
-    jpeg_quality = _config_int(config, "REALSENSE_JPEG_QUALITY", 85)
-    encode_fps = _config_int(config, "CAMERA_ENCODE_FPS", 5)
-    align_depth = bool(getattr(config, "REALSENSE_ALIGN_DEPTH_TO_COLOR", True))
+    fps = settings.realsense_fps or auto_fps
+    color_width = settings.realsense_color_width
+    color_height = settings.realsense_color_height
+    depth_width = settings.realsense_depth_width
+    depth_height = settings.realsense_depth_height
+    jpeg_quality = settings.realsense_jpeg_quality
+    encode_fps = settings.camera_encode_fps
+    align_depth = settings.realsense_align_depth_to_color
     logger.info(
         "RealSense 相机数=%d, color=%dx%d, depth=%dx%d, FPS=%d, encode_fps=%d",
         len(cameras),
@@ -108,13 +104,13 @@ def _get_realsense_manager(config) -> Optional[RealSenseManager]:
     return mgr
 
 
-def _get_opencv_manager(config) -> OpenCVCameraManager:
+def _get_opencv_manager(settings: VisionSettings) -> OpenCVCameraManager:
     """初始化 OpenCV 本地摄像头管理器。
 
     从配置读取 WEBCAM_DEVICE_INDEXES / WEBCAM_DEVICE_NAMES。
     """
-    indexes_str = getattr(config, "WEBCAM_DEVICE_INDEXES", "0")
-    names_str = getattr(config, "WEBCAM_DEVICE_NAMES", "")
+    indexes_str = settings.webcam_device_indexes
+    names_str = settings.webcam_device_names
     indexes = [int(x.strip()) for x in indexes_str.split(",") if x.strip()] or [0]
     names = [n.strip() for n in names_str.split(",") if n.strip()] if names_str else []
 
@@ -124,11 +120,11 @@ def _get_opencv_manager(config) -> OpenCVCameraManager:
     ]
     mgr = OpenCVCameraManager(
         cameras=cameras,
-        fps=_config_int(config, "WEBCAM_FPS", 30),
-        width=_config_int(config, "WEBCAM_WIDTH", 640),
-        height=_config_int(config, "WEBCAM_HEIGHT", 480),
-        jpeg_quality=_config_int(config, "WEBCAM_JPEG_QUALITY", 85),
-        encode_fps=_config_int(config, "CAMERA_ENCODE_FPS", 5),
+        fps=settings.webcam_fps,
+        width=settings.webcam_width,
+        height=settings.webcam_height,
+        jpeg_quality=settings.webcam_jpeg_quality,
+        encode_fps=settings.camera_encode_fps,
     )
     if not mgr.is_running:
         result = mgr.start()

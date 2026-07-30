@@ -116,7 +116,12 @@ POWDER_DISPENSE_MICRO_STEP=500
 VVEAI_API_KEY=你的key
 VVEAI_BASE_URL=https://api.vveai.com/v1
 VVEAI_MODEL=doubao-seed-1-8-251228
+BALANCE_CAMERA_INDEX=12
+BALANCE_REQUEST_TIMEOUT_SECONDS=30
 ```
+
+这些值只在启动边界解析，执行运行时通过 `ApplicationSettings` 显式注入，
+视觉天平模块本身不读取环境变量。
 
 ## 安全保护
 
@@ -141,7 +146,7 @@ VVEAI_MODEL=doubao-seed-1-8-251228
 
 ```text
 1. 使用 test_devices.py 确认升降、旋转、夹爪方向和地址正确。
-2. 单独运行 balance_reader_simple.py，确认天平读数稳定。
+2. 使用 `uv run python -m src.vision.balance_reader_simple`，确认天平读数稳定。
 3. 将智能加粉目标设为 10mg，观察每轮日志和实际加粉效果。
 4. 根据粉末流速调整 POWDER_DISPENSE_*_STEP。
 5. 再测试 100mg。

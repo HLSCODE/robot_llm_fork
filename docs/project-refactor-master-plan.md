@@ -554,10 +554,12 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 当前问题：
 
-- `Config` 超过 1000 行，所有配置集中在全局单例。
-- 已建立启动集中校验和安全解析错误，但数值转换与默认值仍分散在旧单例。
-- 配置项、模板和实际消费位置容易漂移。
-- 配置包含硬件、模型、服务、语音和标定等不同生命周期数据。
+- 环境变量解析仍集中在组合根使用的 `_EnvironmentConfig` 适配器中，但该对象不再作为
+  单例导出，也没有业务层调用方。
+- 运行时配置已拆分为不可变的 Runtime、Data、DataCollection、Server、Secret、
+  Execution、LLM、Robot、Device、Vision、Voice settings。
+- GUI、WebSocket、Application Service、执行 handler、设备 factory、视觉、语音和 LLM
+  均接收显式配置快照；数据采集、视觉天平和低层设备不再读取环境变量。
 
 目标：
 
@@ -585,9 +587,11 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 当前问题：
 
 - `pyproject.toml` 已成为唯一依赖声明，`requirements.txt` 和重复 RealSense 声明已删除。
-- GUI、Server、视觉、语音和硬件依赖未充分拆分。
-- `dev` 依赖和冻结 lock 已建立。
-- `run.py` 不是标准安装后的项目命令。
+- 基础安装只保留配置解析依赖；GUI、Server、AI、数据、视觉、语音、KWS 和硬件已拆分
+  为可选 extra，并提供 `full` 聚合组。
+- `dev` 依赖和冻结 lock 已建立，Windows 已通过 `--all-extras` 冻结同步。
+- 已提供 `robot-llm` 标准命令和 `python -m src` 模块入口。
+- wheel 构建、内容检查、隔离安装和 console entry point 配置校验已进入统一质量门禁。
 
 目标：
 
@@ -625,9 +629,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | G-006 | P1 | DONE | 删除 requirements 副本与重复依赖；pyproject + uv.lock 成为唯一声明和冻结依赖图 |
 | G-007 | P1 | DONE | 增加 `--check-config`、集中活动配置/路径/端口/超时校验、占位凭据拒绝和统一敏感字段脱敏 |
 | G-008 | P1 | DONE | 动作、任务、技能使用 schema v1；旧格式一次性前向迁移并保留 v0 原始备份，所有新写入原子替换 |
-| G-009 | P2 | TODO | 配置按领域拆分 |
-| G-010 | P2 | TODO | optional dependency 分组 |
-| G-011 | P2 | TODO | 标准 CLI 和打包验证 |
+| G-009 | P2 | DONE | 配置拆分为不可变领域 settings；业务层移除全局单例和隐式回退，敏感配置单独建模 |
+| G-010 | P2 | DONE | 依赖按 server/gui/ai/data/vision/voice/kws/hardware 分组，提供 full 聚合组并刷新冻结 lock |
+| G-011 | P2 | DONE | 提供 `robot-llm`/`python -m src` 入口；wheel 构建、隔离安装和入口 smoke test 纳入质量门禁 |
 | G-012 | P2 | TODO | 覆盖率目标和质量门禁 |
 | G-013 | P2 | TODO | Windows/Linux 测试矩阵 |
 | G-014 | P2 | TODO | 日志轮转、结构化日志和 run_id |
@@ -645,7 +649,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | ADR-M-004 | Accepted | 资源冲突 | 使用显式资源租约，冲突立即拒绝 |
 | ADR-M-005 | Accepted | 内部迁移策略 | 直接切换，不保留 legacy/v2 双实现、转发模块或兼容开关 |
 | ADR-M-006 | Accepted | simulation | 替换设备实现，不替换状态机 |
-| ADR-M-007 | Proposed | 配置模型 | typed settings + 启动校验 |
+| ADR-M-007 | Accepted | 配置模型 | 组合根一次解析环境，向业务层注入不可变领域 settings；敏感配置独立快照 |
 | ADR-M-008 | Accepted | 数据目录 | built-in catalog 与可配置 user data root 分离；只初始化缺失文件 |
 | ADR-M-009 | Proposed | GUI 状态管理 | application service + Qt adapter/view-model |
 | ADR-M-010 | Proposed | 四 Agent 粉末方案 | 作为独立立项，不纳入基础重构默认范围 |
@@ -867,7 +871,7 @@ M4 工程治理与清理
 - [ ] 覆盖率阈值、静态检查全仓扩展和 Linux 测试矩阵生效。
 - [ ] 无硬件 simulation 可回归主要流程。
 - [ ] 关键真实硬件验收有记录。
-- [ ] 配置、依赖、打包和平台支持策略清晰。
+- [x] 配置、依赖、打包和平台支持策略清晰。
 - [x] 动作、任务和技能具有版本、原子写和一次性前向迁移。
 - [x] 内置动作和技能可重复交付且不覆盖用户数据。
 - [ ] legacy 执行实现和过期文档已清理。
@@ -925,6 +929,7 @@ M4 工程治理与清理
 | 2026-07-30 | M3 | E | LLM Provider 治理与规划回归 | E-010/E-011/E-012 TODO → DONE | 新增所有 task 共用的 provider health、熔断、半开和显式 fallback；记录 Prompt/请求/provider/model/技能目录来源；分类失败不再静默伪装成功；建立 strict schema v1 离线 golden runner | 195 tests，14 golden cases |
 | 2026-07-30 | M4 | A/C/G | pytest、协议契约与静态质量门禁 | A-008/G-001/G-004/G-005 TODO/DOING → DONE | 建立本地/CI 唯一质量入口和 Windows/Python 3.12 冻结依赖流水线；Ruff 清零收敛主线基础问题，Mypy 检查核心 typed boundary；全部 WebSocket action 具备独立最小合法请求 golden contract，route/schema、payload 边界、稳定错误码和响应 DTO 纳入 pytest | 262 tests + 26 subtests，14 golden cases |
 | 2026-07-30 | M4 | G | 依赖、配置与用户数据治理 | G-003/G-006/G-007/G-008 TODO → DONE | 删除 requirements 双来源；内置 catalog 与可配置用户数据根分离；动作/任务/技能统一 schema v1、v0 原始备份、一次性迁移和原子替换；启动前集中校验活动端口、超时、路径、网络暴露及占位凭据，诊断统一脱敏 | 280 tests + 26 subtests，14 golden cases |
+| 2026-07-30 | M4 | G | 配置、依赖与可安装交付收敛 | G-009/G-010/G-011 TODO → DONE | 删除公开 Config 单例和所有业务层隐式读取，注入十一类不可变领域 settings 并分离 secrets；数据采集与视觉天平改为显式配置注入；拆分 optional extras、刷新 uv.lock，新增 `robot-llm`/模块入口及 wheel 构建、隔离安装、console smoke 质量门禁 | 285 tests + 26 subtests，14 golden cases；Windows all-extras sync + wheel smoke |
 
 ## 22. 建议的首批实施顺序
 
@@ -932,7 +937,7 @@ M4 工程治理与清理
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
 3. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
-4. **G-009/G-010/G-011**：按领域拆分 typed settings 和 optional dependency，补标准安装命令与 wheel 验证。
+4. **G-012/G-013**：确定覆盖率阈值，补 Linux 最小依赖、GUI/Server 和硬件可选依赖矩阵。
 5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
 6. 完成 simulation smoke test 后执行逐设备真实硬件验收。

@@ -365,7 +365,7 @@ def camera_capture_session():
 
 camera_provider = CamerasModuleProvider(
     session_factory=camera_capture_session,
-    camera_name=Config.get_instance().VISION_CAMERA_NAME or None,
+    camera_name=application_services.settings.vision.vision_camera_name or None,
 )
 ```
 
@@ -475,12 +475,16 @@ LLMStreamEvent.audio_delta
 ```python
 from src.voice_interaction import build_voice_speech_runtime
 
-runtime = build_voice_speech_runtime(controller)
+runtime = build_voice_speech_runtime(
+    controller,
+    application_services.settings.voice.as_runtime_mapping(),
+)
 async for event in runtime.run():
     handle_voice_event(event)
 ```
 
-`build_voice_speech_runtime()` 读取 `Config.get_voice_interaction_config()`：
+`build_voice_speech_runtime()` 只消费应用组装层注入的不可变
+`VoiceSettings` 映射：
 
 - `VOICE_INPUT_ENABLED=true` 才会创建真实语音输入运行时。
 - 真实语音输入运行时会同时加载 ASR/VAD 与 `VOICE_WAKE_ENGINE` 指定的唤醒词模型。

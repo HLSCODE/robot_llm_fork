@@ -5,6 +5,7 @@ import unittest
 
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.settings import ApplicationSettings
 from src.device_runtime import (
     DeviceCapability,
     DeviceRegistration,
@@ -281,7 +282,10 @@ class ExecutionManagerTests(unittest.TestCase):
 
 class ApplicationServiceTests(unittest.TestCase):
     def test_simulated_wait_action_uses_unified_runtime(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         item = SequenceItem.from_definition(
             ActionDefinition(
                 id="wait",
@@ -297,7 +301,10 @@ class ApplicationServiceTests(unittest.TestCase):
         self.assertFalse(services.devices.shutdown_all())
 
     def test_teleoperation_session_blocks_sequence_execution(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         services.teleoperation.start()
         item = SequenceItem.from_definition(
             ActionDefinition(
@@ -321,7 +328,10 @@ class ApplicationServiceTests(unittest.TestCase):
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
 
     def test_quick_stop_cancels_execution_and_stops_ready_robot(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
         item = SequenceItem.from_definition(
             ActionDefinition(
@@ -344,7 +354,10 @@ class ApplicationServiceTests(unittest.TestCase):
         self.assertIsNone(services.resources.owner_of(ROBOT_SYSTEM))
 
     def test_quick_stop_exposes_ready_unsupported_motion_device(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         services.device_runtime.initialize(BODY_AXIS)
 
         report = services.safety.stop(StopMode.QUICK)
@@ -358,7 +371,10 @@ class ApplicationServiceTests(unittest.TestCase):
         self.assertFalse(report.complete)
 
     def test_quick_stop_releases_teleoperation_session(self):
-        services = create_application_services(object(), simulation=True)
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
         services.teleoperation.start()
         robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
 

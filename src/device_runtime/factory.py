@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
+from ..core.settings import (
+    ApplicationSettings,
+    DeviceSettings,
+    RobotSettings,
+    VisionSettings,
+)
 from .adapters import (
     PipetteAdapter,
     RelayBankAdapter,
@@ -37,12 +44,16 @@ from .robot_providers import resolve_robot_provider
 from .runtime import DeviceRegistration, DeviceRuntime
 
 
-def create_device_runtime(config: Any, *, simulation: bool) -> DeviceRuntime:
+def create_device_runtime(
+    settings: ApplicationSettings,
+    *,
+    simulation: bool,
+) -> DeviceRuntime:
     runtime = DeviceRuntime()
     if simulation:
         _register_simulated_devices(runtime)
     else:
-        _register_real_devices(runtime, config)
+        _register_real_devices(runtime, settings)
     return runtime
 
 
@@ -128,55 +139,58 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
         runtime.register(registration)
 
 
-def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
-    robot_provider = resolve_robot_provider(config)
+def _register_real_devices(
+    runtime: DeviceRuntime,
+    settings: ApplicationSettings,
+) -> None:
+    robot_provider = resolve_robot_provider(settings.robot)
     runtime.register(
         _registration(
             ROBOT_SYSTEM,
             set(robot_provider.capabilities),
-            lambda: robot_provider.create(config),
+            lambda: robot_provider.create(settings.robot, settings.devices),
         )
     )
     runtime.register(
         _registration(
             BODY_AXIS,
             {DeviceCapability.MOTION, DeviceCapability.BODY_AXIS},
-            lambda: _body_factory(config),
+            lambda: _body_factory(settings.devices),
         )
     )
     runtime.register(
         _registration(
             MOBILE_BASE,
             {DeviceCapability.MOTION, DeviceCapability.MOBILE_BASE},
-            _mobile_base_factory,
+            lambda: _mobile_base_factory(settings.robot),
         )
     )
     runtime.register(
         _registration(
             NECK,
             {DeviceCapability.MOTION, DeviceCapability.NECK_MOTION},
-            _neck_factory,
+            lambda: _neck_factory(settings.devices),
         )
     )
     runtime.register(
         _registration(
             RELAY_BANK,
             {DeviceCapability.DIGITAL_OUTPUT},
-            lambda: _relay_factory(config),
+            lambda: _relay_factory(settings.devices),
         )
     )
     runtime.register(
         _registration(
             TOOL_CHANGER,
             {DeviceCapability.TOOL_CHANGER},
-            lambda: _tool_changer_factory(config),
+            lambda: _tool_changer_factory(settings.devices),
         )
     )
     runtime.register(
         _registration(
             PIPETTE,
             {DeviceCapability.PIPETTE},
-            lambda: _pipette_factory(config),
+            lambda: _pipette_factory(settings.devices),
         )
     )
     runtime.register(
@@ -186,14 +200,14 @@ def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
                 DeviceCapability.MOTION,
                 DeviceCapability.POWDER_DISPENSER,
             },
-            _powder_dispenser_factory,
+            lambda: _powder_dispenser_factory(settings.devices),
         )
     )
     runtime.register(
         _registration(
             CAMERA,
             {DeviceCapability.CAMERA},
-            _camera_factory,
+            lambda: _camera_factory(settings.vision),
             lambda device: device.stop(),
         )
     )
@@ -201,98 +215,123 @@ def _register_real_devices(runtime: DeviceRuntime, config: Any) -> None:
         _registration(
             EXPRESSION_DISPLAY,
             {DeviceCapability.EXPRESSION_DISPLAY},
-            _expression_display_factory,
+            lambda: _expression_display_factory(settings.devices),
         )
     )
 
-def _body_factory(config: Any) -> Any:
+
+def _body_factory(settings: DeviceSettings) -> Any:
     from ..devices import ModbusMotor
 
     if ModbusMotor is None:
         raise DeviceInitializationError("ModbusMotor unavailable")
     return ModbusMotor(
-        port=config.BODY_SERIAL_PORT,
-        baudrate=115200,
-        slave_id=1,
-        timeout=1,
+        port=settings.body_serial_port,
+        baudrate=settings.body_baudrate,
+        slave_id=settings.body_slave_id,
+        timeout=settings.body_timeout,
     )
 
 
-def _mobile_base_factory() -> Any:
+def _mobile_base_factory(settings: RobotSettings) -> Any:
     from ..base_move.move_controller import RobotMoveController
 
-    controller = RobotMoveController()
+    controller = RobotMoveController(
+        server_host=settings.move_controller_host,
+        server_port=settings.move_controller_port,
+        client_bind_port=settings.move_controller_client_bind_port,
+    )
     controller.connect()
     return controller
 
 
-def _neck_factory() -> Any:
+def _neck_factory(settings: DeviceSettings) -> Any:
     from ..devices import PWMNeckController
 
     if PWMNeckController is None:
         raise DeviceInitializationError("PWMNeckController unavailable")
-    return PWMNeckController()
+    config = settings.pwm_neck_config()
+    return PWMNeckController(
+        port=config["port"],
+        baudrate=config["baudrate"],
+        horizontal_config=config["horizontal"],
+        vertical_config=config["vertical"],
+    )
 
 
-def _relay_factory(config: Any) -> RelayBankAdapter:
+def _relay_factory(settings: DeviceSettings) -> RelayBankAdapter:
     from ..devices import RelayController
 
     if RelayController is None:
         raise DeviceInitializationError("RelayController unavailable")
     return RelayBankAdapter(
         RelayController(
-            port=config.RELAY_SERIAL_PORT,
-            baudrate=config.RELAY_BAUDRATE,
-            timeout=config.RELAY_TIMEOUT,
+            port=settings.relay_serial_port,
+            baudrate=settings.relay_baudrate,
+            timeout=settings.relay_timeout,
         )
     )
 
 
-def _tool_changer_factory(config: Any) -> ToolChangerAdapter:
+def _tool_changer_factory(settings: DeviceSettings) -> ToolChangerAdapter:
     from ..devices import Kuaihuanshou
 
     if Kuaihuanshou is None:
         raise DeviceInitializationError("Kuaihuanshou unavailable")
     return ToolChangerAdapter(
-        Kuaihuanshou(port=config.KUAIHUANSHOU_SERIAL_PORT)
+        Kuaihuanshou(
+            port=settings.kuaihuanshou_serial_port,
+            baudrate=settings.kuaihuanshou_baudrate,
+            timeout=settings.kuaihuanshou_timeout,
+        )
     )
 
 
-def _pipette_factory(config: Any) -> PipetteAdapter:
+def _pipette_factory(settings: DeviceSettings) -> PipetteAdapter:
     from ..devices import ADP
     from ..devices.yiyeqiang_init import init_tip
     from ..devices.yiyeqiang_out import eject_tip
 
     if ADP is None:
         raise DeviceInitializationError("ADP unavailable")
-    adp_port = getattr(config, "ADP_SERIAL_PORT", config.KUAIHUANSHOU_SERIAL_PORT)
     return PipetteAdapter(
-        ADP(port=adp_port),
-        tip_port=config.KUAIHUANSHOU_SERIAL_PORT,
+        ADP(
+            port=settings.adp_serial_port,
+            baudrate=settings.adp_baudrate,
+            timeout=settings.adp_timeout,
+            max_retries=settings.adp_max_retries,
+        ),
+        tip_port=settings.kuaihuanshou_serial_port,
         initialize_tip=init_tip,
         eject_tip=eject_tip,
     )
 
 
-def _powder_dispenser_factory() -> Any:
+def _powder_dispenser_factory(settings: DeviceSettings) -> Any:
     from ..devices.tapping_controller import TappingController
 
-    return TappingController.from_config()
+    return TappingController.from_settings(settings)
 
 
-def _camera_factory() -> Any:
+def _camera_factory(settings: VisionSettings) -> Any:
     from ..cameras.camera_factory import create_camera_manager
 
-    manager = create_camera_manager()
+    manager = create_camera_manager(settings)
     if manager is None:
         raise DeviceInitializationError("camera manager unavailable")
     return manager
 
 
-def _expression_display_factory() -> Any:
+def _expression_display_factory(settings: DeviceSettings) -> Any:
     from ..expression_display.display import (
         ExpressionDisplay,
         ExpressionDisplaySettings,
     )
 
-    return ExpressionDisplay(ExpressionDisplaySettings.from_project_config())
+    return ExpressionDisplay(
+        ExpressionDisplaySettings.from_mapping(
+            settings.expression_display_mapping(
+                Path(__file__).resolve().parents[2]
+            )
+        )
+    )

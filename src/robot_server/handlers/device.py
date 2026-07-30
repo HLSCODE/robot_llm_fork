@@ -5,7 +5,6 @@ import base64
 import logging
 import threading
 
-from ...core.config_loader import Config
 from ...device_runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from ...execution import ExecutionState
 from ..protocol import WebSocketRequest
@@ -172,8 +171,10 @@ class DeviceWebSocketHandler:
             try:
                 import time
 
-                config = Config.get_instance()
-                camera_name = config.VISION_CAMERA_NAME or None
+                camera_name = (
+                    self._server._services.settings.vision.vision_camera_name
+                    or None
+                )
 
                 session = self._server._services.camera_access.open("websocket-test")
                 mgr = session.camera

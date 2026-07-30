@@ -15,6 +15,7 @@ CI 配置长期漂移。普通质量门禁不连接机械臂、相机、串口�
 3. Mypy：严格检查协议、路由、请求流控、运行时模型和 LLM 基础数据模型。
 4. Pytest：运行 unit、contract 和 simulation 级测试。
 5. LLM golden regression：离线验证规划输出的 strict schema 和稳定错误分类。
+6. Wheel smoke：构建 wheel、检查关键模块、隔离安装并调用 `robot-llm --check-config`。
 
 覆盖率阈值、Linux 测试矩阵和真实硬件验收仍是独立后续工作，不能用普通 CI 结果替代。
 
@@ -23,7 +24,7 @@ CI 配置长期漂移。普通质量门禁不连接机械臂、相机、串口�
 安装锁定的开发环境：
 
 ```powershell
-uv sync --frozen --group dev
+uv sync --frozen --all-extras --group dev
 ```
 
 执行与 CI 完全相同的门禁：
@@ -39,13 +40,14 @@ uv run --frozen pytest
 uv run --frozen ruff check .
 uv run --frozen mypy
 uv run --frozen python -m src.llm.regression
+uv run --frozen python scripts/validate_package.py
 ```
 
 依赖声明发生变化时，先显式更新 `uv.lock`，再使用 `--frozen` 验证：
 
 ```powershell
 uv lock
-uv sync --frozen --group dev
+uv sync --frozen --all-extras --group dev
 ```
 
 ## 3. 测试分层
@@ -72,6 +74,7 @@ Mypy 先覆盖已完成收敛、类型边界较稳定的核心文件：
 
 - WebSocket protocol、route registry 和 request limiter。
 - 版本化 JSON、用户数据路径、启动配置校验和内置数据安装。
+- 不可变领域 settings 和敏感配置边界。
 - DeviceRuntime 的供应商无关模型。
 - ExecutionRuntime 的状态、事件和结果模型。
 - LLM 通用类型与确定性指纹。

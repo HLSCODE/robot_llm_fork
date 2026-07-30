@@ -3,10 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from dataclasses import replace
 
 from src.application import create_application_services
 from src.core.execution_context import ExecutionContext
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.settings import (
+    ApplicationSettings,
+    ExecutionSettings,
+)
 from src.device_runtime import (
     ArmId,
     DeviceCapability,
@@ -233,7 +238,11 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
 
 class VisionActionHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.runtime = create_device_runtime(object(), simulation=True)
+        self.settings = ApplicationSettings.defaults()
+        self.runtime = create_device_runtime(
+            self.settings,
+            simulation=True,
+        )
         self.context, self.logs = _action_context()
 
     def tearDown(self) -> None:
@@ -242,12 +251,17 @@ class VisionActionHandlerTests(unittest.TestCase):
     def test_capture_executor_receives_runtime_owned_devices(self):
         received: list[tuple[object, object, dict]] = []
 
-        def executor(robot, camera, parameters, log) -> bool:
+        def executor(robot, camera, parameters, settings, log) -> bool:
             received.append((robot, camera, parameters))
+            self.assertIs(self.settings.vision, settings)
             log("capture executor called")
             return True
 
-        handler = VisionCaptureActionHandler(self.runtime, executor)
+        handler = VisionCaptureActionHandler(
+            self.runtime,
+            self.settings.vision,
+            executor,
+        )
 
         self.assertTrue(
             handler(
@@ -273,15 +287,18 @@ class VisionActionHandlerTests(unittest.TestCase):
             _camera,
             _parameters,
             execution_context,
+            settings,
             log,
         ) -> bool:
             received_contexts.append(execution_context)
+            self.assertIs(self.settings.vision, settings)
             log("relocalization executor called")
             return True
 
         handler = VisionRelocalizationActionHandler(
             self.runtime,
             domain_context,
+            self.settings.vision,
             executor,
         )
 
@@ -301,11 +318,21 @@ class VisionActionHandlerTests(unittest.TestCase):
         control = ExecutionControl()
         context, _logs = _action_context(control)
 
-        def executor(_robot, _camera, _parameters, _log) -> bool:
+        def executor(
+            _robot,
+            _camera,
+            _parameters,
+            _settings,
+            _log,
+        ) -> bool:
             control.cancel()
             return True
 
-        handler = VisionCaptureActionHandler(self.runtime, executor)
+        handler = VisionCaptureActionHandler(
+            self.runtime,
+            self.settings.vision,
+            executor,
+        )
 
         with self.assertRaises(ActionCancelledError):
             handler({}, context)
@@ -313,12 +340,13 @@ class VisionActionHandlerTests(unittest.TestCase):
 
 class DomainHandlerIntegrationTests(unittest.TestCase):
     def test_change_tool_and_trajectory_use_unified_registry(self):
-        config = type(
-            "TestConfig",
-            (),
-            {"EXECUTION_TRAJECTORY_POLL_INTERVAL_SECONDS": 0.001},
-        )()
-        services = create_application_services(config, simulation=True)
+        settings = replace(
+            ApplicationSettings.defaults(),
+            execution=ExecutionSettings(
+                execution_trajectory_poll_interval_seconds=0.001,
+            ),
+        )
+        services = create_application_services(settings, simulation=True)
 
         with TemporaryDirectory() as directory:
             path = Path(directory) / "trajectory.txt"

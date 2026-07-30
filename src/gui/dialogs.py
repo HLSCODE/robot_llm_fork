@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ..core.settings import VisionSettings
 from ..core.models import ActionDefinition, ActionType
 
 
@@ -189,9 +190,18 @@ class ActionPreviewDialog(QDialog):
 
 
 class ActionConfigDialog(QDialog):
-    def __init__(self, action_type: ActionType, action_data: dict = None, parent=None, existing_names: set = None, move_target: str = None):
+    def __init__(
+        self,
+        action_type: ActionType,
+        vision_settings: VisionSettings,
+        action_data: dict = None,
+        parent=None,
+        existing_names: set = None,
+        move_target: str = None,
+    ):
         super().__init__(parent)
         self.action_type = action_type
+        self._vision_settings = vision_settings
         self.action_data = action_data or {}
         self._existing_names = existing_names or set()
         self._move_target = move_target  # 新建时预设的移动目标（"机械臂移动" / "身体移动"）
@@ -768,9 +778,6 @@ class ActionConfigDialog(QDialog):
 
     def _init_vision_capture_ui(self, form_layout: QFormLayout):
         """初始化视觉抓取动作 UI（可从 config.env 配置默认值）"""
-        from ..core.config_loader import Config
-        cfg = Config.get_instance()
-
         params = self.action_data.get('parameters', {})
 
         self.vision_robot_combo = QComboBox()
@@ -783,7 +790,10 @@ class ActionConfigDialog(QDialog):
         self.vision_workflow_combo = QComboBox()
         self.vision_workflow_combo.addItem("瓶子抓取 (bottle)", "bottle")
         self.vision_workflow_combo.addItem("竖直抓取 (vertical)", "vertical")
-        default_wf = params.get('工作流', cfg.VISION_DEFAULT_WORKFLOW)
+        default_wf = params.get(
+            '工作流',
+            self._vision_settings.vision_default_workflow,
+        )
         self.vision_workflow_combo.setCurrentText(
             "瓶子抓取 (bottle)" if default_wf == 'bottle' else "竖直抓取 (vertical)"
         )
@@ -793,21 +803,36 @@ class ActionConfigDialog(QDialog):
         self.vision_confidence_input.setSingleStep(0.05)
         self.vision_confidence_input.setDecimals(2)
         self.vision_confidence_input.setValue(
-            float(params.get('置信度', cfg.VISION_DEFAULT_CONFIDENCE))
+            float(
+                params.get(
+                    '置信度',
+                    self._vision_settings.vision_default_confidence,
+                )
+            )
         )
 
         self.vision_velocity_input = QSpinBox()
         self.vision_velocity_input.setRange(1, 100)
         self.vision_velocity_input.setSuffix(" mm/s")
         self.vision_velocity_input.setValue(
-            int(params.get('移动速度', cfg.VISION_DEFAULT_VELOCITY))
+            int(
+                params.get(
+                    '移动速度',
+                    self._vision_settings.vision_default_velocity,
+                )
+            )
         )
 
         self.vision_gripper_length_input = QDoubleSpinBox()
         self.vision_gripper_length_input.setRange(10.0, 500.0)
         self.vision_gripper_length_input.setSuffix(" mm")
         self.vision_gripper_length_input.setValue(
-            float(params.get('夹爪长度', cfg.VISION_DEFAULT_GRIPPER_LENGTH))
+            float(
+                params.get(
+                    '夹爪长度',
+                    self._vision_settings.vision_default_gripper_length,
+                )
+            )
         )
 
         self.vision_debug_checkbox = QCheckBox("保存调试图片")
@@ -824,8 +849,6 @@ class ActionConfigDialog(QDialog):
 
     def _init_vision_relocalize_ui(self, form_layout: QFormLayout):
         """初始化视觉重定位动作 UI。"""
-        from ..core.config_loader import Config
-        cfg = Config.get_instance()
         params = self.action_data.get('parameters', {})
 
         self.relocalize_mode_combo = QComboBox()
@@ -865,7 +888,9 @@ class ActionConfigDialog(QDialog):
 
         self.relocalize_camera_input = QLineEdit()
         self.relocalize_camera_input.setText(params.get("camera_name", ""))
-        relocalize_cfg = cfg.get_vision_relocalization_config(current_arm)
+        relocalize_cfg = self._vision_settings.relocalization_config(
+            current_arm
+        )
         self.relocalize_camera_input.setPlaceholderText(relocalize_cfg.get("camera_name", ""))
 
         marker_params = params.get("marker", {}) if isinstance(params.get("marker"), dict) else {}
@@ -911,10 +936,12 @@ class ActionConfigDialog(QDialog):
     def _on_relocalize_arm_changed(self):
         if not hasattr(self, 'relocalize_camera_input'):
             return
-        from ..core.config_loader import Config
 
         arm = self.relocalize_arm_combo.currentData()
-        camera_name = Config.get_instance().get_vision_relocalization_config(arm).get("camera_name", "")
+        camera_name = self._vision_settings.relocalization_config(arm).get(
+            "camera_name",
+            "",
+        )
         self.relocalize_camera_input.setPlaceholderText(camera_name)
         self._refresh_relocalize_station_choices()
 
@@ -968,7 +995,10 @@ class ActionConfigDialog(QDialog):
             from ..core.vision_station_storage import VisionStationStorage
 
             arm = self.relocalize_arm_combo.currentData()
-            for station_id, label in VisionStationStorage.list_station_choices(arm):
+            storage = VisionStationStorage(
+                self._vision_settings.vision_relocalization_stations_file
+            )
+            for station_id, label in storage.list_station_choices(arm):
                 self.relocalize_station_combo.addItem(label, station_id)
         except Exception:
             pass
@@ -1005,7 +1035,13 @@ class ActionConfigDialog(QDialog):
         try:
             from ..core.vision_station_storage import VisionStationStorage
 
-            profile = VisionStationStorage.get_profile(station_id, self.relocalize_arm_combo.currentData())
+            storage = VisionStationStorage(
+                self._vision_settings.vision_relocalization_stations_file
+            )
+            profile = storage.get_profile(
+                station_id,
+                self.relocalize_arm_combo.currentData(),
+            )
         except Exception:
             profile = None
         if not profile:
@@ -1107,7 +1143,12 @@ class ActionConfigDialog(QDialog):
         try:
             from ..core.vision_station_storage import VisionStationStorage
 
-            choices = VisionStationStorage.list_station_choices(self.arm_combo.currentText())
+            storage = VisionStationStorage(
+                self._vision_settings.vision_relocalization_stations_file
+            )
+            choices = storage.list_station_choices(
+                self.arm_combo.currentText()
+            )
         except Exception:
             choices = []
 

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import unittest
-from types import SimpleNamespace
 from typing import Any
 
+from src.core.settings import LLMSettings, SecretSettings
 from src.llm import (
     BaseLLMClient,
     LLMCapability,
@@ -95,11 +95,11 @@ def _config(
     *,
     fallbacks: tuple[str, ...] = (),
     threshold: int = 3,
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        LLM_FALLBACK_PROVIDERS=fallbacks,
-        LLM_CIRCUIT_FAILURE_THRESHOLD=threshold,
-        LLM_CIRCUIT_RECOVERY_SECONDS=30.0,
+) -> LLMSettings:
+    return LLMSettings(
+        llm_fallback_providers=fallbacks,
+        llm_circuit_failure_threshold=threshold,
+        llm_circuit_recovery_seconds=30.0,
     )
 
 
@@ -143,7 +143,8 @@ class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
     async def test_success_records_prompt_model_and_provider_provenance(self):
         primary = _FakeProvider("openai")
         registry = LLMRegistry(
-            config=_config(),
+            settings=_config(),
+            secrets=SecretSettings(),
             providers={"openai": primary},
         )
 
@@ -175,7 +176,8 @@ class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
         )
         fallback = _FakeProvider("dashscope", chat_text="fallback")
         registry = LLMRegistry(
-            config=_config(fallbacks=("dashscope",)),
+            settings=_config(fallbacks=("dashscope",)),
+            secrets=SecretSettings(),
             providers={
                 "openai": primary,
                 "dashscope": fallback,
@@ -210,10 +212,11 @@ class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
         )
         fallback = _FakeProvider("dashscope", chat_text="fallback")
         registry = LLMRegistry(
-            config=_config(
+            settings=_config(
                 fallbacks=("dashscope",),
                 threshold=2,
             ),
+            secrets=SecretSettings(),
             providers={
                 "openai": primary,
                 "dashscope": fallback,
@@ -249,7 +252,8 @@ class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
         registry = LLMRegistry(
-            config=_config(fallbacks=("dashscope",)),
+            settings=_config(fallbacks=("dashscope",)),
+            secrets=SecretSettings(),
             providers={
                 "openai": primary,
                 "dashscope": fallback,
@@ -303,7 +307,8 @@ class LLMPlanningRegressionTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
         registry = LLMRegistry(
-            config=_config(),
+            settings=_config(),
+            secrets=SecretSettings(),
             providers={"dashscope": provider},
         )
 

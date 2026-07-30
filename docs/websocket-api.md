@@ -1,6 +1,7 @@
 # WebSocket 接口手册
 
-本文档对应当前 `main` 分支上的服务端实现，统一入口为 `python run.py`。
+本文档对应当前 `main` 分支上的服务端实现，统一入口为
+`uv run robot-llm`。WebSocket 由 GUI 主应用进程托管。
 
 目标读者：
 
@@ -112,25 +113,25 @@ cp config.env.example config.env
 模拟模式：
 
 ```bash
-python run.py --simulation
+uv run robot-llm --simulation
 ```
 
 连接真实硬件：
 
 ```bash
-python run.py
+uv run robot-llm
 ```
 
 指定端口：
 
 ```bash
-python run.py --websocket-port 9000
+uv run robot-llm --websocket-port 9000
 ```
 
 本次启动禁用 WebSocket：
 
 ```bash
-python run.py --disable-websocket
+uv run robot-llm --disable-websocket
 ```
 
 ### 2.4 推荐启动方式
@@ -138,7 +139,7 @@ python run.py --disable-websocket
 如果你只是做前端联调，推荐使用：
 
 ```bash
-python run.py --simulation
+uv run robot-llm --simulation
 ```
 
 原因：
@@ -3121,7 +3122,7 @@ function handleChatData(data) {
 
 ## 16. 运行约束与注意事项
 
-- 当前只使用 `python run.py`；WebSocket 由 GUI 应用宿主管理，不再维护独立 Server 启动入口
+- 当前只使用 `uv run robot-llm`；WebSocket 由 GUI 应用宿主管理，不再维护独立 Server 启动入口
 - 仓库不再默认提交 `config.env`
 - 相机和 MiniCPM 功能现在优先走主控制 WebSocket 的 `action` 路由
 - 前端不要假设硬件一定在线

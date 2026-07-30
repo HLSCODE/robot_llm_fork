@@ -2,30 +2,34 @@
 配置加载器
 统一管理所有配置项，从 config.env 文件加载
 """
+
 import os
 from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
 
+from .settings import ApplicationSettings
+
 
 class ConfigLoadError(ValueError):
     """Configuration could not be parsed into a complete snapshot."""
 
 
-class Config:
-    """
-    单例配置类
-    从 .env 文件加载配置，供全局使用
-    """
-    _instance: Optional['Config'] = None
-    _loaded: bool = False
+class _EnvironmentConfig:
+    """Mutable environment adapter used only while creating settings snapshots."""
 
     # 配置项
     # LLM/AI 配置
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
     OPENAI_BASE_URL: str = ""
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_MODEL: str = ""
+    DEEPSEEK_BASE_URL: str = ""
+    DASHSCOPE_API_KEY: str = ""
+    DASHSCOPE_MODEL: str = ""
+    DASHSCOPE_BASE_URL: str = ""
     LLM_DEFAULT_PROVIDER: str = "openai"
     LLM_DEFAULT_TEMPERATURE: float = 0.3
     LLM_DEFAULT_MAX_TOKENS: int = 512
@@ -90,7 +94,21 @@ class Config:
     ACTIONS_LIBRARY_PATH: str = ""
     TASKS_DIRECTORY: str = ""
     SKILL_LIBRARY_PATH: str = ""
-    
+    DATA_COLLECTION_FPS: int = 30
+    DATA_COLLECTION_CAMERA_INDEX: int = 0
+    DATA_COLLECTION_ARMS: tuple[str, ...] = ("left", "right")
+    DATA_COLLECTION_SAVE_PATH: str = "data/demos"
+    DATA_COLLECTION_FORMAT_VARIANT: str = "portable_simplified"
+    DATA_COLLECTION_MIN_FREE_BYTES: int = 1_073_741_824
+    DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR: float = 1.25
+    DATA_COLLECTION_STALE_WRITE_SECONDS: float = 3600.0
+    DATA_COLLECTION_RANDOM_SEED: int = 42
+    DATA_COLLECTION_STOP_TIMEOUT_SECONDS: float = 5.0
+    DATA_COLLECTION_MAX_SYNC_SKEW_MS: float = 100.0
+    DATA_COLLECTION_CAMERA_EXTRINSICS: tuple[float, ...] = ()
+    DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME: str = ""
+    DATA_COLLECTION_CALIBRATION_ID: str = ""
+
     # RealSense 相机配置
     CAMERA_PROVIDER: str = "auto"
     REALSENSE_DEVICE_SN: str = ""
@@ -114,6 +132,11 @@ class Config:
     YOLO_MODEL_PATH: str = "models/best.pt"
     SAM_MODEL_PATH: str = "models/sam2.1_l.pt"
     VISION_DEBUG_SAVE_DIR: str = "pictures"
+    BALANCE_CAMERA_INDEX: int = 12
+    BALANCE_REQUEST_TIMEOUT_SECONDS: float = 30.0
+    VVEAI_API_KEY: str = ""
+    VVEAI_BASE_URL: str = "https://api.vveai.com/v1"
+    VVEAI_MODEL: str = "doubao-seed-1-8-251228"
 
     # 手眼标定参数
     VISION_ROTATION_MATRIX: list = None
@@ -152,7 +175,7 @@ class Config:
     VISION_RELOCALIZATION_PLANAR_CONSTRAINT: str = "none"
     VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES: bool = True
     VISION_RELOCALIZATION_DEBUG_DIR: str = "data/vision_stations/debug"
-    
+
     # 机械臂配置
     ROBOT1_IP: str = "192.168.3.18"
     ROBOT1_PORT: int = 8080
@@ -194,7 +217,7 @@ class Config:
     GRIPPER_PICK_TIMEOUT: int = 3
     GRIPPER_RELEASE_SPEED: int = 100
     GRIPPER_RELEASE_TIMEOUT: int = 3
-    
+
     # 串口设备配置
     BODY_SERIAL_PORT: str = "/dev/ttyUSB1"
     BODY_BAUDRATE: int = 115200
@@ -287,7 +310,7 @@ class Config:
     MINICPM_ASK_API_KEY: str = ""
     MINICPM_ASK_BASE_URL: str = ""
     MINICPM_ASK_MODEL: str = "gpt-4o-mini"
-    
+
     # 位置配置
     INITIAL_POSE: list = None
     LEFT_INITIAL_POSE: list = None
@@ -297,36 +320,29 @@ class Config:
     PLACE_POS2: list = None
     PLACE_TRANSFER_POSE: list = None
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     @classmethod
-    def load(cls, env_path: Optional[str] = None) -> 'Config':
+    def load(cls, env_path: Optional[str] = None) -> "_EnvironmentConfig":
         """Load a complete snapshot without exposing rejected raw values."""
         try:
             return cls._load_unchecked(env_path)
         except ConfigLoadError:
             raise
         except (TypeError, ValueError) as exc:
-            cls._instance = None
-            cls._loaded = False
             raise ConfigLoadError(
                 "配置包含无法解析的值；请对照 config.env.example 检查类型和格式"
             ) from exc
 
     @classmethod
-    def _load_unchecked(cls, env_path: Optional[str] = None) -> 'Config':
+    def _load_unchecked(
+        cls,
+        env_path: Optional[str] = None,
+    ) -> "_EnvironmentConfig":
         """
         从 .env 文件加载配置
 
         Args:
             env_path: 可选，.env 文件路径。默认为项目根目录下的 config.env
         """
-        if cls._loaded:
-            return cls._instance
-
         if env_path is None:
             # 默认查找项目根目录的 config.env
             _src_dir = Path(__file__).parent.parent.parent
@@ -344,14 +360,16 @@ class Config:
             if default_env.exists():
                 load_dotenv(default_env, override=False)
 
-        # 确保实例已创建
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        
-        instance = cls._instance
+        instance = super().__new__(cls)
         instance.OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
         instance.OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
         instance.OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "")
+        instance.DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+        instance.DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "")
+        instance.DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "")
+        instance.DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY", "")
+        instance.DASHSCOPE_MODEL = os.getenv("DASHSCOPE_MODEL", "")
+        instance.DASHSCOPE_BASE_URL = os.getenv("DASHSCOPE_BASE_URL", "")
         instance.LLM_DEFAULT_PROVIDER = os.getenv("LLM_DEFAULT_PROVIDER", "openai")
         instance.LLM_DEFAULT_TEMPERATURE = float(os.getenv("LLM_DEFAULT_TEMPERATURE", "0.3"))
         instance.LLM_DEFAULT_MAX_TOKENS = int(os.getenv("LLM_DEFAULT_MAX_TOKENS", "512"))
@@ -359,37 +377,35 @@ class Config:
         instance.LLM_FALLBACK_PROVIDERS = tuple(
             dict.fromkeys(
                 provider.strip().lower()
-                for provider in os.getenv(
-                    "LLM_FALLBACK_PROVIDERS", ""
-                ).split(",")
+                for provider in os.getenv("LLM_FALLBACK_PROVIDERS", "").split(",")
                 if provider.strip()
             )
         )
-        instance.LLM_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv(
-            "LLM_CIRCUIT_FAILURE_THRESHOLD", "3"
-        ))
-        instance.LLM_CIRCUIT_RECOVERY_SECONDS = float(os.getenv(
-            "LLM_CIRCUIT_RECOVERY_SECONDS", "30"
-        ))
-        instance.INTERACTION_TURN_TIMEOUT_S = float(os.getenv(
-            "INTERACTION_TURN_TIMEOUT_S", "90"
-        ))
-        instance.COMMAND_PREVIEW_TTL_SECONDS = float(os.getenv(
-            "COMMAND_PREVIEW_TTL_SECONDS", "120"
-        ))
+        instance.LLM_CIRCUIT_FAILURE_THRESHOLD = int(
+            os.getenv("LLM_CIRCUIT_FAILURE_THRESHOLD", "3")
+        )
+        instance.LLM_CIRCUIT_RECOVERY_SECONDS = float(
+            os.getenv("LLM_CIRCUIT_RECOVERY_SECONDS", "30")
+        )
+        instance.INTERACTION_TURN_TIMEOUT_S = float(os.getenv("INTERACTION_TURN_TIMEOUT_S", "90"))
+        instance.COMMAND_PREVIEW_TTL_SECONDS = float(
+            os.getenv("COMMAND_PREVIEW_TTL_SECONDS", "120")
+        )
         instance.VOICE_SESSION_TIMEOUT_S = float(os.getenv("VOICE_SESSION_TIMEOUT_S", "30"))
-        instance.VOICE_SESSION_HISTORY_TURNS = int(os.getenv(
-            "VOICE_SESSION_HISTORY_TURNS", "6"
-        ))
-        instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S = float(os.getenv(
-            "VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S", "30"
-        ))
-        instance.VOICE_TTS_ENABLED = os.getenv(
-            "VOICE_TTS_ENABLED", "false"
-        ).lower() in ("true", "1", "yes")
-        instance.VOICE_INPUT_ENABLED = os.getenv(
-            "VOICE_INPUT_ENABLED", "false"
-        ).lower() in ("true", "1", "yes")
+        instance.VOICE_SESSION_HISTORY_TURNS = int(os.getenv("VOICE_SESSION_HISTORY_TURNS", "6"))
+        instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S = float(
+            os.getenv("VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S", "30")
+        )
+        instance.VOICE_TTS_ENABLED = os.getenv("VOICE_TTS_ENABLED", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+        instance.VOICE_INPUT_ENABLED = os.getenv("VOICE_INPUT_ENABLED", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         instance.VOICE_AUDIO_SAMPLE_RATE = int(os.getenv("VOICE_AUDIO_SAMPLE_RATE", "16000"))
         instance.VOICE_AUDIO_CHANNELS = int(os.getenv("VOICE_AUDIO_CHANNELS", "1"))
         instance.VOICE_AUDIO_BLOCK_MS = int(os.getenv("VOICE_AUDIO_BLOCK_MS", "100"))
@@ -404,16 +420,16 @@ class Config:
         instance.VOICE_MIN_UTTERANCE_MS = int(os.getenv("VOICE_MIN_UTTERANCE_MS", "500"))
         instance.VOICE_MAX_UTTERANCE_MS = int(os.getenv("VOICE_MAX_UTTERANCE_MS", "30000"))
         instance.VOICE_END_SILENCE_MS = int(os.getenv("VOICE_END_SILENCE_MS", "800"))
-        instance.VOICE_SPEECH_START_RMS_THRESHOLD = float(os.getenv(
-            "VOICE_SPEECH_START_RMS_THRESHOLD", "0.025"
-        ))
-        instance.VOICE_SPEECH_START_CONFIRM_CHUNKS = int(os.getenv(
-            "VOICE_SPEECH_START_CONFIRM_CHUNKS", "1"
-        ))
+        instance.VOICE_SPEECH_START_RMS_THRESHOLD = float(
+            os.getenv("VOICE_SPEECH_START_RMS_THRESHOLD", "0.025")
+        )
+        instance.VOICE_SPEECH_START_CONFIRM_CHUNKS = int(
+            os.getenv("VOICE_SPEECH_START_CONFIRM_CHUNKS", "1")
+        )
         instance.VOICE_LISTENING_TIMEOUT_S = float(os.getenv("VOICE_LISTENING_TIMEOUT_S", "8.0"))
-        instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S = float(os.getenv(
-            "VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S", "25.0"
-        ))
+        instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S = float(
+            os.getenv("VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S", "25.0")
+        )
         instance.VOICE_WAKE_COOLDOWN_S = float(os.getenv("VOICE_WAKE_COOLDOWN_S", "1.5"))
         instance.VOICE_WAKE_FEEDBACK_ENABLED = os.getenv(
             "VOICE_WAKE_FEEDBACK_ENABLED", "true"
@@ -425,13 +441,17 @@ class Config:
             "VOICE_WAKE_WELCOME_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
         instance.VOICE_WAKE_WELCOME_TASK = os.getenv("VOICE_WAKE_WELCOME_TASK", "")
-        instance.VOICE_SILENCE_RMS_THRESHOLD = float(os.getenv("VOICE_SILENCE_RMS_THRESHOLD", "0.01"))
+        instance.VOICE_SILENCE_RMS_THRESHOLD = float(
+            os.getenv("VOICE_SILENCE_RMS_THRESHOLD", "0.01")
+        )
         instance.VOICE_SUPPRESS_MODEL_OUTPUT = os.getenv(
             "VOICE_SUPPRESS_MODEL_OUTPUT", "true"
         ).lower() in ("true", "1", "yes")
-        instance.VOICE_SHOW_ASR_TIMING = os.getenv(
-            "VOICE_SHOW_ASR_TIMING", "false"
-        ).lower() in ("true", "1", "yes")
+        instance.VOICE_SHOW_ASR_TIMING = os.getenv("VOICE_SHOW_ASR_TIMING", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         instance.VOICE_ASR_MODEL = os.getenv("VOICE_ASR_MODEL", "iic/SenseVoiceSmall")
         instance.VOICE_ASR_PUNC_MODEL = os.getenv("VOICE_ASR_PUNC_MODEL", "ct-punc")
         instance.VOICE_ASR_DEVICE = os.getenv("VOICE_ASR_DEVICE", "")
@@ -465,13 +485,69 @@ class Config:
         instance.VOICE_KWS_NUM_THREADS = int(os.getenv("VOICE_KWS_NUM_THREADS", "1"))
         instance.VOICE_KWS_MAX_ACTIVE_PATHS = int(os.getenv("VOICE_KWS_MAX_ACTIVE_PATHS", "4"))
         instance.VOICE_OPENWAKEWORD_MODEL_PATHS = os.getenv("VOICE_OPENWAKEWORD_MODEL_PATHS", "")
-        instance.VOICE_OPENWAKEWORD_THRESHOLD = float(os.getenv("VOICE_OPENWAKEWORD_THRESHOLD", "0.6"))
+        instance.VOICE_OPENWAKEWORD_THRESHOLD = float(
+            os.getenv("VOICE_OPENWAKEWORD_THRESHOLD", "0.6")
+        )
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-        instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in ("true", "1", "yes")
+        instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         instance.ROBOT_DATA_DIR = os.getenv("ROBOT_DATA_DIR", "data")
         instance.ACTIONS_LIBRARY_PATH = os.getenv("ACTIONS_LIBRARY_PATH", "")
         instance.TASKS_DIRECTORY = os.getenv("TASKS_DIRECTORY", "")
         instance.SKILL_LIBRARY_PATH = os.getenv("SKILL_LIBRARY_PATH", "")
+        instance.DATA_COLLECTION_FPS = int(os.getenv("DATA_COLLECTION_FPS", "30"))
+        instance.DATA_COLLECTION_CAMERA_INDEX = int(os.getenv("DATA_COLLECTION_CAMERA_INDEX", "0"))
+        instance.DATA_COLLECTION_ARMS = tuple(
+            item.strip()
+            for item in os.getenv(
+                "DATA_COLLECTION_ARMS",
+                "left,right",
+            ).split(",")
+            if item.strip()
+        )
+        instance.DATA_COLLECTION_SAVE_PATH = os.getenv(
+            "DATA_COLLECTION_SAVE_PATH",
+            "data/demos",
+        )
+        instance.DATA_COLLECTION_FORMAT_VARIANT = os.getenv(
+            "DATA_COLLECTION_FORMAT_VARIANT",
+            "portable_simplified",
+        )
+        instance.DATA_COLLECTION_MIN_FREE_BYTES = int(
+            os.getenv("DATA_COLLECTION_MIN_FREE_BYTES", "1073741824")
+        )
+        instance.DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR = float(
+            os.getenv(
+                "DATA_COLLECTION_STORAGE_OVERHEAD_FACTOR",
+                "1.25",
+            )
+        )
+        instance.DATA_COLLECTION_STALE_WRITE_SECONDS = float(
+            os.getenv("DATA_COLLECTION_STALE_WRITE_SECONDS", "3600")
+        )
+        instance.DATA_COLLECTION_RANDOM_SEED = int(os.getenv("DATA_COLLECTION_RANDOM_SEED", "42"))
+        instance.DATA_COLLECTION_STOP_TIMEOUT_SECONDS = float(
+            os.getenv("DATA_COLLECTION_STOP_TIMEOUT_SECONDS", "5")
+        )
+        instance.DATA_COLLECTION_MAX_SYNC_SKEW_MS = float(
+            os.getenv("DATA_COLLECTION_MAX_SYNC_SKEW_MS", "100")
+        )
+        instance.DATA_COLLECTION_CAMERA_EXTRINSICS = cls._parse_optional_float_tuple(
+            os.getenv("DATA_COLLECTION_CAMERA_EXTRINSICS", ""),
+            name="DATA_COLLECTION_CAMERA_EXTRINSICS",
+            expected_length=16,
+        )
+        instance.DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME = os.getenv(
+            "DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME",
+            "",
+        )
+        instance.DATA_COLLECTION_CALIBRATION_ID = os.getenv(
+            "DATA_COLLECTION_CALIBRATION_ID",
+            "",
+        )
         instance.CAMERA_PROVIDER = os.getenv("CAMERA_PROVIDER", "auto")
         instance.REALSENSE_DEVICE_SN = os.getenv("REALSENSE_DEVICE_SN", "")
         instance.REALSENSE_DEVICE_NAMES = os.getenv("REALSENSE_DEVICE_NAMES", "")
@@ -499,21 +575,38 @@ class Config:
         instance.YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/best.pt")
         instance.SAM_MODEL_PATH = os.getenv("SAM_MODEL_PATH", "models/sam2.1_l.pt")
         instance.VISION_DEBUG_SAVE_DIR = os.getenv("VISION_DEBUG_SAVE_DIR", "pictures")
+        instance.BALANCE_CAMERA_INDEX = int(os.getenv("BALANCE_CAMERA_INDEX", "12"))
+        instance.BALANCE_REQUEST_TIMEOUT_SECONDS = float(
+            os.getenv("BALANCE_REQUEST_TIMEOUT_SECONDS", "30")
+        )
+        instance.VVEAI_API_KEY = os.getenv("VVEAI_API_KEY", "")
+        instance.VVEAI_BASE_URL = os.getenv(
+            "VVEAI_BASE_URL",
+            "https://api.vveai.com/v1",
+        )
+        instance.VVEAI_MODEL = os.getenv(
+            "VVEAI_MODEL",
+            "doubao-seed-1-8-251228",
+        )
 
         # 手眼标定参数
-        instance.VISION_ROTATION_MATRIX = cls._parse_float_list(os.getenv(
-            "VISION_ROTATION_MATRIX",
-            "0.00215684,0.97503835,0.22202606,-0.99995231,-0.0000119,0.00976617,0.00952503,-0.22203654,0.97499182"
-        ))
-        instance.VISION_TRANSLATION_VECTOR = cls._parse_float_list(os.getenv(
-            "VISION_TRANSLATION_VECTOR", "-0.10273135,0.03312807,-0.07214614"
-        ))
-        instance.VISION_GRIPPER_OFFSET = cls._parse_float_list(os.getenv(
-            "VISION_GRIPPER_OFFSET", "3.146,0.0,3.128"
-        ))
+        instance.VISION_ROTATION_MATRIX = cls._parse_float_list(
+            os.getenv(
+                "VISION_ROTATION_MATRIX",
+                "0.00215684,0.97503835,0.22202606,-0.99995231,-0.0000119,0.00976617,0.00952503,-0.22203654,0.97499182",
+            )
+        )
+        instance.VISION_TRANSLATION_VECTOR = cls._parse_float_list(
+            os.getenv("VISION_TRANSLATION_VECTOR", "-0.10273135,0.03312807,-0.07214614")
+        )
+        instance.VISION_GRIPPER_OFFSET = cls._parse_float_list(
+            os.getenv("VISION_GRIPPER_OFFSET", "3.146,0.0,3.128")
+        )
         instance.VISION_DEFAULT_CONFIDENCE = float(os.getenv("VISION_DEFAULT_CONFIDENCE", "0.7"))
         instance.VISION_DEFAULT_VELOCITY = int(os.getenv("VISION_DEFAULT_VELOCITY", "15"))
-        instance.VISION_DEFAULT_GRIPPER_LENGTH = float(os.getenv("VISION_DEFAULT_GRIPPER_LENGTH", "150.0"))
+        instance.VISION_DEFAULT_GRIPPER_LENGTH = float(
+            os.getenv("VISION_DEFAULT_GRIPPER_LENGTH", "150.0")
+        )
         instance.VISION_DEFAULT_WORKFLOW = os.getenv("VISION_DEFAULT_WORKFLOW", "bottle")
         instance.VISION_CAMERA_NAME = os.getenv("VISION_CAMERA_NAME", "")
         instance.VISION_PREP_OFFSET_X = float(os.getenv("VISION_PREP_OFFSET_X", "-0.07"))
@@ -540,53 +633,99 @@ class Config:
             instance.VISION_CAMERA_NAME,
         )
         default_camera_matrix = "1361.8900146484375,0.0,930.7236938476562,0.0,1361.31640625,547.1578979492188,0.0,0.0,1.0"
-        legacy_camera_matrix = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_CAMERA_MATRIX",
-            default_camera_matrix,
-        ))
-        legacy_camera_resolution = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_CAMERA_MATRIX_RESOLUTION",
-            "1920,1080",
-        ))
-        legacy_dist_coeffs = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_DIST_COEFFS",
-            "0,0,0,0,0",
-        ))
-        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX",
-            "",
-        )) or legacy_camera_matrix
-        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX",
-            "",
-        )) or legacy_camera_matrix
-        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION",
-            "",
-        )) or legacy_camera_resolution
-        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION",
-            "",
-        )) or legacy_camera_resolution
-        instance.VISION_RELOCALIZATION_LEFT_DIST_COEFFS = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_LEFT_DIST_COEFFS",
-            "",
-        )) or legacy_dist_coeffs
-        instance.VISION_RELOCALIZATION_RIGHT_DIST_COEFFS = cls._parse_float_list(os.getenv(
-            "VISION_RELOCALIZATION_RIGHT_DIST_COEFFS",
-            "",
-        )) or legacy_dist_coeffs
-        instance.VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH = float(os.getenv(
-            "VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH",
-            os.getenv("VISION_RELOCALIZATION_MARKER_WIDTH", "0.158"),
-        ))
-        instance.VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT = float(os.getenv(
-            "VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT",
-            os.getenv("VISION_RELOCALIZATION_MARKER_HEIGHT", "0.158"),
-        ))
-        instance.VISION_RELOCALIZATION_POSE_ROTATION_TYPE = os.getenv("VISION_RELOCALIZATION_POSE_ROTATION_TYPE", "rpy")
-        instance.VISION_RELOCALIZATION_POSE_ANGLE_UNIT = os.getenv("VISION_RELOCALIZATION_POSE_ANGLE_UNIT", "rad")
-        default_t_e_c = cls._matrix4_from_rt(instance.VISION_ROTATION_MATRIX, instance.VISION_TRANSLATION_VECTOR)
+        legacy_camera_matrix = cls._parse_float_list(
+            os.getenv(
+                "VISION_RELOCALIZATION_CAMERA_MATRIX",
+                default_camera_matrix,
+            )
+        )
+        legacy_camera_resolution = cls._parse_float_list(
+            os.getenv(
+                "VISION_RELOCALIZATION_CAMERA_MATRIX_RESOLUTION",
+                "1920,1080",
+            )
+        )
+        legacy_dist_coeffs = cls._parse_float_list(
+            os.getenv(
+                "VISION_RELOCALIZATION_DIST_COEFFS",
+                "0,0,0,0,0",
+            )
+        )
+        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX = (
+            cls._parse_float_list(
+                os.getenv(
+                    "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX",
+                    "",
+                )
+            )
+            or legacy_camera_matrix
+        )
+        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX = (
+            cls._parse_float_list(
+                os.getenv(
+                    "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX",
+                    "",
+                )
+            )
+            or legacy_camera_matrix
+        )
+        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION = (
+            cls._parse_float_list(
+                os.getenv(
+                    "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION",
+                    "",
+                )
+            )
+            or legacy_camera_resolution
+        )
+        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION = (
+            cls._parse_float_list(
+                os.getenv(
+                    "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION",
+                    "",
+                )
+            )
+            or legacy_camera_resolution
+        )
+        instance.VISION_RELOCALIZATION_LEFT_DIST_COEFFS = (
+            cls._parse_float_list(
+                os.getenv(
+                    "VISION_RELOCALIZATION_LEFT_DIST_COEFFS",
+                    "",
+                )
+            )
+            or legacy_dist_coeffs
+        )
+        instance.VISION_RELOCALIZATION_RIGHT_DIST_COEFFS = (
+            cls._parse_float_list(
+                os.getenv(
+                    "VISION_RELOCALIZATION_RIGHT_DIST_COEFFS",
+                    "",
+                )
+            )
+            or legacy_dist_coeffs
+        )
+        instance.VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH = float(
+            os.getenv(
+                "VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH",
+                os.getenv("VISION_RELOCALIZATION_MARKER_WIDTH", "0.158"),
+            )
+        )
+        instance.VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT = float(
+            os.getenv(
+                "VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT",
+                os.getenv("VISION_RELOCALIZATION_MARKER_HEIGHT", "0.158"),
+            )
+        )
+        instance.VISION_RELOCALIZATION_POSE_ROTATION_TYPE = os.getenv(
+            "VISION_RELOCALIZATION_POSE_ROTATION_TYPE", "rpy"
+        )
+        instance.VISION_RELOCALIZATION_POSE_ANGLE_UNIT = os.getenv(
+            "VISION_RELOCALIZATION_POSE_ANGLE_UNIT", "rad"
+        )
+        default_t_e_c = cls._matrix4_from_rt(
+            instance.VISION_ROTATION_MATRIX, instance.VISION_TRANSLATION_VECTOR
+        )
         instance.VISION_RELOCALIZATION_LEFT_T_E_C = cls._parse_matrix4(
             os.getenv("VISION_RELOCALIZATION_LEFT_T_E_C", ""),
             default_t_e_c,
@@ -596,7 +735,9 @@ class Config:
             default_t_e_c,
         )
         instance.VISION_RELOCALIZATION_MODE = os.getenv("VISION_RELOCALIZATION_MODE", "planar")
-        instance.VISION_RELOCALIZATION_PLANAR_CONSTRAINT = os.getenv("VISION_RELOCALIZATION_PLANAR_CONSTRAINT", "none")
+        instance.VISION_RELOCALIZATION_PLANAR_CONSTRAINT = os.getenv(
+            "VISION_RELOCALIZATION_PLANAR_CONSTRAINT", "none"
+        )
         instance.VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES = os.getenv(
             "VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES",
             "true",
@@ -605,43 +746,51 @@ class Config:
             "VISION_RELOCALIZATION_DEBUG_DIR",
             "data/vision_stations/debug",
         )
-        
+
         # 机械臂配置
-        instance.ROBOT_PROVIDER = os.getenv(
-            "ROBOT_PROVIDER",
-            "realman",
-        ).strip().lower()
+        instance.ROBOT_PROVIDER = (
+            os.getenv(
+                "ROBOT_PROVIDER",
+                "realman",
+            )
+            .strip()
+            .lower()
+        )
         instance.ROBOT_MODEL = os.getenv(
             "ROBOT_MODEL",
             "rm75-dual",
         ).strip()
         instance.ROBOT1_IP = os.getenv("ROBOT1_IP", "192.168.3.18")
         instance.ROBOT1_PORT = int(os.getenv("ROBOT1_PORT", "8080"))
-        instance.ROBOT1_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT1_INITIAL_POSE", "-0.04844,-0.269769,-0.101888,3.109,-0.094,-1.592"))
+        instance.ROBOT1_INITIAL_POSE = cls._parse_float_list(
+            os.getenv("ROBOT1_INITIAL_POSE", "-0.04844,-0.269769,-0.101888,3.109,-0.094,-1.592")
+        )
         instance.ROBOT2_IP = os.getenv("ROBOT2_IP", "192.168.3.19")
         instance.ROBOT2_PORT = int(os.getenv("ROBOT2_PORT", "8080"))
-        instance.ROBOT2_INITIAL_POSE = cls._parse_float_list(os.getenv("ROBOT2_INITIAL_POSE", "-0.053437,0.24741,-0.120801,3.114,-0.032,-2.935"))
+        instance.ROBOT2_INITIAL_POSE = cls._parse_float_list(
+            os.getenv("ROBOT2_INITIAL_POSE", "-0.053437,0.24741,-0.120801,3.114,-0.032,-2.935")
+        )
         instance.ROBOT_TOOL_RACK_ARM = os.getenv(
             "ROBOT_TOOL_RACK_ARM",
             "right",
         ).strip()
-        instance.ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE = (
-            cls._parse_float_list(os.getenv(
+        instance.ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE = cls._parse_float_list(
+            os.getenv(
                 "ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE",
                 "-0.119418,-0.088287,-0.380201,3.110000,0.001000,-2.893000",
-            ))
+            )
         )
-        instance.ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE = (
-            cls._parse_float_list(os.getenv(
+        instance.ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE = cls._parse_float_list(
+            os.getenv(
                 "ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE",
                 "-0.119418,-0.088287,-0.480201,3.110000,0.001000,-2.893000",
-            ))
+            )
         )
-        instance.ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE = (
-            cls._parse_float_list(os.getenv(
+        instance.ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE = cls._parse_float_list(
+            os.getenv(
                 "ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE",
                 "-0.119418,-0.088287,-0.455201,3.110000,0.001000,-2.893000",
-            ))
+            )
         )
         instance.ROBOT_TOOL_RACK_SLOT_1_ATTACH_DWELL_SECONDS = float(
             os.getenv(
@@ -655,23 +804,23 @@ class Config:
                 "1.0",
             )
         )
-        instance.ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE = (
-            cls._parse_float_list(os.getenv(
+        instance.ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE = cls._parse_float_list(
+            os.getenv(
                 "ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE",
                 "-0.117419,-0.066539,-0.380577,3.135000,-0.009000,-2.869000",
-            ))
+            )
         )
-        instance.ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE = (
-            cls._parse_float_list(os.getenv(
+        instance.ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE = cls._parse_float_list(
+            os.getenv(
                 "ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE",
                 "-0.117419,-0.066539,-0.480577,3.135000,-0.009000,-2.869000",
-            ))
+            )
         )
-        instance.ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE = (
-            cls._parse_float_list(os.getenv(
+        instance.ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE = cls._parse_float_list(
+            os.getenv(
                 "ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE",
                 "-0.117419,-0.066539,-0.465577,3.135000,-0.009000,-2.869000",
-            ))
+            )
         )
         instance.ROBOT_TOOL_RACK_SLOT_2_ATTACH_DWELL_SECONDS = float(
             os.getenv(
@@ -688,7 +837,9 @@ class Config:
         instance.MOVE_CONTROLLER_HOST = os.getenv("MOVE_CONTROLLER_HOST", "192.168.1.216")
         instance.MOVE_CONTROLLER_PORT = int(os.getenv("MOVE_CONTROLLER_PORT", "12345"))
         move_client_bind_port = os.getenv("MOVE_CONTROLLER_CLIENT_BIND_PORT")
-        instance.MOVE_CONTROLLER_CLIENT_BIND_PORT = int(move_client_bind_port) if move_client_bind_port else None
+        instance.MOVE_CONTROLLER_CLIENT_BIND_PORT = (
+            int(move_client_bind_port) if move_client_bind_port else None
+        )
         instance.MOVE_VELOCITY = int(os.getenv("MOVE_VELOCITY", "10"))
         instance.MOVE_RADIUS = int(os.getenv("MOVE_RADIUS", "0"))
         instance.MOVE_CONNECT = int(os.getenv("MOVE_CONNECT", "0"))
@@ -765,28 +916,54 @@ class Config:
         instance.RELAY_TIMEOUT = int(os.getenv("RELAY_TIMEOUT", "1"))
 
         # 表情屏 T5L DGUSII（可选，实际调用时才打开串口）
-        instance.EXPRESSION_DISPLAY_ENABLED = os.getenv("EXPRESSION_DISPLAY_ENABLED", "false").lower() in ("true", "1", "yes")
-        instance.EXPRESSION_DISPLAY_PROVIDER = os.getenv("EXPRESSION_DISPLAY_PROVIDER", "t5l_dgusii")
+        instance.EXPRESSION_DISPLAY_ENABLED = os.getenv(
+            "EXPRESSION_DISPLAY_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        instance.EXPRESSION_DISPLAY_PROVIDER = os.getenv(
+            "EXPRESSION_DISPLAY_PROVIDER", "t5l_dgusii"
+        )
         instance.EXPRESSION_DISPLAY_CONFIG = os.getenv("EXPRESSION_DISPLAY_CONFIG", "")
-        instance.EXPRESSION_DISPLAY_SERIAL_PORT = os.getenv("EXPRESSION_DISPLAY_SERIAL_PORT", "COM4")
-        instance.EXPRESSION_DISPLAY_BAUDRATE = int(os.getenv("EXPRESSION_DISPLAY_BAUDRATE", "115200"))
+        instance.EXPRESSION_DISPLAY_SERIAL_PORT = os.getenv(
+            "EXPRESSION_DISPLAY_SERIAL_PORT", "COM4"
+        )
+        instance.EXPRESSION_DISPLAY_BAUDRATE = int(
+            os.getenv("EXPRESSION_DISPLAY_BAUDRATE", "115200")
+        )
         instance.EXPRESSION_DISPLAY_TIMEOUT = float(os.getenv("EXPRESSION_DISPLAY_TIMEOUT", "0.5"))
-        instance.EXPRESSION_DISPLAY_WRITE_TIMEOUT = float(os.getenv("EXPRESSION_DISPLAY_WRITE_TIMEOUT", "1.0"))
+        instance.EXPRESSION_DISPLAY_WRITE_TIMEOUT = float(
+            os.getenv("EXPRESSION_DISPLAY_WRITE_TIMEOUT", "1.0")
+        )
         instance.EXPRESSION_DISPLAY_VP_ADDR = os.getenv("EXPRESSION_DISPLAY_VP_ADDR", "0x5602")
         instance.EXPRESSION_DISPLAY_SP_ADDR = os.getenv("EXPRESSION_DISPLAY_SP_ADDR", "0x8000")
-        instance.EXPRESSION_DISPLAY_START_VALUE = os.getenv("EXPRESSION_DISPLAY_START_VALUE", "0x0000")
-        instance.EXPRESSION_DISPLAY_STOP_VALUE = os.getenv("EXPRESSION_DISPLAY_STOP_VALUE", "0x0001")
-        instance.EXPRESSION_DISPLAY_HIDE_VALUE = os.getenv("EXPRESSION_DISPLAY_HIDE_VALUE", "0x0002")
-        instance.EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH = os.getenv("EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH", "stop")
-        instance.EXPRESSION_DISPLAY_SWITCH_DELAY = float(os.getenv("EXPRESSION_DISPLAY_SWITCH_DELAY", "0.1"))
-        instance.EXPRESSION_DISPLAY_UPDATE_ICON_RANGE = os.getenv("EXPRESSION_DISPLAY_UPDATE_ICON_RANGE", "true").lower() in ("true", "1", "yes")
+        instance.EXPRESSION_DISPLAY_START_VALUE = os.getenv(
+            "EXPRESSION_DISPLAY_START_VALUE", "0x0000"
+        )
+        instance.EXPRESSION_DISPLAY_STOP_VALUE = os.getenv(
+            "EXPRESSION_DISPLAY_STOP_VALUE", "0x0001"
+        )
+        instance.EXPRESSION_DISPLAY_HIDE_VALUE = os.getenv(
+            "EXPRESSION_DISPLAY_HIDE_VALUE", "0x0002"
+        )
+        instance.EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH = os.getenv(
+            "EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH", "stop"
+        )
+        instance.EXPRESSION_DISPLAY_SWITCH_DELAY = float(
+            os.getenv("EXPRESSION_DISPLAY_SWITCH_DELAY", "0.1")
+        )
+        instance.EXPRESSION_DISPLAY_UPDATE_ICON_RANGE = os.getenv(
+            "EXPRESSION_DISPLAY_UPDATE_ICON_RANGE", "true"
+        ).lower() in ("true", "1", "yes")
         instance.EXPRESSION_DISPLAY_EXPRESSIONS = os.getenv(
             "EXPRESSION_DISPLAY_EXPRESSIONS",
             "happy:24:0:63,sad:27:0:63,angry:30:0:63,speechless:33:0:63,default_1:36:0:63,default_2:39:0:63",
         )
         instance.EXPRESSION_DISPLAY_CLEAR_VPS = os.getenv("EXPRESSION_DISPLAY_CLEAR_VPS", "")
-        instance.EXPRESSION_DISPLAY_TEST_INTERVAL = float(os.getenv("EXPRESSION_DISPLAY_TEST_INTERVAL", "1.5"))
-        instance.EXPRESSION_DISPLAY_TX_DELAY = float(os.getenv("EXPRESSION_DISPLAY_TX_DELAY", "0.05"))
+        instance.EXPRESSION_DISPLAY_TEST_INTERVAL = float(
+            os.getenv("EXPRESSION_DISPLAY_TEST_INTERVAL", "1.5")
+        )
+        instance.EXPRESSION_DISPLAY_TX_DELAY = float(
+            os.getenv("EXPRESSION_DISPLAY_TX_DELAY", "0.05")
+        )
 
         # 加粉装置
         instance.TAPPING_SERIAL_PORT = os.getenv("TAPPING_SERIAL_PORT", "/dev/ttyACM0")
@@ -796,13 +973,17 @@ class Config:
         instance.TAPPING_LIFT_ADDRESS = int(os.getenv("TAPPING_LIFT_ADDRESS", "7"))
         instance.TAPPING_ROTATION_ADDRESS = int(os.getenv("TAPPING_ROTATION_ADDRESS", "6"))
         instance.TAPPING_LIFT_SAFE_POSITION = int(os.getenv("TAPPING_LIFT_SAFE_POSITION", "0"))
-        instance.TAPPING_LIFT_DISPENSE_POSITION = int(os.getenv("TAPPING_LIFT_DISPENSE_POSITION", "50000"))
-        instance.TAPPING_ROTATION_HOME_POSITION = int(os.getenv("TAPPING_ROTATION_HOME_POSITION", "0"))
+        instance.TAPPING_LIFT_DISPENSE_POSITION = int(
+            os.getenv("TAPPING_LIFT_DISPENSE_POSITION", "50000")
+        )
+        instance.TAPPING_ROTATION_HOME_POSITION = int(
+            os.getenv("TAPPING_ROTATION_HOME_POSITION", "0")
+        )
         instance.POWDER_DISPENSE_LARGE_STEP = int(os.getenv("POWDER_DISPENSE_LARGE_STEP", "20000"))
         instance.POWDER_DISPENSE_MEDIUM_STEP = int(os.getenv("POWDER_DISPENSE_MEDIUM_STEP", "8000"))
         instance.POWDER_DISPENSE_SMALL_STEP = int(os.getenv("POWDER_DISPENSE_SMALL_STEP", "2000"))
         instance.POWDER_DISPENSE_MICRO_STEP = int(os.getenv("POWDER_DISPENSE_MICRO_STEP", "500"))
-        
+
         # WebSocket 服务器配置
         instance.WEBSOCKET_ENABLED = os.getenv(
             "WEBSOCKET_ENABLED",
@@ -849,19 +1030,32 @@ class Config:
         instance.MINICPM_GATEWAY_PATH_PREFIX = os.getenv("MINICPM_GATEWAY_PATH_PREFIX", "")
         instance.MINICPM_REALTIME_PATH = os.getenv("MINICPM_REALTIME_PATH", "/v1/realtime")
         instance.MINICPM_MODEL = os.getenv("MINICPM_MODEL", "minicpm-o")
-        instance.MINICPM_ASK_ENABLED = os.getenv(
-            "MINICPM_ASK_ENABLED", "true").lower() in ("true", "1", "yes")
+        instance.MINICPM_ASK_ENABLED = os.getenv("MINICPM_ASK_ENABLED", "true").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
         instance.MINICPM_ASK_API_KEY = os.getenv("MINICPM_ASK_API_KEY", "")
         instance.MINICPM_ASK_BASE_URL = os.getenv("MINICPM_ASK_BASE_URL", "")
         instance.MINICPM_ASK_MODEL = os.getenv("MINICPM_ASK_MODEL", "gpt-4o-mini")
-        
+
         # 位置配置
-        instance.INITIAL_POSE = cls._parse_float_list(os.getenv("INITIAL_POSE", "-0.303379,0.274441,-0.075986,-3.081,0.137,-1.828"))
-        instance.LEFT_INITIAL_POSE = cls._parse_float_list(os.getenv("LEFT_INITIAL_POSE", "-0.356,0.309,-0.186,-3.141,0,-1.89"))
-        instance.RIGHT_INITIAL_POSE = cls._parse_float_list(os.getenv("RIGHT_INITIAL_POSE", "-0.372,0.221,-0.186,-3.121,0,-1.89"))
+        instance.INITIAL_POSE = cls._parse_float_list(
+            os.getenv("INITIAL_POSE", "-0.303379,0.274441,-0.075986,-3.081,0.137,-1.828")
+        )
+        instance.LEFT_INITIAL_POSE = cls._parse_float_list(
+            os.getenv("LEFT_INITIAL_POSE", "-0.356,0.309,-0.186,-3.141,0,-1.89")
+        )
+        instance.RIGHT_INITIAL_POSE = cls._parse_float_list(
+            os.getenv("RIGHT_INITIAL_POSE", "-0.372,0.221,-0.186,-3.121,0,-1.89")
+        )
         instance.PLACE_DROP_HEIGHT = float(os.getenv("PLACE_DROP_HEIGHT", "0.06"))
-        instance.PLACE_ABOVE = cls._parse_float_list(os.getenv("PLACE_ABOVE", "0.0637,-0.07351,-0.4182,3.15,0,1.617"))
-        instance.PLACE_POS2 = cls._parse_float_list(os.getenv("PLACE_POS2", "0.285488,-0.256408,-0.090654,3.14,0,1.5"))
+        instance.PLACE_ABOVE = cls._parse_float_list(
+            os.getenv("PLACE_ABOVE", "0.0637,-0.07351,-0.4182,3.15,0,1.617")
+        )
+        instance.PLACE_POS2 = cls._parse_float_list(
+            os.getenv("PLACE_POS2", "0.285488,-0.256408,-0.090654,3.14,0,1.5")
+        )
         instance.PLACE_TRANSFER_POSE = cls._parse_float_list(
             os.getenv(
                 "PLACE_TRANSFER_POSE",
@@ -869,37 +1063,7 @@ class Config:
             )
         )
 
-        cls._loaded = True
         return instance
-
-    @classmethod
-    def get_instance(cls) -> 'Config':
-        """获取单例实例，如果未加载则先加载"""
-        if not cls._loaded:
-            cls.load()
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    @classmethod
-    def is_api_key_set(cls) -> bool:
-        """检查默认 LLM provider 是否已配置。"""
-        instance = cls.get_instance()
-        provider = (
-            instance.LLM_DEFAULT_PROVIDER
-            or "openai"
-        ).lower()
-        if provider == "minicpm":
-            return bool(instance.MINICPM_GATEWAY_HOST)
-        key = instance.OPENAI_API_KEY
-        return bool(key and key != "your_openai_key_here")
-
-    @classmethod
-    def get_skill_library_path(cls) -> Path:
-        """获取技能库文件的绝对路径"""
-        from .data_paths import ApplicationDataPaths
-
-        return ApplicationDataPaths.from_config(cls.get_instance()).skills_file
 
     @classmethod
     def _parse_float_list(cls, value: str) -> list:
@@ -910,6 +1074,24 @@ class Config:
             return [float(x.strip()) for x in value.split(",")]
         except (ValueError, AttributeError):
             return []
+
+    @staticmethod
+    def _parse_optional_float_tuple(
+        value: str,
+        *,
+        name: str,
+        expected_length: int,
+    ) -> tuple[float, ...]:
+        normalized = value.strip()
+        if not normalized:
+            return ()
+        try:
+            values = tuple(float(item.strip()) for item in normalized.split(","))
+        except ValueError as exc:
+            raise ConfigLoadError(f"{name} must contain comma-separated numbers") from exc
+        if len(values) != expected_length:
+            raise ConfigLoadError(f"{name} must contain exactly {expected_length} values")
+        return values
 
     @classmethod
     def _matrix4_from_rt(cls, rotation_flat: list, translation: list) -> list:
@@ -931,363 +1113,12 @@ class Config:
         values = cls._parse_float_list(value)
         if len(values) != 16:
             return default or cls._matrix4_from_rt([], [])
-        return [values[i:i + 4] for i in range(0, 16, 4)]
-
-    @classmethod
-    def _matrix3_from_flat(cls, values: list) -> list:
-        if len(values or []) == 9:
-            return [
-                values[0:3],
-                values[3:6],
-                values[6:9],
-            ]
-        return [
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ]
+        return [values[i : i + 4] for i in range(0, 16, 4)]
 
 
-    @classmethod
-    @classmethod
-    def get_move_controller_config(cls) -> dict:
-        """获取移动控制器TCP连接配置"""
-        instance = cls.get_instance()
-        return {
-            "host": instance.MOVE_CONTROLLER_HOST,
-            "port": instance.MOVE_CONTROLLER_PORT,
-            "client_bind_port": instance.MOVE_CONTROLLER_CLIENT_BIND_PORT
-        }
-
-    @classmethod
-    @classmethod
-    def get_body_motor_config(cls) -> dict:
-        """获取身体控制器（ModbusMotor）配置"""
-        instance = cls.get_instance()
-        return {
-            "port": instance.BODY_SERIAL_PORT,
-            "baudrate": instance.BODY_BAUDRATE,
-            "slave_id": instance.BODY_SLAVE_ID,
-            "timeout": instance.BODY_TIMEOUT
-        }
-
-    @classmethod
-    def get_kuaihuanshou_config(cls) -> dict:
-        """获取快换手配置"""
-        instance = cls.get_instance()
-        return {
-            "port": instance.KUAIHUANSHOU_SERIAL_PORT,
-            "baudrate": instance.KUAIHUANSHOU_BAUDRATE,
-            "timeout": instance.KUAIHUANSHOU_TIMEOUT
-        }
-
-    @classmethod
-    def get_adp_config(cls) -> dict:
-        """获取 ADP 吸液枪配置"""
-        instance = cls.get_instance()
-        return {
-            "port": instance.ADP_SERIAL_PORT,
-            "baudrate": instance.ADP_BAUDRATE,
-            "timeout": instance.ADP_TIMEOUT,
-            "max_retries": instance.ADP_MAX_RETRIES
-        }
-
-    @classmethod
-    def get_relay_config(cls) -> dict:
-        """获取继电器控制器配置"""
-        instance = cls.get_instance()
-        return {
-            "port": instance.RELAY_SERIAL_PORT,
-            "baudrate": instance.RELAY_BAUDRATE,
-            "timeout": instance.RELAY_TIMEOUT
-        }
-
-    @classmethod
-    def get_expression_display_config(cls) -> dict:
-        """获取表情屏配置（不会初始化串口）。"""
-        instance = cls.get_instance()
-        config_path = instance.EXPRESSION_DISPLAY_CONFIG
-        if config_path:
-            path = Path(config_path)
-            if not path.is_absolute():
-                path = Path(__file__).parent.parent.parent / path
-            config_path = str(path)
-        return {
-            "enabled": instance.EXPRESSION_DISPLAY_ENABLED,
-            "provider": instance.EXPRESSION_DISPLAY_PROVIDER,
-            "config_path": config_path,
-            "port": instance.EXPRESSION_DISPLAY_SERIAL_PORT,
-            "baudrate": instance.EXPRESSION_DISPLAY_BAUDRATE,
-            "timeout": instance.EXPRESSION_DISPLAY_TIMEOUT,
-            "write_timeout": instance.EXPRESSION_DISPLAY_WRITE_TIMEOUT,
-            "vp_addr": instance.EXPRESSION_DISPLAY_VP_ADDR,
-            "sp_addr": instance.EXPRESSION_DISPLAY_SP_ADDR,
-            "start_value": instance.EXPRESSION_DISPLAY_START_VALUE,
-            "stop_value": instance.EXPRESSION_DISPLAY_STOP_VALUE,
-            "hide_value": instance.EXPRESSION_DISPLAY_HIDE_VALUE,
-            "clear_before_switch": instance.EXPRESSION_DISPLAY_CLEAR_BEFORE_SWITCH,
-            "switch_delay": instance.EXPRESSION_DISPLAY_SWITCH_DELAY,
-            "update_icon_range": instance.EXPRESSION_DISPLAY_UPDATE_ICON_RANGE,
-            "expressions": instance.EXPRESSION_DISPLAY_EXPRESSIONS,
-            "clear_vps": instance.EXPRESSION_DISPLAY_CLEAR_VPS,
-            "test_interval": instance.EXPRESSION_DISPLAY_TEST_INTERVAL,
-            "tx_delay": instance.EXPRESSION_DISPLAY_TX_DELAY,
-        }
-
-    @classmethod
-    def get_tapping_config(cls) -> dict:
-        """获取加粉装置控制器配置"""
-        instance = cls.get_instance()
-        return {
-            "port": instance.TAPPING_SERIAL_PORT,
-            "baudrate": instance.TAPPING_BAUDRATE,
-            "timeout": instance.TAPPING_TIMEOUT,
-            "gripper_address": instance.TAPPING_GRIPPER_ADDRESS,
-            "lift_address": instance.TAPPING_LIFT_ADDRESS,
-            "rotation_address": instance.TAPPING_ROTATION_ADDRESS,
-            "lift_safe_position": instance.TAPPING_LIFT_SAFE_POSITION,
-            "lift_dispense_position": instance.TAPPING_LIFT_DISPENSE_POSITION,
-            "rotation_home_position": instance.TAPPING_ROTATION_HOME_POSITION,
-            "powder_large_step": instance.POWDER_DISPENSE_LARGE_STEP,
-            "powder_medium_step": instance.POWDER_DISPENSE_MEDIUM_STEP,
-            "powder_small_step": instance.POWDER_DISPENSE_SMALL_STEP,
-            "powder_micro_step": instance.POWDER_DISPENSE_MICRO_STEP,
-        }
-
-    @classmethod
-    def get_pwm_neck_config(cls) -> dict:
-        """获取 PWM 颈部舵机配置"""
-        instance = cls.get_instance()
-        return {
-            "port": instance.PWM_NECK_SERIAL_PORT,
-            "baudrate": instance.PWM_NECK_BAUDRATE,
-            "horizontal": {
-                "servo_id": instance.PWM_NECK_H_SERVO_ID,
-                "initial_pwm": instance.PWM_NECK_H_INITIAL_PWM,
-                "pwm_min": instance.PWM_NECK_H_PWM_MIN,
-                "pwm_max": instance.PWM_NECK_H_PWM_MAX,
-                "default_time": instance.PWM_NECK_H_DEFAULT_TIME,
-            },
-            "vertical": {
-                "servo_id": instance.PWM_NECK_V_SERVO_ID,
-                "initial_pwm": instance.PWM_NECK_V_INITIAL_PWM,
-                "pwm_min": instance.PWM_NECK_V_PWM_MIN,
-                "pwm_max": instance.PWM_NECK_V_PWM_MAX,
-                "default_time": instance.PWM_NECK_V_DEFAULT_TIME,
-            },
-        }
-
-    @classmethod
-    def get_vision_config(cls) -> dict:
-        """获取视觉系统配置"""
-        instance = cls.get_instance()
-        return {
-            "camera_provider": instance.CAMERA_PROVIDER,
-            "camera_sn": instance.REALSENSE_DEVICE_SN,
-            "webcam_indexes": instance.WEBCAM_DEVICE_INDEXES,
-            "camera_host": instance.VISION_CAMERA_HOST,
-            "camera_port": instance.VISION_CAMERA_PORT,
-            "yolo_model_path": instance.YOLO_MODEL_PATH,
-            "sam_model_path": instance.SAM_MODEL_PATH,
-            "debug_save_dir": instance.VISION_DEBUG_SAVE_DIR
-        }
-
-    @classmethod
-    def get_vision_calibration(cls) -> dict:
-        """获取手眼标定参数（相机→末端变换）"""
-        instance = cls.get_instance()
-        mat_flat = instance.VISION_ROTATION_MATRIX or [1, 0, 0, 0, 1, 0, 0, 0, 1]
-        rotation_matrix = [
-            mat_flat[0:3],
-            mat_flat[3:6],
-            mat_flat[6:9],
-        ]
-        return {
-            "rotation_matrix": rotation_matrix,
-            "translation_vector": instance.VISION_TRANSLATION_VECTOR or [0.0, 0.0, 0.0],
-            "gripper_offset": instance.VISION_GRIPPER_OFFSET or [3.146, 0.0, 3.128],
-        }
-
-    @classmethod
-    def get_vision_relocalization_config(cls, arm: str | None = None) -> dict:
-        """获取视觉重定位固定参数。"""
-        instance = cls.get_instance()
-        arm_text = str(arm or "").strip().lower()
-        is_right = arm_text in {"right", "r", "robot2", "r2", "2", "右", "右臂"}
-        camera_name = (
-            instance.VISION_RELOCALIZATION_RIGHT_CAMERA_NAME
-            if is_right
-            else instance.VISION_RELOCALIZATION_LEFT_CAMERA_NAME
-        )
-        t_e_c = (
-            instance.VISION_RELOCALIZATION_RIGHT_T_E_C
-            if is_right
-            else instance.VISION_RELOCALIZATION_LEFT_T_E_C
-        )
-        camera_values = (
-            instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX
-            if is_right
-            else instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX
-        ) or []
-        camera_matrix = cls._matrix3_from_flat(camera_values)
-        camera_resolution = (
-            instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION
-            if is_right
-            else instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION
-        )
-        if len(camera_resolution or []) != 2:
-            camera_resolution = None
-        dist_coeffs = (
-            instance.VISION_RELOCALIZATION_RIGHT_DIST_COEFFS
-            if is_right
-            else instance.VISION_RELOCALIZATION_LEFT_DIST_COEFFS
-        )
-        return {
-            "stations_file": instance.VISION_RELOCALIZATION_STATIONS_FILE,
-            "camera_name": camera_name,
-            "camera_matrix": camera_matrix,
-            "camera_matrix_resolution": camera_resolution,
-            "dist_coeffs": dist_coeffs or [0, 0, 0, 0, 0],
-            "marker": {
-                "width": instance.VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH,
-                "height": instance.VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT,
-            },
-            "pose_rotation_type": instance.VISION_RELOCALIZATION_POSE_ROTATION_TYPE,
-            "pose_angle_unit": instance.VISION_RELOCALIZATION_POSE_ANGLE_UNIT,
-            "T_E_C": t_e_c,
-            "mode": instance.VISION_RELOCALIZATION_MODE,
-            "planar_constraint": instance.VISION_RELOCALIZATION_PLANAR_CONSTRAINT,
-            "save_debug_images": instance.VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES,
-            "debug_dir": instance.VISION_RELOCALIZATION_DEBUG_DIR,
-        }
-
-    @classmethod
-    def get_websocket_config(cls) -> dict:
-        """获取 WebSocket 服务器配置"""
-        instance = cls.get_instance()
-        return {
-            "enabled": instance.WEBSOCKET_ENABLED,
-            "host": instance.WEBSOCKET_HOST,
-            "port": instance.WEBSOCKET_PORT,
-            "auth_token": instance.WEBSOCKET_AUTH_TOKEN,
-            "control_lease_seconds": (
-                instance.WEBSOCKET_CONTROL_LEASE_SECONDS
-            ),
-            "max_message_size_bytes": (
-                instance.WEBSOCKET_MAX_MESSAGE_SIZE_BYTES
-            ),
-            "max_requests_per_second": (
-                instance.WEBSOCKET_MAX_REQUESTS_PER_SECOND
-            ),
-            "max_concurrent_requests": (
-                instance.WEBSOCKET_MAX_CONCURRENT_REQUESTS
-            ),
-            "max_queued_messages": (
-                instance.WEBSOCKET_MAX_QUEUED_MESSAGES
-            ),
-            "send_timeout_seconds": (
-                instance.WEBSOCKET_SEND_TIMEOUT_SECONDS
-            ),
-            "start_timeout_seconds": (
-                instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS
-            ),
-            "stop_timeout_seconds": (
-                instance.AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS
-            ),
-        }
-
-    @classmethod
-    def get_minicpm_config(cls) -> dict:
-        """获取 MiniCPM Realtime / 聊天配置"""
-        instance = cls.get_instance()
-        return {
-            "gateway_host": instance.MINICPM_GATEWAY_HOST,
-            "gateway_port": instance.MINICPM_GATEWAY_PORT,
-            "ws_scheme": instance.MINICPM_WS_SCHEME,
-            "gateway_path_prefix": instance.MINICPM_GATEWAY_PATH_PREFIX,
-            "realtime_path": instance.MINICPM_REALTIME_PATH,
-            "ask_enabled": instance.MINICPM_ASK_ENABLED,
-            "ask_api_key": instance.MINICPM_ASK_API_KEY or instance.OPENAI_API_KEY,
-            "ask_base_url": instance.MINICPM_ASK_BASE_URL or instance.OPENAI_BASE_URL,
-            "ask_model": instance.MINICPM_ASK_MODEL,
-        }
-
-    @classmethod
-    def get_llm_config(cls) -> dict:
-        """获取 LLM 能力层配置摘要。"""
-        instance = cls.get_instance()
-        return {
-            "default_provider": instance.LLM_DEFAULT_PROVIDER,
-            "supported_providers": ["openai", "deepseek", "dashscope", "minicpm"],
-            "openai_model": instance.OPENAI_MODEL,
-            "openai_base_url": instance.OPENAI_BASE_URL,
-            "minicpm_model": instance.MINICPM_MODEL,
-            "minicpm_ws_scheme": instance.MINICPM_WS_SCHEME,
-            "minicpm_realtime_path": instance.MINICPM_REALTIME_PATH,
-            "timeout_s": instance.LLM_REQUEST_TIMEOUT_S,
-            "fallback_providers": list(instance.LLM_FALLBACK_PROVIDERS),
-            "circuit_failure_threshold": instance.LLM_CIRCUIT_FAILURE_THRESHOLD,
-            "circuit_recovery_seconds": instance.LLM_CIRCUIT_RECOVERY_SECONDS,
-        }
-
-    @classmethod
-    def get_voice_interaction_config(cls) -> dict:
-        """获取唤醒后语音会话配置。"""
-        instance = cls.get_instance()
-        return {
-            "session_timeout_s": instance.VOICE_SESSION_TIMEOUT_S,
-            "session_history_turns": instance.VOICE_SESSION_HISTORY_TURNS,
-            "speech_startup_wait_timeout_s": instance.VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S,
-            "tts_enabled": instance.VOICE_TTS_ENABLED,
-            "speech_input_enabled": instance.VOICE_INPUT_ENABLED,
-            "wake_word_enabled": instance.VOICE_INPUT_ENABLED,
-            "asr_enabled": instance.VOICE_INPUT_ENABLED,
-            "audio_sample_rate": instance.VOICE_AUDIO_SAMPLE_RATE,
-            "audio_channels": instance.VOICE_AUDIO_CHANNELS,
-            "audio_block_ms": instance.VOICE_AUDIO_BLOCK_MS,
-            "audio_queue_size": instance.VOICE_AUDIO_QUEUE_SIZE,
-            "audio_latency": instance.VOICE_AUDIO_LATENCY,
-            "audio_device": instance.VOICE_AUDIO_DEVICE,
-            "audio_show_status": instance.VOICE_AUDIO_SHOW_STATUS,
-            "vad_model": instance.VOICE_VAD_MODEL,
-            "vad_chunk_ms": instance.VOICE_VAD_CHUNK_MS,
-            "min_utterance_ms": instance.VOICE_MIN_UTTERANCE_MS,
-            "max_utterance_ms": instance.VOICE_MAX_UTTERANCE_MS,
-            "end_silence_ms": instance.VOICE_END_SILENCE_MS,
-            "speech_start_rms_threshold": instance.VOICE_SPEECH_START_RMS_THRESHOLD,
-            "speech_start_confirm_chunks": instance.VOICE_SPEECH_START_CONFIRM_CHUNKS,
-            "listening_timeout_s": instance.VOICE_LISTENING_TIMEOUT_S,
-            "follow_up_listening_timeout_s": instance.VOICE_FOLLOW_UP_LISTENING_TIMEOUT_S,
-            "wake_cooldown_s": instance.VOICE_WAKE_COOLDOWN_S,
-            "wake_feedback_enabled": instance.VOICE_WAKE_FEEDBACK_ENABLED,
-            "wake_feedback_text": instance.VOICE_WAKE_FEEDBACK_TEXT,
-            "wake_welcome_enabled": instance.VOICE_WAKE_WELCOME_ENABLED,
-            "wake_welcome_task": instance.VOICE_WAKE_WELCOME_TASK,
-            "silence_rms_threshold": instance.VOICE_SILENCE_RMS_THRESHOLD,
-            "suppress_model_output": instance.VOICE_SUPPRESS_MODEL_OUTPUT,
-            "show_asr_timing": instance.VOICE_SHOW_ASR_TIMING,
-            "asr_model": instance.VOICE_ASR_MODEL,
-            "asr_punc_model": instance.VOICE_ASR_PUNC_MODEL,
-            "asr_device": instance.VOICE_ASR_DEVICE,
-            "asr_batch_size_s": instance.VOICE_ASR_BATCH_SIZE_S,
-            "wake_engine": instance.VOICE_WAKE_ENGINE,
-            "wake_auto_trigger": instance.VOICE_WAKE_AUTO_TRIGGER,
-            "kws_encoder": instance.VOICE_KWS_ENCODER,
-            "kws_decoder": instance.VOICE_KWS_DECODER,
-            "kws_joiner": instance.VOICE_KWS_JOINER,
-            "kws_tokens": instance.VOICE_KWS_TOKENS,
-            "kws_keywords_file": instance.VOICE_KWS_KEYWORDS_FILE,
-            "kws_provider": instance.VOICE_KWS_PROVIDER,
-            "kws_threshold": instance.VOICE_KWS_THRESHOLD,
-            "kws_score": instance.VOICE_KWS_SCORE,
-            "kws_num_threads": instance.VOICE_KWS_NUM_THREADS,
-            "kws_max_active_paths": instance.VOICE_KWS_MAX_ACTIVE_PATHS,
-            "openwakeword_model_paths": instance.VOICE_OPENWAKEWORD_MODEL_PATHS,
-            "openwakeword_threshold": instance.VOICE_OPENWAKEWORD_THRESHOLD,
-        }
-    
-    @classmethod
-    def reset(cls):
-        """重置配置（用于测试）"""
-        cls._instance = None
-        cls._loaded = False
+def load_application_settings(
+    env_path: str | None = None,
+) -> "ApplicationSettings":
+    """Parse environment values once and return immutable domain settings."""
+    raw_config = _EnvironmentConfig.load(env_path)
+    return ApplicationSettings.from_config(raw_config)

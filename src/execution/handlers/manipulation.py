@@ -53,9 +53,7 @@ class ManipulationHandlerOptions:
         if self.gripper_max_attempts <= 0:
             raise ValueError("gripper_max_attempts must be positive")
         if self.gripper_retry_delay_seconds < 0:
-            raise ValueError(
-                "gripper_retry_delay_seconds must not be negative"
-            )
+            raise ValueError("gripper_retry_delay_seconds must not be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,9 +102,7 @@ class PipetteCommand:
                 parameters.get("吐液速度"),
                 "吐液速度",
             ),
-            full_dispense=(
-                full_dispense or dispense_mode == "全吐"
-            ),
+            full_dispense=(full_dispense or dispense_mode == "全吐"),
         )
 
 
@@ -179,9 +175,7 @@ class ToolChangerActionHandler:
         try:
             context.invoke(
                 self._OPERATION,
-                lambda: tool_changer.set_locked(
-                    locked_by_operation[operation]
-                ),
+                lambda: tool_changer.set_locked(locked_by_operation[operation]),
             )
         except (ActionCancelledError, ActionTimeoutError):
             raise
@@ -319,6 +313,7 @@ class GripperActionHandler:
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
             )
+
         def action() -> object:
             if operation == "开":
                 return gripper.open_gripper(ArmId.LEFT)
@@ -332,9 +327,7 @@ class GripperActionHandler:
                 raise
             except Exception as exc:
                 context.log(
-                    f"执行夹爪出错 "
-                    f"({attempt}/{self._options.gripper_max_attempts}): "
-                    f"{exc}",
+                    f"执行夹爪出错 ({attempt}/{self._options.gripper_max_attempts}): {exc}",
                     "warn",
                 )
             else:
@@ -345,9 +338,7 @@ class GripperActionHandler:
                 )
 
             if attempt < self._options.gripper_max_attempts:
-                context.sleep(
-                    self._options.gripper_retry_delay_seconds
-                )
+                context.sleep(self._options.gripper_retry_delay_seconds)
 
         return _failed_result(
             context,
@@ -421,8 +412,7 @@ class PipetteActionHandler:
 
         level = "info" if success else "error"
         context.log(
-            f"吸液枪{command.operation}执行"
-            f"{'成功' if success else '失败'}",
+            f"吸液枪{command.operation}执行{'成功' if success else '失败'}",
             level,
         )
         if success:
@@ -452,9 +442,7 @@ class PipetteActionHandler:
             )
             configured = context.invoke(
                 "pipette.set_absorb_speed",
-                lambda: pipette.set_absorb_speed(
-                    command.speed_ul_s
-                ),
+                lambda: pipette.set_absorb_speed(command.speed_ul_s),
             )
             if not configured:
                 context.log("设置吸液速度失败", "error")
@@ -480,9 +468,7 @@ class PipetteActionHandler:
             )
             configured = context.invoke(
                 "pipette.set_dispense_speed",
-                lambda: pipette.set_dispense_speed(
-                    command.speed_ul_s
-                ),
+                lambda: pipette.set_dispense_speed(command.speed_ul_s),
             )
             if not configured:
                 context.log("设置吐液速度失败", "error")
@@ -518,9 +504,7 @@ class ExpressionDisplayActionHandler:
             try:
                 context.invoke(
                     self._SHUTDOWN_OPERATION,
-                    lambda: self._device_runtime.shutdown(
-                        EXPRESSION_DISPLAY
-                    ),
+                    lambda: self._device_runtime.shutdown(EXPRESSION_DISPLAY),
                 )
             except (ActionCancelledError, ActionTimeoutError):
                 raise
@@ -601,14 +585,8 @@ class TappingActionHandler:
             "使能",
         }
     )
-    _STEP_OPERATIONS = frozenset(
-        {"针上升", "针下降", "针正转", "针反转"}
-    )
-    _SUPPORTED_OPERATIONS = (
-        _SIMPLE_OPERATIONS
-        | _STEP_OPERATIONS
-        | {"夹爪移动到"}
-    )
+    _STEP_OPERATIONS = frozenset({"针上升", "针下降", "针正转", "针反转"})
+    _SUPPORTED_OPERATIONS = _SIMPLE_OPERATIONS | _STEP_OPERATIONS | {"夹爪移动到"}
 
     def __init__(self, device_runtime: DeviceRuntime) -> None:
         self._device_runtime = device_runtime
@@ -701,9 +679,7 @@ class TappingActionHandler:
         if operation in simple_operations:
             return simple_operations[operation]
         if argument is None:
-            raise RuntimeError(
-                f"missing validated argument for operation: {operation}"
-            )
+            raise RuntimeError(f"missing validated argument for operation: {operation}")
         if operation == "夹爪移动到":
             return lambda: controller.gripper_move_to(argument)
 
@@ -812,7 +788,7 @@ class PowderDispenseActionHandler:
         device_runtime: DeviceRuntime,
         tapping_config_provider: TappingConfigProvider,
         *,
-        read_balance: BalanceReader | None = None,
+        read_balance: BalanceReader,
     ) -> None:
         self._device_runtime = device_runtime
         self._tapping_config_provider = tapping_config_provider
@@ -848,7 +824,7 @@ class PowderDispenseActionHandler:
                 POWDER_DISPENSER,
                 PowderDispenser,
             )
-            balance_reader = self._resolve_balance_reader()
+            balance_reader = self._read_balance
         except Exception as exc:
             return _failed_result(
                 context,
@@ -904,18 +880,12 @@ class PowderDispenseActionHandler:
             log=False,
         )
 
-    def _resolve_balance_reader(self) -> BalanceReader:
-        if self._read_balance is not None:
-            return self._read_balance
-        from ...vision.balance_reader_simple import read_balance
-
-        return read_balance
-
 
 def create_manipulation_handler(
     device_runtime: DeviceRuntime,
     options: ManipulationHandlerOptions,
     tapping_config_provider: TappingConfigProvider,
+    read_balance: BalanceReader,
 ) -> ManipulateActionHandler:
     expression_handler = ExpressionDisplayActionHandler(device_runtime)
     handlers: dict[str, ActionHandler] = {
@@ -931,6 +901,7 @@ def create_manipulation_handler(
         "智能加粉": PowderDispenseActionHandler(
             device_runtime,
             tapping_config_provider,
+            read_balance=read_balance,
         ),
         "加粉装置": TappingActionHandler(device_runtime),
     }
@@ -946,9 +917,7 @@ def _positive_int(value: object, label: str) -> int:
 
 def _required_capacity(command: PipetteCommand) -> int:
     if command.capacity_ul is None:
-        raise RuntimeError(
-            f"missing capacity for pipette operation: {command.operation}"
-        )
+        raise RuntimeError(f"missing capacity for pipette operation: {command.operation}")
     return command.capacity_ul
 
 
