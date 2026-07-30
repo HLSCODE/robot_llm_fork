@@ -24,9 +24,6 @@ class WebSocketHandlerHost(Protocol):
     _teleop_modes: dict[str, bool]
     _teleop_msg_counts: dict[str, int]
     _last_grip: dict[str, int | None]
-    _demo_recorder: Any
-    _demo_camera_session: Any
-    _demo_session: dict[str, Any]
     _camera_preview_session: Any
     _camera_frame_subs: set[Any]
     _camera_push_task: Any

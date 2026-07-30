@@ -2,7 +2,9 @@
 
 ## 功能概述
 
-数据采集功能用于在WebSocket遥操作框架下采集机械臂操作数据，并保存为RLBench标准格式。该功能支持通过WebSocket协议控制数据采集流程，自动记录遥操作过程中的相机图像和机械臂状态数据。
+数据采集功能用于在遥操作期间采集机械臂操作数据，并保存为 RLBench
+目标格式。采集用例由独立的 `DataCollectionService` 编排；WebSocket 目前是
+对外入口之一，只负责请求/响应映射，不持有 recorder、相机会话或采集状态。
 
 **核心特性**：
 - **30Hz采集频率**：定时采集相机RGB/Depth图像和机械臂关节状态
@@ -14,6 +16,29 @@
 - 遥操作数据采集（通过VR/键盘控制机械臂）
 - 强化学习训练数据准备
 - 操作轨迹分析与回放
+
+### 当前架构
+
+```text
+WebSocket / 后续 HTTP / GUI
+            |
+   DataCollectionService
+      /       |        \
+ Recorder  CameraSession  TeleoperationService
+              |                |
+       CameraAccessService  ResourceArbiter
+```
+
+`DataCollectionService` 是以下状态和资源的唯一所有者：
+
+- session/episode 显式状态机；
+- `RLBenchRecorder` 生命周期；
+- session 全周期的独占 `CameraSession`；
+- 首个 episode 启动后与遥操作共享、直到 session 结束才释放的机器人控制会话。
+
+稳定状态为 `idle`、`session_ready`、`recording` 和 `faulted`；启动/停止过程中
+还会进入 `starting_session`、`starting_episode`、`stopping_episode`、
+`ending_session`、`closing` 等过渡状态。非法状态转换会被应用层直接拒绝。
 
 ---
 
@@ -39,7 +64,7 @@
 
 **参数说明**：
 - `task`（必填）：任务名称，用于数据分类（如"pick_bottle"）
-- `description`（必填）：任务描述，用于后续数据标注
+- `description`（可选）：任务描述，用于后续数据标注
 
 **响应格式**：
 ```json
@@ -109,6 +134,8 @@
 - 停止30Hz采集线程
 - 将采集的数据保存为RLBench格式（PNG文件+pkl文件）
 - 自动递增episode编号
+- episode 停止后仍保留共享遥操作控制，便于继续采集下一条 episode；只有
+  `demo_session_end`、控制租约释放或安全停止才会释放控制会话
 
 ---
 
@@ -143,12 +170,16 @@
 - `demo_session_start` 通过 `CameraAccessService.open_depth()` 取得独占相机会话，
   并在整个数据采集 session 期间持有；相机预览、语音视觉、相机测试和视觉动作
   会在资源冲突时被明确拒绝。
-- `demo_record_start` 必须先取得 `TeleoperationService` 的机械臂会话租约，
-  成功后才启动 30Hz recorder，避免采集线程已经运行但机器人控制权申请失败。
-- `demo_session_end`、WebSocket 服务停止以及异常清理都会停止 recorder 和
-  teleoperation，并在 `finally` 路径释放相机会话。
-- 当前资源所有权已收敛，但 session/episode 状态仍位于
-  `RobotWebSocketServer`；提取独立 `DataCollectionService` 是下一阶段工作。
+- `demo_record_start` 由 `DataCollectionService` 先加入
+  `TeleoperationService` 控制会话，再启动 30Hz recorder；失败时按相反顺序回滚。
+- `demo_record_stop` 只结束并保存当前 episode，不释放共享控制会话。
+  数据采集 session 存续期间，单独的 `teleop_stop` 会被拒绝，避免 recorder
+  与机器人控制状态分离。
+- `demo_session_end` 调用 `end_session()`；控制租约超时/断线、WebSocket
+  服务停止、软件安全停止和 `devices.shutdown_all()` 调用幂等 `close()`。
+  两条路径都由同一个应用服务按相同所有权规则释放资源。
+- recorder 的阻塞启动、停止、保存与结束操作通过工作线程执行，不阻塞
+  WebSocket asyncio 事件循环。
 
 ---
 
@@ -159,9 +190,16 @@
 ```json
 {
   "event": "demo_record_error",
-  "message": "会话未启动，请先发送demo_session_start"
+  "code": "data_collection_failed",
+  "detail_code": "invalid_state",
+  "message": "..."
 }
 ```
+
+`code` 是 WebSocket 通用错误码；`detail_code` 是应用层稳定原因码，当前包括
+`invalid_state`、`session_start_failed`、`episode_start_failed`、
+`episode_stop_failed`、`session_end_failed`、`recorder_protocol_error`
+和 `cleanup_failed`。保存失败时还会尽可能返回 `episode_id` 与 `frames`。
 
 **常见错误场景**：
 - 缺少必填参数（task、description）
@@ -516,21 +554,21 @@ FrameData列表 → RLBenchFormatter
 
 ### 与现有框架的集成
 
-数据采集功能集成在WebSocket服务端：
+数据采集用例位于应用层，WebSocket 只是适配器：
 
-**集成点**：`src/robot_server/ws_server.py`
-
-**新增内容**：
-- 4个WebSocket handler（demo_session_start、demo_record_start、demo_record_stop、demo_session_end）
-- 数据采集器初始化（延迟加载）
-- 会话状态管理
+- `src/application/data_collection.py`：状态机、强类型结果、错误分类和资源生命周期；
+- `src/application/factory.py`：延迟组装 `RLBenchRecorder`，未使用采集功能时
+  不加载可选采集依赖；
+- `src/robot_server/handlers/teleoperation.py`：4 个 action 的协议映射；
+- `src/data_collection/`：RLBench recorder/formatter 基础设施实现。
 
 **依赖关系**：
 ```
-WebSocket服务端 → RobotController（机械臂状态）
-                → RealSenseManager（相机数据）
-                → RLBenchRecorder（数据采集）
-                → RLBenchFormatter（数据保存）
+WebSocket handler → DataCollectionService
+                          ├─ RobotQueryService（统一机械臂状态能力）
+                          ├─ CameraAccessService（独占相机会话）
+                          ├─ TeleoperationService（共享机器人控制会话）
+                          └─ RLBenchRecorder → RLBenchFormatter
 ```
 
 ---
@@ -693,6 +731,6 @@ WebSocket服务端 → RobotController（机械臂状态）
 
 ---
 
-**文档版本**：v1.0
-**最后更新**：2026-06-30
+**文档版本**：v1.1
+**最后更新**：2026-07-30
 **维护者**：Robot LLM Project Team

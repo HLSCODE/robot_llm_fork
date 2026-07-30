@@ -22,6 +22,18 @@ from .composition import (
     CompositionService,
     TaskSummary,
 )
+from .data_collection import (
+    DataCollectionEpisodeStarted,
+    DataCollectionEpisodeStopped,
+    DataCollectionError,
+    DataCollectionErrorCode,
+    DataCollectionRecorder,
+    DataCollectionService,
+    DataCollectionSessionEnded,
+    DataCollectionSessionStarted,
+    DataCollectionSnapshot,
+    DataCollectionState,
+)
 from .factory import create_application_services
 from .safety import SafetyService, SafetyStopReport
 from .services import (
@@ -46,6 +58,16 @@ __all__ = [
     "CompositionRevisionConflict",
     "CompositionService",
     "ConfirmedCommand",
+    "DataCollectionEpisodeStarted",
+    "DataCollectionEpisodeStopped",
+    "DataCollectionError",
+    "DataCollectionErrorCode",
+    "DataCollectionRecorder",
+    "DataCollectionService",
+    "DataCollectionSessionEnded",
+    "DataCollectionSessionStarted",
+    "DataCollectionSnapshot",
+    "DataCollectionState",
     "DeviceManagementService",
     "ExecutionControlAction",
     "ExecutionService",

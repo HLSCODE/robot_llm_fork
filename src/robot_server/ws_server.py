@@ -95,7 +95,6 @@ import logging
 import threading
 from collections.abc import Coroutine, Mapping
 from typing import (
-    TYPE_CHECKING,
     Any,
     Dict,
     Optional,
@@ -142,10 +141,6 @@ from .protocol import (
 )
 from .request_limits import WebSocketRequestLimiter
 from .routing import WebSocketRoute, WebSocketRouteRegistry
-
-if TYPE_CHECKING:
-    from ..data_collection import RLBenchRecorder
-
 
 logger = logging.getLogger(__name__)
 
@@ -266,15 +261,6 @@ class RobotWebSocketServer:
         self._teleop_msg_counts = {"左": 0, "右": 0}  # 双臂消息计数器字典
         self._last_grip = {"左": None, "右": None}  # 夹爪状态跟踪（避免重复执行）
 
-        # 数据采集状态
-        self._demo_recorder: Optional["RLBenchRecorder"] = None
-        self._demo_camera_session: Optional[CameraSession] = None
-        self._demo_session = {
-            "active": False,
-            "task": None,
-            "description": None,
-            "next_episode_id": 0,
-        }
         self._execution_handler = ExecutionWebSocketHandler(self)
         self._composition_handler = CompositionWebSocketHandler(self)
         self._interaction_handler = InteractionWebSocketHandler(self)
@@ -355,7 +341,7 @@ class RobotWebSocketServer:
         await self._cancel_background_tasks()
         self._device_handler._stop_camera_if_idle()
         await self._interaction_handler._close_llm_clients()
-        await self._teleoperation_handler._close_demo_recorder()
+        await self._teleoperation_handler.close_data_collection()
         self._clients.clear()
         self._client_ids.clear()
         self._access.clear()
@@ -1034,10 +1020,11 @@ class RobotWebSocketServer:
         reason: str,
     ) -> None:
         try:
-            if self._demo_recorder is not None or self._demo_camera_session is not None:
-                await self._teleoperation_handler._close_demo_recorder()
-            elif self._services.teleoperation.active:
-                self._services.teleoperation.stop()
+            await self._teleoperation_handler.close_data_collection()
+            if self._services.teleoperation.active:
+                await asyncio.to_thread(
+                    self._services.teleoperation.stop
+                )
         except Exception as exc:
             logger.error(
                 "释放控制客户端会话失败: client_id=%s reason=%s error=%s",

@@ -744,6 +744,14 @@ ws.onmessage = (event) => {
     "error_device_id": ""
   },
   "sequence_length": 0,
+  "data_collection": {
+    "state": "idle",
+    "task": null,
+    "next_episode_id": null,
+    "episode_id": null,
+    "recording": false,
+    "teleoperation_shared": false
+  },
   "ai_processing": false,
   "camera": {
     "available": false,
@@ -775,6 +783,12 @@ ws.onmessage = (event) => {
 | `executor.error_operation` | `string` | 失败的规范操作标识 |
 | `executor.error_device_id` | `string` | 失败关联的规范设备 ID |
 | `sequence_length` | `number` | 当前服务端维护的序列长度 |
+| `data_collection.state` | `string` | 数据采集状态机当前状态 |
+| `data_collection.task` | `string \| null` | 当前采集任务 |
+| `data_collection.next_episode_id` | `number \| null` | 下一条 episode 编号 |
+| `data_collection.episode_id` | `number \| null` | 当前 episode 编号 |
+| `data_collection.recording` | `boolean` | 是否处于 episode 启动、记录或停止阶段 |
+| `data_collection.teleoperation_shared` | `boolean` | 当前 session 是否已加入共享遥操作控制 |
 | `ai_processing` | `boolean` | AI 是否正在处理中 |
 | `camera.available` | `boolean` | 是否有可用相机 |
 | `camera.camera_count` | `number` | 在线相机数量 |
@@ -3038,6 +3052,11 @@ function handleChatData(data) {
 | `camera_failed` | 相机请求失败 |
 | `data_collection_failed` | 数据采集请求失败 |
 | `internal_error` | 未预期的服务端异常；响应不会包含内部异常详情 |
+
+数据采集错误还会通过 `detail_code` 提供应用层稳定原因，例如
+`invalid_state`、`session_start_failed`、`episode_start_failed`、
+`episode_stop_failed`、`session_end_failed`、`recorder_protocol_error`
+或 `cleanup_failed`；保存失败时可能同时携带 `episode_id` 和 `frames`。
 
 权限拒绝使用独立事件：
 

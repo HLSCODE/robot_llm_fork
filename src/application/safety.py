@@ -60,12 +60,8 @@ class SafetyStopReport:
                 "run_id": self.execution_after.run_id,
                 "error": self.execution_after.error,
                 "error_code": self.execution_after.error_code,
-                "error_operation": (
-                    self.execution_after.error_operation
-                ),
-                "error_device_id": (
-                    self.execution_after.error_device_id
-                ),
+                "error_operation": (self.execution_after.error_operation),
+                "error_device_id": (self.execution_after.error_device_id),
             },
             "devices": [
                 {
@@ -99,7 +95,21 @@ class SafetyService:
         self._teleoperation = teleoperation
         self._trajectory_teaching = trajectory_teaching
         self._wait_timeout_seconds = wait_timeout_seconds
+        self._control_sessions: list[tuple[str, Callable[[], None]]] = []
         self._lock = RLock()
+
+    def register_control_session(
+        self,
+        name: str,
+        close: Callable[[], None],
+    ) -> None:
+        """Register an application session that must close before shutdown."""
+
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ValueError("control session name must not be empty")
+        with self._lock:
+            self._control_sessions.append((normalized_name, close))
 
     def stop(
         self,
@@ -153,6 +163,7 @@ class SafetyService:
             errors.append(f"execution cancellation failed: {exc}")
 
     def _close_control_sessions(self, errors: list[str]) -> None:
+        self._close_registered_sessions(errors)
         self._try_session_action(
             "teleoperation release",
             self._teleoperation.stop,
@@ -169,6 +180,7 @@ class SafetyService:
         devices: tuple[DeviceStopResult, ...],
         errors: list[str],
     ) -> None:
+        self._close_registered_sessions(errors)
         self._try_session_action(
             "teleoperation release",
             self._teleoperation.release_after_safety_stop,
@@ -193,6 +205,14 @@ class SafetyService:
             errors,
         )
 
+    def _close_registered_sessions(self, errors: list[str]) -> None:
+        for name, close in self._control_sessions:
+            self._try_session_action(
+                f"{name} release",
+                close,
+                errors,
+            )
+
     def _wait_for_execution(
         self,
         before: ExecutionSnapshot,
@@ -209,9 +229,7 @@ class SafetyService:
             errors.append(f"execution wait failed: {exc}")
             return self._execution.snapshot()
         if after.active:
-            errors.append(
-                f"execution did not stop within {timeout:g} seconds"
-            )
+            errors.append(f"execution did not stop within {timeout:g} seconds")
         return after
 
     @staticmethod

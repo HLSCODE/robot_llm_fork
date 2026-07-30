@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ...device_runtime.ids import ROBOT_SYSTEM
+from ...application import DataCollectionError, DataCollectionState
 from ..protocol import WebSocketRequest
 from .base import WebSocketHandlerHost
 
@@ -471,6 +471,23 @@ class TeleoperationWebSocketHandler:
         - 双臂: {"action": "teleop_stop"} (无参数，停止所有臂)
         响应: {"event": "teleop_stopped", "arms": ["左"], "total_counts": {"左": 100}, "message": "遥操作模式已停止"}
         """
+        if (
+            self._server._services.data_collection.snapshot().state
+            is not DataCollectionState.IDLE
+        ):
+            await websocket.send(
+                self._server._json_msg(
+                    {
+                        "event": "demo_record_error",
+                        "message": (
+                            "数据采集会话正在共享遥操作控制，"
+                            "请先结束数据采集会话"
+                        ),
+                    }
+                )
+            )
+            return
+
         arm = data.get("arm")
         arms_list = data.get("arms")
 
@@ -523,15 +540,11 @@ class TeleoperationWebSocketHandler:
     async def _handle_demo_session_start(
         self, websocket, data: WebSocketRequest
     ) -> None:
-        """
-        开始数据采集会话
-        请求: {"action": "demo_session_start", "task": "pick_bottle", "description": "抓取瓶子"}
-        响应: {"event": "demo_session_started", "task": "pick_bottle", "next_episode_id": 0}
-        """
+        """Start a data-collection session through the application service."""
         task = data.get("task")
         description = data.get("description", "")
 
-        if not task:
+        if not isinstance(task, str) or not task.strip():
             await websocket.send(
                 self._server._json_msg(
                     {"event": "demo_record_error", "message": "缺少task参数"}
@@ -539,338 +552,153 @@ class TeleoperationWebSocketHandler:
             )
             return
 
-        if (
-            self._server._demo_recorder is not None
-            or self._server._demo_camera_session is not None
-        ):
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": "数据采集会话已经启动",
-                    }
-                )
-            )
-            return
-
-        # 初始化数据采集器（延迟初始化）
-        camera_session = None
         try:
-            from ...data_collection import RLBenchRecorder
-            from ...data_collection.config import DataCollectionConfig
-
-            config = DataCollectionConfig()
-            camera_session = self._server._services.camera_access.open_depth(
-                "websocket-data-collection"
+            result = await asyncio.to_thread(
+                self._server._services.data_collection.start_session,
+                task,
+                description if isinstance(description, str) else "",
             )
-            self._server._services.devices.initialize(ROBOT_SYSTEM)
-            recorder = RLBenchRecorder(
-                robot_state_reader=(self._server._services.robot_query.state_reader()),
-                camera_source=camera_session.camera,
-                config=config,
-            )
-            result = recorder.start_session(task, description)
-        except Exception as exc:
-            if camera_session is not None:
-                camera_session.close()
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": f"数据采集会话启动失败: {exc}",
-                    }
-                )
-            )
+        except (DataCollectionError, ValueError) as exc:
+            await self._send_data_collection_error(websocket, exc)
             return
 
-        if result.get("success"):
-            self._server._demo_recorder = recorder
-            self._server._demo_camera_session = camera_session
-            # 更新会话状态
-            self._server._demo_session["active"] = True
-            self._server._demo_session["task"] = task
-            self._server._demo_session["description"] = description
-            self._server._demo_session["next_episode_id"] = result["next_episode_id"]
-
-            logger.info(
-                f"数据采集会话已启动: task={task}, next_episode_id={result['next_episode_id']}"
-            )
-
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_session_started",
-                        "task": task,
-                        "next_episode_id": result["next_episode_id"],
-                        "message": result["message"],
-                    }
-                )
-            )
-        else:
-            camera_session.close()
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": result.get("message", "会话启动失败"),
-                    }
-                )
-            )
-
-    async def _handle_demo_record_start(
-        self, websocket, data: WebSocketRequest
-    ) -> None:
-        """
-        开始记录单条episode（自动启动遥操作模式）
-        请求: {"action": "demo_record_start"}
-        响应: {"event": "demo_record_started", "episode_id": 0}
-        """
-        if not self._server._demo_session["active"]:
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": "会话未启动，请先发送demo_session_start",
-                    }
-                )
-            )
-            return
-        recorder = self._server._demo_recorder
-        if recorder is None:
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": "数据采集器不可用",
-                    }
-                )
-            )
-            return
-
-        teleoperation_was_active = self._server._services.teleoperation.active
-        try:
-            self._server._services.teleoperation.start()
-        except Exception as exc:
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": f"遥操作资源申请失败: {exc}",
-                    }
-                )
-            )
-            return
-
-        try:
-            result = recorder.start_recording()
-        except Exception as exc:
-            if not teleoperation_was_active:
-                self._server._services.teleoperation.stop()
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": f"启动数据记录失败: {exc}",
-                    }
-                )
-            )
-            return
-
-        if result.get("success"):
-            episode_id = result["episode_id"]
-
-            # 启动双臂遥操作模式
-            for arm_name in ["左", "右"]:
-                self._server._teleop_modes[arm_name] = True
-                self._server._teleop_msg_counts[arm_name] = 0
-                self._server._last_grip[arm_name] = None  # 重置夹爪跟踪状态
-
-            logger.info("数据采集已自动启动遥操作模式: 双臂")
-
-            logger.info(f"episode {episode_id} 开始记录（已自动启动遥操作）")
-
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_started",
-                        "episode_id": episode_id,
-                        "message": result["message"] + "（已自动启动遥操作模式）",
-                    }
-                )
-            )
-        else:
-            if not teleoperation_was_active:
-                self._server._services.teleoperation.stop()
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": result.get("message", "记录启动失败"),
-                    }
-                )
-            )
-
-    async def _handle_demo_record_stop(self, websocket, data: WebSocketRequest) -> None:
-        """
-        结束记录单条episode并保存
-        请求: {"action": "demo_record_stop"}
-        响应: {"event": "demo_record_stopped", "episode_id": 0, "frames": 1500}
-        """
-        if not self._server._demo_session["active"]:
-            await websocket.send(
-                self._server._json_msg(
-                    {"event": "demo_record_error", "message": "会话未启动"}
-                )
-            )
-            return
-
-        recorder = self._server._demo_recorder
-        if recorder is None:
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": "数据采集器不可用",
-                    }
-                )
-            )
-            return
-
-        # 结束记录并保存
-        result = recorder.stop_recording()
-
-        if result.get("success"):
-            episode_id = result["episode_id"]
-            frames = result["frames"]
-
-            logger.info(f"episode {episode_id} 已保存，共{frames}帧")
-
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_stopped",
-                        "episode_id": episode_id,
-                        "frames": frames,
-                        "message": result["message"],
-                    }
-                )
-            )
-        else:
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "episode_id": result.get("episode_id"),
-                        "frames": result.get("frames", 0),
-                        "message": result.get("message", "保存失败"),
-                    }
-                )
-            )
-
-    async def _handle_demo_session_end(self, websocket, data: WebSocketRequest) -> None:
-        """
-        结束数据采集会话（自动停止遥操作模式）
-        请求: {"action": "demo_session_end"}
-        响应: {"event": "demo_session_ended", "message": "会话已结束"}
-        """
-        if not self._server._demo_session["active"]:
-            await websocket.send(
-                self._server._json_msg(
-                    {"event": "demo_record_error", "message": "会话未启动"}
-                )
-            )
-            return
-
-        recorder = self._server._demo_recorder
-        camera_session = self._server._demo_camera_session
-        if recorder is None or camera_session is None:
-            try:
-                await self._close_demo_recorder()
-            except Exception as exc:
-                logger.warning(
-                    "清理不完整的数据采集会话失败: %s",
-                    exc,
-                )
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "demo_record_error",
-                        "message": "数据采集会话状态不完整，已执行清理",
-                    }
-                )
-            )
-            return
-
-        try:
-            recorder.stop_recording()
-            result = recorder.end_session()
-        except Exception as exc:
-            result = {
-                "success": False,
-                "message": f"结束数据采集会话失败: {exc}",
-            }
-        finally:
-            try:
-                self._server._services.teleoperation.stop()
-            finally:
-                camera_session.close()
-                self._server._demo_recorder = None
-                self._server._demo_camera_session = None
-                for arm_name in ["左", "右"]:
-                    self._server._teleop_modes[arm_name] = False
-                    self._server._teleop_msg_counts[arm_name] = 0
-                    self._server._last_grip[arm_name] = None
-
-                logger.info("数据采集会话已自动停止遥操作模式: 双臂")
-                self._server._demo_session["active"] = False
-                self._server._demo_session["task"] = None
-                self._server._demo_session["description"] = None
-
-        logger.info("数据采集会话已结束（已自动停止遥操作）")
-
-        event = "demo_session_ended" if result.get("success") else "demo_record_error"
+        logger.info(
+            "数据采集会话已启动: task=%s, next_episode_id=%d",
+            result.task,
+            result.next_episode_id,
+        )
         await websocket.send(
             self._server._json_msg(
                 {
-                    "event": event,
-                    "message": result["message"] + "（已自动停止遥操作模式）",
+                    "event": "demo_session_started",
+                    "task": result.task,
+                    "next_episode_id": result.next_episode_id,
+                    "message": result.message,
                 }
             )
         )
 
-    async def _close_demo_recorder(self) -> None:
-        recorder = self._server._demo_recorder
-        self._server._demo_recorder = None
-        camera_session = self._server._demo_camera_session
-        self._server._demo_camera_session = None
-        if recorder is None and camera_session is None:
-            return
-        errors: list[Exception] = []
-        if recorder is not None:
-            try:
-                await asyncio.to_thread(recorder.stop_recording)
-            except Exception as exc:
-                errors.append(exc)
-            try:
-                recorder.end_session()
-            except Exception as exc:
-                errors.append(exc)
+    async def _handle_demo_record_start(
+        self, websocket, data: WebSocketRequest
+    ) -> None:
+        """Start one episode and join the shared teleoperation session."""
         try:
-            self._server._services.teleoperation.stop()
-        except Exception as exc:
-            errors.append(exc)
+            result = await asyncio.to_thread(
+                self._server._services.data_collection.start_episode
+            )
+        except DataCollectionError as exc:
+            await self._send_data_collection_error(websocket, exc)
+            return
+
+        self._set_data_collection_teleoperation_active()
+        logger.info(
+            "episode %d 开始记录（已共享遥操作控制会话）",
+            result.episode_id,
+        )
+        await websocket.send(
+            self._server._json_msg(
+                {
+                    "event": "demo_record_started",
+                    "episode_id": result.episode_id,
+                    "message": result.message + "（已自动启动遥操作模式）",
+                }
+            )
+        )
+
+    async def _handle_demo_record_stop(self, websocket, data: WebSocketRequest) -> None:
+        """Stop and persist one episode without ending shared control."""
+        try:
+            result = await asyncio.to_thread(
+                self._server._services.data_collection.stop_episode
+            )
+        except DataCollectionError as exc:
+            await self._send_data_collection_error(websocket, exc)
+            return
+
+        logger.info(
+            "episode %d 已保存，共 %d 帧",
+            result.episode_id,
+            result.frames,
+        )
+        await websocket.send(
+            self._server._json_msg(
+                {
+                    "event": "demo_record_stopped",
+                    "episode_id": result.episode_id,
+                    "frames": result.frames,
+                    "message": result.message,
+                }
+            )
+        )
+
+    async def _handle_demo_session_end(self, websocket, data: WebSocketRequest) -> None:
+        """End the session and release recorder, camera and control resources."""
+        try:
+            result = await asyncio.to_thread(
+                self._server._services.data_collection.end_session
+            )
+        except DataCollectionError as exc:
+            if (
+                self._server._services.data_collection.snapshot().state
+                is DataCollectionState.IDLE
+            ):
+                self._reset_data_collection_teleoperation()
+            await self._send_data_collection_error(websocket, exc)
+            return
+
+        self._reset_data_collection_teleoperation()
+        logger.info("数据采集会话已结束（已释放共享遥操作控制）")
+        await websocket.send(
+            self._server._json_msg(
+                {
+                    "event": "demo_session_ended",
+                    "message": result.message + "（已自动停止遥操作模式）",
+                }
+            )
+        )
+
+    async def close_data_collection(self) -> None:
+        """Release application-owned collection resources on host cleanup."""
+
+        try:
+            await asyncio.to_thread(
+                self._server._services.data_collection.close
+            )
         finally:
-            if camera_session is not None:
-                camera_session.close()
-            self._server._demo_session = {
-                "active": False,
-                "task": None,
-                "description": None,
-                "next_episode_id": 0,
-            }
-        if errors:
-            detail = "; ".join(str(error) for error in errors)
-            raise RuntimeError(f"failed to close data collection recorder: {detail}")
+            if (
+                self._server._services.data_collection.snapshot().state
+                is DataCollectionState.IDLE
+            ):
+                self._reset_data_collection_teleoperation()
+
+    async def _send_data_collection_error(
+        self,
+        websocket,
+        error: Exception,
+    ) -> None:
+        payload: dict[str, object] = {
+            "event": "demo_record_error",
+            "message": str(error),
+        }
+        if isinstance(error, DataCollectionError):
+            payload["detail_code"] = error.code.value
+            if error.episode_id is not None:
+                payload["episode_id"] = error.episode_id
+            if error.frames is not None:
+                payload["frames"] = error.frames
+        await websocket.send(self._server._json_msg(payload))
+
+    def _set_data_collection_teleoperation_active(self) -> None:
+        for arm_name in ("左", "右"):
+            self._server._teleop_modes[arm_name] = True
+            self._server._teleop_msg_counts[arm_name] = 0
+            self._server._last_grip[arm_name] = None
+
+    def _reset_data_collection_teleoperation(self) -> None:
+        for arm_name in ("左", "右"):
+            self._server._teleop_modes[arm_name] = False
+            self._server._teleop_msg_counts[arm_name] = 0
+            self._server._last_grip[arm_name] = None
 
     async def _execute_grip_async(self, arm: str, position: int) -> None:
         """在线程池中异步执行夹爪位置指令，不阻塞关节指令流"""

@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from ..core.storage import JsonCompositionRepository
-from ..device_runtime import ResourceArbiter
+from ..device_runtime import (
+    ArmStateReader,
+    DepthCameraSource,
+    ResourceArbiter,
+)
 from ..device_runtime.factory import create_device_runtime
 from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
@@ -11,6 +15,10 @@ from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
 from .command_runtime import CommandRuntime
 from .composition import CompositionService
+from .data_collection import (
+    DataCollectionRecorder,
+    DataCollectionService,
+)
 from .safety import SafetyService
 from .services import (
     ApplicationServices,
@@ -43,9 +51,7 @@ def create_application_services(
     commands = CommandRuntime(
         execution=execution,
         skill_engine=skill_engine,
-        preview_ttl_s=float(
-            getattr(config, "COMMAND_PREVIEW_TTL_SECONDS", 120.0)
-        ),
+        preview_ttl_s=float(getattr(config, "COMMAND_PREVIEW_TTL_SECONDS", 120.0)),
     )
     manual_control = ManualControlService(device_runtime, resources)
     camera_access = CameraAccessService(device_runtime, resources)
@@ -69,9 +75,21 @@ def create_application_services(
         resources,
         safety,
     )
+    data_collection = DataCollectionService(
+        camera_access=camera_access,
+        devices=devices,
+        robot_query=robot_query,
+        teleoperation=teleoperation,
+        recorder_factory=_create_data_collection_recorder,
+    )
+    safety.register_control_session(
+        "data collection",
+        data_collection.close,
+    )
     return ApplicationServices(
         camera_access=camera_access,
         composition=composition,
+        data_collection=data_collection,
         execution=execution,
         devices=devices,
         manual_control=manual_control,
@@ -83,4 +101,20 @@ def create_application_services(
         device_runtime=device_runtime,
         resources=resources,
         simulation=simulation,
+    )
+
+
+def _create_data_collection_recorder(
+    robot_state_reader: ArmStateReader,
+    camera_source: DepthCameraSource,
+) -> DataCollectionRecorder:
+    """Load optional data-collection infrastructure only when requested."""
+
+    from ..data_collection import RLBenchRecorder
+    from ..data_collection.config import DataCollectionConfig
+
+    return RLBenchRecorder(
+        robot_state_reader=robot_state_reader,
+        camera_source=camera_source,
+        config=DataCollectionConfig(),
     )

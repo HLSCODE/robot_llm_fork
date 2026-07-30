@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from threading import RLock
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ..device_runtime import (
@@ -33,6 +33,9 @@ from .camera_access import CameraAccessService
 from .command_runtime import CommandRuntime
 from .composition import CompositionService
 from .safety import SafetyService
+
+if TYPE_CHECKING:
+    from .data_collection import DataCollectionService
 
 
 class ExecutionService:
@@ -432,6 +435,7 @@ def _arm_id(arm: str | ArmId) -> ArmId:
 class ApplicationServices:
     camera_access: CameraAccessService
     composition: CompositionService
+    data_collection: DataCollectionService
     execution: ExecutionService
     devices: DeviceManagementService
     manual_control: ManualControlService

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
+from src.application import (
+    DataCollectionSnapshot,
+    DataCollectionState,
+)
 from src.core.models import (
     ActionDefinition,
     ActionType,
@@ -129,6 +133,16 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
             error_device_id="robot-system",
         )
         services = SimpleNamespace(
+            data_collection=SimpleNamespace(
+                snapshot=lambda: DataCollectionSnapshot(
+                    state=DataCollectionState.SESSION_READY,
+                    task="pick",
+                    description="test",
+                    next_episode_id=3,
+                    episode_id=None,
+                    teleoperation_shared=True,
+                )
+            ),
             execution=SimpleNamespace(snapshot=lambda: snapshot),
             devices=SimpleNamespace(status=lambda: {}),
             device_runtime=SimpleNamespace(
@@ -142,6 +156,17 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
         asyncio.run(server._device_handler._handle_status(websocket, {}))
 
         response = json.loads(websocket.messages[0])
+        self.assertEqual(
+            {
+                "state": "session_ready",
+                "task": "pick",
+                "next_episode_id": 3,
+                "episode_id": None,
+                "recording": False,
+                "teleoperation_shared": True,
+            },
+            response["data_collection"],
+        )
         self.assertEqual(
             {
                 "run_id": "run-1",

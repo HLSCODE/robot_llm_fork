@@ -22,6 +22,9 @@ class DeviceWebSocketHandler:
         """查询设备和执行状态"""
         execution = self._server._services.execution.snapshot()
         devices = self._server._services.devices.status()
+        data_collection = (
+            self._server._services.data_collection.snapshot()
+        )
         camera = self._server._camera_manager
         await websocket.send(
             self._server._json_msg(
@@ -41,6 +44,18 @@ class DeviceWebSocketHandler:
                     "sequence_length": len(
                         self._server._services.composition.sequence_entries()
                     ),
+                    "data_collection": {
+                        "state": data_collection.state.value,
+                        "task": data_collection.task,
+                        "next_episode_id": (
+                            data_collection.next_episode_id
+                        ),
+                        "episode_id": data_collection.episode_id,
+                        "recording": data_collection.recording,
+                        "teleoperation_shared": (
+                            data_collection.teleoperation_shared
+                        ),
+                    },
                     "ai_processing": self._server._ai_processing,
                     "camera": {
                         "available": camera is not None and camera.camera_count > 0,

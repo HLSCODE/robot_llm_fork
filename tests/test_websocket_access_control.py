@@ -7,14 +7,15 @@ from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.application import DataCollectionState
 from src.execution import ExecutionState
 from src.robot_server.access_control import (
     WebSocketAccessController,
     WebSocketAccessError,
 )
 from src.robot_server.protocol import (
-    RequestCorrelation,
     WEBSOCKET_API_VERSION,
+    RequestCorrelation,
     WebSocketRequestContext,
 )
 from src.robot_server.ws_server import RobotWebSocketServer
@@ -61,6 +62,17 @@ class _FakeTeleoperation:
     def stop(self) -> None:
         self.active = False
         self.stop_count += 1
+
+
+class _FakeDataCollection:
+    def __init__(self) -> None:
+        self.close_count = 0
+
+    def snapshot(self):
+        return SimpleNamespace(state=DataCollectionState.IDLE)
+
+    def close(self) -> None:
+        self.close_count += 1
 
 
 def _request(
@@ -155,9 +167,11 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
     def setUp(self) -> None:
         self.execution = _FakeExecution()
         self.teleoperation = _FakeTeleoperation()
+        self.data_collection = _FakeDataCollection()
         self.audit_events = []
         self.server = RobotWebSocketServer(
             services=SimpleNamespace(
+                data_collection=self.data_collection,
                 execution=self.execution,
                 teleoperation=self.teleoperation,
             ),
@@ -318,12 +332,14 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
         asyncio.run(scenario())
 
         self.assertEqual(1, self.teleoperation.stop_count)
+        self.assertEqual(1, self.data_collection.close_count)
         self.assertIsNone(self.server._access.control_snapshot())
 
     def test_expired_control_lease_stops_owned_teleoperation(self):
         websocket = _RecordingWebSocket()
         server = RobotWebSocketServer(
             services=SimpleNamespace(
+                data_collection=self.data_collection,
                 execution=self.execution,
                 teleoperation=self.teleoperation,
             ),
@@ -356,6 +372,7 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
         asyncio.run(scenario())
 
         self.assertEqual(1, self.teleoperation.stop_count)
+        self.assertEqual(1, self.data_collection.close_count)
         self.assertIsNone(server._access.control_snapshot())
 
 

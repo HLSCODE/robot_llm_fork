@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager
 import json
 import sys
-from types import ModuleType
 import unittest
+from contextlib import contextmanager
+from types import ModuleType
 from unittest.mock import patch
 
-from src.application import CameraAccessService, create_application_services
+from src.application import (
+    CameraAccessService,
+    DataCollectionState,
+    create_application_services,
+)
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.device_runtime import (
     DeviceCapability,
@@ -264,25 +268,108 @@ class CameraWebSocketSessionTests(unittest.TestCase):
 
                 services.trajectory_teaching.start("left")
                 await server._teleoperation_handler._handle_demo_record_start(websocket, {})
-                self.assertFalse(server._demo_recorder.recording)
+                self.assertEqual(
+                    DataCollectionState.SESSION_READY,
+                    services.data_collection.snapshot().state,
+                )
                 self.assertFalse(services.teleoperation.active)
                 services.trajectory_teaching.cancel()
 
                 await server._teleoperation_handler._handle_demo_record_start(websocket, {})
+                self.assertEqual(
+                    DataCollectionState.RECORDING,
+                    services.data_collection.snapshot().state,
+                )
                 self.assertTrue(services.teleoperation.active)
                 self.assertEqual(
                     "teleoperation",
                     services.resources.owner_of(ROBOT_SYSTEM),
                 )
+                await server._teleoperation_handler._handle_teleop_stop(
+                    websocket,
+                    {},
+                )
+                self.assertTrue(services.teleoperation.active)
+                self.assertEqual(
+                    DataCollectionState.RECORDING,
+                    services.data_collection.snapshot().state,
+                )
 
                 await server._teleoperation_handler._handle_demo_record_stop(websocket, {})
+                self.assertEqual(
+                    DataCollectionState.SESSION_READY,
+                    services.data_collection.snapshot().state,
+                )
+                self.assertTrue(services.teleoperation.active)
                 await server._teleoperation_handler._handle_demo_session_end(websocket, {})
+                self.assertEqual(
+                    DataCollectionState.IDLE,
+                    services.data_collection.snapshot().state,
+                )
 
             self.assertIsNone(services.resources.owner_of(CAMERA))
             self.assertFalse(services.teleoperation.active)
 
         asyncio.run(scenario())
         self.assertFalse(services.devices.shutdown_all())
+
+    def test_device_shutdown_closes_active_data_collection_session(self):
+        services = create_application_services(object(), simulation=True)
+
+        class Recorder:
+            def start_session(self, _task, _description):
+                return {
+                    "success": True,
+                    "next_episode_id": 0,
+                    "message": "session started",
+                }
+
+            def start_recording(self):
+                return {
+                    "success": True,
+                    "episode_id": 0,
+                    "message": "recording started",
+                }
+
+            def stop_recording(self):
+                return {
+                    "success": True,
+                    "episode_id": 0,
+                    "frames": 1,
+                    "message": "recording stopped",
+                }
+
+            def end_session(self):
+                return {"success": True, "message": "session ended"}
+
+        data_collection_module = ModuleType("src.data_collection")
+        data_collection_module.RLBenchRecorder = lambda **_kwargs: Recorder()
+        config_module = ModuleType("src.data_collection.config")
+        config_module.DataCollectionConfig = type(
+            "DataCollectionConfig",
+            (),
+            {},
+        )
+        with patch.dict(
+            sys.modules,
+            {
+                "src.data_collection": data_collection_module,
+                "src.data_collection.config": config_module,
+            },
+        ):
+            services.data_collection.start_session("pick")
+            services.data_collection.start_episode()
+
+        self.assertTrue(services.teleoperation.active)
+        self.assertIsNotNone(services.resources.owner_of(CAMERA))
+
+        self.assertFalse(services.devices.shutdown_all())
+        self.assertEqual(
+            DataCollectionState.IDLE,
+            services.data_collection.snapshot().state,
+        )
+        self.assertFalse(services.teleoperation.active)
+        self.assertIsNone(services.resources.owner_of(CAMERA))
 
 
 class _RecordingWebSocket:

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
-from threading import get_ident
 import unittest
+from threading import get_ident
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from src.application import DataCollectionState
 from src.core.auxiliary_services import (
     AuxiliaryServiceHost,
     AuxiliaryServiceState,
@@ -15,6 +16,14 @@ from src.core.launcher import (
     build_auxiliary_service_host,
 )
 from src.robot_server.ws_server import RobotWebSocketServer
+
+
+class _FakeDataCollection:
+    def close(self) -> None:
+        return None
+
+    def snapshot(self):
+        return SimpleNamespace(state=DataCollectionState.IDLE)
 
 
 class _FakeAsyncService:
@@ -195,6 +204,7 @@ class WebSocketServiceLifecycleTests(unittest.TestCase):
         server = RobotWebSocketServer(
             services=SimpleNamespace(
                 composition=_FakeComposition(),
+                data_collection=_FakeDataCollection(),
             ),
             host="127.0.0.1",
             port=9876,
