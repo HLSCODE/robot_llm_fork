@@ -21,6 +21,9 @@ __pycache__/
 *.so
 *.egg-info/
 .Python
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
 config.env
 env/
 venv/

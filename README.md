@@ -279,6 +279,17 @@ python run.py --simulation
 
 ## 开发建议
 
+安装开发依赖并执行本地/CI 共用的质量门禁：
+
+```powershell
+uv sync --frozen --group dev
+uv run --frozen --group dev python scripts/run_quality_checks.py
+```
+
+该入口依次执行 Python 编译检查、Ruff、核心 Mypy 检查、Pytest 和 LLM 离线 golden
+regression。测试分层、静态检查范围和 CI 规则见
+[工程质量门禁](docs/quality-gates.md)。
+
 - 新增配置项：优先在 `config.env.example` 和 `src/core/config_loader.py` 中同步维护。
 - 新增动作类型：更新 `ActionType`、动作参数 schema、GUI 表单和 WebSocket 执行器。
 - 新增技能：维护 `data/skills/skill_library.json`，或扩展默认技能定义。

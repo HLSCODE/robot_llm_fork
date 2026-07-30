@@ -319,10 +319,10 @@ class GripperActionHandler:
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
             )
-        if operation == "开":
-            action = lambda: gripper.open_gripper(ArmId.LEFT)
-        else:
-            action = lambda: gripper.close_gripper(ArmId.LEFT)
+        def action() -> object:
+            if operation == "开":
+                return gripper.open_gripper(ArmId.LEFT)
+            return gripper.close_gripper(ArmId.LEFT)
 
         context.log(f"夹爪动作: {operation}", "info")
         for attempt in range(1, self._options.gripper_max_attempts + 1):

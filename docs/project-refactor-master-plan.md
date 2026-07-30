@@ -4,7 +4,7 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-30
 >
-> 当前里程碑：M3 — 领域服务、协议边界和数据治理继续收口
+> 当前里程碑：M4 — 工程质量门禁已建立，继续扩展静态检查与交付治理
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -23,6 +23,7 @@
 | F. 遥操作 | [遥操作说明](teleop.md) |
 | F. 数据采集 | [数据采集说明](data-collection.md) |
 | F. 智能加粉 | [智能闭环加粉 Agent](powder_dispense_agent.md) |
+| G. 工程质量 | [工程质量门禁](quality-gates.md) |
 
 本计划覆盖的是当前仓库可确认的问题。后续发现的新问题应进入对应 Track 的 backlog，不能因为没有列在首版文档中而被忽略。
 
@@ -235,7 +236,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | A-005 | P1 | DONE | 实现 execution models/events/handle |
 | A-006 | P1 | DOING | 实现唯一 ExecutionManager；待硬件验收和更多竞态测试 |
 | A-007 | P1 | DONE | 唯一注册表、全部具体动作 handler 和结构化 ActionHandlerResult 已落地 |
-| A-008 | P1 | DOING | WebSocket 已迁移，待协议 contract test |
+| A-008 | P1 | DONE | WebSocket 已迁移；路由、全部 action 最小合法请求、payload 边界、错误码和响应 DTO contract test 已进入 pytest |
 | A-009 | P1 | DOING | GUI 手工和 AI 已迁移，待 GUI smoke test |
 | A-010 | P1 | DONE | GUI 文本、真实语音和 WebSocket 命令统一进入 CommandRuntime；入口不再持有私有预览缓存 |
 | A-011 | P1 | DONE | simulation 与真实模式共用状态机和执行入口 |
@@ -600,8 +601,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 当前问题：
 
-- 没有 pytest 测试套件。
-- 没有 CI、lint、类型检查和覆盖率配置。
+- 已建立 pytest 和 Windows 最小 CI，但覆盖率阈值与 Linux 矩阵尚未建立。
+- Ruff 已覆盖收敛主线模块，供应商 SDK、旧设备/视觉/语音模块和联调脚本的历史问题仍需分批清零后纳入。
+- Mypy 已覆盖协议与核心运行时模型，应用服务和其他领域模块仍需逐步扩展。
 - `test_devices.py` 等主要是硬件联调脚本。
 - 大量硬件代码难以在无设备环境导入和测试。
 
@@ -616,11 +618,11 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
-| G-001 | P0 | TODO | 引入 pytest 和最小 CI |
+| G-001 | P0 | DONE | pytest 统一收集现有测试；Windows/Python 3.12 CI 使用冻结 lock 执行统一质量入口 |
 | G-002 | P0 | DOING | 已建立 fake device/runtime，transport/LLM fake 待补充 |
 | G-003 | P0 | TODO | 确定默认技能和动作数据交付方式 |
-| G-004 | P1 | DOING | 已覆盖 runtime、资源、执行状态和依赖边界，协议测试待补充 |
-| G-005 | P1 | TODO | 增加 ruff 和基础类型检查 |
+| G-004 | P1 | DONE | unit/contract 已覆盖 runtime、资源、执行状态、依赖边界及全部 WebSocket action、错误码和 route/schema 所有权 |
+| G-005 | P1 | DONE | Ruff 覆盖收敛主线与测试；Mypy 覆盖 WebSocket、DeviceRuntime、ExecutionRuntime 和 LLM 核心类型 |
 | G-006 | P1 | TODO | 统一依赖声明并清理重复依赖 |
 | G-007 | P1 | TODO | 配置启动校验和敏感信息策略 |
 | G-008 | P1 | TODO | 持久化原子写、版本和迁移 |
@@ -743,10 +745,12 @@ M4 工程治理与清理
 
 ### Gate 0：任何代码变更
 
-- `python -m compileall src`
+- `uv run --frozen --group dev python scripts/run_quality_checks.py`
 - 新增代码无明显循环依赖。
 - 不提交密钥、真实设备凭据和用户运行数据。
 - 相关文档同步更新。
+
+本地与 CI 的命令、检查范围和分层规则见[工程质量门禁](quality-gates.md)。
 
 ### Gate 1：核心 Runtime 合并
 
@@ -860,7 +864,8 @@ M4 工程治理与清理
 
 ### 工程质量
 
-- [ ] pytest、CI、lint、类型检查和覆盖率门禁生效。
+- [x] pytest、Windows 最小 CI、核心 Ruff 和 Mypy 门禁生效。
+- [ ] 覆盖率阈值、静态检查全仓扩展和 Linux 测试矩阵生效。
 - [ ] 无硬件 simulation 可回归主要流程。
 - [ ] 关键真实硬件验收有记录。
 - [ ] 配置、依赖、打包和平台支持策略清晰。
@@ -918,6 +923,7 @@ M4 工程治理与清理
 | 2026-07-30 | M3 | F/G | 数据采集格式与存储治理 | F-D-004/F-D-005/F-D-006/F-D-007 TODO → DONE | 新增 schema v1、来源/单位/文件哈希 manifest、portable NPZ 与 Native RLBench 显式格式；同目录 staged write 校验后原子发布，加入容量预检、范围受限残留恢复和离线验证 CLI；删除旧 recorder/formatter 与伪 RLBench 回退 | 183 tests + 26 subtests |
 | 2026-07-30 | M3 | B/F | 多臂真实遥测与采集时间语义 | F-D-008/F-D-009 TODO → DONE | schema 直接升级 v2；新增统一 ArmTelemetry/DepthCameraFrame，记录 depth scale、畸变、设备/主机时间、可选外参和实际夹爪/电流/末端力；单/双臂采样强制最大 monotonic 偏差，可选字段使用 validity mask；Native 不伪造 joint_forces，并增加显式受信 pickle 类型 smoke test | 187 tests |
 | 2026-07-30 | M3 | E | LLM Provider 治理与规划回归 | E-010/E-011/E-012 TODO → DONE | 新增所有 task 共用的 provider health、熔断、半开和显式 fallback；记录 Prompt/请求/provider/model/技能目录来源；分类失败不再静默伪装成功；建立 strict schema v1 离线 golden runner | 195 tests，14 golden cases |
+| 2026-07-30 | M4 | A/C/G | pytest、协议契约与静态质量门禁 | A-008/G-001/G-004/G-005 TODO/DOING → DONE | 建立本地/CI 唯一质量入口和 Windows/Python 3.12 冻结依赖流水线；Ruff 清零收敛主线基础问题，Mypy 检查核心 typed boundary；全部 WebSocket action 具备独立最小合法请求 golden contract，route/schema、payload 边界、稳定错误码和响应 DTO 纳入 pytest | 262 tests + 26 subtests，14 golden cases |
 
 ## 22. 建议的首批实施顺序
 
@@ -925,7 +931,7 @@ M4 工程治理与清理
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
 3. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
-4. **G-001/G-004/G-005**：补 CI、协议测试、lint 和类型检查。
+4. **G-003/G-006/G-007/G-008**：统一默认数据交付、依赖声明、启动配置校验和持久化迁移策略。
 5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
 6. 完成 simulation smoke test 后执行逐设备真实硬件验收。

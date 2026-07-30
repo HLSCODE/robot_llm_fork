@@ -450,17 +450,23 @@ class WebSocketRequestContext:
             decorated.setdefault("run_id", self.run_id)
 
         event = decorated.get("event")
-        default_code = _ERROR_EVENT_DEFAULTS.get(event)
+        default_code = (
+            _ERROR_EVENT_DEFAULTS.get(event)
+            if isinstance(event, str)
+            else None
+        )
         if default_code is not None:
-            code = str(decorated.setdefault("code", default_code.value))
-            self.error_code = code
+            error_code = str(
+                decorated.setdefault("code", default_code.value)
+            )
+            self.error_code = error_code
             if event != "error":
                 decorated.setdefault("error_source", event)
                 decorated["event"] = "error"
         elif event == "access_denied":
-            code = decorated.get("code")
-            if isinstance(code, str):
-                self.error_code = code
+            error_code_value = decorated.get("code")
+            if isinstance(error_code_value, str):
+                self.error_code = error_code_value
 
         self.response_count += 1
         return decorated

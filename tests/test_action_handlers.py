@@ -21,12 +21,14 @@ from src.execution import (
 from src.execution.action_control import resolve_wait_control_policy
 
 
+def _successful_handler(_parameters, _context) -> ActionHandlerResult:
+    return ActionHandlerResult.succeeded()
+
+
 class ActionHandlerRegistryTests(unittest.TestCase):
     def test_registry_rejects_duplicate_registration(self):
         registry = ActionHandlerRegistry()
-        handler = lambda _parameters, _context: (
-            ActionHandlerResult.succeeded()
-        )
+        handler = _successful_handler
         registry.register(
             ActionType.WAIT,
             handler,
@@ -61,9 +63,7 @@ class ActionHandlerRegistryTests(unittest.TestCase):
 
     def test_complete_registry_is_frozen_before_execution(self):
         registry = ActionHandlerRegistry()
-        handler = lambda _parameters, _context: (
-            ActionHandlerResult.succeeded()
-        )
+        handler = _successful_handler
         for action_type in ActionType:
             registry.register(
                 action_type,
