@@ -93,6 +93,7 @@ class TrajectoryActionHandler:
                 message,
                 operation=self._SEND_OPERATION,
                 device_id=ROBOT_SYSTEM,
+                error=exc,
             )
 
         try:
@@ -121,4 +122,5 @@ class TrajectoryActionHandler:
                 message,
                 operation=self._SEND_OPERATION,
                 device_id=ROBOT_SYSTEM,
+                error=exc,
             )

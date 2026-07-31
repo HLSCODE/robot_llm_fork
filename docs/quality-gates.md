@@ -76,6 +76,7 @@ Mypy 先覆盖已完成收敛、类型边界较稳定的核心文件：
 - 版本化 JSON、用户数据路径、启动配置校验和内置数据安装。
 - 不可变领域 settings 和敏感配置边界。
 - DeviceRuntime 的供应商无关模型。
+- 设备错误分类、基础设施错误映射和 action result 错误 DTO。
 - ExecutionRuntime 的状态、事件和结果模型。
 - LLM 通用类型与确定性指纹。
 

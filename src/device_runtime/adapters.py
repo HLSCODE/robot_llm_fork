@@ -669,9 +669,7 @@ class ToolChangerAdapter:
 
     def set_locked(self, locked: bool) -> None:
         command = "close" if locked else "open"
-        result = self._controller.send_command(command)
-        if result == "error" or result is False:
-            raise RuntimeError(f"tool changer command failed: {result}")
+        self._controller.send_command(command)
 
     def close(self) -> None:
         self._controller.close()

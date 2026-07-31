@@ -4,7 +4,7 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-31
 >
-> 当前里程碑：M4 — 设备串口传输与硬件所有权边界已收敛
+> 当前里程碑：M4 — 设备传输、所有权与错误语义边界已收敛
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -113,6 +113,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - 工具架不再在机械臂 Provider 内直接持有移液枪串口逻辑；放枪动作按控制策略
   同时租用机械臂和移液枪，并从 `DeviceRuntime` 注入弹枪能力。
 - 身体轴驱动中的独立 Tk 调试 GUI 和旧移液枪串口脚本已删除，不保留双入口。
+- 硬件失败已统一为 `DeviceErrorCategory` 和 `DeviceOperationError`；设备、操作、
+  稳定分类及可用的供应商原始码贯通 step/terminal event、执行快照、设备状态与
+  WebSocket，用户消息不包含底层端口、堆栈或 SDK 诊断。
 
 仍需继续收敛的重点：
 
@@ -270,8 +273,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   handler；保留的 `get_if_ready()` 仅用于只读就绪状态展示。
 - 串口访问已收敛到共享 Transport，但部分设备协议驱动仍需继续强类型化。
 - 设备连接状态可能只表示“控制器对象存在”，不表示设备真实在线。
-- Transport 已提供连接、关闭、超时和 I/O 分类；设备级错误码与统一用户消息
-  尚未覆盖全部硬件 adapter。
+- Transport、协议、机械臂、设备生命周期、手动控制、遥操作和安全停止已共用
+  设备错误分类；真实设备仍需验证各供应商原始码的含义与恢复策略。
 - 部分阻塞 SDK 无法及时响应取消。
 - 颈部控制器已初始化但没有形成完整动作链路。
 
@@ -299,7 +302,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | B-008 | P2 | DONE | 身体轴、继电器、快换手、移液枪、PWM 颈部和表情屏统一使用共享 SerialTransport；配置、有限重试、RTS/DTR、超时、互斥收发和幂等关闭均由唯一生命周期入口管理 |
 | B-009 | P2 | DONE | relay/tool-changer/pipette 及机械臂 adapter 已落地，视觉不再依赖厂商对象 |
 | B-010 | P2 | TODO | 评估并接入 PWM neck 动作能力 |
-| B-011 | P2 | DOING | Transport 已提供 dependency/open/closed/timeout/I/O 稳定分类；待建立设备操作级错误 DTO，并统一全部 adapter、执行事件和用户消息 |
+| B-011 | P2 | DONE | 建立 unavailable/connection/timeout/protocol/rejected/I/O/internal 设备错误模型；统一执行、设备生命周期、手动控制、遥操作与安全停止消息，并贯通事件、快照及 WebSocket |
 | B-012 | P3 | DOING | 已删除旧移液枪串口脚本和身体轴驱动内嵌 Tk GUI；待继续全仓清理无引用设备封装与联调脚本 |
 | B-013 | P0 | DONE | 定义厂商无关的机械臂运动、状态、夹爪及可选能力协议 |
 | B-014 | P1 | DONE | RealMan adapter 接入统一运行时，业务层移除 `rm_*` 和原生控制器访问 |
@@ -314,6 +317,25 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - shutdown 有明确顺序、超时和结果。
 - 硬件错误能够关联设备、操作、run_id 和原始错误。
 - simulation device 与真实 device 暴露相同 capability 接口。
+
+### 7.5 设备错误契约
+
+设备边界统一使用以下稳定分类：
+
+| 分类 | 含义 |
+|---|---|
+| `unavailable` | 设备未注册、依赖缺失、初始化失败或能力不满足 |
+| `connection` | 连接打开失败、连接已关闭或连接不可用 |
+| `timeout` | 设备在约定时间内没有完整响应 |
+| `protocol` | CRC、帧结构、Modbus 异常或响应内容无效 |
+| `rejected` | 设备或供应商 SDK 明确拒绝操作 |
+| `io` | 其他传输读写失败 |
+| `internal` | 未归入上述类型的设备实现错误 |
+
+对外失败 DTO 使用 `code`、`operation`、`device_id`、`error_category` 和
+`raw_error_code`。`raw_error_code` 仅保留可安全序列化的供应商/传输错误码；
+用户消息使用稳定分类文本，底层异常类型、端口和诊断只进入内部日志。执行事件
+继续通过 `run_id` 关联完整操作，取消和执行 deadline 不归类为普通设备失败。
 
 ## 8. Track C：WebSocket API、安全与服务拆分
 
@@ -918,6 +940,7 @@ M4 工程治理与清理
 | 2026-07-31 | M4 | B/F/G | 定位、离散安全态、遥操作流控和测试能力收敛 | B-017、F-V-003、F-T-004、F-T-005、F-P-003 → DONE；G-002 DOING → DONE | 定位服务应用级持有；停止统一应用离散安全态；遥操作阻塞 I/O 移出事件循环；补齐粉末逐轮审计和共享 Transport/LLM fake | - |
 | 2026-07-31 | M4 | F | 遥操作会话状态收敛 | F-T-003 DOING → DONE；F-T-002 保持 DOING | 将 owner/臂/计数/最后指令/夹爪状态收敛到 TeleoperationService；WebSocket 和 DataCollection 独立持有 owner；增加逐臂指令流 watchdog 和控制租约联动释放 | - |
 | 2026-07-31 | M4 | B | 串口 Transport 与工具架设备所有权收敛 | B-008 TODO → DONE；B-011/B-012 TODO → DOING | 六类生产串口设备统一使用组合根注入的 SerialTransport；增加有限打开重试、结构化传输错误和协议测试；工具架放枪按需租用并注入移液枪能力；删除身体轴内嵌 Tk GUI及旧串口双入口 | 303 tests + 27 subtests，14 golden cases；完整质量门禁和 wheel smoke |
+| 2026-07-31 | M4 | B/C/G | 设备错误语义整批收敛 | B-011 DOING → DONE | 新增稳定设备错误分类和安全用户消息；Transport、协议、RealMan、生命周期、动作、手动控制、遥操作及安全停止统一归一化；category/raw code 贯通 step/terminal event、快照、状态 API；核心错误边界加入 Mypy | 308 tests + 27 subtests，14 golden cases |
 | 2026-07-28 | M2 | A/C/D | GUI 与附加服务统一宿主 | A-013/C-014 TODO → DONE | 删除 GUI/Server 二选一组合路径；WebSocket 进入受管理 asyncio 线程并共享唯一 ApplicationServices，默认仅监听本机 | - |
 | 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
 | 2026-07-29 | M2 | A/B | 动作 handler 与执行控制首批收敛 | B-007 TODO → DOING；A-007 保持 DOING | 建立唯一 ActionHandlerRegistry、注册完整性校验和统一动作 deadline/cancel 上下文；首批拆出 WAIT/INSPECT，阻塞调用不使用脱离资源租约的后台超时线程 | - |
@@ -949,9 +972,8 @@ M4 工程治理与清理
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **B-011/B-010/B-012**：将 Transport 分类提升为设备操作级错误 DTO，统一
-   adapter、执行事件和用户消息；接入 PWM neck 动作 schema/handler，并完成
-   剩余设备实验脚本清理。
+3. **B-010/B-012**：接入 PWM neck 动作 schema/handler，并完成剩余设备实验
+   脚本清理。
 4. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
 5. **G-012/G-013**：确定覆盖率阈值，补 Linux 最小依赖、GUI/Server 和硬件可选依赖矩阵。
 6. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`

@@ -152,7 +152,9 @@ files = [
     "src/llm/types.py",
     "src/llm/fingerprints.py",
     "src/device_runtime/arm_models.py",
+    "src/device_runtime/errors.py",
     "src/device_runtime/models.py",
+    "src/execution/action_handlers.py",
     "src/execution/models.py",
 ]
 check_untyped_defs = true

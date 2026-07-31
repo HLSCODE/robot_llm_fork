@@ -147,8 +147,10 @@ class RobotMoveActionHandler:
                 message,
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
+                error=exc,
             )
 
+        last_error: Exception | None = None
         for attempt in range(1, self._options.arm_move_max_attempts + 1):
             try:
                 context.invoke(
@@ -158,10 +160,10 @@ class RobotMoveActionHandler:
             except (ActionCancelledError, ActionTimeoutError):
                 raise
             except Exception as exc:
+                last_error = exc
                 context.log(
                     "机械臂移动失败 "
-                    f"(第{attempt}/{self._options.arm_move_max_attempts}次): "
-                    f"{exc}",
+                    f"(第{attempt}/{self._options.arm_move_max_attempts}次)",
                     "warn",
                 )
             else:
@@ -182,6 +184,7 @@ class RobotMoveActionHandler:
             message,
             operation=self._OPERATION,
             device_id=ROBOT_SYSTEM,
+            error=last_error,
         )
 
 
@@ -264,6 +267,7 @@ class BodyMoveActionHandler:
                 message,
                 operation=self._MOVE_OPERATION,
                 device_id=BODY_AXIS,
+                error=exc,
             )
 
 
@@ -355,6 +359,7 @@ class BaseMoveActionHandler:
                 message,
                 operation=BaseMoveActionHandler._POSITION_OPERATION,
                 device_id=MOBILE_BASE,
+                error=exc,
             )
 
         level = "info" if success else "error"
@@ -418,6 +423,7 @@ class BaseMoveActionHandler:
                 message,
                 operation=BaseMoveActionHandler._DISTANCE_OPERATION,
                 device_id=MOBILE_BASE,
+                error=exc,
             )
 
         level = "info" if success else "error"

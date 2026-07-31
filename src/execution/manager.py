@@ -92,6 +92,8 @@ class ExecutionManager:
         self._error_code = ""
         self._error_operation = ""
         self._error_device_id = ""
+        self._error_category = ""
+        self._raw_error_code = ""
         self._started_at: float | None = None
         self._finished_at: float | None = None
         self._control: ExecutionControl | None = None
@@ -135,6 +137,8 @@ class ExecutionManager:
             self._error_code = ""
             self._error_operation = ""
             self._error_device_id = ""
+            self._error_category = ""
+            self._raw_error_code = ""
             self._started_at = None
             self._finished_at = None
             self._control = control
@@ -303,6 +307,8 @@ class ExecutionManager:
                 self._error_code = result.error_code
                 self._error_operation = result.error_operation
                 self._error_device_id = result.error_device_id
+                self._error_category = result.error_category
+                self._raw_error_code = result.raw_error_code
                 self._finished_at = time.time()
         self._emit(
             run_id,
@@ -313,6 +319,8 @@ class ExecutionManager:
                 "code": result.error_code,
                 "operation": result.error_operation,
                 "device_id": result.error_device_id,
+                "error_category": result.error_category,
+                "raw_error_code": result.raw_error_code,
             },
         )
 
@@ -378,6 +386,8 @@ class ExecutionManager:
             error_code=self._error_code,
             error_operation=self._error_operation,
             error_device_id=self._error_device_id,
+            error_category=self._error_category,
+            raw_error_code=self._raw_error_code,
             started_at=self._started_at,
             finished_at=self._finished_at,
         )

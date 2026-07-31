@@ -7,12 +7,15 @@ from threading import RLock
 from typing import Any, Generic, TypeVar
 
 from .contracts import StoppableDevice
+from .errors import normalize_device_error
 from .models import (
     DeviceAlreadyRegisteredError,
     DeviceCapability,
     DeviceContractError,
+    DeviceErrorCategory,
     DeviceInitializationError,
     DeviceNotRegisteredError,
+    DeviceOperationError,
     DeviceSnapshot,
     DeviceSafeStateResult,
     DeviceSafeStateStatus,
@@ -46,6 +49,8 @@ class _DeviceRecord:
     state: DeviceState = DeviceState.REGISTERED
     instance: Any = None
     error: str = ""
+    error_category: str = ""
+    raw_error_code: str = ""
     lock: RLock = field(default_factory=RLock)
 
 
@@ -86,6 +91,8 @@ class DeviceRuntime:
 
             record.state = DeviceState.STARTING
             record.error = ""
+            record.error_category = ""
+            record.raw_error_code = ""
             try:
                 instance = record.registration.factory()
                 if instance is None:
@@ -93,14 +100,18 @@ class DeviceRuntime:
                         f"device '{device_id}' factory returned None"
                     )
             except Exception as exc:
+                normalized = normalize_device_error(
+                    exc,
+                    device_id=device_id,
+                    operation="device.initialize",
+                    fallback_category=DeviceErrorCategory.UNAVAILABLE,
+                )
                 record.instance = None
                 record.state = DeviceState.FAILED
-                record.error = str(exc)
-                if isinstance(exc, DeviceInitializationError):
-                    raise
-                raise DeviceInitializationError(
-                    f"initialize device '{device_id}' failed: {exc}"
-                ) from exc
+                record.error = normalized.user_message
+                record.error_category = normalized.category.value
+                record.raw_error_code = normalized.raw_error_code
+                raise normalized from exc
 
             record.instance = instance
             record.state = DeviceState.READY
@@ -153,6 +164,8 @@ class DeviceRuntime:
                     )
                 ),
                 error=record.error,
+                error_category=record.error_category,
+                raw_error_code=record.raw_error_code,
             )
 
     def snapshots(self) -> tuple[DeviceSnapshot, ...]:
@@ -218,23 +231,30 @@ class DeviceRuntime:
                 if instance is not None:
                     record.registration.close(instance)
             except Exception as exc:
+                normalized = normalize_device_error(
+                    exc,
+                    device_id=device_id,
+                    operation="device.shutdown",
+                )
                 record.state = DeviceState.FAILED
-                record.error = str(exc)
-                raise DeviceInitializationError(
-                    f"shutdown device '{device_id}' failed: {exc}"
-                ) from exc
+                record.error = normalized.user_message
+                record.error_category = normalized.category.value
+                record.raw_error_code = normalized.raw_error_code
+                raise normalized from exc
             finally:
                 record.instance = None
 
             record.state = DeviceState.STOPPED
             record.error = ""
+            record.error_category = ""
+            record.raw_error_code = ""
 
     def shutdown_all(self) -> dict[str, str]:
         errors: dict[str, str] = {}
         for device_id in reversed(self.registered_device_ids()):
             try:
                 self.shutdown(device_id)
-            except DeviceInitializationError as exc:
+            except (DeviceInitializationError, DeviceOperationError) as exc:
                 logger.exception("Device shutdown failed: %s", device_id)
                 errors[device_id] = str(exc)
         return errors
@@ -291,17 +311,24 @@ class DeviceRuntime:
             try:
                 instance.stop(mode)
             except Exception as exc:
+                normalized = normalize_device_error(
+                    exc,
+                    device_id=device_id,
+                    operation=f"device.stop.{mode.value}",
+                )
                 logger.warning(
                     "Device %s %s stop failed: %s",
                     device_id,
                     mode.value,
-                    exc,
+                    normalized.diagnostic_message,
                 )
                 return DeviceStopResult(
                     device_id=device_id,
                     mode=mode,
                     status=DeviceStopStatus.FAILED,
-                    error=str(exc),
+                    error=normalized.user_message,
+                    error_category=normalized.category.value,
+                    raw_error_code=normalized.raw_error_code,
                 )
             return DeviceStopResult(
                 device_id=device_id,
@@ -327,11 +354,22 @@ class DeviceRuntime:
             try:
                 action(record.instance)
             except Exception as exc:
-                logger.warning("Device %s safe state failed: %s", device_id, exc)
+                normalized = normalize_device_error(
+                    exc,
+                    device_id=device_id,
+                    operation="device.enter_safe_state",
+                )
+                logger.warning(
+                    "Device %s safe state failed: %s",
+                    device_id,
+                    normalized.diagnostic_message,
+                )
                 return DeviceSafeStateResult(
                     device_id=device_id,
                     status=DeviceSafeStateStatus.FAILED,
-                    error=str(exc),
+                    error=normalized.user_message,
+                    error_category=normalized.category.value,
+                    raw_error_code=normalized.raw_error_code,
                 )
             return DeviceSafeStateResult(
                 device_id=device_id,

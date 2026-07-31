@@ -55,12 +55,24 @@ class DeviceSafeStateStatus(str, Enum):
     FAILED = "failed"
 
 
+class DeviceErrorCategory(str, Enum):
+    UNAVAILABLE = "unavailable"
+    CONNECTION = "connection"
+    TIMEOUT = "timeout"
+    PROTOCOL = "protocol"
+    REJECTED = "rejected"
+    IO = "io"
+    INTERNAL = "internal"
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceStopResult:
     device_id: str
     mode: StopMode
     status: DeviceStopStatus
     error: str = ""
+    error_category: str = ""
+    raw_error_code: str = ""
 
     @property
     def successful(self) -> bool:
@@ -75,6 +87,8 @@ class DeviceSafeStateResult:
     device_id: str
     status: DeviceSafeStateStatus
     error: str = ""
+    error_category: str = ""
+    raw_error_code: str = ""
 
     @property
     def successful(self) -> bool:
@@ -90,6 +104,8 @@ class DeviceSnapshot:
     state: DeviceState
     capabilities: tuple[DeviceCapability, ...]
     error: str = ""
+    error_category: str = ""
+    raw_error_code: str = ""
 
     @property
     def ready(self) -> bool:
@@ -98,6 +114,28 @@ class DeviceSnapshot:
 
 class DeviceRuntimeError(RuntimeError):
     """Base error for device lifecycle and capability access."""
+
+
+class DeviceOperationError(DeviceRuntimeError):
+    """Stable device failure with safe user text and internal diagnostics."""
+
+    def __init__(
+        self,
+        *,
+        device_id: str,
+        operation: str,
+        category: DeviceErrorCategory,
+        user_message: str,
+        diagnostic_message: str,
+        raw_error_code: str = "",
+    ) -> None:
+        super().__init__(user_message)
+        self.device_id = device_id
+        self.operation = operation
+        self.category = category
+        self.user_message = user_message
+        self.diagnostic_message = diagnostic_message
+        self.raw_error_code = raw_error_code
 
 
 class DeviceAlreadyRegisteredError(DeviceRuntimeError):

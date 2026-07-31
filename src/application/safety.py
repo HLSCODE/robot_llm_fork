@@ -65,6 +65,8 @@ class SafetyStopReport:
                 "error_code": self.execution_after.error_code,
                 "error_operation": (self.execution_after.error_operation),
                 "error_device_id": (self.execution_after.error_device_id),
+                "error_category": self.execution_after.error_category,
+                "raw_error_code": self.execution_after.raw_error_code,
             },
             "devices": [
                 {
@@ -72,6 +74,8 @@ class SafetyStopReport:
                     "mode": result.mode.value,
                     "status": result.status.value,
                     "error": result.error,
+                    "error_category": result.error_category,
+                    "raw_error_code": result.raw_error_code,
                 }
                 for result in self.devices
             ],
@@ -80,6 +84,8 @@ class SafetyStopReport:
                     "device_id": result.device_id,
                     "status": result.status.value,
                     "error": result.error,
+                    "error_category": result.error_category,
+                    "raw_error_code": result.raw_error_code,
                 }
                 for result in self.safe_devices
             ],

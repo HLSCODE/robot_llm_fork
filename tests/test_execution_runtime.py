@@ -174,6 +174,11 @@ class DeviceRuntimeTests(unittest.TestCase):
 
         self.assertEqual(DeviceStopStatus.STOPPED, results["quick"].status)
         self.assertEqual(DeviceStopStatus.FAILED, results["failed"].status)
+        self.assertEqual("internal", results["failed"].error_category)
+        self.assertEqual(
+            "设备操作失败（设备=failed，操作=device.stop.quick）",
+            results["failed"].error,
+        )
         self.assertEqual(
             DeviceStopStatus.UNSUPPORTED,
             results["unsupported"].status,

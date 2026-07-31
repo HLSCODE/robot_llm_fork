@@ -723,19 +723,25 @@ ws.onmessage = (event) => {
       "state": "ready",
       "ready": true,
       "capabilities": ["robot_motion", "gripper"],
-      "error": ""
+      "error": "",
+      "error_category": "",
+      "raw_error_code": ""
     },
     "body-axis": {
       "state": "registered",
       "ready": false,
       "capabilities": ["body_axis"],
-      "error": ""
+      "error": "",
+      "error_category": "",
+      "raw_error_code": ""
     },
     "camera": {
       "state": "registered",
       "ready": false,
       "capabilities": ["camera"],
-      "error": ""
+      "error": "",
+      "error_category": "",
+      "raw_error_code": ""
     }
   },
   "executor": {
@@ -746,7 +752,9 @@ ws.onmessage = (event) => {
     "error": "",
     "error_code": "",
     "error_operation": "",
-    "error_device_id": ""
+    "error_device_id": "",
+    "error_category": "",
+    "raw_error_code": ""
   },
   "sequence_length": 0,
   "data_collection": {
@@ -779,6 +787,8 @@ ws.onmessage = (event) => {
 | `devices.<device_id>.ready` | `boolean` | 设备是否可被应用服务调用 |
 | `devices.<device_id>.capabilities` | `string[]` | 设备提供的能力集合 |
 | `devices.<device_id>.error` | `string` | 最近一次初始化或关闭错误；无错误时为空字符串 |
+| `devices.<device_id>.error_category` | `string` | 稳定设备错误分类；无错误时为空字符串 |
+| `devices.<device_id>.raw_error_code` | `string` | 可用的供应商或传输原始码；无原始码时为空字符串 |
 | `executor.run_id` | `string \| null` | 当前或最近一次执行的唯一 ID |
 | `executor.state` | `string` | 统一执行状态 |
 | `executor.running` | `boolean` | 是否正在执行 |
@@ -787,6 +797,8 @@ ws.onmessage = (event) => {
 | `executor.error_code` | `string` | 稳定执行错误码；无失败时为空 |
 | `executor.error_operation` | `string` | 失败的规范操作标识 |
 | `executor.error_device_id` | `string` | 失败关联的规范设备 ID |
+| `executor.error_category` | `string` | `unavailable`、`connection`、`timeout`、`protocol`、`rejected`、`io` 或 `internal` |
+| `executor.raw_error_code` | `string` | 可用的供应商或传输原始码；无原始码时为空字符串 |
 | `sequence_length` | `number` | 当前服务端维护的序列长度 |
 | `data_collection.state` | `string` | 数据采集状态机当前状态 |
 | `data_collection.task` | `string \| null` | 当前采集任务 |
@@ -1094,15 +1106,20 @@ ws.onmessage = (event) => {
   "event": "step_failed",
   "index": 0,
   "name": "移动到A点",
-  "error": "机械臂移动重试次数耗尽",
+  "error": "设备拒绝执行操作（设备=robot-system，操作=robot_system.move_to_pose）",
   "failure": {
     "status": "failed",
     "code": "device_operation_failed",
     "operation": "robot_system.move_to_pose",
-    "device_id": "robot-system"
+    "device_id": "robot-system",
+    "error_category": "rejected",
+    "raw_error_code": "17"
   }
 }
 ```
+
+设备失败消息只包含稳定的用户语义。串口、异常类型、堆栈和 SDK 诊断不会通过
+WebSocket 返回；服务端内部日志仍记录诊断上下文。
 
 `failure.code` 当前稳定取值：
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from threading import RLock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
 
 from ..device_runtime import (
@@ -11,6 +12,7 @@ from ..device_runtime import (
     ArmState,
     ArmStateReader,
     ArmTelemetryReader,
+    DeviceOperationError,
     DeviceRuntime,
     DigitalOutputs,
     GripperControl,
@@ -23,6 +25,7 @@ from ..device_runtime import (
     TrajectoryControl,
     TrajectorySaveResult,
 )
+from ..device_runtime.errors import normalize_device_error
 from ..core.settings import ApplicationSettings
 from ..device_runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from ..execution import (
@@ -40,6 +43,26 @@ from .teleoperation import TeleoperationService
 
 if TYPE_CHECKING:
     from .data_collection import DataCollectionService
+
+
+_ResultT = TypeVar("_ResultT")
+
+
+def _device_operation(
+    device_id: str,
+    operation: str,
+    callback: Callable[[], _ResultT],
+) -> _ResultT:
+    try:
+        return callback()
+    except DeviceOperationError:
+        raise
+    except Exception as exc:
+        raise normalize_device_error(
+            exc,
+            device_id=device_id,
+            operation=operation,
+        ) from exc
 
 
 class ExecutionService:
@@ -92,7 +115,11 @@ class DeviceManagementService:
 
     def initialize(self, device_id: str) -> dict[str, Any]:
         with self._lifecycle_lease("initialize", (device_id,)):
-            self._runtime.initialize(device_id)
+            _device_operation(
+                device_id,
+                "device.initialize",
+                lambda: self._runtime.initialize(device_id),
+            )
             return self._snapshot_dict(device_id)
 
     def initialize_many(
@@ -104,7 +131,11 @@ class DeviceManagementService:
             return {}
         with self._lifecycle_lease("initialize-many", selected):
             for device_id in selected:
-                self._runtime.initialize(device_id)
+                _device_operation(
+                    device_id,
+                    "device.initialize",
+                    partial(self._runtime.initialize, device_id),
+                )
             return {
                 device_id: self._snapshot_dict(device_id)
                 for device_id in selected
@@ -119,6 +150,8 @@ class DeviceManagementService:
                     capability.value for capability in snapshot.capabilities
                 ],
                 "error": snapshot.error,
+                "error_category": snapshot.error_category,
+                "raw_error_code": snapshot.raw_error_code,
             }
             for snapshot in self._runtime.snapshots()
         }
@@ -160,6 +193,8 @@ class DeviceManagementService:
                 capability.value for capability in snapshot.capabilities
             ],
             "error": snapshot.error,
+            "error_category": snapshot.error_category,
+            "raw_error_code": snapshot.raw_error_code,
         }
 
 
@@ -185,29 +220,57 @@ class ManualControlService:
             raise ValueError("opened or position is required")
         arm_id = ArmId.parse(arm)
         with self._lease(ROBOT_SYSTEM, "gripper"):
-            gripper = self._runtime.require(ROBOT_SYSTEM, GripperControl)
-            if position is not None:
-                gripper.move_gripper(arm_id, int(position))
-            elif opened:
-                gripper.open_gripper(arm_id)
-            else:
-                gripper.close_gripper(arm_id)
-            return True
+            def operate_gripper() -> bool:
+                gripper = self._runtime.require(
+                    ROBOT_SYSTEM,
+                    GripperControl,
+                )
+                if position is not None:
+                    gripper.move_gripper(arm_id, int(position))
+                elif opened:
+                    gripper.open_gripper(arm_id)
+                else:
+                    gripper.close_gripper(arm_id)
+                return True
+
+            return _device_operation(
+                ROBOT_SYSTEM,
+                "gripper.set",
+                operate_gripper,
+            )
 
     def set_relay(self, channel: int, enabled: bool) -> None:
         with self._lease(RELAY_BANK, "relay"):
-            relay = self._runtime.require(RELAY_BANK, DigitalOutputs)
-            relay.set_channel(channel, enabled)
+            _device_operation(
+                RELAY_BANK,
+                "relay.set_channel",
+                lambda: self._runtime.require(
+                    RELAY_BANK,
+                    DigitalOutputs,
+                ).set_channel(channel, enabled),
+            )
 
     def initialize_pipette(self) -> bool:
         with self._lease(PIPETTE, "pipette-initialize"):
-            pipette = self._runtime.require(PIPETTE, Pipette)
-            return pipette.initialize()
+            return _device_operation(
+                PIPETTE,
+                "pipette.initialize",
+                lambda: self._runtime.require(
+                    PIPETTE,
+                    Pipette,
+                ).initialize(),
+            )
 
     def eject_pipette_tip(self) -> bool:
         with self._lease(PIPETTE, "pipette-eject"):
-            pipette = self._runtime.require(PIPETTE, Pipette)
-            return pipette.eject_tip()
+            return _device_operation(
+                PIPETTE,
+                "pipette.eject_tip",
+                lambda: self._runtime.require(
+                    PIPETTE,
+                    Pipette,
+                ).eject_tip(),
+            )
 
     def initialize_teleoperation(
         self,
@@ -216,17 +279,35 @@ class ManualControlService:
     ) -> bool:
         arm_id = ArmId.parse(arm)
         with self._lease(ROBOT_SYSTEM, "teleop-initialize"):
-            teleoperation = self._runtime.require(
+            return _device_operation(
                 ROBOT_SYSTEM,
-                RobotTeleoperation,
+                "robot_system.initialize_teleoperation",
+                lambda: self._initialize_teleoperation(
+                    arm_id,
+                    joints,
+                ),
             )
-            teleoperation.initialize_teleoperation(
-                arm_id,
-                JointVector.from_iterable(joints),
-            )
-            return True
 
-    def _lease(self, resource_id: str, operation: str):
+    def _initialize_teleoperation(
+        self,
+        arm_id: ArmId,
+        joints: list[float],
+    ) -> bool:
+        teleoperation = self._runtime.require(
+            ROBOT_SYSTEM,
+            RobotTeleoperation,
+        )
+        teleoperation.initialize_teleoperation(
+            arm_id,
+            JointVector.from_iterable(joints),
+        )
+        return True
+
+    def _lease(
+        self,
+        resource_id: str,
+        operation: str,
+    ) -> ResourceLease:
         owner_id = f"manual:{operation}:{uuid4().hex}"
         return self._resources.acquire(owner_id, (resource_id,))
 
@@ -246,7 +327,11 @@ class RobotQueryService:
         return self._runtime.require(ROBOT_SYSTEM, ArmTelemetryReader)
 
     def read_state(self, arm: str | ArmId) -> ArmState:
-        return self.state_reader().read_arm_state(_arm_id(arm))
+        return _device_operation(
+            ROBOT_SYSTEM,
+            "robot_system.read_arm_state",
+            lambda: self.state_reader().read_arm_state(_arm_id(arm)),
+        )
 
     def try_read_state(self, arm: str | ArmId) -> ArmState | None:
         reader = self._runtime.get_if_ready(ROBOT_SYSTEM)
@@ -284,11 +369,14 @@ class TrajectoryTeachingService:
                 (ROBOT_SYSTEM,),
             )
             try:
-                trajectory = self._runtime.require(
+                _device_operation(
                     ROBOT_SYSTEM,
-                    TrajectoryControl,
+                    "trajectory.start_drag_teaching",
+                    lambda: self._runtime.require(
+                        ROBOT_SYSTEM,
+                        TrajectoryControl,
+                    ).start_drag_teaching(arm_id),
                 )
-                trajectory.start_drag_teaching(arm_id)
             except Exception:
                 lease.release()
                 raise
@@ -298,15 +386,27 @@ class TrajectoryTeachingService:
     def stop_and_save(self, path: str) -> TrajectorySaveResult:
         with self._lock:
             arm, lease = self._required_session_unlocked()
-            trajectory = self._runtime.require(
+            trajectory = _device_operation(
                 ROBOT_SYSTEM,
-                TrajectoryControl,
+                "trajectory.resolve",
+                lambda: self._runtime.require(
+                    ROBOT_SYSTEM,
+                    TrajectoryControl,
+                ),
             )
-            trajectory.stop_drag_teaching(arm)
+            _device_operation(
+                ROBOT_SYSTEM,
+                "trajectory.stop_drag_teaching",
+                lambda: trajectory.stop_drag_teaching(arm),
+            )
             self._arm = None
             self._lease = None
         try:
-            return trajectory.save_trajectory(arm, path)
+            return _device_operation(
+                ROBOT_SYSTEM,
+                "trajectory.save",
+                lambda: trajectory.save_trajectory(arm, path),
+            )
         finally:
             lease.release()
 
@@ -321,7 +421,11 @@ class TrajectoryTeachingService:
         try:
             trajectory = self._runtime.get_if_ready(ROBOT_SYSTEM)
             if isinstance(trajectory, TrajectoryControl):
-                trajectory.stop_drag_teaching(arm)
+                _device_operation(
+                    ROBOT_SYSTEM,
+                    "trajectory.stop_drag_teaching",
+                    lambda: trajectory.stop_drag_teaching(arm),
+                )
         finally:
             lease.release()
 

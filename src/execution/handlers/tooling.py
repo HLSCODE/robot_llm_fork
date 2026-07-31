@@ -69,6 +69,7 @@ class ChangeToolActionHandler:
                 message,
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
+                error=exc,
             )
 
         try:
@@ -91,6 +92,7 @@ class ChangeToolActionHandler:
                 message,
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
+                error=exc,
             )
 
         context.log(

@@ -91,6 +91,8 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
             "robot move failed",
             operation="robot_system.move_to_pose",
             device_id="robot-system",
+            error_category="protocol",
+            raw_error_code="crc",
         )
         event = ExecutionEvent(
             run_id="run-1",
@@ -115,6 +117,8 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
                     "code": "device_operation_failed",
                     "operation": "robot_system.move_to_pose",
                     "device_id": "robot-system",
+                    "error_category": "protocol",
+                    "raw_error_code": "crc",
                 },
                 "run_id": "run-1",
                 "origin": "test",
@@ -131,6 +135,8 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
             error_code="device_operation_failed",
             error_operation="robot_system.move_to_pose",
             error_device_id="robot-system",
+            error_category="rejected",
+            raw_error_code="17",
         )
         services = SimpleNamespace(
             data_collection=SimpleNamespace(
@@ -177,6 +183,8 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
                 "error_code": "device_operation_failed",
                 "error_operation": "robot_system.move_to_pose",
                 "error_device_id": "robot-system",
+                "error_category": "rejected",
+                "raw_error_code": "17",
             },
             response["executor"],
         )

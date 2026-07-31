@@ -39,6 +39,8 @@ class DeviceWebSocketHandler:
                         "error_code": execution.error_code,
                         "error_operation": execution.error_operation,
                         "error_device_id": execution.error_device_id,
+                        "error_category": execution.error_category,
+                        "raw_error_code": execution.raw_error_code,
                     },
                     "sequence_length": len(
                         self._server._services.composition.sequence_entries()

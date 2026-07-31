@@ -84,6 +84,7 @@ class VisionCaptureActionHandler:
                 message,
                 operation=self._OPERATION,
                 device_id=CAMERA,
+                error=exc,
             )
 
         try:
@@ -106,6 +107,7 @@ class VisionCaptureActionHandler:
                 message,
                 operation=self._OPERATION,
                 device_id=CAMERA,
+                error=exc,
             )
 
         if not result:
@@ -164,6 +166,7 @@ class VisionRelocalizationActionHandler:
                 message,
                 operation=self._OPERATION,
                 device_id=CAMERA,
+                error=exc,
             )
 
         try:
@@ -187,6 +190,7 @@ class VisionRelocalizationActionHandler:
                 message,
                 operation=self._OPERATION,
                 device_id=CAMERA,
+                error=exc,
             )
 
         if not result:

@@ -312,6 +312,8 @@ class ActionEngine:
                 error_code=failure.code.value,
                 error_operation=failure.operation,
                 error_device_id=failure.device_id,
+                error_category=failure.error_category,
+                raw_error_code=failure.raw_error_code,
             )
         return EngineResult(success=True)
 

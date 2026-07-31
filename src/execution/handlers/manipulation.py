@@ -171,6 +171,7 @@ class ToolChangerActionHandler:
                 f"快换手设备不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=TOOL_CHANGER,
+                error=exc,
             )
         try:
             context.invoke(
@@ -186,6 +187,7 @@ class ToolChangerActionHandler:
                 f"快换手{operation}执行失败: {exc}",
                 operation=self._OPERATION,
                 device_id=TOOL_CHANGER,
+                error=exc,
             )
 
         context.log(f"快换手{operation}执行完成", "info")
@@ -247,6 +249,7 @@ class RelayActionHandler:
                 f"继电器设备不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=RELAY_BANK,
+                error=exc,
             )
         try:
             context.invoke(
@@ -262,6 +265,7 @@ class RelayActionHandler:
                 f"继电器{channel}{operation}执行失败: {exc}",
                 operation=self._OPERATION,
                 device_id=RELAY_BANK,
+                error=exc,
             )
 
         context.log(
@@ -312,6 +316,7 @@ class GripperActionHandler:
                 f"夹爪设备不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
+                error=exc,
             )
 
         def action() -> object:
@@ -320,14 +325,17 @@ class GripperActionHandler:
             return gripper.close_gripper(ArmId.LEFT)
 
         context.log(f"夹爪动作: {operation}", "info")
+        last_error: Exception | None = None
         for attempt in range(1, self._options.gripper_max_attempts + 1):
             try:
                 context.invoke(self._OPERATION, action)
             except (ActionCancelledError, ActionTimeoutError):
                 raise
             except Exception as exc:
+                last_error = exc
                 context.log(
-                    f"执行夹爪出错 ({attempt}/{self._options.gripper_max_attempts}): {exc}",
+                    "执行夹爪出错 "
+                    f"({attempt}/{self._options.gripper_max_attempts})",
                     "warn",
                 )
             else:
@@ -346,6 +354,7 @@ class GripperActionHandler:
             "夹爪重试次数耗尽",
             operation=self._OPERATION,
             device_id=ROBOT_SYSTEM,
+            error=last_error,
         )
 
 
@@ -380,6 +389,7 @@ class PipetteActionHandler:
                 f"吸液枪设备不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=PIPETTE,
+                error=exc,
             )
         try:
             if command.operation == "退枪头":
@@ -408,6 +418,7 @@ class PipetteActionHandler:
                 f"执行吸液枪出错: {exc}",
                 operation=self._OPERATION,
                 device_id=PIPETTE,
+                error=exc,
             )
 
         level = "info" if success else "error"
@@ -515,6 +526,7 @@ class ExpressionDisplayActionHandler:
                     f"表情屏关闭失败: {exc}",
                     operation=self._SHUTDOWN_OPERATION,
                     device_id=EXPRESSION_DISPLAY,
+                    error=exc,
                 )
             context.log("表情屏连接已关闭", "info")
             return context.success(
@@ -547,6 +559,7 @@ class ExpressionDisplayActionHandler:
                 f"表情屏设备不可用: {exc}",
                 operation=self._SWITCH_OPERATION,
                 device_id=EXPRESSION_DISPLAY,
+                error=exc,
             )
         context.log(f"表情屏切换: {expression}", "info")
         try:
@@ -563,6 +576,7 @@ class ExpressionDisplayActionHandler:
                 f"表情屏切换失败: {exc}",
                 operation=self._SWITCH_OPERATION,
                 device_id=EXPRESSION_DISPLAY,
+                error=exc,
             )
 
         name = getattr(switched, "name", str(switched))
@@ -628,6 +642,7 @@ class TappingActionHandler:
                 f"加粉装置不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=POWDER_DISPENSER,
+                error=exc,
             )
         action = self._resolve_action(
             controller,
@@ -655,6 +670,7 @@ class TappingActionHandler:
                 f"加粉装置 {operation} 执行失败: {exc}",
                 operation=self._OPERATION,
                 device_id=POWDER_DISPENSER,
+                error=exc,
             )
 
         context.log(f"加粉装置 {operation} 执行完成", "info")
@@ -734,6 +750,7 @@ class CircleDispenseActionHandler:
                 f"转圈注液机械臂不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
+                error=exc,
             )
         try:
             pipette = self._device_runtime.require(PIPETTE, Pipette)
@@ -744,6 +761,7 @@ class CircleDispenseActionHandler:
                 f"转圈注液吸液枪不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=PIPETTE,
+                error=exc,
             )
 
         try:
@@ -766,6 +784,7 @@ class CircleDispenseActionHandler:
                 ActionResultCode.DEVICE_OPERATION_FAILED,
                 f"转圈注液执行失败: {exc}",
                 operation=self._OPERATION,
+                error=exc,
             )
 
         if success:
@@ -832,6 +851,7 @@ class PowderDispenseActionHandler:
                 f"智能加粉依赖不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=POWDER_DISPENSER,
+                error=exc,
             )
         agent = PowderDispenseAgent(
             controller,
@@ -864,6 +884,7 @@ class PowderDispenseActionHandler:
                 f"智能加粉执行失败: {exc}",
                 operation=self._OPERATION,
                 device_id=POWDER_DISPENSER,
+                error=exc,
             )
 
         level = "info" if result.successful else "error"
@@ -975,10 +996,12 @@ def _failed_result(
     *,
     operation: str,
     device_id: str = "",
+    error: Exception | None = None,
 ) -> ActionHandlerResult:
     return context.failure(
         code,
         message,
         operation=operation,
         device_id=device_id,
+        error=error,
     )

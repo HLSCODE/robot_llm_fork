@@ -50,6 +50,8 @@ class ExecutionSnapshot:
     error_code: str = ""
     error_operation: str = ""
     error_device_id: str = ""
+    error_category: str = ""
+    raw_error_code: str = ""
     started_at: float | None = None
     finished_at: float | None = None
 
@@ -84,6 +86,8 @@ class EngineResult:
     error_code: str = ""
     error_operation: str = ""
     error_device_id: str = ""
+    error_category: str = ""
+    raw_error_code: str = ""
 
 
 class ExecutionRuntimeError(RuntimeError):

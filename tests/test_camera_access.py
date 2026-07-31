@@ -18,7 +18,8 @@ from src.core.settings import ApplicationSettings
 from src.device_runtime import (
     DeviceCapability,
     DeviceContractError,
-    DeviceNotRegisteredError,
+    DeviceErrorCategory,
+    DeviceOperationError,
     DeviceRegistration,
     DeviceRuntime,
     ResourceArbiter,
@@ -109,9 +110,13 @@ class CameraAccessServiceTests(unittest.TestCase):
             simulation=True,
         )
 
-        with self.assertRaises(DeviceNotRegisteredError):
+        with self.assertRaises(DeviceOperationError) as raised:
             services.devices.initialize("missing-device")
 
+        self.assertEqual(
+            DeviceErrorCategory.UNAVAILABLE,
+            raised.exception.category,
+        )
         self.assertIsNone(services.resources.owner_of("missing-device"))
         self.assertFalse(services.devices.shutdown_all())
 

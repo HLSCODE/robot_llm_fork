@@ -9,6 +9,7 @@ import time
 
 from ..device_runtime import (
     ArmId,
+    DeviceOperationError,
     DeviceRuntime,
     GripperControl,
     JointVector,
@@ -16,6 +17,7 @@ from ..device_runtime import (
     ResourceLease,
     RobotTeleoperation,
 )
+from ..device_runtime.errors import normalize_device_error
 from ..device_runtime.ids import ROBOT_SYSTEM
 
 
@@ -174,9 +176,15 @@ class TeleoperationService:
                         ROBOT_SYSTEM,
                         RobotTeleoperation,
                     )
-                except Exception:
+                except Exception as exc:
                     lease.release()
-                    raise
+                    if isinstance(exc, DeviceOperationError):
+                        raise
+                    raise normalize_device_error(
+                        exc,
+                        device_id=ROBOT_SYSTEM,
+                        operation="teleoperation.start",
+                    ) from exc
                 self._lease = lease
             session = self._owners.setdefault(
                 normalized_owner,
@@ -263,6 +271,14 @@ class TeleoperationService:
                 follow=follow,
                 trajectory_mode=trajectory_mode,
             )
+        except DeviceOperationError:
+            raise
+        except Exception as exc:
+            raise normalize_device_error(
+                exc,
+                device_id=ROBOT_SYSTEM,
+                operation="teleoperation.follow_joints",
+            ) from exc
         finally:
             self._operation_lock.release()
         with self._lock:
@@ -300,6 +316,14 @@ class TeleoperationService:
             self._operation_lock.acquire()
         try:
             gripper.move_gripper(arm_id, normalized_position)
+        except DeviceOperationError:
+            raise
+        except Exception as exc:
+            raise normalize_device_error(
+                exc,
+                device_id=ROBOT_SYSTEM,
+                operation="teleoperation.move_gripper",
+            ) from exc
         finally:
             self._operation_lock.release()
         with self._lock:

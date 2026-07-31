@@ -138,6 +138,8 @@ class ActionHandlerResultTests(unittest.TestCase):
                 "code": "device_operation_failed",
                 "operation": "robot.move",
                 "device_id": "robot-system",
+                "error_category": "internal",
+                "raw_error_code": "",
             },
             result.to_event_data(),
         )

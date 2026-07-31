@@ -3,10 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+import logging
 import time
 from typing import Any, Protocol, TypeVar
 
 from ..core.models import ActionType
+from ..device_runtime.errors import normalize_device_error
+from ..device_runtime.models import DeviceErrorCategory
 from .action_control import (
     ActionControlPolicy,
     ActionControlPolicyResolver,
@@ -17,6 +20,7 @@ from .control import ExecutionControl
 ActionLog = Callable[[str, str], None]
 ActionParameters = Mapping[str, Any]
 _ResultT = TypeVar("_ResultT")
+logger = logging.getLogger(__name__)
 
 
 class ActionCancelledError(RuntimeError):
@@ -59,6 +63,8 @@ class ActionHandlerResult:
     message: str = ""
     operation: str = ""
     device_id: str = ""
+    error_category: str = ""
+    raw_error_code: str = ""
 
     def __post_init__(self) -> None:
         if self.status is ActionResultStatus.SUCCEEDED:
@@ -83,6 +89,8 @@ class ActionHandlerResult:
         message: str = "",
         operation: str = "",
         device_id: str = "",
+        error_category: str = "",
+        raw_error_code: str = "",
     ) -> ActionHandlerResult:
         return cls(
             status=ActionResultStatus.SUCCEEDED,
@@ -90,6 +98,8 @@ class ActionHandlerResult:
             message=message,
             operation=operation,
             device_id=device_id,
+            error_category=error_category,
+            raw_error_code=raw_error_code,
         )
 
     @classmethod
@@ -100,13 +110,29 @@ class ActionHandlerResult:
         *,
         operation: str = "",
         device_id: str = "",
+        error_category: str = "",
+        raw_error_code: str = "",
     ) -> ActionHandlerResult:
+        if not error_category and device_id:
+            error_category = {
+                ActionResultCode.DEVICE_UNAVAILABLE: (
+                    DeviceErrorCategory.UNAVAILABLE.value
+                ),
+                ActionResultCode.DEVICE_OPERATION_FAILED: (
+                    DeviceErrorCategory.INTERNAL.value
+                ),
+                ActionResultCode.OPERATION_REJECTED: (
+                    DeviceErrorCategory.REJECTED.value
+                ),
+            }.get(code, "")
         return cls(
             status=ActionResultStatus.FAILED,
             code=code,
             message=message,
             operation=operation,
             device_id=device_id,
+            error_category=error_category,
+            raw_error_code=raw_error_code,
         )
 
     def to_event_data(self) -> dict[str, str]:
@@ -115,6 +141,8 @@ class ActionHandlerResult:
             "code": self.code.value,
             "operation": self.operation,
             "device_id": self.device_id,
+            "error_category": self.error_category,
+            "raw_error_code": self.raw_error_code,
         }
 
     def __bool__(self) -> bool:
@@ -245,7 +273,44 @@ class ActionExecutionContext:
         operation: str = "",
         device_id: str = "",
         log: bool = True,
+        error: Exception | None = None,
     ) -> ActionHandlerResult:
+        error_category = ""
+        raw_error_code = ""
+        if error is not None:
+            fallback_category = (
+                DeviceErrorCategory.UNAVAILABLE
+                if code is ActionResultCode.DEVICE_UNAVAILABLE
+                else DeviceErrorCategory.INTERNAL
+            )
+            normalized = normalize_device_error(
+                error,
+                device_id=device_id,
+                operation=operation,
+                fallback_category=fallback_category,
+            )
+            message = normalized.user_message
+            error_category = normalized.category.value
+            raw_error_code = normalized.raw_error_code
+            if (
+                normalized.category is DeviceErrorCategory.REJECTED
+                and code is ActionResultCode.DEVICE_OPERATION_FAILED
+            ):
+                code = ActionResultCode.OPERATION_REJECTED
+            logger.error(
+                "Device failure: device_id=%s operation=%s category=%s "
+                "raw_error_code=%s diagnostic=%s",
+                device_id,
+                operation,
+                error_category,
+                raw_error_code,
+                normalized.diagnostic_message,
+                exc_info=(
+                    type(error),
+                    error,
+                    error.__traceback__,
+                ),
+            )
         if log:
             self.log(message, "error")
         return ActionHandlerResult.failed(
@@ -253,6 +318,8 @@ class ActionExecutionContext:
             message,
             operation=operation,
             device_id=device_id,
+            error_category=error_category,
+            raw_error_code=raw_error_code,
         )
 
     def _timeout_message(self) -> str:
