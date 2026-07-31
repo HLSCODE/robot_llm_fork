@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from ..core.settings import DeviceSettings, RobotSettings
+from ..core.settings import RobotSettings
 from .adapters import (
     RealManGripperOptions,
     RealManRobotAdapter,
@@ -22,7 +22,7 @@ class RobotProviderDefinition:
 
     name: str
     capabilities: frozenset[DeviceCapability]
-    create: Callable[[RobotSettings, DeviceSettings], RobotSystem]
+    create: Callable[[RobotSettings], RobotSystem]
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -140,7 +140,6 @@ def resolve_robot_provider(settings: RobotSettings) -> RobotProviderDefinition:
 
 def _create_realman_robot(
     robot_settings: RobotSettings,
-    device_settings: DeviceSettings,
 ) -> RobotSystem:
     from ..arm_sdk import RobotController
     if RobotController is None:

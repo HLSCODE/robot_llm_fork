@@ -1,26 +1,15 @@
 """串口 / ModBus 设备驱动"""
 
-try:
-    from .kuaihuanshou import Kuaihuanshou
-except ImportError:
-    Kuaihuanshou = None
+from .adp import ADP
+from .kuaihuanshou import Kuaihuanshou
+from .modbus_motor import ModbusMotor
+from .pwm_neck import PWMNeckController
+from .relay import RelayController
 
-try:
-    from .relay import RelayController
-except ImportError:
-    RelayController = None
-
-try:
-    from .adp import ADP
-except ImportError:
-    ADP = None
-
-try:
-    from .modbus_motor import ModbusMotor
-except ImportError:
-    ModbusMotor = None
-
-try:
-    from .pwm_neck import PWMNeckController
-except ImportError:
-    PWMNeckController = None
+__all__ = [
+    "ADP",
+    "Kuaihuanshou",
+    "ModbusMotor",
+    "PWMNeckController",
+    "RelayController",
+]

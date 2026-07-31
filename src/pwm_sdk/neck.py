@@ -42,10 +42,8 @@ class NeckController:
 
     Parameters
     ----------
-    serial_port : str
-        Serial port identifier, e.g. ``"COM3"`` or ``"/dev/ttyUSB0"``.
-    baud_rate : int
-        Baud rate for the serial connection.
+    transport : Transport
+        Explicitly owned byte transport supplied by the composition root.
     horizontal_config : HorizontalServoConfig, optional
         Configuration for the horizontal (left-right) servo.
     vertical_config : VerticalServoConfig, optional
@@ -53,7 +51,7 @@ class NeckController:
 
     Examples
     --------
-    >>> ctrl = NeckController("COM3", 9600)
+    >>> ctrl = NeckController(transport)
     >>> ctrl.move_to(1800, ServoAxis.HORIZONTAL)
     >>> ctrl.move_offset(-100, ServoAxis.VERTICAL)
     >>> ctrl.reset()

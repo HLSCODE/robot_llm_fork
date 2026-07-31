@@ -167,6 +167,13 @@ class ActionControlPolicyTests(unittest.TestCase):
                 "tool_rack.change_tool",
             ),
             (
+                resolve_change_tool_control_policy,
+                {"Operation": "放"},
+                ActionCancellationMode.DEVICE_ASSISTED,
+                (ROBOT_SYSTEM, PIPETTE),
+                "tool_rack.change_tool",
+            ),
+            (
                 resolve_vision_capture_control_policy,
                 {},
                 ActionCancellationMode.DEVICE_ASSISTED,

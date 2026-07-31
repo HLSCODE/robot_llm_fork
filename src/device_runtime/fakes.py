@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -150,9 +151,17 @@ class SimulatedRobotSystem:
     def is_trajectory_complete(self, _arm: ArmId) -> bool:
         return True
 
-    def change_tool(self, slot: int, *, attach: bool) -> None:
+    def change_tool(
+        self,
+        slot: int,
+        *,
+        attach: bool,
+        eject_tool: Callable[[], bool] | None = None,
+    ) -> None:
         if slot not in (1, 2):
             raise ValueError(f"unsupported tool slot: {slot}")
+        if not attach and eject_tool is not None and not eject_tool():
+            raise RuntimeError("tool ejector reported failure")
         self.tool_slot = slot if attach else None
 
     def close(self) -> None:

@@ -266,7 +266,6 @@ class RealManRobotAdapterTests(unittest.TestCase):
             self.controller,
             default_motion=MotionOptions(velocity_percent=20),
             tool_rack_options=_tool_rack_options(),
-            eject_tool=lambda: True,
         )
 
     def test_adapter_implements_vendor_neutral_contract(self):
@@ -313,7 +312,11 @@ class RealManRobotAdapterTests(unittest.TestCase):
             "movej_canfd",
             self.controller.robot2_ctrl.robot.calls[-1][0],
         )
-        self.adapter.change_tool(1, attach=False)
+        self.adapter.change_tool(
+            1,
+            attach=False,
+            eject_tool=lambda: True,
+        )
         tool_calls = self.controller.robot2_ctrl.robot.calls[-3:]
         self.assertEqual(
             ["movel", "movel", "movel"],
@@ -357,7 +360,6 @@ class RealManRobotAdapterTests(unittest.TestCase):
                 blocking=False,
             ),
             tool_rack_options=_tool_rack_options(ArmId.LEFT),
-            eject_tool=lambda: True,
         )
 
         adapter.change_tool(2, attach=True)
@@ -379,14 +381,17 @@ class RealManRobotAdapterTests(unittest.TestCase):
             self.controller,
             default_motion=MotionOptions(),
             tool_rack_options=_tool_rack_options(),
-            eject_tool=lambda: False,
         )
 
         with self.assertRaisesRegex(
             RobotOperationError,
             "tool ejector reported failure",
         ):
-            adapter.change_tool(1, attach=False)
+            adapter.change_tool(
+                1,
+                attach=False,
+                eject_tool=lambda: False,
+            )
 
     def test_adapter_normalizes_errors_and_trajectory_results(self):
         self.controller.robot1_ctrl.robot.state_code = 7
@@ -493,7 +498,6 @@ class RobotProviderContractTests(unittest.TestCase):
                 controller,
                 default_motion=MotionOptions(),
                 tool_rack_options=_tool_rack_options(),
-                eject_tool=lambda: True,
             ),
             SimulatedRobotSystem(),
         )

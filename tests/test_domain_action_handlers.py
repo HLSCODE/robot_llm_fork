@@ -21,7 +21,7 @@ from src.device_runtime import (
     RobotSystem,
 )
 from src.device_runtime.factory import create_device_runtime
-from src.device_runtime.ids import CAMERA, ROBOT_SYSTEM
+from src.device_runtime.ids import CAMERA, PIPETTE, ROBOT_SYSTEM
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -72,8 +72,50 @@ class _ToolRack:
     def __init__(self) -> None:
         self.calls: list[tuple[int, bool]] = []
 
-    def change_tool(self, slot: int, *, attach: bool) -> None:
+    def change_tool(
+        self,
+        slot: int,
+        *,
+        attach: bool,
+        eject_tool=None,
+    ) -> None:
+        if not attach and eject_tool is not None:
+            eject_tool()
         self.calls.append((slot, attach))
+
+
+class _Pipette:
+    def __init__(self) -> None:
+        self.ejected = False
+
+    def initialize(self) -> bool:
+        return True
+
+    def set_absorb_speed(self, _speed_ul_s: int) -> bool:
+        return True
+
+    def set_dispense_speed(self, _speed_ul_s: int) -> bool:
+        return True
+
+    def absorb(self, _volume_ul: int, _speed_ul_s: int | None = None) -> bool:
+        return True
+
+    def dispense(
+        self,
+        _volume_ul: int,
+        _speed_ul_s: int | None = None,
+    ) -> bool:
+        return True
+
+    def dispense_all(self, _speed_ul_s: int | None = None) -> bool:
+        return True
+
+    def eject_tip(self) -> bool:
+        self.ejected = True
+        return True
+
+    def close(self) -> None:
+        return None
 
 
 def _runtime_with_robot(
@@ -196,6 +238,15 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
             tool_rack,
             DeviceCapability.TOOL_RACK,
         )
+        pipette = _Pipette()
+        runtime.register(
+            DeviceRegistration(
+                device_id=PIPETTE,
+                capabilities=frozenset({DeviceCapability.PIPETTE}),
+                factory=lambda: pipette,
+                close=lambda _device: None,
+            )
+        )
         handler = ChangeToolActionHandler(runtime)
         context, _logs = _action_context()
 
@@ -206,6 +257,7 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
             ).successful
         )
         self.assertEqual([(2, False)], tool_rack.calls)
+        self.assertTrue(pipette.ejected)
 
     def test_invalid_change_tool_parameters_do_not_initialize_robot(self):
         created = 0

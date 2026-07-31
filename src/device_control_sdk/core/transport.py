@@ -85,15 +85,6 @@ class SerialTransport(StrategyTransport):
         open_retry_delay_seconds: float = 0.0,
         serial_factory: Callable[..., object] | None = None,
     ) -> None:
-        try:
-            import serial
-        except ImportError as exc:
-            raise TransportError(
-                "pyserial is required",
-                category=TransportErrorCategory.DEPENDENCY,
-                operation="import",
-            ) from exc
-
         settings = (
             port
             if isinstance(port, SerialSettings)
@@ -116,7 +107,7 @@ class SerialTransport(StrategyTransport):
         self.baudrate = settings.baudrate
         self.timeout = settings.timeout_seconds
         self._lock = threading.Lock()
-        self._serial_factory = serial_factory or serial.Serial
+        self._serial_factory = serial_factory or _load_serial_factory()
         self._serial = self._open()
 
     def transact_with_strategy(self, strategy: SerialExchangeStrategy) -> bytes:
@@ -197,4 +188,16 @@ class SerialTransport(StrategyTransport):
 def _modbus_rtu_inter_frame_delay(baudrate: int) -> float:
     bits_per_char = 11
     return MODBUS_RTU_INTER_FRAME_GAP_CHARS * bits_per_char / max(int(baudrate), 1)
+
+
+def _load_serial_factory() -> Callable[..., object]:
+    try:
+        import serial
+    except ImportError as exc:
+        raise TransportError(
+            "pyserial is required",
+            category=TransportErrorCategory.DEPENDENCY,
+            operation="import",
+        ) from exc
+    return serial.Serial
 

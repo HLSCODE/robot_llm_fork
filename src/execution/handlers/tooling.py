@@ -57,8 +57,13 @@ class ChangeToolActionHandler:
                 ROBOT_SYSTEM,
                 ToolRackControl,
             )
+            pipette = (
+                self._device_runtime.require(PIPETTE, Pipette)
+                if operation == "放"
+                else None
+            )
         except Exception as exc:
-            message = f"工具架设备不可用: {exc}"
+            message = f"换枪所需设备不可用: {exc}"
             return context.failure(
                 ActionResultCode.DEVICE_UNAVAILABLE,
                 message,
@@ -67,16 +72,14 @@ class ChangeToolActionHandler:
             )
 
         try:
-            eject_tool = None
-            if operation == "放":
-                pipette = self._device_runtime.require(PIPETTE, Pipette)
-                eject_tool = pipette.eject_tip
             context.invoke(
                 self._OPERATION,
                 lambda: tool_rack.change_tool(
                     slot,
                     attach=operation == "取",
-                    eject_tool=eject_tool,
+                    eject_tool=(
+                        pipette.eject_tip if pipette is not None else None
+                    ),
                 ),
             )
         except (ActionCancelledError, ActionTimeoutError):

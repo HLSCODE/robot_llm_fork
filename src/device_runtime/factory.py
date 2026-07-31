@@ -158,7 +158,7 @@ def _register_real_devices(
         _registration(
             ROBOT_SYSTEM,
             set(robot_provider.capabilities),
-            lambda: robot_provider.create(settings.robot, settings.devices),
+            lambda: robot_provider.create(settings.robot),
         )
     )
     runtime.register(
