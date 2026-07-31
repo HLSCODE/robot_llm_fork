@@ -98,7 +98,13 @@ class TrajectoryControl(Protocol):
 
 @runtime_checkable
 class ToolRackControl(Protocol):
-    def change_tool(self, slot: int, *, attach: bool) -> None: ...
+    def change_tool(
+        self,
+        slot: int,
+        *,
+        attach: bool,
+        eject_tool: Callable[[], bool] | None = None,
+    ) -> None: ...
 
 
 @runtime_checkable

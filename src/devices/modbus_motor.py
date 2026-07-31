@@ -4,20 +4,15 @@ import threading
 import tkinter as tk
 from tkinter import messagebox
 from collections.abc import Callable
-import serial
 import time
+
+from ..device_control_sdk import ModbusRTUStrategy, Transport
 
 # ---------- Modbus 驱动器 ----------
 class ModbusMotor:
-    def __init__(self, port, baudrate, slave_id, timeout):
-        """Initialize the body axis from explicit device settings."""
+    def __init__(self, transport: Transport, slave_id: int):
         self.slave_id = slave_id
-        self.serial = serial.Serial(port=port, baudrate=baudrate,
-                                    bytesize=8, parity='N', stopbits=1,
-                                    timeout=timeout)
-        if not self.serial.is_open:
-            raise Exception("串口打开失败")
-        print(f"已连接 Modbus 驱动器 (port={port}, baudrate={baudrate})")
+        self._transport = transport
 
         # 寄存器偏移
         self.trigger   = 0x6002
@@ -56,21 +51,19 @@ class ModbusMotor:
     # ---------- 收发 ----------
     def write_register(self, addr, val):
         frame = self._create_modbus_frame(0x06, addr, val)
-        self.serial.reset_input_buffer()
-        self.serial.write(frame)
-        time.sleep(0.02)
-        rsp = self.serial.read(8)
+        rsp = self._transport.transact_with_strategy(
+            ModbusRTUStrategy(bytes(frame), 8)
+        )
         if len(rsp) != 8 or rsp[0] != self.slave_id or rsp[1] != 0x06:
-            raise Exception("写寄存器异常")
+            raise RuntimeError("body axis write register response invalid")
 
     def read_holding_registers(self, addr, cnt=1):
         frame = self._create_modbus_frame(0x03, addr, cnt=cnt)
-        self.serial.reset_input_buffer()
-        self.serial.write(frame)
-        time.sleep(0.02)
-        rsp = self.serial.read(5 + 2 * cnt)
+        rsp = self._transport.transact_with_strategy(
+            ModbusRTUStrategy(bytes(frame), 5 + 2 * cnt)
+        )
         if len(rsp) < 5 or rsp[0] != self.slave_id or rsp[1] != 0x03:
-            raise Exception("读寄存器异常")
+            raise RuntimeError("body axis read register response invalid")
         return [(rsp[3 + i * 2] << 8) | rsp[4 + i * 2] for i in range(cnt)]
 
     # ---------- 业务 ----------
@@ -80,12 +73,9 @@ class ModbusMotor:
 
     def emergency_stop(self):
         """急停：写 0x6002=0x0008（厂家定义）"""
-        try:
-            self.write_register(self.trigger, 0x040)
-            time.sleep(0.1)
-            self.enable()          # 清除报警
-        except Exception:
-            pass
+        self.write_register(self.trigger, 0x040)
+        time.sleep(0.1)
+        self.enable()
 
     def move_init(self):
         self.write_register(self.pr0_mode, 0x0001)
@@ -105,10 +95,7 @@ class ModbusMotor:
         self.write_register(self.trigger, 0x0010)
 
     def is_reached(self):
-        try:
-            return self.read_holding_registers(self.trigger, 1)[0] == 0
-        except Exception:
-            return None
+        return self.read_holding_registers(self.trigger, 1)[0] == 0
 
     def to_zero(self):
         self.write_register(0x600a, 0x000c)
@@ -118,8 +105,7 @@ class ModbusMotor:
             time.sleep(0.2)
 
     def close(self):
-        if self.serial and self.serial.is_open:
-            self.serial.close()
+        self._transport.close()
 
 
 # ---------- GUI ----------

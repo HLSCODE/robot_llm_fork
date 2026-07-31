@@ -178,8 +178,6 @@ class ExecutionWebSocketHandler:
         report = await asyncio.to_thread(self._server._services.safety.stop, mode)
         if report.execution_before.active and self._server._ai_execution_pending:
             self._server._execution_had_failure = True
-        for arm_name in self._server._teleop_modes:
-            self._server._teleop_modes[arm_name] = False
         await websocket.send(
             self._server._json_msg(
                 {

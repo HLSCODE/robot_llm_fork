@@ -8,15 +8,24 @@ from .exceptions import (
     StepperSDKError,
     TransientReadingError,
     TransportError,
+    TransportErrorCategory,
     UnsupportedMotionModeError,
 )
-from .strategies import FixedLengthStrategy, ModbusRTUStrategy, ReadUntilStrategy, SerialExchangeStrategy, WriteOnlyStrategy
+from .strategies import (
+    FixedLengthStrategy,
+    ModbusRTUStrategy,
+    ReadSomeStrategy,
+    ReadUntilStrategy,
+    SerialExchangeStrategy,
+    WriteOnlyStrategy,
+)
 from .transport import (
     DEFAULT_BAUDRATE,
     DEFAULT_BYTESIZE,
     DEFAULT_PARITY,
     DEFAULT_STOPBITS,
     DEFAULT_TIMEOUT,
+    SerialSettings,
     SerialTransport,
     StrategyTransport,
     Transport,

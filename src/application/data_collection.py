@@ -6,9 +6,10 @@ from enum import Enum
 from threading import RLock
 from typing import Any, Protocol
 
-from ..device_runtime import ArmTelemetryReader, DepthCameraSource
+from ..device_runtime import ArmId, ArmTelemetryReader, DepthCameraSource
 from ..device_runtime.ids import ROBOT_SYSTEM
 from .camera_access import CameraAccessService, CameraSession
+from .teleoperation import DATA_COLLECTION_TELEOPERATION_OWNER
 
 
 class _DeviceManagementPort(Protocol):
@@ -23,9 +24,13 @@ class _TeleoperationPort(Protocol):
     @property
     def active(self) -> bool: ...
 
-    def start(self) -> None: ...
+    def start(
+        self,
+        owner_id: str,
+        arms: tuple[ArmId, ...],
+    ) -> object: ...
 
-    def stop(self) -> None: ...
+    def stop(self, owner_id: str) -> object: ...
 
 
 class DataCollectionState(str, Enum):
@@ -274,10 +279,12 @@ class DataCollectionService:
                 "start data collection episode",
             )
             recorder = self._require_recorder()
-            teleoperation_was_active = self._teleoperation.active
             recorder_start_invoked = False
             try:
-                self._teleoperation.start()
+                self._teleoperation.start(
+                    DATA_COLLECTION_TELEOPERATION_OWNER,
+                    (ArmId.LEFT, ArmId.RIGHT),
+                )
                 recorder_start_invoked = True
                 raw_result = recorder.start_recording()
                 if (
@@ -308,11 +315,12 @@ class DataCollectionService:
                             self._recorder_may_be_recording = False
                     except Exception as cleanup_exc:
                         cleanup_errors.append(f"stop recorder: {cleanup_exc}")
-                if not teleoperation_was_active:
-                    try:
-                        self._teleoperation.stop()
-                    except Exception as cleanup_exc:
-                        cleanup_errors.append(str(cleanup_exc))
+                try:
+                    self._teleoperation.stop(
+                        DATA_COLLECTION_TELEOPERATION_OWNER
+                    )
+                except Exception as cleanup_exc:
+                    cleanup_errors.append(str(cleanup_exc))
                 self._set_state(
                     DataCollectionState.FAULTED
                     if cleanup_errors
@@ -502,7 +510,9 @@ class DataCollectionService:
     ) -> None:
         if self._teleoperation_shared:
             try:
-                self._teleoperation.stop()
+                self._teleoperation.stop(
+                    DATA_COLLECTION_TELEOPERATION_OWNER
+                )
             except Exception as exc:
                 errors.append(f"stop teleoperation: {exc}")
         if camera_session is not None:

@@ -21,9 +21,6 @@ class WebSocketHandlerHost(Protocol):
     _minicpm_sessions: dict[int, dict[str, Any]]
     _ai_execution_pending: bool
     _execution_had_failure: bool
-    _teleop_modes: dict[str, bool]
-    _teleop_msg_counts: dict[str, int]
-    _last_grip: dict[str, int | None]
     _camera_preview_session: Any
     _camera_frame_subs: set[Any]
     _camera_push_task: Any
@@ -39,6 +36,8 @@ class WebSocketHandlerHost(Protocol):
     def _json_msg(self, data: Mapping[str, Any]) -> str: ...
 
     def _composition_origin(self, websocket: Any) -> str: ...
+
+    def _client_id(self, websocket: Any) -> str: ...
 
     def _parse_sequence(self, raw: list[Any]) -> list[Any]: ...
 

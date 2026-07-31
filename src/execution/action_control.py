@@ -268,9 +268,17 @@ def resolve_manipulate_control_policy(
 
 
 def resolve_change_tool_control_policy(
-    _parameters: ActionParameters,
+    parameters: ActionParameters,
 ) -> ActionControlPolicy:
-    return _robot_stoppable_policy("tool_rack.change_tool")
+    additional_devices = (
+        (PIPETTE,)
+        if str(parameters.get("Operation", "取")).strip() == "放"
+        else ()
+    )
+    return _robot_stoppable_policy(
+        "tool_rack.change_tool",
+        *additional_devices,
+    )
 
 
 def resolve_vision_capture_control_policy(

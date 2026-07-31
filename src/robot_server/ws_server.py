@@ -112,6 +112,8 @@ from ..application import (
     CameraSession,
     CompositionChangeType,
     CompositionEvent,
+    WEBSOCKET_TELEOPERATION_OWNER_PREFIX,
+    websocket_teleoperation_owner,
 )
 from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
 from .access_control import (
@@ -191,6 +193,7 @@ class RobotWebSocketServer:
         max_concurrent_requests: int = 16,
         max_queued_messages: int = 16,
         send_timeout_seconds: float = 2.0,
+        teleoperation_command_timeout_seconds: float = 1.0,
         audit_sink: AuditSink | None = None,
     ) -> None:
         normalized_host = host.strip()
@@ -204,6 +207,10 @@ class RobotWebSocketServer:
             raise ValueError("max_queued_messages must be positive")
         if send_timeout_seconds <= 0:
             raise ValueError("send_timeout_seconds must be positive")
+        if teleoperation_command_timeout_seconds <= 0:
+            raise ValueError(
+                "teleoperation_command_timeout_seconds must be positive"
+            )
 
         self._services = services
         self._host = normalized_host
@@ -211,6 +218,9 @@ class RobotWebSocketServer:
         self._max_message_size_bytes = max_message_size_bytes
         self._max_queued_messages = max_queued_messages
         self._send_timeout_seconds = send_timeout_seconds
+        self._teleoperation_command_timeout_seconds = (
+            teleoperation_command_timeout_seconds
+        )
         self._server: Any = None
         self._composition_unsubscribe = None
 
@@ -255,11 +265,6 @@ class RobotWebSocketServer:
         # AI 执行跟踪（用于发送 ai_execution_finished 事件）
         self._ai_execution_pending = False
         self._execution_had_failure = False
-
-        # 遥操作状态（双臂独立）
-        self._teleop_modes = {"左": False, "右": False}  # 双臂遥操作状态字典
-        self._teleop_msg_counts = {"左": 0, "右": 0}  # 双臂消息计数器字典
-        self._last_grip = {"左": None, "右": None}  # 夹爪状态跟踪（避免重复执行）
 
         self._execution_handler = ExecutionWebSocketHandler(self)
         self._composition_handler = CompositionWebSocketHandler(self)
@@ -1008,8 +1013,10 @@ class RobotWebSocketServer:
     ) -> None:
         try:
             await self._teleoperation_handler.close_data_collection()
-            if self._services.teleoperation.active:
-                await asyncio.to_thread(self._services.teleoperation.stop)
+            await asyncio.to_thread(
+                self._services.teleoperation.stop,
+                websocket_teleoperation_owner(client_id),
+            )
         except Exception as exc:
             logger.error(
                 "释放控制客户端会话失败: client_id=%s reason=%s error=%s",
@@ -1017,9 +1024,6 @@ class RobotWebSocketServer:
                 reason,
                 exc,
             )
-        finally:
-            for arm_name in self._teleop_modes:
-                self._teleop_modes[arm_name] = False
         await self._broadcast(
             {
                 "event": "control_released",
@@ -1040,6 +1044,23 @@ class RobotWebSocketServer:
                 await self._release_control_side_effects(
                     expired_client_id,
                     reason="expired",
+                )
+            stale_owners = await asyncio.to_thread(
+                self._services.teleoperation.expire_stale_owners,
+                owner_prefix=WEBSOCKET_TELEOPERATION_OWNER_PREFIX,
+                timeout_seconds=self._teleoperation_command_timeout_seconds,
+            )
+            for owner_id in stale_owners:
+                stale_client_id = owner_id.removeprefix(
+                    WEBSOCKET_TELEOPERATION_OWNER_PREFIX
+                )
+                try:
+                    self._access.release_control(stale_client_id)
+                except WebSocketAccessError:
+                    pass
+                await self._release_control_side_effects(
+                    stale_client_id,
+                    reason="teleoperation_watchdog",
                 )
 
     def _client_id(self, websocket: Any) -> str:
@@ -1112,6 +1133,7 @@ class RobotWebSocketServer:
         client_id = self._client_id(websocket)
         session = self._access.session(client_id)
         lease = self._access.control_snapshot()
+        teleoperation = self._services.teleoperation.snapshot()
         await websocket.send(
             self._json_msg(
                 {
@@ -1120,6 +1142,7 @@ class RobotWebSocketServer:
                     "authenticated": session.authenticated,
                     "authentication_configured": (self._access.authentication_configured),
                     "control_lease": lease.to_dict() if lease else None,
+                    "teleoperation": teleoperation.to_dict(),
                     "request_id": data["request_id"],
                 }
             )

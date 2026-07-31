@@ -440,7 +440,7 @@ ws.onmessage = (event) => {
 | action | 权限 | 含义 |
 |---|---|---|
 | `authenticate` | 公开 | 使用 `WEBSOCKET_AUTH_TOKEN` 认证当前连接 |
-| `control_status` | 公开 | 查询当前连接认证状态和控制租约 |
+| `control_status` | 公开 | 查询当前连接认证状态、控制租约和应用层遥操作 owner/活动臂/指令计数快照 |
 | `acquire_control` | 已认证 | 申请唯一控制权 |
 | `control_heartbeat` | 控制者 | 续期控制租约 |
 | `release_control` | 控制者 | 主动释放控制权及其会话资源 |

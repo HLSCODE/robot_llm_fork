@@ -10,6 +10,7 @@ from ..core.settings import (
     RobotSettings,
     VisionSettings,
 )
+from ..device_control_sdk import SerialSettings, SerialTransport
 from .adapters import (
     PipetteAdapter,
     RelayBankAdapter,
@@ -238,10 +239,14 @@ def _body_factory(settings: DeviceSettings) -> Any:
     if ModbusMotor is None:
         raise DeviceInitializationError("ModbusMotor unavailable")
     return ModbusMotor(
-        port=settings.body_serial_port,
-        baudrate=settings.body_baudrate,
+        transport=SerialTransport(
+            SerialSettings(
+                port=settings.body_serial_port,
+                baudrate=settings.body_baudrate,
+                timeout_seconds=settings.body_timeout,
+            )
+        ),
         slave_id=settings.body_slave_id,
-        timeout=settings.body_timeout,
     )
 
 
@@ -264,8 +269,15 @@ def _neck_factory(settings: DeviceSettings) -> Any:
         raise DeviceInitializationError("PWMNeckController unavailable")
     config = settings.pwm_neck_config()
     return PWMNeckController(
-        port=config["port"],
-        baudrate=config["baudrate"],
+        transport=SerialTransport(
+            SerialSettings(
+                port=str(config["port"]),
+                baudrate=int(config["baudrate"]),
+                timeout_seconds=1.0,
+                rts=False,
+                dtr=False,
+            )
+        ),
         horizontal_config=config["horizontal"],
         vertical_config=config["vertical"],
     )
@@ -278,9 +290,13 @@ def _relay_factory(settings: DeviceSettings) -> RelayBankAdapter:
         raise DeviceInitializationError("RelayController unavailable")
     return RelayBankAdapter(
         RelayController(
-            port=settings.relay_serial_port,
-            baudrate=settings.relay_baudrate,
-            timeout=settings.relay_timeout,
+            SerialTransport(
+                SerialSettings(
+                    port=settings.relay_serial_port,
+                    baudrate=settings.relay_baudrate,
+                    timeout_seconds=settings.relay_timeout,
+                )
+            )
         )
     )
 
@@ -292,30 +308,33 @@ def _tool_changer_factory(settings: DeviceSettings) -> ToolChangerAdapter:
         raise DeviceInitializationError("Kuaihuanshou unavailable")
     return ToolChangerAdapter(
         Kuaihuanshou(
-            port=settings.kuaihuanshou_serial_port,
-            baudrate=settings.kuaihuanshou_baudrate,
-            timeout=settings.kuaihuanshou_timeout,
+            SerialTransport(
+                SerialSettings(
+                    port=settings.kuaihuanshou_serial_port,
+                    baudrate=settings.kuaihuanshou_baudrate,
+                    timeout_seconds=settings.kuaihuanshou_timeout,
+                )
+            )
         )
     )
 
 
 def _pipette_factory(settings: DeviceSettings) -> PipetteAdapter:
     from ..devices import ADP
-    from ..devices.yiyeqiang_init import init_tip
-    from ..devices.yiyeqiang_out import eject_tip
-
     if ADP is None:
         raise DeviceInitializationError("ADP unavailable")
     return PipetteAdapter(
         ADP(
-            port=settings.adp_serial_port,
-            baudrate=settings.adp_baudrate,
-            timeout=settings.adp_timeout,
-            max_retries=settings.adp_max_retries,
+            SerialTransport(
+                SerialSettings(
+                    port=settings.adp_serial_port,
+                    baudrate=settings.adp_baudrate,
+                    timeout_seconds=settings.adp_timeout,
+                    open_attempts=settings.adp_max_retries,
+                    open_retry_delay_seconds=1.0,
+                )
+            )
         ),
-        tip_port=settings.kuaihuanshou_serial_port,
-        initialize_tip=init_tip,
-        eject_tip=eject_tip,
     )
 
 

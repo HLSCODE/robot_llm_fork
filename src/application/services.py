@@ -36,6 +36,7 @@ from .command_runtime import CommandRuntime
 from .composition import CompositionService
 from .safety import SafetyService
 from .localization import LocalizationService
+from .teleoperation import TeleoperationService
 
 if TYPE_CHECKING:
     from .data_collection import DataCollectionService
@@ -228,99 +229,6 @@ class ManualControlService:
     def _lease(self, resource_id: str, operation: str):
         owner_id = f"manual:{operation}:{uuid4().hex}"
         return self._resources.acquire(owner_id, (resource_id,))
-
-
-class TeleoperationService:
-    """Hold a robot resource lease for the whole teleoperation session."""
-
-    def __init__(
-        self,
-        runtime: DeviceRuntime,
-        resources: ResourceArbiter,
-    ) -> None:
-        self._runtime = runtime
-        self._resources = resources
-        self._lease: ResourceLease | None = None
-        self._lock = RLock()
-        self._operation_lock = RLock()
-
-    @property
-    def active(self) -> bool:
-        with self._lock:
-            return self._lease is not None
-
-    def start(self) -> None:
-        with self._lock:
-            if self._lease is not None:
-                return
-            lease = self._resources.acquire(
-                "teleoperation",
-                (ROBOT_SYSTEM,),
-            )
-            try:
-                self._runtime.require(ROBOT_SYSTEM, RobotTeleoperation)
-            except Exception:
-                lease.release()
-                raise
-            self._lease = lease
-
-    def stop(self) -> None:
-        with self._lock:
-            lease = self._lease
-            self._lease = None
-        if lease is not None:
-            with self._operation_lock:
-                pass
-            lease.release()
-
-    def release_after_safety_stop(self) -> None:
-        """Release the session without waiting on interrupted device I/O."""
-        with self._lock:
-            lease = self._lease
-            self._lease = None
-        if lease is not None:
-            lease.release()
-
-    def follow(
-        self,
-        arm: str,
-        joints: list[float],
-        *,
-        follow: bool,
-        trajectory_mode: int,
-    ) -> bool:
-        with self._lock:
-            self._require_active_unlocked()
-            teleoperation = self._runtime.require(
-                ROBOT_SYSTEM,
-                RobotTeleoperation,
-            )
-            self._operation_lock.acquire()
-        try:
-            teleoperation.follow_joints(
-                ArmId.parse(arm),
-                JointVector.from_iterable(joints),
-                follow=follow,
-                trajectory_mode=trajectory_mode,
-            )
-        finally:
-            self._operation_lock.release()
-        return True
-
-    def set_gripper(self, arm: str, position: int) -> bool:
-        with self._lock:
-            self._require_active_unlocked()
-            gripper = self._runtime.require(ROBOT_SYSTEM, GripperControl)
-            self._operation_lock.acquire()
-        try:
-            gripper.move_gripper(ArmId.parse(arm), int(position))
-        finally:
-            self._operation_lock.release()
-        return True
-
-    def _require_active_unlocked(self) -> None:
-        if self._lease is None:
-            raise RuntimeError("teleoperation session is not active")
 
 
 class RobotQueryService:

@@ -18,6 +18,12 @@
   50Hz         50Hz              50Hz                50Hz
 ```
 
+`TeleoperationService` 是遥操作状态的唯一所有者。每个 WebSocket 控制客户端使用
+`websocket:<client_id>` owner，数据采集使用独立的 `data-collection` owner。
+多个 owner 可以共享同一机械臂资源租约，但只能控制自己声明的臂；owner 离开时
+只释放自己的状态，最后一个 owner 离开后才释放机械臂租约。WebSocket Server
+不再维护遥操作模式、消息计数或夹爪位置的镜像字典。
+
 ### 性能指标
 - **指令频率**：50Hz（推荐）
 - **网络延迟**：<20ms（本地网络）
@@ -352,14 +358,13 @@ setTimeout(() => {
 - ⚠️ **未实现**：关节限位检查
 - ⚠️ **未实现**：速度限制检查
 - ✅ **已实现**：WebSocket 控制租约心跳、超时释放和遥操作停止
-- ⚠️ **未实现**：独立于控制租约的关节指令流 watchdog
+- ✅ **已实现**：独立于控制租约的逐臂关节指令流 watchdog
 
 ### 后续增强（Phase 2）
 需要添加以下安全措施：
 1. **关节限位检查**：每个关节的角度范围限制
 2. **速度限制检查**：相邻指令的变化率限制
-3. **指令流 watchdog**：在控制租约之外检测关节指令中断
-4. **紧急停止**：新增 `teleop_emergency_stop` 接口
+3. **紧急停止**：继续完成真实硬件最大停止时延验收
 
 ### 使用建议
 - 仅在安全环境下使用遥操作
@@ -379,11 +384,16 @@ WEBSOCKET_PORT=8765
 WEBSOCKET_AUTH_TOKEN=<运行时强随机密钥>
 WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
 WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
+TELEOPERATION_COMMAND_TIMEOUT_SECONDS=1.0
 ```
 
 当前 WebSocket API 版本为 `2.0`。包括 50Hz 关节指令在内的每个请求都必须
 携带 `api_version: "2.0"` 和唯一 `request_id`；默认每客户端上限为每秒
 120 个请求，入站队列大小由 `WEBSOCKET_MAX_QUEUED_MESSAGES` 配置。
+任一已启用机械臂超过 `TELEOPERATION_COMMAND_TIMEOUT_SECONDS` 未收到成功的
+关节指令时，服务会停止该 WebSocket owner、撤销控制租约、清理关联数据采集，
+并广播 `control_released(reason="teleoperation_watchdog")`。控制心跳不能代替
+关节指令流 watchdog。
 
 启动服务：
 ```bash

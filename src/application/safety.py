@@ -23,7 +23,7 @@ class _ExecutionPort(Protocol):
 
 
 class _TeleoperationPort(Protocol):
-    def stop(self) -> None: ...
+    def stop_all(self) -> None: ...
     def release_after_safety_stop(self) -> None: ...
 
 
@@ -179,7 +179,7 @@ class SafetyService:
         self._close_registered_sessions(errors)
         self._try_session_action(
             "teleoperation release",
-            self._teleoperation.stop,
+            self._teleoperation.stop_all,
             errors,
         )
         self._try_session_action(

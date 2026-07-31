@@ -5,6 +5,7 @@ from functools import partial
 import logging
 
 from ...application import DataCollectionError, DataCollectionState
+from ...application import websocket_teleoperation_owner
 from ..protocol import WebSocketRequest
 from .base import WebSocketHandlerHost
 
@@ -224,7 +225,9 @@ class TeleoperationWebSocketHandler:
 
         try:
             await asyncio.to_thread(
-                self._server._services.teleoperation.start
+                self._server._services.teleoperation.start,
+                self._owner_id(websocket),
+                arms_to_start,
             )
         except Exception as exc:
             await websocket.send(
@@ -236,11 +239,6 @@ class TeleoperationWebSocketHandler:
                 )
             )
             return
-
-        # 启动指定臂的遥操作模式
-        for arm_name in arms_to_start:
-            self._server._teleop_modes[arm_name] = True
-            self._server._teleop_msg_counts[arm_name] = 0
 
         logger.info("遥操作模式已启动: %s", arms_to_start)
         await websocket.send(
@@ -293,7 +291,11 @@ class TeleoperationWebSocketHandler:
                 return
 
             # 检查该臂是否已启动遥操作
-            if not self._server._teleop_modes.get(arm):
+            owner_id = self._owner_id(websocket)
+            owner = self._server._services.teleoperation.snapshot().owner(
+                owner_id
+            )
+            if owner is None or not owner.controls(arm):
                 await websocket.send(
                     self._server._json_msg(
                         {"event": "teleop_error", "message": f"{arm}臂未启动遥操作模式"}
@@ -301,42 +303,30 @@ class TeleoperationWebSocketHandler:
                 )
                 return
 
-            # 采样日志：每10条记录一次
-            self._server._teleop_msg_counts[arm] += 1
-            if self._server._teleop_msg_counts[arm] % 10 == 0:
-                logger.debug(
-                    "遥操作指令 #%d: arm=%s, joints=%s",
-                    self._server._teleop_msg_counts[arm],
-                    arm,
-                    joints,
-                )
-
             # 立即发送到机械臂
             if self._server._robot_system:
                 try:
-                    success = await asyncio.to_thread(
+                    command = await asyncio.to_thread(
                         partial(
                             self._server._services.teleoperation.follow,
+                            owner_id,
                             arm,
                             joints,
                             follow=follow,
                             trajectory_mode=trajectory_mode,
                         )
                     )
-                    if not success:
-                        logger.warning(
-                            "遥操作指令 #%d 执行失败",
-                            self._server._teleop_msg_counts[arm],
-                        )
-                        await websocket.send(
-                            self._server._json_msg(
-                                {"event": "teleop_error", "message": "关节指令执行失败"}
-                            )
+                    if command.command_count % 10 == 0:
+                        logger.debug(
+                            "遥操作指令 #%d: arm=%s, joints=%s",
+                            command.command_count,
+                            arm,
+                            joints,
                         )
                 except Exception as e:
                     logger.error(
-                        "遥操作执行异常 #%d: %s",
-                        self._server._teleop_msg_counts[arm],
+                        "遥操作执行异常: arm=%s error=%s",
+                        arm,
                         str(e),
                     )
                     await websocket.send(
@@ -345,11 +335,9 @@ class TeleoperationWebSocketHandler:
                         )
                     )
 
-            # 处理夹爪指令（直接传原始位置值，仅在值变化时触发）
-            if grip is not None and grip != self._server._last_grip.get(arm):
-                self._server._last_grip[arm] = grip
+            if grip is not None:
                 self._server._schedule_background_task(
-                    self._execute_grip_async(arm, grip),
+                    self._execute_grip_async(owner_id, arm, grip),
                     name=f"WebSocketGrip-{arm}",
                 )
 
@@ -388,7 +376,11 @@ class TeleoperationWebSocketHandler:
                     return
 
                 # 检查该臂是否已启动遥操作
-                if not self._server._teleop_modes.get(arm_name):
+                owner_id = self._owner_id(websocket)
+                owner = self._server._services.teleoperation.snapshot().owner(
+                    owner_id
+                )
+                if owner is None or not owner.controls(arm_name):
                     await websocket.send(
                         self._server._json_msg(
                             {
@@ -399,17 +391,6 @@ class TeleoperationWebSocketHandler:
                     )
                     return
 
-            # 采样日志：每10条记录一次（使用左臂计数）
-            self._server._teleop_msg_counts["左"] += 1
-            self._server._teleop_msg_counts["右"] += 1
-            if self._server._teleop_msg_counts["左"] % 10 == 0:
-                logger.debug(
-                    "双臂遥操作指令 #%d: 左=%s, 右=%s",
-                    self._server._teleop_msg_counts["左"],
-                    joints_data.get("左"),
-                    joints_data.get("右"),
-                )
-
             # 并行执行双臂指令
             if self._server._robot_system:
                 try:
@@ -419,6 +400,7 @@ class TeleoperationWebSocketHandler:
                             asyncio.to_thread(
                                 partial(
                                     self._server._services.teleoperation.follow,
+                                    owner_id,
                                     arm_name,
                                     joints_data[arm_name],
                                     follow=follow,
@@ -429,31 +411,20 @@ class TeleoperationWebSocketHandler:
                         )
                     )
                     success_results = dict(zip(arms, results, strict=True))
-
-                    if not all(success_results.values()):
-                        failed_arms = [
-                            arm
-                            for arm, success in success_results.items()
-                            if not success
-                        ]
-                        logger.warning(
-                            "双臂遥操作指令 #%d 部分执行失败: %s",
-                            self._server._teleop_msg_counts["左"],
-                            failed_arms,
-                        )
-                        await websocket.send(
-                            self._server._json_msg(
-                                {
-                                    "event": "teleop_error",
-                                    "message": f"部分臂执行失败: {failed_arms}",
-                                }
-                            )
+                    if any(
+                        result.command_count % 10 == 0
+                        for result in success_results.values()
+                    ):
+                        logger.debug(
+                            "双臂遥操作指令: counts=%s",
+                            {
+                                arm_name: result.command_count
+                                for arm_name, result in success_results.items()
+                            },
                         )
                 except Exception as e:
                     logger.error(
-                        "双臂遥操作执行异常 #%d: %s",
-                        self._server._teleop_msg_counts["左"],
-                        str(e),
+                        "双臂遥操作执行异常: %s", str(e)
                     )
                     await websocket.send(
                         self._server._json_msg(
@@ -464,14 +435,13 @@ class TeleoperationWebSocketHandler:
             # 处理双臂夹爪指令
             if isinstance(grip, dict):
                 for arm_name, grip_val in grip.items():
-                    if (
-                        arm_name in self._server._last_grip
-                        and grip_val is not None
-                        and grip_val != self._server._last_grip.get(arm_name)
-                    ):
-                        self._server._last_grip[arm_name] = grip_val
+                    if grip_val is not None:
                         self._server._schedule_background_task(
-                            self._execute_grip_async(arm_name, grip_val),
+                            self._execute_grip_async(
+                                owner_id,
+                                arm_name,
+                                grip_val,
+                            ),
                             name=f"WebSocketGrip-{arm_name}",
                         )
 
@@ -525,20 +495,19 @@ class TeleoperationWebSocketHandler:
                 )
                 return
 
-        # 记录停止前的总计数
-        total_counts = {}
-        for arm_name in arms_to_stop:
-            total_counts[arm_name] = self._server._teleop_msg_counts[arm_name]
-
-        # 停止指定臂的遥操作模式
-        for arm_name in arms_to_stop:
-            self._server._teleop_modes[arm_name] = False
-            self._server._teleop_msg_counts[arm_name] = 0
-            self._server._last_grip[arm_name] = None  # 重置夹爪跟踪状态
-        if not any(self._server._teleop_modes.values()):
-            await asyncio.to_thread(
-                self._server._services.teleoperation.stop
+        stopped = await asyncio.to_thread(
+            self._server._services.teleoperation.stop,
+            self._owner_id(websocket),
+            arms_to_stop,
+        )
+        total_counts = {
+            arm_name: (
+                stopped.command_count(arm_name)
+                if stopped is not None
+                else 0
             )
+            for arm_name in arms_to_stop
+        }
 
         logger.info("遥操作模式已停止: %s，共执行指令 %s", arms_to_stop, total_counts)
         await websocket.send(
@@ -605,7 +574,6 @@ class TeleoperationWebSocketHandler:
             await self._send_data_collection_error(websocket, exc)
             return
 
-        self._set_data_collection_teleoperation_active()
         logger.info(
             "episode %d 开始记录（已共享遥操作控制会话）",
             result.episode_id,
@@ -653,15 +621,9 @@ class TeleoperationWebSocketHandler:
                 self._server._services.data_collection.end_session
             )
         except DataCollectionError as exc:
-            if (
-                self._server._services.data_collection.snapshot().state
-                is DataCollectionState.IDLE
-            ):
-                self._reset_data_collection_teleoperation()
             await self._send_data_collection_error(websocket, exc)
             return
 
-        self._reset_data_collection_teleoperation()
         logger.info("数据采集会话已结束（已释放共享遥操作控制）")
         await websocket.send(
             self._server._json_msg(
@@ -675,16 +637,9 @@ class TeleoperationWebSocketHandler:
     async def close_data_collection(self) -> None:
         """Release application-owned collection resources on host cleanup."""
 
-        try:
-            await asyncio.to_thread(
-                self._server._services.data_collection.close
-            )
-        finally:
-            if (
-                self._server._services.data_collection.snapshot().state
-                is DataCollectionState.IDLE
-            ):
-                self._reset_data_collection_teleoperation()
+        await asyncio.to_thread(
+            self._server._services.data_collection.close
+        )
 
     async def _send_data_collection_error(
         self,
@@ -703,19 +658,12 @@ class TeleoperationWebSocketHandler:
                 payload["frames"] = error.frames
         await websocket.send(self._server._json_msg(payload))
 
-    def _set_data_collection_teleoperation_active(self) -> None:
-        for arm_name in ("左", "右"):
-            self._server._teleop_modes[arm_name] = True
-            self._server._teleop_msg_counts[arm_name] = 0
-            self._server._last_grip[arm_name] = None
-
-    def _reset_data_collection_teleoperation(self) -> None:
-        for arm_name in ("左", "右"):
-            self._server._teleop_modes[arm_name] = False
-            self._server._teleop_msg_counts[arm_name] = 0
-            self._server._last_grip[arm_name] = None
-
-    async def _execute_grip_async(self, arm: str, position: int) -> None:
+    async def _execute_grip_async(
+        self,
+        owner_id: str,
+        arm: str,
+        position: int,
+    ) -> None:
         """在线程池中异步执行夹爪位置指令，不阻塞关节指令流"""
         if self._server._robot_system is None:
             return
@@ -723,9 +671,15 @@ class TeleoperationWebSocketHandler:
         try:
             await asyncio.to_thread(
                 self._server._services.teleoperation.set_gripper,
+                owner_id,
                 arm,
                 position,
             )
             logger.info("遥操作夹爪位置: %s臂 %d", arm, position)
         except Exception as e:
             logger.error("遥操作夹爪执行异常: arm=%s, error=%s", arm, str(e))
+
+    def _owner_id(self, websocket) -> str:
+        return websocket_teleoperation_owner(
+            self._server._client_id(websocket)
+        )

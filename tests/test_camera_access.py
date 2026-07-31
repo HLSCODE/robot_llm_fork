@@ -179,6 +179,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
         )
         server = RobotWebSocketServer(services)
         websocket = _RecordingWebSocket()
+        server._register_client(websocket, websocket.remote_address)
 
         async def scenario() -> None:
             await server._device_handler._handle_subscribe_camera_frames(websocket, {})
@@ -228,6 +229,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
         )
         server = RobotWebSocketServer(services)
         websocket = _RecordingWebSocket()
+        server._register_client(websocket, websocket.remote_address)
 
         class Recorder:
             def __init__(self, **_kwargs):

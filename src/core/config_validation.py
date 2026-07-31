@@ -382,6 +382,10 @@ def _validate_websocket(
         ("WEBSOCKET_CONTROL_LEASE_SECONDS", settings.websocket_control_lease_seconds),
         ("WEBSOCKET_SEND_TIMEOUT_SECONDS", settings.websocket_send_timeout_seconds),
         (
+            "TELEOPERATION_COMMAND_TIMEOUT_SECONDS",
+            settings.teleoperation_command_timeout_seconds,
+        ),
+        (
             "AUXILIARY_SERVICE_START_TIMEOUT_SECONDS",
             settings.auxiliary_service_start_timeout_seconds,
         ),

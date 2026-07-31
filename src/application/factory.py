@@ -30,9 +30,9 @@ from .services import (
     ExecutionService,
     ManualControlService,
     RobotQueryService,
-    TeleoperationService,
     TrajectoryTeachingService,
 )
+from .teleoperation import TeleoperationService
 
 
 def create_application_services(

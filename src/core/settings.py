@@ -56,6 +56,7 @@ class ServerSettings:
     websocket_max_concurrent_requests: int = 16
     websocket_max_queued_messages: int = 16
     websocket_send_timeout_seconds: float = 2.0
+    teleoperation_command_timeout_seconds: float = 1.0
     auxiliary_service_start_timeout_seconds: float = 5.0
     auxiliary_service_stop_timeout_seconds: float = 10.0
 

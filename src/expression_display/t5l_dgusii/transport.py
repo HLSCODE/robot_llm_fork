@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-import serial
+from ...device_control_sdk import (
+    SerialSettings,
+    SerialTransport as CoreSerialTransport,
+    WriteOnlyStrategy,
+)
 
 
 class Transport(Protocol):
@@ -25,28 +29,27 @@ class SerialConfig:
 class SerialTransport:
     def __init__(self, config: SerialConfig):
         self.config = config
-        self._serial = serial.Serial(
-            port=config.port,
-            baudrate=config.baudrate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=config.timeout,
-            write_timeout=config.write_timeout,
+        self._transport = CoreSerialTransport(
+            SerialSettings(
+                port=config.port,
+                baudrate=config.baudrate,
+                timeout_seconds=config.timeout,
+                write_timeout_seconds=config.write_timeout,
+            )
         )
 
     @property
     def is_open(self) -> bool:
-        return bool(self._serial and self._serial.is_open)
+        return self._transport.is_open
 
     def write(self, frame: bytes) -> int:
-        written = self._serial.write(frame)
-        self._serial.flush()
-        return written
+        self._transport.transact_with_strategy(
+            WriteOnlyStrategy(frame)
+        )
+        return len(frame)
 
     def close(self) -> None:
-        if self._serial and self._serial.is_open:
-            self._serial.close()
+        self._transport.close()
 
     def __enter__(self) -> "SerialTransport":
         return self

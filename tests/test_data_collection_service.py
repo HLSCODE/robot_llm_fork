@@ -56,13 +56,15 @@ class _FakeTeleoperation:
         self.stop_count = 0
         self.start_error: Exception | None = None
 
-    def start(self) -> None:
+    def start(self, owner_id, arms) -> None:
+        del owner_id, arms
         self.start_count += 1
         if self.start_error is not None:
             raise self.start_error
         self.active = True
 
-    def stop(self) -> None:
+    def stop(self, owner_id) -> None:
+        del owner_id
         self.stop_count += 1
         self.active = False
 

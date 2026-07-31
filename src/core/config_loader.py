@@ -296,6 +296,7 @@ class _EnvironmentConfig:
     WEBSOCKET_MAX_CONCURRENT_REQUESTS: int = 16
     WEBSOCKET_MAX_QUEUED_MESSAGES: int = 16
     WEBSOCKET_SEND_TIMEOUT_SECONDS: float = 2.0
+    TELEOPERATION_COMMAND_TIMEOUT_SECONDS: float = 1.0
     AUXILIARY_SERVICE_START_TIMEOUT_SECONDS: float = 5.0
     AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS: float = 10.0
 
@@ -1015,6 +1016,9 @@ class _EnvironmentConfig:
         )
         instance.WEBSOCKET_SEND_TIMEOUT_SECONDS = float(
             os.getenv("WEBSOCKET_SEND_TIMEOUT_SECONDS", "2.0")
+        )
+        instance.TELEOPERATION_COMMAND_TIMEOUT_SECONDS = float(
+            os.getenv("TELEOPERATION_COMMAND_TIMEOUT_SECONDS", "1.0")
         )
         instance.AUXILIARY_SERVICE_START_TIMEOUT_SECONDS = float(
             os.getenv("AUXILIARY_SERVICE_START_TIMEOUT_SECONDS", "5.0")

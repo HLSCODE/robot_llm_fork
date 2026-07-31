@@ -58,10 +58,22 @@ class _FakeTeleoperation:
     def __init__(self) -> None:
         self.active = False
         self.stop_count = 0
+        self.stale_owners: tuple[str, ...] = ()
 
-    def stop(self) -> None:
+    def stop(self, _owner_id: str) -> None:
         self.active = False
         self.stop_count += 1
+
+    def expire_stale_owners(
+        self,
+        *,
+        owner_prefix: str,
+        timeout_seconds: float,
+    ) -> tuple[str, ...]:
+        del owner_prefix, timeout_seconds
+        stale = self.stale_owners
+        self.stale_owners = ()
+        return stale
 
 
 class _FakeDataCollection:
@@ -93,7 +105,7 @@ class WebSocketAccessControllerTests(unittest.TestCase):
         clock = _FakeClock()
         access = WebSocketAccessController(
             "correct-secret",
-            control_lease_seconds=10,
+            control_lease_seconds=1,
             clock=clock,
         )
         access.register("client-1", "local")
@@ -374,6 +386,51 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
         self.assertEqual(1, self.teleoperation.stop_count)
         self.assertEqual(1, self.data_collection.close_count)
         self.assertIsNone(server._access.control_snapshot())
+
+    def test_teleoperation_watchdog_releases_control_and_collection(self):
+        websocket = _RecordingWebSocket()
+        server = RobotWebSocketServer(
+            services=SimpleNamespace(
+                data_collection=self.data_collection,
+                execution=self.execution,
+                teleoperation=self.teleoperation,
+            ),
+            auth_token="correct-secret",
+            control_lease_seconds=1,
+            teleoperation_command_timeout_seconds=0.01,
+            audit_sink=self.audit_events.append,
+        )
+        client_id = server._register_client(
+            websocket,
+            websocket.remote_address,
+        )
+        server._access.authenticate(client_id, "correct-secret")
+        server._access.acquire_control(client_id)
+        self.teleoperation.stale_owners = (f"websocket:{client_id}",)
+
+        async def scenario() -> None:
+            monitor = asyncio.create_task(
+                server._control_lease_monitor()
+            )
+            try:
+                for _ in range(20):
+                    if server._access.control_snapshot() is None:
+                        break
+                    await asyncio.sleep(0.02)
+            finally:
+                monitor.cancel()
+                with suppress(asyncio.CancelledError):
+                    await monitor
+
+        asyncio.run(scenario())
+
+        self.assertIsNone(server._access.control_snapshot())
+        self.assertEqual(1, self.teleoperation.stop_count)
+        self.assertEqual(1, self.data_collection.close_count)
+        self.assertEqual(
+            "teleoperation_watchdog",
+            websocket.payloads[-1]["reason"],
+        )
 
 
 if __name__ == "__main__":

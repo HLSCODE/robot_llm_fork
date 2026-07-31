@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ...device_runtime import DeviceRuntime, ToolRackControl
-from ...device_runtime.ids import ROBOT_SYSTEM
+from ...device_runtime import DeviceRuntime, Pipette, ToolRackControl
+from ...device_runtime.ids import PIPETTE, ROBOT_SYSTEM
 from ..action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -67,11 +67,16 @@ class ChangeToolActionHandler:
             )
 
         try:
+            eject_tool = None
+            if operation == "放":
+                pipette = self._device_runtime.require(PIPETTE, Pipette)
+                eject_tool = pipette.eject_tip
             context.invoke(
                 self._OPERATION,
                 lambda: tool_rack.change_tool(
                     slot,
                     attach=operation == "取",
+                    eject_tool=eject_tool,
                 ),
             )
         except (ActionCancelledError, ActionTimeoutError):

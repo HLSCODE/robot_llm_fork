@@ -22,8 +22,7 @@ from __future__ import annotations
 import time
 from enum import Enum
 
-import serial
-
+from ..device_control_sdk import Transport, WriteOnlyStrategy
 from .config import HorizontalServoConfig, ServoConfig, VerticalServoConfig
 
 
@@ -63,8 +62,7 @@ class NeckController:
 
     def __init__(
         self,
-        serial_port: str,
-        baud_rate: int,
+        transport: Transport,
         horizontal_config: HorizontalServoConfig | None = None,
         vertical_config: VerticalServoConfig | None = None,
     ) -> None:
@@ -77,20 +75,7 @@ class NeckController:
             ServoAxis.VERTICAL: self._v_cfg.initial_pwm,
         }
 
-        # Open without port first, then assert RTS=False and DTR=False before
-        # activating the port.  Both lines are wired to the controller's MCU
-        # reset pin on some boards; asserting them causes an unwanted reboot.
-        self._serial = serial.Serial(
-            baudrate=baud_rate,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-        )
-        self._serial.rts = False
-        self._serial.dtr = False
-        self._serial.port = serial_port
-        self._serial.open()
-        # Immediately de-assert both lines so neither triggers an MCU reset.
+        self._transport = transport
 
     # ------------------------------------------------------------------
     # Public API
@@ -226,9 +211,7 @@ class NeckController:
 
     def close(self) -> None:
         """Close the underlying serial connection."""
-        if self._serial.is_open:
-            print("[CLOSE] Closing serial connection")
-            self._serial.close()
+        self._transport.close()
 
     def __enter__(self) -> "NeckController":
         return self
@@ -251,22 +234,6 @@ class NeckController:
         self._send_raw(_build_single_cmd(servo_id, pwm, time_ms))
 
     def _send_raw(self, data: str) -> None:
-        print(f"[TX] {data}")
-        self._serial.write(data.encode("ascii"))
-        # self._serial.flush()  # block until all bytes are physically transmitted
-        self._read_response()
-
-    def _read_response(self, timeout: float = 0.1) -> None:
-        """Read and print any bytes the controller sends back within *timeout* seconds."""
-        deadline = time.time() + timeout
-        buf = bytearray()
-        while time.time() < deadline:
-            waiting = self._serial.in_waiting
-            if waiting:
-                buf += self._serial.read(waiting)
-                deadline = time.time() + timeout  # extend on each new chunk
-        if buf:
-            try:
-                print(f"[RX] {buf.decode('ascii', errors='replace')}")
-            except Exception:
-                print(f"[RX] (hex) {buf.hex(' ').upper()}")
+        self._transport.transact_with_strategy(
+            WriteOnlyStrategy(data.encode("ascii"))
+        )

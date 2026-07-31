@@ -8,6 +8,7 @@ PWM 颈部舵机控制器（项目适配层）
 - 异常在构造时吞掉并返回 None ser，不阻塞启动
 """
 from typing import Optional
+from ..device_control_sdk import Transport
 from ..pwm_sdk import (
     NeckController, HorizontalServoConfig, VerticalServoConfig, ServoAxis
 )
@@ -17,24 +18,13 @@ class PWMNeckController:
 
     def __init__(
         self,
-        port: str,
-        baudrate: int,
+        transport: Transport,
         horizontal_config: dict,
         vertical_config: dict,
     ):
-        self.port = port
-        self.baudrate = baudrate
-        self._controller = None  # pwm_sdk.NeckController 实例
-
-        # 初始化 SDK 实例
-        try:
-            h_cfg = HorizontalServoConfig(**horizontal_config)
-            v_cfg = VerticalServoConfig(**vertical_config)
-            self._controller = NeckController(port, baudrate, h_cfg, v_cfg)
-            print(f"PWM 颈部舵机初始化成功：{port} @ {baudrate}")
-        except Exception as e:
-            print(f"PWM 颈部舵机初始化失败：{e}")
-            self._controller = None
+        h_cfg = HorizontalServoConfig(**horizontal_config)
+        v_cfg = VerticalServoConfig(**vertical_config)
+        self._controller = NeckController(transport, h_cfg, v_cfg)
 
     # ---------------- 对外 API（代理到 SDK）----------------
     def move_horizontal(self, pwm: int, time_ms: Optional[int] = None):
@@ -76,9 +66,5 @@ class PWMNeckController:
 
     def close(self):
         if self._controller is not None:
-            try:
-                self._controller.close()
-                print(f"PWM 颈部舵机串口 {self.port} 已关闭")
-            except Exception as e:
-                print(f"关闭 PWM 颈部舵机失败：{e}")
+            self._controller.close()
             self._controller = None

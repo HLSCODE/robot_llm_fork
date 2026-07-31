@@ -100,13 +100,11 @@ class RealManRobotAdapter:
         default_motion: MotionOptions,
         tool_rack_options: RealManToolRackOptions,
         gripper_options: RealManGripperOptions | None = None,
-        eject_tool: Callable[[], bool] | None = None,
     ) -> None:
         self._controller = controller
         self._default_motion = default_motion
         self._gripper_options = gripper_options or RealManGripperOptions()
         self._tool_rack_options = tool_rack_options
-        self._eject_tool = eject_tool
         self._stop_lock = RLock()
         self._telemetry_history_lock = RLock()
         self._telemetry_history: dict[
@@ -325,7 +323,13 @@ class RealManRobotAdapter:
             )
         )
 
-    def change_tool(self, slot: int, *, attach: bool) -> None:
+    def change_tool(
+        self,
+        slot: int,
+        *,
+        attach: bool,
+        eject_tool: Callable[[], bool] | None = None,
+    ) -> None:
         options = self._tool_rack_options
         slot_config = options.require_slot(slot)
         arm_controller, robot = self._arm_backend(options.arm)
@@ -348,14 +352,14 @@ class RealManRobotAdapter:
                     options.arm,
                     slot_config.detach_pose,
                 )
-                if self._eject_tool is None:
+                if eject_tool is None:
                     raise RobotOperationError(
                         "detach_tool",
                         options.arm,
                         detail="tool ejector is not configured",
                     )
                 try:
-                    ejected = bool(self._eject_tool())
+                    ejected = bool(eject_tool())
                 except Exception as exc:
                     raise RobotOperationError(
                         "detach_tool",
@@ -647,9 +651,7 @@ class RelayBankAdapter:
     def set_channel(self, channel: int, enabled: bool) -> None:
         if channel not in (1, 2):
             raise ValueError(f"unsupported relay channel: {channel}")
-        state = "on" if enabled else "off"
-        method = getattr(self._controller, f"turn_{state}_relay_Y{channel}")
-        method()
+        self._controller.set_channel(channel, enabled)
 
     def close(self) -> None:
         self._controller.close()
@@ -684,18 +686,11 @@ class PipetteAdapter:
     def __init__(
         self,
         controller: Any,
-        *,
-        tip_port: str,
-        initialize_tip: Callable[..., bool],
-        eject_tip: Callable[..., bool],
     ) -> None:
         self._controller = controller
-        self._tip_port = tip_port
-        self._initialize_tip = initialize_tip
-        self._eject_tip = eject_tip
 
     def initialize(self) -> bool:
-        return bool(self._initialize_tip(port=self._tip_port))
+        return bool(self._controller.initialize())
 
     def set_absorb_speed(self, speed_ul_s: int) -> bool:
         return bool(self._controller.set_absorb_speed(speed_ul_s))
@@ -713,7 +708,7 @@ class PipetteAdapter:
         return bool(self._controller.dispense_all())
 
     def eject_tip(self) -> bool:
-        return bool(self._eject_tip(port=self._tip_port))
+        return bool(self._controller.eject_tip())
 
     def close(self) -> None:
         self._controller.close()

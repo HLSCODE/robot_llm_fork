@@ -338,7 +338,7 @@ class ApplicationServiceTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        services.teleoperation.start()
+        services.teleoperation.start("test", ("left",))
         item = SequenceItem.from_definition(
             ActionDefinition(
                 id="move",
@@ -356,7 +356,7 @@ class ApplicationServiceTests(unittest.TestCase):
         with self.assertRaises(ResourceBusyError):
             services.execution.start([item], origin="test")
 
-        services.teleoperation.stop()
+        services.teleoperation.stop("test")
         final = services.execution.start([item], origin="test").wait(1)
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
 
@@ -408,7 +408,7 @@ class ApplicationServiceTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        services.teleoperation.start()
+        services.teleoperation.start("test", ("left",))
         robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
 
         report = services.safety.stop(StopMode.QUICK)

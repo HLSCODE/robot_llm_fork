@@ -47,10 +47,16 @@ class FakeTransport(StrategyTransport):
 
     def transact_with_strategy(self, strategy: SerialExchangeStrategy) -> bytes:
         self._ensure_open()
+        payload = getattr(strategy, "payload", None)
+        response_size = getattr(strategy, "response_size", None)
         self.calls.append(
             TransportCall(
-                payload=None,
-                response_size=None,
+                payload=bytes(payload) if payload is not None else None,
+                response_size=(
+                    int(response_size)
+                    if response_size is not None
+                    else None
+                ),
                 strategy_name=type(strategy).__name__,
             )
         )

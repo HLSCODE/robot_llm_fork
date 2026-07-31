@@ -87,6 +87,9 @@ def build_auxiliary_service_host(
                 send_timeout_seconds=(
                     settings.server.websocket_send_timeout_seconds
                 ),
+                teleoperation_command_timeout_seconds=(
+                    settings.server.teleoperation_command_timeout_seconds
+                ),
             )
         )
 

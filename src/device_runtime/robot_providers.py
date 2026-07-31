@@ -143,8 +143,6 @@ def _create_realman_robot(
     device_settings: DeviceSettings,
 ) -> RobotSystem:
     from ..arm_sdk import RobotController
-    from ..devices import yiyeqiang_out
-
     if RobotController is None:
         raise DeviceInitializationError("RobotController SDK unavailable")
 
@@ -158,9 +156,6 @@ def _create_realman_robot(
         default_motion=settings.motion,
         gripper_options=settings.gripper,
         tool_rack_options=settings.tool_rack,
-        eject_tool=lambda: yiyeqiang_out.eject_tip(
-            port=device_settings.kuaihuanshou_serial_port
-        ),
     )
     try:
         adapter.read_arm_state(ArmId.LEFT)

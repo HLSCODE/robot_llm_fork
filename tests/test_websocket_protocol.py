@@ -54,6 +54,19 @@ def _request(action: str, request_id: str) -> dict[str, str]:
     }
 
 
+def _control_status_services() -> SimpleNamespace:
+    snapshot = SimpleNamespace(
+        to_dict=lambda: {
+            "active": False,
+            "active_arms": [],
+            "owners": [],
+        }
+    )
+    return SimpleNamespace(
+        teleoperation=SimpleNamespace(snapshot=lambda: snapshot)
+    )
+
+
 class WebSocketRequestLimiterTests(unittest.TestCase):
     def test_rate_limit_has_deterministic_retry_window(self):
         clock = _FakeClock()
@@ -94,7 +107,7 @@ class WebSocketRequestLimiterTests(unittest.TestCase):
 
 class WebSocketProtocolContractTests(unittest.TestCase):
     def test_every_route_has_an_action_schema_and_domain_handler(self):
-        server = RobotWebSocketServer(services=SimpleNamespace())
+        server = RobotWebSocketServer(services=_control_status_services())
 
         self.assertEqual(
             set(server._routes),
@@ -175,7 +188,9 @@ class WebSocketProtocolContractTests(unittest.TestCase):
             asyncio.run(websocket.send("message"))
 
     def test_api_version_is_required_and_echoed_on_all_responses(self):
-        server = RobotWebSocketServer(services=SimpleNamespace())
+        server = RobotWebSocketServer(
+            services=_control_status_services()
+        )
         websocket = _RecordingWebSocket()
         server._register_client(websocket, websocket.remote_address)
 
@@ -222,7 +237,7 @@ class WebSocketProtocolContractTests(unittest.TestCase):
 
     def test_rate_limit_response_keeps_request_correlation(self):
         server = RobotWebSocketServer(
-            services=SimpleNamespace(),
+            services=_control_status_services(),
             max_requests_per_second=1,
         )
         websocket = _RecordingWebSocket()
