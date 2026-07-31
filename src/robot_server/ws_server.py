@@ -112,6 +112,7 @@ from ..arm_sdk import RobotController
 from ..voice_interaction import CamerasModuleProvider, WakeFeedback, VoiceInteractionController
 from ..data_collection import RLBenchRecorder
 from ..data_collection.config import DataCollectionConfig
+from .task_command_adapter import TaskCommandAdapter, TaskCommandError
 
 
 
@@ -271,6 +272,11 @@ class RobotWebSocketServer:
         self._ai_execution_pending = False
         self._execution_had_failure = False
 
+        # 固定任务命令入口：启动占用覆盖“已受理但执行线程尚未启动”的短窗口。
+        self._task_command_adapter = TaskCommandAdapter()
+        self._active_task_command: Optional[Dict[str, Any]] = None
+        self._execution_starting = False
+
         # 遥操作状态（双臂独立）
         self._teleop_modes = {"左": False, "右": False}  # 双臂遥操作状态字典
         self._teleop_msg_counts = {"左": 0, "右": 0}  # 双臂消息计数器字典
@@ -424,7 +430,18 @@ class RobotWebSocketServer:
     # ------------------------------------------------------------------
 
     async def _dispatch(self, websocket, data: dict) -> None:
-        """根据 action 字段分发到对应处理函数"""
+        """根据 command_type 或 action 字段分发到对应处理函数。"""
+        if not isinstance(data, dict):
+            await websocket.send(self._json_msg(
+                {"event": "error", "message": "请求必须是 JSON 对象"}
+            ))
+            return
+
+        if "command_type" in data:
+            # 固定任务不使用 action；优先分流以保持旧 action 协议完全兼容。
+            await self._handle_task_command(websocket, data)
+            return
+
         action = data.get("action", "")
 
         # 指令路由表
@@ -504,13 +521,165 @@ class RobotWebSocketServer:
     # 执行控制
     # ==================================================================
 
+    async def _handle_task_command(self, websocket, data: dict) -> None:
+        """加载、在内存中映射并执行一个白名单固定任务。"""
+        try:
+            request_id = self._task_command_adapter.request_id(data)
+        except TaskCommandError as exc:
+            await self._send_command_rejected(
+                websocket,
+                request_id=str(uuid4()),
+                command_type=str(data.get("command_type") or ""),
+                code=exc.code,
+                message=exc.message,
+            )
+            return
+
+        command_type = str(data.get("command_type") or "")
+        if data.get("action") not in (None, ""):
+            await self._send_command_rejected(
+                websocket,
+                request_id=request_id,
+                command_type=command_type,
+                code="AMBIGUOUS_REQUEST",
+                message="action 与 command_type 不能同时提供",
+            )
+            return
+
+        # 不排队：上一条任务未结束时由客户端决定何时重试。
+        if self._execution_is_busy():
+            await self._send_command_rejected(
+                websocket,
+                request_id=request_id,
+                command_type=command_type,
+                code="BUSY",
+                message="已有任务正在执行，请在当前任务完成后重试",
+            )
+            return
+
+        try:
+            prepared = self._task_command_adapter.prepare(data, request_id=request_id)
+        except TaskCommandError as exc:
+            await self._send_command_rejected(
+                websocket,
+                request_id=request_id,
+                command_type=command_type,
+                code=exc.code,
+                message=exc.message,
+            )
+            return
+        except Exception as exc:
+            logger.exception("固定任务命令准备失败")
+            await self._send_command_rejected(
+                websocket,
+                request_id=request_id,
+                command_type=command_type,
+                code="INTERNAL_ERROR",
+                message=f"命令准备失败: {exc}",
+            )
+            return
+
+        # prepare() 到这里没有 await；设置占用后，其他连接会立即看到 BUSY。
+        # 这还覆盖了“已回 accepted、但 ActionExecutor 线程尚未启动”的短暂窗口。
+        self._execution_starting = True
+        self._execution_had_failure = False
+        self._active_task_command = {
+            "request_id": prepared.request_id,
+            "command_type": prepared.command_type,
+            "task": prepared.task_filename,
+            "failed": False,
+            "error": "",
+            "stop_requested": False,
+        }
+        try:
+            await websocket.send(self._json_msg({
+                "event": "command_accepted",
+                "request_id": prepared.request_id,
+                "command_type": prepared.command_type,
+                "task": prepared.task_filename,
+                "steps": prepared.total_steps,
+            }))
+
+            if self._active_task_command.get("stop_requested"):
+                # stop 可能恰好到达 accepted 与 execute 之间，此时不再启动机器人动作。
+                await self._finish_cancelled_task_command()
+                return
+
+            await self._broadcast({
+                "event": "command_started",
+                "request_id": prepared.request_id,
+                "command_type": prepared.command_type,
+                "task": prepared.task_filename,
+                "steps": prepared.total_steps,
+            })
+
+            if self._active_task_command.get("stop_requested"):
+                await self._finish_cancelled_task_command()
+                return
+
+            self._executor.execute(prepared.entries)
+        except Exception as exc:
+            logger.exception("固定任务命令启动失败")
+            context = self._active_task_command
+            self._active_task_command = None
+            if context is not None:
+                await self._broadcast({
+                    "event": "command_failed",
+                    "request_id": context["request_id"],
+                    "command_type": context["command_type"],
+                    "task": context["task"],
+                    "code": "INTERNAL_ERROR",
+                    "message": f"任务启动失败: {exc}",
+                })
+        finally:
+            self._execution_starting = False
+
+    async def _send_command_rejected(
+        self,
+        websocket,
+        *,
+        request_id: str,
+        command_type: str,
+        code: str,
+        message: str,
+    ) -> None:
+        await websocket.send(self._json_msg({
+            "event": "command_rejected",
+            "request_id": request_id,
+            "command_type": command_type,
+            "code": code,
+            "message": message,
+        }))
+
+    async def _finish_cancelled_task_command(self) -> None:
+        context = self._active_task_command
+        if context is None:
+            return
+        self._active_task_command = None
+        await self._broadcast({
+            "event": "command_failed",
+            "request_id": context["request_id"],
+            "command_type": context["command_type"],
+            "task": context["task"],
+            "code": "STOPPED",
+            "message": "任务在执行线程启动前被停止",
+        })
+
+    def _execution_is_busy(self) -> bool:
+        # _execution_starting 用于弥补 ActionExecutor.is_running 尚未置位的启动竞争窗口。
+        return bool(
+            self._execution_starting
+            or self._active_task_command is not None
+            or (self._executor is not None and self._executor.is_running)
+        )
+
     async def _handle_execute(self, websocket, data: dict) -> None:
         """
         执行动作序列
         请求: {"action": "execute", "sequence": [...]}
         如果 sequence 省略，则执行当前编排的序列
         """
-        if self._executor.is_running:
+        if self._execution_is_busy():
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "已有序列正在执行，请先停止"}
             ))
@@ -548,19 +717,23 @@ class RobotWebSocketServer:
                 entry.status = SequenceItemStatus.PENDING
                 total_steps += 1
 
-        await self._broadcast({
-            "event": "accepted",
-            "message": "开始执行",
-            "steps": total_steps,
-        })
-        self._executor.execute(sequence)
+        self._execution_starting = True
+        try:
+            await self._broadcast({
+                "event": "accepted",
+                "message": "开始执行",
+                "steps": total_steps,
+            })
+            self._executor.execute(sequence)
+        finally:
+            self._execution_starting = False
 
     async def _handle_execute_task(self, websocket, data: dict) -> None:
         """
         加载并执行已保存的任务
         请求: {"action": "execute_task", "name": "xxx.task"}
         """
-        if self._executor.is_running:
+        if self._execution_is_busy():
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "已有序列正在执行，请先停止"}
             ))
@@ -593,16 +766,24 @@ class RobotWebSocketServer:
             for e in entries
         )
 
-        await self._broadcast({
-            "event": "accepted",
-            "message": f"加载任务 '{task_name}'，开始执行",
-            "steps": total_steps,
-        })
-        self._executor.execute(entries)
+        self._execution_starting = True
+        try:
+            await self._broadcast({
+                "event": "accepted",
+                "message": f"加载任务 '{task_name}'，开始执行",
+                "steps": total_steps,
+            })
+            self._executor.execute(entries)
+        finally:
+            self._execution_starting = False
 
     async def _handle_stop(self, websocket, data: dict) -> None:
         """请求协作式停止任务；该接口不会触发设备硬件急停。"""
         if self._executor.is_running:
+            if self._active_task_command is not None:
+                self._active_task_command["failed"] = True
+                self._active_task_command["error"] = "任务已由客户端停止"
+                self._active_task_command["stop_requested"] = True
             if self._ai_execution_pending:
                 self._execution_had_failure = True  # 人工停止视为未成功完成
             self._executor.stop()
@@ -610,6 +791,16 @@ class RobotWebSocketServer:
                 {
                     "event": "stopped",
                     "message": "已发送任务停止请求（非硬件急停）",
+                }
+            ))
+        elif self._active_task_command is not None:
+            self._active_task_command["failed"] = True
+            self._active_task_command["error"] = "任务已由客户端停止"
+            self._active_task_command["stop_requested"] = True
+            await websocket.send(self._json_msg(
+                {
+                    "event": "stopped",
+                    "message": "已取消尚未启动的任务",
                 }
             ))
         else:
@@ -1470,7 +1661,7 @@ class RobotWebSocketServer:
             ))
             return
 
-        if self._executor.is_running:
+        if self._execution_is_busy():
             await websocket.send(self._json_msg(
                 {"event": "error", "message": "已有序列正在执行，请先停止"}
             ))
@@ -1487,12 +1678,16 @@ class RobotWebSocketServer:
         self._ai_execution_pending = True
         self._execution_had_failure = False
 
-        await self._broadcast({
-            "event": "accepted",
-            "message": "AI 序列开始执行",
-            "steps": len(sequence),
-        })
-        self._executor.execute(sequence)
+        self._execution_starting = True
+        try:
+            await self._broadcast({
+                "event": "accepted",
+                "message": "AI 序列开始执行",
+                "steps": len(sequence),
+            })
+            self._executor.execute(sequence)
+        finally:
+            self._execution_starting = False
 
         # 清空预览状态
         self._ai_preview_sequence = []
@@ -1732,6 +1927,10 @@ class RobotWebSocketServer:
         self._ai_preview_sequence = []
         self._ai_preview_skill_info = {}
         if self._executor is not None and self._executor.is_running:
+            if self._active_task_command is not None:
+                self._active_task_command["failed"] = True
+                self._active_task_command["error"] = "任务已由交互会话取消"
+                self._active_task_command["stop_requested"] = True
             self._executor.stop()
 
     # ==================================================================
@@ -1744,7 +1943,7 @@ class RobotWebSocketServer:
             "event": "status",
             "devices": self._device_status,
             "executor": {
-                "running": self._executor.is_running,
+                "running": self._execution_is_busy(),
                 "paused": self._executor.is_paused,
             },
             "sequence_length": len(self._current_sequence),
@@ -1844,6 +2043,11 @@ class RobotWebSocketServer:
     async def _handle_disconnect(self, websocket, data: dict) -> None:
         """断开所有硬件连接"""
         messages = []
+
+        if self._active_task_command is not None:
+            self._active_task_command["failed"] = True
+            self._active_task_command["error"] = "硬件断开"
+            self._active_task_command["stop_requested"] = True
 
         if self._executor.is_running:
             self._executor.stop()
@@ -2461,28 +2665,38 @@ class RobotWebSocketServer:
     # ==================================================================
 
     def _on_step_started(self, index: int, item: SequenceItem) -> None:
-        self._broadcast_threadsafe({
+        event = {
             "event": "step_started",
             "index": index,
             "name": item.definition.name,
             "status": item.status.value,
-        })
+        }
+        # 固定任务才附加关联字段，旧 action 客户端仍可按原事件结构消费。
+        event.update(self._active_task_command_fields())
+        self._broadcast_threadsafe(event)
 
     def _on_step_completed(self, index: int, item: SequenceItem) -> None:
-        self._broadcast_threadsafe({
+        event = {
             "event": "step_completed",
             "index": index,
             "name": item.definition.name,
-        })
+        }
+        event.update(self._active_task_command_fields())
+        self._broadcast_threadsafe(event)
 
     def _on_step_failed(self, index: int, item: SequenceItem, error: str) -> None:
         self._execution_had_failure = True
-        self._broadcast_threadsafe({
+        if self._active_task_command is not None:
+            self._active_task_command["failed"] = True
+            self._active_task_command["error"] = error
+        event = {
             "event": "step_failed",
             "index": index,
             "name": item.definition.name,
             "error": error,
-        })
+        }
+        event.update(self._active_task_command_fields())
+        self._broadcast_threadsafe(event)
 
     def _on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int) -> None:
         self._broadcast_threadsafe({
@@ -2510,9 +2724,40 @@ class RobotWebSocketServer:
                 "success": success,
                 "message": "AI 序列执行完成" if success else "AI 序列执行失败",
             })
+
+        command_context = self._active_task_command
+        if command_context is not None:
+            # 执行器回调运行在后台线程；结束时清空上下文，释放下一条 command_type。
+            self._active_task_command = None
+            if command_context["failed"] or command_context["stop_requested"]:
+                self._broadcast_threadsafe({
+                    "event": "command_failed",
+                    "request_id": command_context["request_id"],
+                    "command_type": command_context["command_type"],
+                    "task": command_context["task"],
+                    "code": "STOPPED" if command_context["stop_requested"] else "EXECUTION_FAILED",
+                    "message": command_context["error"] or "任务执行失败",
+                })
+            else:
+                self._broadcast_threadsafe({
+                    "event": "command_completed",
+                    "request_id": command_context["request_id"],
+                    "command_type": command_context["command_type"],
+                    "task": command_context["task"],
+                    "message": "任务执行完成",
+                })
         self._broadcast_threadsafe({
             "event": "execution_finished",
         })
+
+    def _active_task_command_fields(self) -> dict:
+        context = self._active_task_command
+        if context is None:
+            return {}
+        return {
+            "request_id": context["request_id"],
+            "command_type": context["command_type"],
+        }
 
     # ==================================================================
     # 广播工具
@@ -2672,7 +2917,7 @@ class RobotWebSocketServer:
         arms_list = data.get("arms")
 
         # 检查是否正在执行其他任务
-        if self._executor.is_running:
+        if self._execution_is_busy():
             await websocket.send(self._json_msg({
                 "event": "error",
                 "message": "有任务正在执行，无法启动遥操作"

@@ -42,7 +42,8 @@
 
 协议基本约定：
 
-- 客户端发给服务端的 JSON 必须包含 `action`
+- 普通接口请求必须包含 `action`；固定任务命令请求使用 `command_type`
+- `action` 与 `command_type` 不能同时出现
 - 服务端返回给客户端的 JSON 必须包含 `event`
 - 同一条 WebSocket 连接中，既会收到“接口直接响应”，也会收到“后台异步推送”
 
@@ -200,7 +201,7 @@ ws.onerror = (err) => {
 
 ### 3.2 请求消息格式
 
-客户端请求统一为 JSON 对象：
+客户端请求统一为 JSON 对象。普通接口使用 `action`：
 
 ```json
 {
@@ -212,7 +213,8 @@ ws.onerror = (err) => {
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `action` | `string` | 是 | 接口动作名 |
+| `action` | `string` | 条件必填 | 普通接口动作名；与 `command_type` 二选一 |
+| `command_type` | `string` | 条件必填 | 固定任务名；与 `action` 二选一 |
 | 其他字段 | 任意 | 否 | 由具体接口决定 |
 
 ### 3.3 响应/事件消息格式
@@ -884,7 +886,95 @@ ws.onmessage = (event) => {
 - 该接口会先加载任务，再立刻执行
 - 后续事件与 `execute` 基本一致
 
-### 7.3 停止执行 `stop`
+### 7.3 执行固定任务命令 `command_type`
+
+固定任务客户端不需要发送 `action`。`command_type` 可带或不带 `.task` 后缀，当前仅允许：
+
+- `730-1-2`
+- `730-peiye`
+- `730-2-3`
+- `730-zhuye`
+- `730-3-1`
+
+完整请求示例：
+
+```json
+{
+  "command_type": "730-zhuye",
+  "request_id": "client-request-001",
+  "aspirate_volume_ml": 200,
+  "station_id": 2,
+  "height_level": "middle",
+  "method": "circular",
+  "flow_rate_ml_min": 800,
+  "volume_ml": 500
+}
+```
+
+参数说明：
+
+| 字段 | 类型 | 默认值 | 使用任务 | 说明 |
+|---|---|---|---|---|
+| `request_id` | string | 服务端 UUID | 全部 | 关联异步执行事件 |
+| `aspirate_volume_ml` | number | 保留模板值 | `730-peiye` | 修改全部 `XI200` 的吸液容量 |
+| `station_id` | integer | `1` | `730-zhuye` | 工位 `1\|2\|3\|4` |
+| `height_level` | string | `upper` | `730-zhuye` | `upper\|middle\|lower` |
+| `method` | string | `vertical` | `730-zhuye` | `vertical\|circular` |
+| `flow_rate_ml_min` | number | 模板值 `800` | `730-zhuye` | 直接作为设备吐液速度，不做单位换算 |
+| `volume_ml` | number | 模板值 `500` | `730-zhuye` | 直接作为设备吐液容量，不做单位换算 |
+
+请求可以携带所有阶段字段，当前任务不使用的字段会被忽略。数值按十进制四舍五入；速度范围 `1..9999`，容量范围 `1..65535`。字段缺失时采用默认值，但字段存在且非法时会拒绝整条命令。
+
+四个工位的 `shang/upper/middle/lower` 六维点位保存在 `config/injection_points.json`。服务端每次执行 `730-zhuye` 前重新读取并完整校验该文件。
+
+受理与启动事件：
+
+```json
+{
+  "event": "command_accepted",
+  "request_id": "client-request-001",
+  "command_type": "730-zhuye",
+  "task": "730-zhuye.task",
+  "steps": 13
+}
+```
+
+```json
+{
+  "event": "command_started",
+  "request_id": "client-request-001",
+  "command_type": "730-zhuye",
+  "task": "730-zhuye.task",
+  "steps": 13
+}
+```
+
+固定任务触发的 `step_started`、`step_completed`、`step_failed` 会附带相同的 `request_id` 和 `command_type`。最终事件为 `command_completed` 或 `command_failed`，同时仍会推送兼容事件 `execution_finished`。
+
+拒绝示例：
+
+```json
+{
+  "event": "command_rejected",
+  "request_id": "client-request-001",
+  "command_type": "730-zhuye",
+  "code": "BUSY",
+  "message": "已有任务正在执行，请在当前任务完成后重试"
+}
+```
+
+常见错误码包括 `BUSY`、`AMBIGUOUS_REQUEST`、`UNKNOWN_COMMAND`、`INVALID_ARGUMENT`、`TASK_NOT_FOUND`、`TEMPLATE_INVALID` 和 `POINT_CONFIG_INVALID`。忙时命令不会排队，客户端应等待当前任务结束后重试。
+
+仓库内提供命令行联调脚本：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\test_task_command_client.py 730-peiye --aspirate-volume 200
+.\.venv\Scripts\python.exe scripts\test_task_command_client.py 730-zhuye --station-id 2 --height-level middle --method circular --flow-rate 800 --volume 500
+.\.venv\Scripts\python.exe scripts\test_task_command_client.py pause
+.\.venv\Scripts\python.exe scripts\test_task_command_client.py resume
+```
+
+### 7.4 停止执行 `stop`
 
 该接口请求任务在当前动作的可中断点停止，**不会触发设备硬件急停**。
 
@@ -905,7 +995,7 @@ ws.onmessage = (event) => {
 }
 ```
 
-### 7.4 暂停执行 `pause`
+### 7.5 暂停执行 `pause`
 
 请求：
 
@@ -924,7 +1014,7 @@ ws.onmessage = (event) => {
 }
 ```
 
-### 7.5 恢复执行 `resume`
+### 7.6 恢复执行 `resume`
 
 请求：
 
