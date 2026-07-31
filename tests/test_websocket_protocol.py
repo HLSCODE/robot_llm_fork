@@ -12,6 +12,7 @@ from src.robot_server.handlers import (
     InteractionWebSocketHandler,
     TeleoperationWebSocketHandler,
 )
+from src.robot_server.metrics import WebSocketMetrics
 from src.robot_server.protocol import (
     ACTION_REQUEST_SCHEMAS,
     WEBSOCKET_API_VERSION,
@@ -62,9 +63,7 @@ def _control_status_services() -> SimpleNamespace:
             "owners": [],
         }
     )
-    return SimpleNamespace(
-        teleoperation=SimpleNamespace(snapshot=lambda: snapshot)
-    )
+    return SimpleNamespace(teleoperation=SimpleNamespace(snapshot=lambda: snapshot))
 
 
 class WebSocketRequestLimiterTests(unittest.TestCase):
@@ -182,15 +181,18 @@ class WebSocketProtocolContractTests(unittest.TestCase):
         websocket = _BoundedWebSocket(
             SlowWebSocket(),
             timeout_seconds=0.01,
+            metrics=WebSocketMetrics(slow_send_threshold_seconds=0.005),
         )
 
         with self.assertRaises(asyncio.TimeoutError):
             asyncio.run(websocket.send("message"))
 
+        metrics = websocket._metrics.snapshot()
+        self.assertEqual(1, metrics.send_timeouts_total)
+        self.assertEqual(1, metrics.slow_client_disconnects_total)
+
     def test_api_version_is_required_and_echoed_on_all_responses(self):
-        server = RobotWebSocketServer(
-            services=_control_status_services()
-        )
+        server = RobotWebSocketServer(services=_control_status_services())
         websocket = _RecordingWebSocket()
         server._register_client(websocket, websocket.remote_address)
 
@@ -229,11 +231,40 @@ class WebSocketProtocolContractTests(unittest.TestCase):
             websocket.payloads[-1]["event"],
         )
         self.assertTrue(
-            all(
-                payload["api_version"] == WEBSOCKET_API_VERSION
-                for payload in websocket.payloads
-            )
+            all(payload["api_version"] == WEBSOCKET_API_VERSION for payload in websocket.payloads)
         )
+
+    def test_server_metrics_requires_authentication_and_reports_requests(self):
+        server = RobotWebSocketServer(
+            services=_control_status_services(),
+            auth_token="test-token",
+        )
+        websocket = _RecordingWebSocket()
+        server._register_client(websocket, websocket.remote_address)
+
+        async def scenario() -> None:
+            await server._dispatch(
+                websocket,
+                _request("server_metrics", "metrics-denied"),
+            )
+            await server._dispatch(
+                websocket,
+                _request("authenticate", "auth-1") | {"token": "test-token"},
+            )
+            await server._dispatch(
+                websocket,
+                _request("server_metrics", "metrics-1"),
+            )
+
+        asyncio.run(scenario())
+
+        self.assertEqual("access_denied", websocket.payloads[0]["event"])
+        metrics = websocket.payloads[-1]
+        self.assertEqual("server_metrics", metrics["event"])
+        self.assertEqual("metrics-1", metrics["request_id"])
+        self.assertEqual(1, metrics["metrics"]["connections_active"])
+        self.assertEqual(3, metrics["metrics"]["requests_total"])
+        self.assertEqual(1, metrics["metrics"]["access_denied_total"])
 
     def test_rate_limit_response_keeps_request_correlation(self):
         server = RobotWebSocketServer(

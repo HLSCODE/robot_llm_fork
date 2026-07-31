@@ -57,9 +57,7 @@ class RequestField:
         if value is None and self.allow_none:
             return
         if not self._matches_type(value):
-            expected = " | ".join(
-                value_type.__name__ for value_type in self.value_types
-            )
+            expected = " | ".join(value_type.__name__ for value_type in self.value_types)
             raise WebSocketRequestError(
                 WebSocketErrorCode.INVALID_PAYLOAD,
                 f"字段 '{name}' 必须是 {expected}",
@@ -74,9 +72,7 @@ class RequestField:
                 None,
             )
             if invalid_index is not None:
-                expected = " | ".join(
-                    item_type.__name__ for item_type in self.item_types
-                )
+                expected = " | ".join(item_type.__name__ for item_type in self.item_types)
                 raise WebSocketRequestError(
                     WebSocketErrorCode.INVALID_PAYLOAD,
                     f"字段 '{name}[{invalid_index}]' 必须是 {expected}",
@@ -93,9 +89,7 @@ class RequestField:
 class ActionRequestSchema:
     """The complete payload contract for a single action."""
 
-    fields: Mapping[str, RequestField] = field(
-        default_factory=lambda: MappingProxyType({})
-    )
+    fields: Mapping[str, RequestField] = field(default_factory=lambda: MappingProxyType({}))
 
     def validate(self, payload: Mapping[str, Any]) -> None:
         unknown = sorted(set(payload) - set(self.fields))
@@ -105,9 +99,7 @@ class ActionRequestSchema:
                 f"action 不接受字段: {', '.join(unknown)}",
             )
         missing = sorted(
-            name
-            for name, spec in self.fields.items()
-            if spec.required and name not in payload
+            name for name, spec in self.fields.items() if spec.required and name not in payload
         )
         if missing:
             raise WebSocketRequestError(
@@ -139,6 +131,7 @@ def _schema(**fields: RequestField) -> ActionRequestSchema:
 _EMPTY_SCHEMA = ActionRequestSchema()
 _NO_PAYLOAD_ACTIONS = {
     "control_status",
+    "server_metrics",
     "acquire_control",
     "control_heartbeat",
     "release_control",
@@ -322,15 +315,13 @@ class WebSocketRequest(Mapping[str, Any]):
         request_id_value = data.get("request_id")
         request_id = (
             request_id_value
-            if isinstance(request_id_value, str)
-            and _REQUEST_ID_PATTERN.fullmatch(request_id_value)
+            if isinstance(request_id_value, str) and _REQUEST_ID_PATTERN.fullmatch(request_id_value)
             else None
         )
         if request_id is None:
             raise WebSocketRequestError(
                 WebSocketErrorCode.INVALID_REQUEST_ID,
-                "request_id 只能包含字母、数字、点、下划线、冒号或连字符，"
-                "长度为 1..128",
+                "request_id 只能包含字母、数字、点、下划线、冒号或连字符，长度为 1..128",
                 action=action,
             )
 
@@ -359,11 +350,7 @@ class WebSocketRequest(Mapping[str, Any]):
         # fallback keeps explicitly injected in-process diagnostic routes
         # usable without weakening registered route validation.
         schema = ACTION_REQUEST_SCHEMAS.get(action, _EMPTY_SCHEMA)
-        payload = {
-            key: value
-            for key, value in data.items()
-            if key not in _COMMON_REQUEST_FIELDS
-        }
+        payload = {key: value for key, value in data.items() if key not in _COMMON_REQUEST_FIELDS}
         try:
             schema.validate(payload)
         except WebSocketRequestError as exc:
@@ -450,15 +437,9 @@ class WebSocketRequestContext:
             decorated.setdefault("run_id", self.run_id)
 
         event = decorated.get("event")
-        default_code = (
-            _ERROR_EVENT_DEFAULTS.get(event)
-            if isinstance(event, str)
-            else None
-        )
+        default_code = _ERROR_EVENT_DEFAULTS.get(event) if isinstance(event, str) else None
         if default_code is not None:
-            error_code = str(
-                decorated.setdefault("code", default_code.value)
-            )
+            error_code = str(decorated.setdefault("code", default_code.value))
             self.error_code = error_code
             if event != "error":
                 decorated.setdefault("error_source", event)

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .data_paths import ApplicationDataPaths
 from .settings import (
@@ -315,7 +316,6 @@ def _validate_data_collection(
         ),
     ):
         _positive_value(value, issues, field)
-
     has_extrinsics = bool(settings.camera_extrinsics)
     has_metadata = bool(
         settings.camera_extrinsics_reference_frame.strip() or settings.calibration_id.strip()
@@ -382,6 +382,10 @@ def _validate_websocket(
         ("WEBSOCKET_CONTROL_LEASE_SECONDS", settings.websocket_control_lease_seconds),
         ("WEBSOCKET_SEND_TIMEOUT_SECONDS", settings.websocket_send_timeout_seconds),
         (
+            "WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS",
+            settings.websocket_slow_send_threshold_seconds,
+        ),
+        (
             "TELEOPERATION_COMMAND_TIMEOUT_SECONDS",
             settings.teleoperation_command_timeout_seconds,
         ),
@@ -395,6 +399,13 @@ def _validate_websocket(
         ),
     ):
         _positive_value(value, issues, field)
+    if settings.websocket_slow_send_threshold_seconds > settings.websocket_send_timeout_seconds:
+        _error(
+            issues,
+            "invalid_websocket_slow_send_threshold",
+            "WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS",
+            "慢发送阈值不能大于发送超时",
+        )
     for field, value in (
         ("WEBSOCKET_MAX_MESSAGE_SIZE_BYTES", settings.websocket_max_message_size_bytes),
         (
@@ -417,21 +428,118 @@ def _validate_websocket(
             "WEBSOCKET_AUTH_TOKEN",
             "不能使用示例占位凭据",
         )
-    if is_loopback_host(options.websocket_host):
-        return
-    if auth_token:
-        _warning(
+    _validate_websocket_transport_security(
+        settings,
+        auth_token,
+        options,
+        issues,
+    )
+
+
+def _validate_websocket_transport_security(
+    settings: ServerSettings,
+    auth_token: str,
+    options: StartupOptions,
+    issues: list[ConfigurationIssue],
+) -> None:
+    certificate_path = settings.websocket_tls_certificate_path.strip()
+    private_key_path = settings.websocket_tls_private_key_path.strip()
+    tls_enabled = bool(certificate_path and private_key_path)
+    if bool(certificate_path) != bool(private_key_path):
+        _error(
+            issues,
+            "incomplete_websocket_tls",
+            "WEBSOCKET_TLS_CERTIFICATE_PATH",
+            "TLS 证书和私钥必须同时配置",
+        )
+    if certificate_path:
+        _require_regular_file(
+            certificate_path,
+            "WEBSOCKET_TLS_CERTIFICATE_PATH",
+            issues,
+        )
+    if private_key_path:
+        _require_regular_file(
+            private_key_path,
+            "WEBSOCKET_TLS_PRIVATE_KEY_PATH",
+            issues,
+        )
+
+    for origin in settings.websocket_allowed_origins:
+        if not _is_valid_origin(origin):
+            _error(
+                issues,
+                "invalid_websocket_origin",
+                "WEBSOCKET_ALLOWED_ORIGINS",
+                f"Origin 必须是无路径的 http(s) 源: {origin}",
+            )
+
+    loopback = is_loopback_host(options.websocket_host)
+    reverse_proxy = settings.websocket_reverse_proxy_mode
+    if reverse_proxy and not loopback:
+        _error(
+            issues,
+            "untrusted_reverse_proxy_binding",
+            "WEBSOCKET_HOST",
+            "反向代理模式必须绑定 loopback，由同机可信代理访问",
+        )
+    if reverse_proxy and tls_enabled:
+        _error(
+            issues,
+            "ambiguous_websocket_tls_termination",
+            "WEBSOCKET_REVERSE_PROXY_MODE",
+            "反向代理模式由代理终止 TLS，后端不要同时配置服务端 TLS",
+        )
+    if not loopback and not tls_enabled:
+        _error(
             issues,
             "websocket_tls_required",
-            "WEBSOCKET_HOST",
-            "非本机监听必须通过可信反向代理提供 wss://",
+            "WEBSOCKET_TLS_CERTIFICATE_PATH",
+            "非本机直连必须配置服务端 TLS",
         )
-        return
-    _warning(
-        issues,
-        "public_read_only_websocket",
-        "WEBSOCKET_AUTH_TOKEN",
-        "非本机监听且无凭据时仅开放公共只读接口，业务状态可能被远程读取",
+
+    externally_exposed = not loopback or reverse_proxy or tls_enabled
+    if externally_exposed and not auth_token:
+        _error(
+            issues,
+            "websocket_auth_required",
+            "WEBSOCKET_AUTH_TOKEN",
+            "远程或代理部署必须配置认证密钥",
+        )
+    if externally_exposed and not settings.websocket_allowed_origins:
+        _error(
+            issues,
+            "websocket_origins_required",
+            "WEBSOCKET_ALLOWED_ORIGINS",
+            "远程或代理部署必须配置明确的 Origin 白名单",
+        )
+
+
+def _require_regular_file(
+    raw_path: str,
+    field: str,
+    issues: list[ConfigurationIssue],
+) -> None:
+    path = Path(raw_path).expanduser()
+    if not path.is_file():
+        _error(
+            issues,
+            "missing_websocket_tls_file",
+            field,
+            "配置的 TLS 文件不存在或不是普通文件",
+        )
+
+
+def _is_valid_origin(origin: str) -> bool:
+    parsed = urlsplit(origin.strip())
+    return (
+        parsed.scheme in {"http", "https"}
+        and bool(parsed.netloc)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in {"", "/"}
+        and not parsed.query
+        and not parsed.fragment
     )
 
 

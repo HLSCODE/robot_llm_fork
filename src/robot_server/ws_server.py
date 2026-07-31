@@ -90,6 +90,7 @@ WebSocket 路径:
 """
 
 import asyncio
+from contextlib import suppress
 import json
 import logging
 import threading
@@ -131,6 +132,7 @@ from .handlers import (
     InteractionWebSocketHandler,
     TeleoperationWebSocketHandler,
 )
+from .metrics import WebSocketMetrics
 from .protocol import (
     CURRENT_WEBSOCKET_REQUEST,
     WEBSOCKET_API_VERSION,
@@ -143,6 +145,10 @@ from .protocol import (
 )
 from .request_limits import WebSocketRequestLimiter
 from .routing import WebSocketRoute, WebSocketRouteRegistry
+from .transport_security import (
+    create_server_ssl_context,
+    normalize_allowed_origins,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,9 +156,15 @@ logger = logging.getLogger(__name__)
 class _BoundedWebSocket:
     """Apply a send deadline while preserving the websocket interface."""
 
-    def __init__(self, websocket: Any, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        websocket: Any,
+        timeout_seconds: float,
+        metrics: WebSocketMetrics,
+    ) -> None:
         self._websocket = websocket
         self._timeout_seconds = timeout_seconds
+        self._metrics = metrics
 
     def __aiter__(self):
         return self._websocket.__aiter__()
@@ -161,10 +173,20 @@ class _BoundedWebSocket:
         return getattr(self._websocket, name)
 
     async def send(self, message: str) -> None:
-        await asyncio.wait_for(
-            self._websocket.send(message),
-            timeout=self._timeout_seconds,
-        )
+        started_at = self._metrics.send_started()
+        try:
+            await asyncio.wait_for(
+                self._websocket.send(message),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError:
+            self._metrics.send_failed(started_at, timed_out=True)
+            raise
+        except Exception:
+            self._metrics.send_failed(started_at, timed_out=False)
+            raise
+        else:
+            self._metrics.send_succeeded(started_at)
 
 
 class RobotWebSocketServer:
@@ -193,6 +215,11 @@ class RobotWebSocketServer:
         max_concurrent_requests: int = 16,
         max_queued_messages: int = 16,
         send_timeout_seconds: float = 2.0,
+        slow_send_threshold_seconds: float = 0.5,
+        allowed_origins: tuple[str, ...] = (),
+        tls_certificate_path: str = "",
+        tls_private_key_path: str = "",
+        reverse_proxy_mode: bool = False,
         teleoperation_command_timeout_seconds: float = 1.0,
         audit_sink: AuditSink | None = None,
     ) -> None:
@@ -207,10 +234,12 @@ class RobotWebSocketServer:
             raise ValueError("max_queued_messages must be positive")
         if send_timeout_seconds <= 0:
             raise ValueError("send_timeout_seconds must be positive")
+        if slow_send_threshold_seconds <= 0:
+            raise ValueError("slow_send_threshold_seconds must be positive")
+        if slow_send_threshold_seconds > send_timeout_seconds:
+            raise ValueError("slow_send_threshold_seconds must not exceed send_timeout_seconds")
         if teleoperation_command_timeout_seconds <= 0:
-            raise ValueError(
-                "teleoperation_command_timeout_seconds must be positive"
-            )
+            raise ValueError("teleoperation_command_timeout_seconds must be positive")
 
         self._services = services
         self._host = normalized_host
@@ -218,9 +247,14 @@ class RobotWebSocketServer:
         self._max_message_size_bytes = max_message_size_bytes
         self._max_queued_messages = max_queued_messages
         self._send_timeout_seconds = send_timeout_seconds
-        self._teleoperation_command_timeout_seconds = (
-            teleoperation_command_timeout_seconds
+        self._allowed_origins = normalize_allowed_origins(allowed_origins)
+        self._ssl_context = create_server_ssl_context(
+            tls_certificate_path,
+            tls_private_key_path,
         )
+        self._reverse_proxy_mode = bool(reverse_proxy_mode)
+        self._validate_transport_boundary(auth_token)
+        self._teleoperation_command_timeout_seconds = teleoperation_command_timeout_seconds
         self._server: Any = None
         self._composition_unsubscribe = None
 
@@ -237,6 +271,9 @@ class RobotWebSocketServer:
         self._request_limiter = WebSocketRequestLimiter(
             max_requests_per_second=max_requests_per_second,
             max_concurrent_requests=max_concurrent_requests,
+        )
+        self._metrics = WebSocketMetrics(
+            slow_send_threshold_seconds=slow_send_threshold_seconds,
         )
 
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -291,7 +328,28 @@ class RobotWebSocketServer:
 
     @property
     def endpoint(self) -> str:
-        return f"ws://{self._host}:{self._port}/"
+        scheme = "wss" if self._ssl_context else "ws"
+        return f"{scheme}://{self._host}:{self._port}/"
+
+    def _validate_transport_boundary(self, auth_token: str) -> None:
+        is_loopback = self._host.lower() in {
+            "127.0.0.1",
+            "::1",
+            "localhost",
+        }
+        if self._reverse_proxy_mode and not is_loopback:
+            raise ValueError("reverse proxy mode requires a loopback binding")
+        if self._reverse_proxy_mode and self._ssl_context is not None:
+            raise ValueError("reverse proxy mode and direct TLS are mutually exclusive")
+        if not is_loopback and self._ssl_context is None:
+            raise ValueError("non-loopback WebSocket binding requires TLS")
+        externally_exposed = (
+            not is_loopback or self._reverse_proxy_mode or self._ssl_context is not None
+        )
+        if externally_exposed and not auth_token.strip():
+            raise ValueError("remote or proxy WebSocket deployment requires authentication")
+        if externally_exposed and not self._allowed_origins:
+            raise ValueError("remote or proxy WebSocket deployment requires allowed origins")
 
     async def start(self) -> None:
         """Bind the socket and return after the service is ready."""
@@ -318,6 +376,8 @@ class RobotWebSocketServer:
             self._port,
             max_size=self._max_message_size_bytes,
             max_queue=self._max_queued_messages,
+            origins=((*self._allowed_origins, None) if self._allowed_origins else None),
+            ssl=self._ssl_context,
         )
         self._schedule_background_task(
             self._control_lease_monitor(),
@@ -451,12 +511,17 @@ class RobotWebSocketServer:
 
     async def _handler(self, websocket) -> None:
         """所有连接统一进入主控处理器，通过 action 字段分发指令。"""
-        await self._handle_frontend_ws(
-            _BoundedWebSocket(
-                websocket,
-                self._send_timeout_seconds,
+        try:
+            await self._handle_frontend_ws(
+                _BoundedWebSocket(
+                    websocket,
+                    self._send_timeout_seconds,
+                    self._metrics,
+                )
             )
-        )
+        except TimeoutError:
+            with suppress(Exception):
+                await websocket.close(code=1011, reason="send timeout")
 
     async def _handle_frontend_ws(self, websocket) -> None:
         """处理前端主控 WebSocket 连接"""
@@ -467,19 +532,18 @@ class RobotWebSocketServer:
             client_id,
             remote,
         )
-        await websocket.send(
-            self._json_msg(
-                {
-                    "event": "connected",
-                    "client_id": client_id,
-                    "authentication_configured": (self._access.authentication_configured),
-                    "control_lease_seconds": (self._access.control_lease_seconds),
-                    "api_version_required": True,
-                }
-            )
-        )
-
         try:
+            await websocket.send(
+                self._json_msg(
+                    {
+                        "event": "connected",
+                        "client_id": client_id,
+                        "authentication_configured": (self._access.authentication_configured),
+                        "control_lease_seconds": (self._access.control_lease_seconds),
+                        "api_version_required": True,
+                    }
+                )
+            )
             async for raw in websocket:
                 logger.debug(
                     "收到 WebSocket 消息: client_id=%s bytes=%d",
@@ -532,6 +596,11 @@ class RobotWebSocketServer:
             "control_status": WebSocketRoute(
                 self._handle_control_status,
                 public,
+                audited=False,
+            ),
+            "server_metrics": WebSocketRoute(
+                self._handle_server_metrics,
+                authenticated,
                 audited=False,
             ),
             "acquire_control": WebSocketRoute(
@@ -759,6 +828,7 @@ class RobotWebSocketServer:
             "access": {
                 "authenticate",
                 "control_status",
+                "server_metrics",
                 "acquire_control",
                 "control_heartbeat",
                 "release_control",
@@ -834,6 +904,13 @@ class RobotWebSocketServer:
         return dict(registry.freeze())
 
     async def _dispatch(self, websocket, data: object) -> None:
+        started_at = self._metrics.request_started()
+        try:
+            await self._dispatch_request(websocket, data)
+        finally:
+            self._metrics.request_finished(started_at)
+
+    async def _dispatch_request(self, websocket, data: object) -> None:
         """Validate a typed request, then dispatch it to a domain handler."""
         try:
             request = WebSocketRequest.parse(
@@ -841,6 +918,7 @@ class RobotWebSocketServer:
                 known_actions=set(self._routes),
             )
         except WebSocketRequestError as exc:
+            self._metrics.record_invalid_request()
             error_payload: dict[str, Any] = {
                 "event": "error",
                 "code": exc.code.value,
@@ -875,6 +953,10 @@ class RobotWebSocketServer:
         admission = self._request_limiter.admit(client_id)
         try:
             if not admission.accepted:
+                if admission.code == WebSocketErrorCode.RATE_LIMITED.value:
+                    self._metrics.record_rate_limited()
+                else:
+                    self._metrics.record_server_busy()
                 await websocket.send(
                     self._json_msg(
                         {
@@ -917,7 +999,10 @@ class RobotWebSocketServer:
                 request_id=request_id,
             )
             await route.handler(websocket, request)
+        except TimeoutError:
+            raise
         except WebSocketAccessError as exc:
+            self._metrics.record_access_denied()
             await websocket.send(
                 self._json_msg(
                     {
@@ -936,6 +1021,7 @@ class RobotWebSocketServer:
                     code=exc.code,
                 )
         except Exception as exc:
+            self._metrics.record_internal_error()
             logger.exception(
                 "WebSocket 请求处理异常: client_id=%s action=%s request_id=%s",
                 client_id,
@@ -984,6 +1070,7 @@ class RobotWebSocketServer:
         self._clients.add(websocket)
         self._client_ids[websocket] = client_id
         self._access.register(client_id, str(remote or "unknown"))
+        self._metrics.connection_opened()
         return client_id
 
     async def _unregister_client(
@@ -992,11 +1079,15 @@ class RobotWebSocketServer:
         *,
         reason: str,
     ) -> None:
+        if reason == "send_failed":
+            with suppress(Exception):
+                await websocket.close(code=1011, reason="send failed")
         self._clients.discard(websocket)
         self._camera_frame_subs.discard(websocket)
         self._device_handler._stop_camera_if_idle()
         client_id = self._client_ids.pop(websocket, None)
         if client_id is not None:
+            self._metrics.connection_closed()
             self._request_limiter.unregister(client_id)
             if self._access.unregister(client_id):
                 await self._release_control_side_effects(
@@ -1051,9 +1142,7 @@ class RobotWebSocketServer:
                 timeout_seconds=self._teleoperation_command_timeout_seconds,
             )
             for owner_id in stale_owners:
-                stale_client_id = owner_id.removeprefix(
-                    WEBSOCKET_TELEOPERATION_OWNER_PREFIX
-                )
+                stale_client_id = owner_id.removeprefix(WEBSOCKET_TELEOPERATION_OWNER_PREFIX)
                 try:
                     self._access.release_control(stale_client_id)
                 except WebSocketAccessError:
@@ -1143,6 +1232,21 @@ class RobotWebSocketServer:
                     "authentication_configured": (self._access.authentication_configured),
                     "control_lease": lease.to_dict() if lease else None,
                     "teleoperation": teleoperation.to_dict(),
+                    "request_id": data["request_id"],
+                }
+            )
+        )
+
+    async def _handle_server_metrics(
+        self,
+        websocket: Any,
+        data: dict[str, Any],
+    ) -> None:
+        await websocket.send(
+            self._json_msg(
+                {
+                    "event": "server_metrics",
+                    "metrics": self._metrics.snapshot().to_dict(),
                     "request_id": data["request_id"],
                 }
             )

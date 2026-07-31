@@ -296,6 +296,11 @@ class _EnvironmentConfig:
     WEBSOCKET_MAX_CONCURRENT_REQUESTS: int = 16
     WEBSOCKET_MAX_QUEUED_MESSAGES: int = 16
     WEBSOCKET_SEND_TIMEOUT_SECONDS: float = 2.0
+    WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS: float = 0.5
+    WEBSOCKET_ALLOWED_ORIGINS: tuple[str, ...] = ()
+    WEBSOCKET_TLS_CERTIFICATE_PATH: str = ""
+    WEBSOCKET_TLS_PRIVATE_KEY_PATH: str = ""
+    WEBSOCKET_REVERSE_PROXY_MODE: bool = False
     TELEOPERATION_COMMAND_TIMEOUT_SECONDS: float = 1.0
     AUXILIARY_SERVICE_START_TIMEOUT_SECONDS: float = 5.0
     AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS: float = 10.0
@@ -1017,6 +1022,28 @@ class _EnvironmentConfig:
         instance.WEBSOCKET_SEND_TIMEOUT_SECONDS = float(
             os.getenv("WEBSOCKET_SEND_TIMEOUT_SECONDS", "2.0")
         )
+        instance.WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS = float(
+            os.getenv("WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS", "0.5")
+        )
+        instance.WEBSOCKET_ALLOWED_ORIGINS = tuple(
+            dict.fromkeys(
+                origin.strip()
+                for origin in os.getenv("WEBSOCKET_ALLOWED_ORIGINS", "").split(",")
+                if origin.strip()
+            )
+        )
+        instance.WEBSOCKET_TLS_CERTIFICATE_PATH = os.getenv(
+            "WEBSOCKET_TLS_CERTIFICATE_PATH",
+            "",
+        )
+        instance.WEBSOCKET_TLS_PRIVATE_KEY_PATH = os.getenv(
+            "WEBSOCKET_TLS_PRIVATE_KEY_PATH",
+            "",
+        )
+        instance.WEBSOCKET_REVERSE_PROXY_MODE = os.getenv(
+            "WEBSOCKET_REVERSE_PROXY_MODE",
+            "false",
+        ).lower() in ("true", "1", "yes")
         instance.TELEOPERATION_COMMAND_TIMEOUT_SECONDS = float(
             os.getenv("TELEOPERATION_COMMAND_TIMEOUT_SECONDS", "1.0")
         )

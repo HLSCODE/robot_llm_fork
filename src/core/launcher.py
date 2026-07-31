@@ -25,16 +25,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 def setup_logging(level: str = "INFO") -> None:
     """Configure process-level console and daily file logging."""
     from datetime import datetime
 
     log_directory = Path(__file__).resolve().parents[2] / "log"
     log_directory.mkdir(parents=True, exist_ok=True)
-    log_file = (
-        log_directory
-        / f"application_{datetime.now().strftime('%Y%m%d')}.log"
-    )
+    log_file = log_directory / f"application_{datetime.now().strftime('%Y%m%d')}.log"
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -60,8 +58,7 @@ def build_auxiliary_service_host(
         auth_token = settings.secrets.websocket_auth_token
         if not auth_token:
             logger.warning(
-                "未配置 WEBSOCKET_AUTH_TOKEN；WebSocket 仅提供公开只读接口，"
-                "所有写操作均会被拒绝"
+                "未配置 WEBSOCKET_AUTH_TOKEN；WebSocket 仅提供公开只读接口，所有写操作均会被拒绝"
             )
         auxiliary_services.append(
             RobotWebSocketServer(
@@ -69,24 +66,17 @@ def build_auxiliary_service_host(
                 host=options.websocket_host,
                 port=options.websocket_port,
                 auth_token=auth_token,
-                control_lease_seconds=(
-                    settings.server.websocket_control_lease_seconds
-                ),
-                max_message_size_bytes=(
-                    settings.server.websocket_max_message_size_bytes
-                ),
-                max_requests_per_second=(
-                    settings.server.websocket_max_requests_per_second
-                ),
-                max_concurrent_requests=(
-                    settings.server.websocket_max_concurrent_requests
-                ),
-                max_queued_messages=(
-                    settings.server.websocket_max_queued_messages
-                ),
-                send_timeout_seconds=(
-                    settings.server.websocket_send_timeout_seconds
-                ),
+                control_lease_seconds=(settings.server.websocket_control_lease_seconds),
+                max_message_size_bytes=(settings.server.websocket_max_message_size_bytes),
+                max_requests_per_second=(settings.server.websocket_max_requests_per_second),
+                max_concurrent_requests=(settings.server.websocket_max_concurrent_requests),
+                max_queued_messages=(settings.server.websocket_max_queued_messages),
+                send_timeout_seconds=(settings.server.websocket_send_timeout_seconds),
+                slow_send_threshold_seconds=(settings.server.websocket_slow_send_threshold_seconds),
+                allowed_origins=settings.server.websocket_allowed_origins,
+                tls_certificate_path=(settings.server.websocket_tls_certificate_path),
+                tls_private_key_path=(settings.server.websocket_tls_private_key_path),
+                reverse_proxy_mode=(settings.server.websocket_reverse_proxy_mode),
                 teleoperation_command_timeout_seconds=(
                     settings.server.teleoperation_command_timeout_seconds
                 ),
@@ -95,12 +85,8 @@ def build_auxiliary_service_host(
 
     return AuxiliaryServiceHost(
         tuple(auxiliary_services),
-        start_timeout_seconds=(
-            settings.server.auxiliary_service_start_timeout_seconds
-        ),
-        stop_timeout_seconds=(
-            settings.server.auxiliary_service_stop_timeout_seconds
-        ),
+        start_timeout_seconds=(settings.server.auxiliary_service_start_timeout_seconds),
+        stop_timeout_seconds=(settings.server.auxiliary_service_stop_timeout_seconds),
     )
 
 
@@ -109,27 +95,17 @@ def resolve_startup_options(
     settings: ApplicationSettings,
 ) -> StartupOptions:
     return StartupOptions(
-        simulation=bool(
-            getattr(args, "simulation", False)
-            or settings.runtime.simulation_mode
-        ),
+        simulation=bool(getattr(args, "simulation", False) or settings.runtime.simulation_mode),
         websocket_enabled=bool(
-            settings.server.websocket_enabled
-            and not getattr(args, "disable_websocket", False)
+            settings.server.websocket_enabled and not getattr(args, "disable_websocket", False)
         ),
-        websocket_host=(
-            getattr(args, "websocket_host", None)
-            or settings.server.websocket_host
-        ),
+        websocket_host=(getattr(args, "websocket_host", None) or settings.server.websocket_host),
         websocket_port=(
             getattr(args, "websocket_port", None)
             if getattr(args, "websocket_port", None) is not None
             else settings.server.websocket_port
         ),
-        log_level=(
-            getattr(args, "log_level", None)
-            or settings.runtime.log_level
-        ),
+        log_level=(getattr(args, "log_level", None) or settings.runtime.log_level),
     )
 
 
@@ -164,9 +140,7 @@ def _start_auxiliary_services(host: AuxiliaryServiceHost) -> None:
     try:
         snapshots = host.start()
     except Exception:
-        logger.exception(
-            "附加服务宿主启动失败；GUI 将继续运行"
-        )
+        logger.exception("附加服务宿主启动失败；GUI 将继续运行")
         return
     for snapshot in snapshots:
         _log_service_snapshot(snapshot)

@@ -70,6 +70,7 @@ MINIMAL_VALID_PAYLOADS: dict[str, dict[str, Any]] = {
     "rename_task": {"name": "task-a", "new_name": "task-b"},
     "resume": {},
     "save_task": {"name": "task-a"},
+    "server_metrics": {},
     "status": {},
     "stop": {},
     "subscribe_camera_frames": {},

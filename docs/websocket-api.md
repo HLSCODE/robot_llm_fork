@@ -159,12 +159,17 @@ WEBSOCKET_ENABLED=true
 WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
 WEBSOCKET_AUTH_TOKEN=
+WEBSOCKET_ALLOWED_ORIGINS=
+WEBSOCKET_TLS_CERTIFICATE_PATH=
+WEBSOCKET_TLS_PRIVATE_KEY_PATH=
+WEBSOCKET_REVERSE_PROXY_MODE=false
 WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
 WEBSOCKET_MAX_MESSAGE_SIZE_BYTES=1048576
 WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
 WEBSOCKET_MAX_CONCURRENT_REQUESTS=16
 WEBSOCKET_MAX_QUEUED_MESSAGES=16
 WEBSOCKET_SEND_TIMEOUT_SECONDS=2.0
+WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS=0.5
 AUXILIARY_SERVICE_START_TIMEOUT_SECONDS=5.0
 AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=10.0
 
@@ -193,15 +198,20 @@ MINICPM_ASK_MODEL=qwen-turbo
 |---|---|---|
 | `SIMULATION_MODE` | 是否模拟模式 | `true` 时不连接真实硬件 |
 | `WEBSOCKET_ENABLED` | 是否随 GUI 启动 WebSocket | 默认 `true` |
-| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `127.0.0.1`；远程监听必须使用可信反向代理提供 `wss://` |
+| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `127.0.0.1`；非 loopback 监听必须由服务端直接提供 TLS |
 | `WEBSOCKET_PORT` | WebSocket 监听端口 | 默认 `8765` |
-| `WEBSOCKET_AUTH_TOKEN` | 写操作共享认证密钥 | 留空时服务保持可读，但所有写操作均被拒绝；不得提交真实值 |
+| `WEBSOCKET_AUTH_TOKEN` | 写操作共享认证密钥 | 留空时服务保持可读，但所有写操作均被拒绝；远程/TLS/代理部署时必填 |
+| `WEBSOCKET_ALLOWED_ORIGINS` | 浏览器 Origin 白名单 | 逗号分隔、精确匹配；远程/TLS/代理部署时必填；不发送 Origin 的非浏览器客户端不受影响 |
+| `WEBSOCKET_TLS_CERTIFICATE_PATH` | 服务端 TLS 证书链 | 与私钥同时配置后直接提供 `wss://` |
+| `WEBSOCKET_TLS_PRIVATE_KEY_PATH` | 服务端 TLS 私钥 | 不得提交私钥文件；与证书同时配置 |
+| `WEBSOCKET_REVERSE_PROXY_MODE` | 同机可信反向代理模式 | 启用后必须绑定 loopback，由代理终止 TLS；不能同时启用服务端 TLS |
 | `WEBSOCKET_CONTROL_LEASE_SECONDS` | 单一控制客户端租约时长 | 默认 30 秒；控制指令或心跳会续期 |
 | `WEBSOCKET_MAX_MESSAGE_SIZE_BYTES` | 单条入站消息上限 | 默认 1048576 字节；超限连接由 WebSocket 层以 1009 关闭 |
 | `WEBSOCKET_MAX_REQUESTS_PER_SECOND` | 每客户端每秒请求上限 | 默认 120，包含高频遥操作余量 |
 | `WEBSOCKET_MAX_CONCURRENT_REQUESTS` | 全服务同时处理的请求上限 | 默认 16；超限返回 `server_busy` |
 | `WEBSOCKET_MAX_QUEUED_MESSAGES` | 每连接入站排队上限 | 默认 16，由 WebSocket 库施加背压 |
 | `WEBSOCKET_SEND_TIMEOUT_SECONDS` | 单次出站发送超时 | 默认 2 秒；慢客户端会被断开并释放其会话资源 |
+| `WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS` | 慢发送监控阈值 | 默认 0.5 秒；达到阈值计入 `slow_sends_total` |
 | `AUXILIARY_SERVICE_START_TIMEOUT_SECONDS` | 单个附加服务启动超时 | 默认 5 秒 |
 | `AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS` | 单个附加服务停止超时 | 默认 10 秒 |
 | `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
@@ -221,6 +231,42 @@ MINICPM_ASK_MODEL=qwen-turbo
 | `MINICPM_ASK_API_KEY` | 指令分类模型的 API Key | 留空时回退到 `OPENAI_API_KEY`；若两者都为空，则跳过分类，不自动规划 |
 | `MINICPM_ASK_BASE_URL` | 指令分类模型 Base URL | 留空时回退到 `OPENAI_BASE_URL` |
 | `MINICPM_ASK_MODEL` | 指令分类模型名 | 如 `qwen-turbo` |
+
+### 2.6 TLS 与可信反向代理部署
+
+服务只支持两种远程部署方式，配置不完整时启动直接失败：
+
+1. 服务端直接 TLS：监听远程地址，同时配置认证密钥、Origin 白名单、证书链和
+   私钥，客户端连接 `wss://host:port/`。
+2. 同机可信反向代理：服务保持 `127.0.0.1`/`::1`，设置
+   `WEBSOCKET_REVERSE_PROXY_MODE=true`，由 Nginx/Caddy 等同机代理提供
+   `wss://`。代理必须保留 `Origin` 和 WebSocket Upgrade 头。
+
+代理模式不读取 `X-Forwarded-For`、`X-Forwarded-Proto` 等转发头参与认证或授权，
+可信边界由 loopback socket、WebSocket token 和 Origin 白名单共同构成。禁止把
+代理模式后端端口直接暴露到外网。
+
+Nginx 同机代理的最小 WebSocket location：
+
+```nginx
+location /robot/ws {
+    proxy_pass http://127.0.0.1:8765/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Origin $http_origin;
+    proxy_read_timeout 60s;
+}
+```
+
+部署验收必须确认：
+
+- 白名单内 Origin 可以完成握手，非白名单浏览器 Origin 被握手层拒绝。
+- 未认证连接不能读取 `server_metrics`，也不能取得控制权。
+- 代理模式的后端端口只能从 loopback 访问，外部只暴露代理的 `wss://` 端点。
+- 服务端 TLS 模式使用 TLS 1.2 及以上，证书域名、有效期和完整链均通过客户端校验。
+- 人为阻塞一个客户端发送时，其他连接仍可接收广播；超时客户端被关闭并增加
+  `send_timeouts_total` 与 `slow_client_disconnects_total`。
 
 ---
 
@@ -298,7 +344,7 @@ ws.onerror = (err) => {
 | 级别 | action |
 |---|---|
 | 公开只读 | `status`、动作/序列/任务查询、`ai_status`、`list_skills`、`camera_status`、`minicpm_status`、`control_status` |
-| 仅需认证 | 相机帧订阅、LLM 聊天会话 |
+| 仅需认证 | `server_metrics`、相机帧订阅、LLM 聊天会话 |
 | 认证并持有控制权 | 其余执行、设备、编排、AI 规划、遥操作和数据采集 action |
 
 `WEBSOCKET_AUTH_TOKEN` 未配置时，`authenticate` 返回
@@ -431,6 +477,11 @@ ws.onmessage = (event) => {
 `rate_limited` 和 `retry_after_seconds`；全服务并发达到上限时返回
 `server_busy`。客户端遇到这两类错误不得立即无界重试。
 
+已认证客户端可调用 `server_metrics` 读取进程生命周期内的聚合指标，包括当前/
+峰值/累计连接数、当前/峰值/累计请求数、请求耗时、非法请求、限流、繁忙、
+权限拒绝、内部错误、发送耗时、慢发送、发送失败和超时断连。指标不包含 token、
+请求 payload、客户端地址或其他高基数个人数据。
+
 ---
 
 ## 4. action 总表
@@ -441,6 +492,7 @@ ws.onmessage = (event) => {
 |---|---|---|
 | `authenticate` | 公开 | 使用 `WEBSOCKET_AUTH_TOKEN` 认证当前连接 |
 | `control_status` | 公开 | 查询当前连接认证状态、控制租约和应用层遥操作 owner/活动臂/指令计数快照 |
+| `server_metrics` | 已认证 | 查询 WebSocket API、连接和慢客户端聚合指标 |
 | `acquire_control` | 已认证 | 申请唯一控制权 |
 | `control_heartbeat` | 控制者 | 续期控制租约 |
 | `release_control` | 控制者 | 主动释放控制权及其会话资源 |

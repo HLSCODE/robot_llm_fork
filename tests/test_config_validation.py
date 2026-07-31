@@ -93,7 +93,7 @@ class ConfigurationValidationTests(unittest.TestCase):
             all(issue.severity is ConfigurationSeverity.ERROR for issue in report.errors)
         )
 
-    def test_non_loopback_binding_has_explicit_security_warning(self) -> None:
+    def test_non_loopback_binding_without_tls_is_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(
                 _config(
@@ -103,10 +103,77 @@ class ConfigurationValidationTests(unittest.TestCase):
                 _options(websocket_host="0.0.0.0"),
             )
 
-        self.assertEqual((), report.errors)
         self.assertEqual(
-            ["websocket_tls_required"],
-            [issue.code for issue in report.warnings],
+            {
+                "websocket_origins_required",
+                "websocket_tls_required",
+            },
+            {issue.code for issue in report.errors},
+        )
+        self.assertEqual((), report.warnings)
+
+    def test_loopback_reverse_proxy_requires_auth_and_origins(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            valid = validate_startup_configuration(
+                _config(
+                    root,
+                    WEBSOCKET_AUTH_TOKEN="real-test-token",
+                    WEBSOCKET_REVERSE_PROXY_MODE=True,
+                    WEBSOCKET_ALLOWED_ORIGINS=("https://robot.example",),
+                ),
+                _options(),
+            )
+            invalid = validate_startup_configuration(
+                _config(
+                    root,
+                    WEBSOCKET_REVERSE_PROXY_MODE=True,
+                    WEBSOCKET_ALLOWED_ORIGINS=("https://robot.example/path",),
+                ),
+                _options(),
+            )
+
+        self.assertEqual((), valid.errors)
+        self.assertEqual(
+            {
+                "invalid_websocket_origin",
+                "websocket_auth_required",
+            },
+            {issue.code for issue in invalid.errors},
+        )
+
+    def test_tls_certificate_and_key_must_be_configured_together(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    WEBSOCKET_TLS_CERTIFICATE_PATH="missing.crt",
+                ),
+                _options(),
+            )
+
+        self.assertEqual(
+            {
+                "incomplete_websocket_tls",
+                "missing_websocket_tls_file",
+            },
+            {issue.code for issue in report.errors},
+        )
+
+    def test_slow_send_threshold_must_not_exceed_send_timeout(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    WEBSOCKET_SEND_TIMEOUT_SECONDS=1.0,
+                    WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS=1.1,
+                ),
+                _options(),
+            )
+
+        self.assertIn(
+            "invalid_websocket_slow_send_threshold",
+            {issue.code for issue in report.errors},
         )
 
     def test_data_collection_and_balance_settings_are_validated_at_startup(

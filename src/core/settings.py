@@ -56,6 +56,11 @@ class ServerSettings:
     websocket_max_concurrent_requests: int = 16
     websocket_max_queued_messages: int = 16
     websocket_send_timeout_seconds: float = 2.0
+    websocket_slow_send_threshold_seconds: float = 0.5
+    websocket_allowed_origins: tuple[str, ...] = ()
+    websocket_tls_certificate_path: str = ""
+    websocket_tls_private_key_path: str = ""
+    websocket_reverse_proxy_mode: bool = False
     teleoperation_command_timeout_seconds: float = 1.0
     auxiliary_service_start_timeout_seconds: float = 5.0
     auxiliary_service_stop_timeout_seconds: float = 10.0

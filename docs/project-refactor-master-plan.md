@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-31
 >
-> 当前里程碑：M4 — 设备动作入口与历史包装持续收敛
-> 计划进度：84/115（83 DONE + 1 DROPPED，73.0%）
+> 当前里程碑：M4 — WebSocket 传输安全与运行指标已收敛
+> 计划进度：86/115（85 DONE + 1 DROPPED，74.8%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -347,14 +347,16 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 ### 8.1 当前问题
 
-- 已改为默认监听 `127.0.0.1`；共享密钥认证已落地，但远程监听仍缺少
-  Origin 限制和服务端 TLS/可信反向代理部署验收。
+- 默认监听 `127.0.0.1`；远程直连强制 TLS、认证和 Origin 白名单，同机可信
+  反向代理强制 loopback 后端并由代理终止 TLS，部署配置和验收清单已文档化。
 - 多客户端写操作已由单控制客户端租约串行化；公开查询和已认证的相机/聊天
   读取会话仍允许观察者并行访问。
 - 请求幂等语义尚未定义。
 - 执行与编排事件按设计广播给观察者；后续若增加更多高频事件，需要扩展显式
   订阅类别。
 - 聊天协议已经明确存在不支持并发请求的限制。
+- WebSocket 已提供不含客户端身份和 payload 的聚合 API/连接/发送指标；生产环境
+  仍需接入外部采集与告警系统。
 
 ### 8.2 目标
 
@@ -379,9 +381,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | C-008 | P1 | DONE | 请求结果单播、系统/执行事件广播、相机帧显式订阅；广播与订阅发送并发隔离慢客户端 |
 | C-009 | P2 | DONE | Server 的业务处理方法已清空，仅保留连接、鉴权、限流、顶层路由、投递及 handler host context；执行、编排、交互、设备、遥操作/采集拆为独立 handler，并复用 ApplicationServices |
 | C-010 | P2 | DONE | 请求在边界转换为不可变 WebSocketRequest，响应经 WebSocketResponse 统一序列化 |
-| C-011 | P2 | TODO | 增加 Origin/TLS/反向代理部署方案 |
+| C-011 | P2 | DONE | 远程直连强制 TLS、认证和精确 Origin 白名单；同机可信代理强制 loopback、代理终止 TLS 且不采信转发头授权；配置错误启动失败，部署与验收清单已文档化 |
 | C-012 | P2 | DONE | 全部 action 具有唯一 payload schema；缺失字段、错误类型和未知字段在鉴权/handler 前统一拒绝，路由缺少 schema 时启动失败 |
-| C-013 | P3 | TODO | 增加 API 指标和慢客户端监控 |
+| C-013 | P3 | DONE | 增加线程安全的连接/请求/错误/限流/发送延迟聚合指标和已认证 server_metrics 动作；慢发送、发送超时及超时断连独立计数，超时连接明确关闭并释放会话 |
 | C-014 | P1 | DONE | WebSocket 改为 GUI 同进程的可选附加服务，共用唯一 ApplicationServices 和受管理 asyncio 生命周期 |
 | C-015 | P1 | DONE | 动作库、任务库和当前编排序列已收敛到线程安全 CompositionService；JSON 原子替换并向 GUI/网络入口发布 revision 事件 |
 
@@ -948,6 +950,7 @@ M4 工程治理与清理
 | 2026-07-31 | M4 | B | 串口 Transport 与工具架设备所有权收敛 | B-008 TODO → DONE；B-011/B-012 TODO → DOING | 六类生产串口设备统一使用组合根注入的 SerialTransport；增加有限打开重试、结构化传输错误和协议测试；工具架放枪按需租用并注入移液枪能力；删除身体轴内嵌 Tk GUI及旧串口双入口 | 303 tests + 27 subtests，14 golden cases；完整质量门禁和 wheel smoke |
 | 2026-07-31 | M4 | B/C/G | 设备错误语义整批收敛 | B-011 DOING → DONE | 新增稳定设备错误分类和安全用户消息；Transport、协议、RealMan、生命周期、动作、手动控制、遥操作及安全停止统一归一化；category/raw code 贯通 step/terminal event、快照、状态 API；核心错误边界加入 Mypy | 308 tests + 27 subtests，14 golden cases |
 | 2026-07-31 | M4 | B/G | PWM 颈部动作链路与旧设备包装收敛 | B-010 TODO → DONE；B-012 DOING → DONE | 颈部水平/垂直/双轴/复位接入统一 schema、handler、控制策略和 DeviceRuntime；驱动改为显式拒绝越界 PWM/时长；删除无调用方 tapping_device 包装和伪兼容导出；修正 WebSocket watchdog 测试同步条件 | 313 tests + 28 subtests，14 golden cases；完整质量门禁和 wheel smoke |
+| 2026-07-31 | M4 | C/G | WebSocket 传输安全与可观测性收敛 | C-011/C-013 TODO → DONE | 远程直连强制 TLS/认证/Origin；代理模式限制同机 loopback 且不信任转发头；新增 server_metrics 聚合连接、请求、限流、延迟、慢发送和超时断连；补首次发送失败清理和超时连接关闭 | 323 tests + 32 subtests，14 golden cases；完整质量门禁和 wheel smoke |
 | 2026-07-28 | M2 | A/C/D | GUI 与附加服务统一宿主 | A-013/C-014 TODO → DONE | 删除 GUI/Server 二选一组合路径；WebSocket 进入受管理 asyncio 线程并共享唯一 ApplicationServices，默认仅监听本机 | - |
 | 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
 | 2026-07-29 | M2 | A/B | 动作 handler 与执行控制首批收敛 | B-007 TODO → DOING；A-007 保持 DOING | 建立唯一 ActionHandlerRegistry、注册完整性校验和统一动作 deadline/cancel 上下文；首批拆出 WAIT/INSPECT，阻塞调用不使用脱离资源租约的后台超时线程 | - |
@@ -979,8 +982,7 @@ M4 工程治理与清理
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
-4. **G-012/G-013**：确定覆盖率阈值，补 Linux 最小依赖、GUI/Server 和硬件可选依赖矩阵。
-5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+3. **G-012/G-013**：确定覆盖率阈值，补 Linux 最小依赖、GUI/Server 和硬件可选依赖矩阵。
+4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
-7. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+5. 完成 simulation smoke test 后执行逐设备真实硬件验收。

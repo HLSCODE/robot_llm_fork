@@ -101,10 +101,7 @@ class AuxiliaryServiceHostTests(unittest.TestCase):
         stopped = host.stop()
 
         self.assertTrue(
-            all(
-                snapshot.state is AuxiliaryServiceState.STOPPED
-                for snapshot in stopped
-            )
+            all(snapshot.state is AuxiliaryServiceState.STOPPED for snapshot in stopped)
         )
         self.assertEqual(
             [
@@ -136,10 +133,7 @@ class AuxiliaryServiceHostTests(unittest.TestCase):
             "src.core.auxiliary_services",
             level="WARNING",
         ):
-            snapshots = {
-                snapshot.name: snapshot
-                for snapshot in host.start()
-            }
+            snapshots = {snapshot.name: snapshot for snapshot in host.start()}
 
         self.assertEqual(
             AuxiliaryServiceState.FAILED,
@@ -148,10 +142,7 @@ class AuxiliaryServiceHostTests(unittest.TestCase):
         self.assertIn("unavailable", snapshots["failed"].error)
         self.assertTrue(snapshots["running"].running)
 
-        final = {
-            snapshot.name: snapshot
-            for snapshot in host.stop()
-        }
+        final = {snapshot.name: snapshot for snapshot in host.stop()}
         self.assertEqual(
             AuxiliaryServiceState.FAILED,
             final["failed"].state,
@@ -234,6 +225,8 @@ class WebSocketServiceLifecycleTests(unittest.TestCase):
         self.assertEqual(9876, captured["port"])
         self.assertEqual(1_048_576, captured["options"]["max_size"])
         self.assertEqual(16, captured["options"]["max_queue"])
+        self.assertIsNone(captured["options"]["origins"])
+        self.assertIsNone(captured["options"]["ssl"])
         self.assertTrue(binding.closed)
         self.assertTrue(binding.waited)
 
@@ -315,6 +308,10 @@ class ApplicationHostCompositionTests(unittest.TestCase):
 
         self.assertEqual("0.0.0.0", server_type.call_args.kwargs["host"])
         self.assertEqual(8765, server_type.call_args.kwargs["port"])
+        self.assertEqual(
+            0.5,
+            server_type.call_args.kwargs["slow_send_threshold_seconds"],
+        )
         self.assertEqual("websocket", host.snapshots()[0].name)
 
     def test_missing_websocket_token_warns_that_writes_are_locked(self):
