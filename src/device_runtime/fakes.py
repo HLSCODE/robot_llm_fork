@@ -201,25 +201,37 @@ class SimulatedMobileBase:
 
 
 class SimulatedNeck:
-    def move_horizontal(self, _pwm: int, _time_ms: int | None = None) -> None:
-        return None
+    def __init__(self) -> None:
+        self.horizontal_pwm = 1600
+        self.vertical_pwm = 1600
+        self.calls: list[tuple[str, int, int | None, int | None]] = []
+        self.closed = False
 
-    def move_vertical(self, _pwm: int, _time_ms: int | None = None) -> None:
-        return None
+    def move_horizontal(self, pwm: int, time_ms: int | None = None) -> None:
+        self.horizontal_pwm = pwm
+        self.calls.append(("horizontal", pwm, None, time_ms))
+
+    def move_vertical(self, pwm: int, time_ms: int | None = None) -> None:
+        self.vertical_pwm = pwm
+        self.calls.append(("vertical", pwm, None, time_ms))
 
     def move_both(
         self,
-        _horizontal_pwm: int,
-        _vertical_pwm: int,
-        _time_ms: int | None = None,
+        horizontal_pwm: int,
+        vertical_pwm: int,
+        time_ms: int | None = None,
     ) -> None:
-        return None
+        self.horizontal_pwm = horizontal_pwm
+        self.vertical_pwm = vertical_pwm
+        self.calls.append(("both", horizontal_pwm, vertical_pwm, time_ms))
 
-    def reset(self, _time_ms: int | None = None) -> None:
-        return None
+    def reset(self, time_ms: int | None = None) -> None:
+        self.horizontal_pwm = 1600
+        self.vertical_pwm = 1600
+        self.calls.append(("reset", 1600, 1600, time_ms))
 
     def close(self) -> None:
-        return None
+        self.closed = True
 
 
 class SimulatedDigitalOutputs:

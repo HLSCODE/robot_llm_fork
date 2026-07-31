@@ -6,8 +6,8 @@
   - 针升降电机 (Stepper Motor)
   - 针旋转电机 (Stepper Motor)
 
-被统一 ActionEngine 通过 `执行器: "加粉装置"` 调用，
-不修改任何已有代码。
+由 DeviceRuntime 管理生命周期，并通过统一 ActionEngine 的
+`执行器: "加粉装置"` 动作入口调用。
 """
 
 from __future__ import annotations
@@ -188,17 +188,17 @@ class TappingController:
 # 操作名称 -> 方法映射（供统一 ActionEngine 使用）
 OPERATIONS = {
     # 夹爪
-    "夹爪闭合":     lambda ctrl, **kw: ctrl.gripper_grip(),
-    "夹爪张开":     lambda ctrl, **kw: ctrl.gripper_release(),
-    "夹爪移动到":   lambda ctrl, **kw: ctrl.gripper_move_to(int(kw.get("开度", 50))),
+    "夹爪闭合": lambda ctrl, **kw: ctrl.gripper_grip(),
+    "夹爪张开": lambda ctrl, **kw: ctrl.gripper_release(),
+    "夹爪移动到": lambda ctrl, **kw: ctrl.gripper_move_to(int(kw.get("开度", 50))),
     # 针升降
-    "针上升":       lambda ctrl, **kw: ctrl.lift_up(steps=int(kw.get("步数", DEFAULT_STEPS))),
-    "针下降":       lambda ctrl, **kw: ctrl.lift_down(steps=int(kw.get("步数", DEFAULT_STEPS))),
-    "针停止":       lambda ctrl, **kw: ctrl.lift_stop(),
+    "针上升": lambda ctrl, **kw: ctrl.lift_up(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针下降": lambda ctrl, **kw: ctrl.lift_down(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针停止": lambda ctrl, **kw: ctrl.lift_stop(),
     # 针旋转
-    "针正转":       lambda ctrl, **kw: ctrl.rotation_cw(steps=int(kw.get("步数", DEFAULT_STEPS))),
-    "针反转":       lambda ctrl, **kw: ctrl.rotation_ccw(steps=int(kw.get("步数", DEFAULT_STEPS))),
-    "针旋转停止":   lambda ctrl, **kw: ctrl.rotation_stop(),
+    "针正转": lambda ctrl, **kw: ctrl.rotation_cw(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针反转": lambda ctrl, **kw: ctrl.rotation_ccw(steps=int(kw.get("步数", DEFAULT_STEPS))),
+    "针旋转停止": lambda ctrl, **kw: ctrl.rotation_stop(),
     # 通用
-    "使能":         lambda ctrl, **kw: ctrl.enable_all(),
+    "使能": lambda ctrl, **kw: ctrl.enable_all(),
 }

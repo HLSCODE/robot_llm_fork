@@ -26,6 +26,7 @@ from src.device_runtime.ids import (
     CAMERA,
     EXPRESSION_DISPLAY,
     MOBILE_BASE,
+    NECK,
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
@@ -130,6 +131,13 @@ class ActionControlPolicyTests(unittest.TestCase):
                 ActionCancellationMode.AFTER_BLOCKING_CALL,
                 (PIPETTE,),
                 "pipette.execute",
+            ),
+            (
+                resolve_manipulate_control_policy,
+                {"执行器": "颈部"},
+                ActionCancellationMode.AFTER_BLOCKING_CALL,
+                (NECK,),
+                "neck.move",
             ),
             (
                 resolve_manipulate_control_policy,

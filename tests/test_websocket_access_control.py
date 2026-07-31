@@ -414,7 +414,7 @@ class WebSocketDispatchAccessTests(unittest.TestCase):
             )
             try:
                 for _ in range(20):
-                    if server._access.control_snapshot() is None:
+                    if self.teleoperation.stop_count:
                         break
                     await asyncio.sleep(0.02)
             finally:

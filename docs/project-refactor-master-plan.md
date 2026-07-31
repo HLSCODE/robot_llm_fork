@@ -4,7 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-31
 >
-> 当前里程碑：M4 — 设备传输、所有权与错误语义边界已收敛
+> 当前里程碑：M4 — 设备动作入口与历史包装持续收敛
+> 计划进度：84/115（83 DONE + 1 DROPPED，73.0%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -110,9 +111,14 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - 身体轴、继电器、快换手、移液枪、PWM 颈部和表情屏生产链路已统一通过
   `device_control_sdk.SerialTransport` 访问串口；端口参数、打开重试、RTS/DTR、
   超时、互斥收发和幂等关闭由组合根与共享 Transport 管理。
+- PWM 颈部已作为 `MANIPULATE/颈部` 正式接入统一动作 schema、handler、控制策略
+  和设备资源租约；水平、垂直、双轴及复位均经 `DeviceRuntime` 调用，参数在设备
+  初始化前校验，驱动不再静默钳制越界 PWM。
 - 工具架不再在机械臂 Provider 内直接持有移液枪串口逻辑；放枪动作按控制策略
   同时租用机械臂和移液枪，并从 `DeviceRuntime` 注入弹枪能力。
-- 身体轴驱动中的独立 Tk 调试 GUI 和旧移液枪串口脚本已删除，不保留双入口。
+- 身体轴驱动中的独立 Tk 调试 GUI、旧移液枪串口脚本和无调用方的
+  `tapping_device` 包装已删除；伪 `Stateful*`/`*Snapshot = object` 导出一并移除，
+  不保留兼容入口。
 - 硬件失败已统一为 `DeviceErrorCategory` 和 `DeviceOperationError`；设备、操作、
   稳定分类及可用的供应商原始码贯通 step/terminal event、执行快照、设备状态与
   WebSocket，用户消息不包含底层端口、堆栈或 SDK 诊断。
@@ -276,7 +282,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - Transport、协议、机械臂、设备生命周期、手动控制、遥操作和安全停止已共用
   设备错误分类；真实设备仍需验证各供应商原始码的含义与恢复策略。
 - 部分阻塞 SDK 无法及时响应取消。
-- 颈部控制器已初始化但没有形成完整动作链路。
+- PWM 舵机实际机械限位、方向和不同负载下的动作时长仍需真实设备验收。
 
 ### 7.2 目标
 
@@ -301,9 +307,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | B-007 | P1 | DOING | 已建立全动作控制策略矩阵、执行前停止能力校验和事件输出；无即时取消能力的路径已显式标记，待完成 RealMan 最大停止延迟硬件验证 |
 | B-008 | P2 | DONE | 身体轴、继电器、快换手、移液枪、PWM 颈部和表情屏统一使用共享 SerialTransport；配置、有限重试、RTS/DTR、超时、互斥收发和幂等关闭均由唯一生命周期入口管理 |
 | B-009 | P2 | DONE | relay/tool-changer/pipette 及机械臂 adapter 已落地，视觉不再依赖厂商对象 |
-| B-010 | P2 | TODO | 评估并接入 PWM neck 动作能力 |
+| B-010 | P2 | DONE | PWM neck 已接入 MANIPULATE 动作 schema、handler、控制策略和 DeviceRuntime 资源租约；支持水平、垂直、双轴及复位，越界参数在初始化设备前拒绝 |
 | B-011 | P2 | DONE | 建立 unavailable/connection/timeout/protocol/rejected/I/O/internal 设备错误模型；统一执行、设备生命周期、手动控制、遥操作与安全停止消息，并贯通事件、快照及 WebSocket |
-| B-012 | P3 | DOING | 已删除旧移液枪串口脚本和身体轴驱动内嵌 Tk GUI；待继续全仓清理无引用设备封装与联调脚本 |
+| B-012 | P3 | DONE | 已完成全仓设备封装与脚本引用审计；删除旧移液枪串口脚本、身体轴内嵌 Tk GUI、无调用方 tapping_device 包装及伪 Stateful/Snapshot 兼容导出 |
 | B-013 | P0 | DONE | 定义厂商无关的机械臂运动、状态、夹爪及可选能力协议 |
 | B-014 | P1 | DONE | RealMan adapter 接入统一运行时，业务层移除 `rm_*` 和原生控制器访问 |
 | B-015 | P1 | DOING | Provider 注册表和可复用核心契约测试已落地；待明确并接入第二种真实机械臂 adapter，执行软硬件契约验收 |
@@ -941,6 +947,7 @@ M4 工程治理与清理
 | 2026-07-31 | M4 | F | 遥操作会话状态收敛 | F-T-003 DOING → DONE；F-T-002 保持 DOING | 将 owner/臂/计数/最后指令/夹爪状态收敛到 TeleoperationService；WebSocket 和 DataCollection 独立持有 owner；增加逐臂指令流 watchdog 和控制租约联动释放 | - |
 | 2026-07-31 | M4 | B | 串口 Transport 与工具架设备所有权收敛 | B-008 TODO → DONE；B-011/B-012 TODO → DOING | 六类生产串口设备统一使用组合根注入的 SerialTransport；增加有限打开重试、结构化传输错误和协议测试；工具架放枪按需租用并注入移液枪能力；删除身体轴内嵌 Tk GUI及旧串口双入口 | 303 tests + 27 subtests，14 golden cases；完整质量门禁和 wheel smoke |
 | 2026-07-31 | M4 | B/C/G | 设备错误语义整批收敛 | B-011 DOING → DONE | 新增稳定设备错误分类和安全用户消息；Transport、协议、RealMan、生命周期、动作、手动控制、遥操作及安全停止统一归一化；category/raw code 贯通 step/terminal event、快照、状态 API；核心错误边界加入 Mypy | 308 tests + 27 subtests，14 golden cases |
+| 2026-07-31 | M4 | B/G | PWM 颈部动作链路与旧设备包装收敛 | B-010 TODO → DONE；B-012 DOING → DONE | 颈部水平/垂直/双轴/复位接入统一 schema、handler、控制策略和 DeviceRuntime；驱动改为显式拒绝越界 PWM/时长；删除无调用方 tapping_device 包装和伪兼容导出；修正 WebSocket watchdog 测试同步条件 | 313 tests + 28 subtests，14 golden cases；完整质量门禁和 wheel smoke |
 | 2026-07-28 | M2 | A/C/D | GUI 与附加服务统一宿主 | A-013/C-014 TODO → DONE | 删除 GUI/Server 二选一组合路径；WebSocket 进入受管理 asyncio 线程并共享唯一 ApplicationServices，默认仅监听本机 | - |
 | 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
 | 2026-07-29 | M2 | A/B | 动作 handler 与执行控制首批收敛 | B-007 TODO → DOING；A-007 保持 DOING | 建立唯一 ActionHandlerRegistry、注册完整性校验和统一动作 deadline/cancel 上下文；首批拆出 WAIT/INSPECT，阻塞调用不使用脱离资源租约的后台超时线程 | - |
@@ -972,10 +979,8 @@ M4 工程治理与清理
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **B-010/B-012**：接入 PWM neck 动作 schema/handler，并完成剩余设备实验
-   脚本清理。
-4. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
-5. **G-012/G-013**：确定覆盖率阈值，补 Linux 最小依赖、GUI/Server 和硬件可选依赖矩阵。
-6. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+3. **C-011/C-013**：补 Origin/TLS/可信反向代理部署验收和 API/慢客户端指标。
+4. **G-012/G-013**：确定覆盖率阈值，补 Linux 最小依赖、GUI/Server 和硬件可选依赖矩阵。
+5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
 7. 完成 simulation smoke test 后执行逐设备真实硬件验收。

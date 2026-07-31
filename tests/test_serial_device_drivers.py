@@ -18,7 +18,7 @@ class SerialDeviceDriverTests(unittest.TestCase):
         relay.set_channel(2, True)
 
         self.assertEqual(
-            b"\x01\x06\x00\x01\x00\x01\x19\xCA",
+            b"\x01\x06\x00\x01\x00\x01\x19\xca",
             transport.calls[0].payload,
         )
         with self.assertRaises(ValueError):
@@ -45,7 +45,7 @@ class SerialDeviceDriverTests(unittest.TestCase):
             (
                 b"OK",
                 b"OK",
-                b"\x01\x06\x01\x07\x00\x01\xF8\x37",
+                b"\x01\x06\x01\x07\x00\x01\xf8\x37",
             )
         )
         pipette = ADP(transport)
@@ -57,7 +57,7 @@ class SerialDeviceDriverTests(unittest.TestCase):
         self.assertEqual(b">01G6158", transport.calls[0].payload)
         self.assertEqual(b">01p000061AC", transport.calls[1].payload)
         self.assertEqual(
-            b"\x01\x06\x01\x07\x00\x01\xF8\x37",
+            b"\x01\x06\x01\x07\x00\x01\xf8\x37",
             transport.calls[2].payload,
         )
 
@@ -71,6 +71,17 @@ class SerialDeviceDriverTests(unittest.TestCase):
         self.assertEqual(1800, neck.current_pwm[ServoAxis.HORIZONTAL])
         neck.close()
         self.assertTrue(transport.closed)
+
+    def test_neck_rejects_out_of_range_values_instead_of_clamping(self):
+        transport = FakeTransport((b"",))
+        neck = NeckController(transport)
+
+        with self.assertRaises(ValueError):
+            neck.move_to(2500, ServoAxis.HORIZONTAL, time_ms=0)
+        with self.assertRaises(ValueError):
+            neck.move_to(1600, ServoAxis.HORIZONTAL, time_ms=10000)
+
+        self.assertEqual([], transport.calls)
 
 
 if __name__ == "__main__":

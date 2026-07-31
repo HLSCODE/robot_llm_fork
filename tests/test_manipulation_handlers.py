@@ -14,6 +14,7 @@ from src.device_runtime import (
 )
 from src.device_runtime.ids import (
     EXPRESSION_DISPLAY,
+    NECK,
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
@@ -33,6 +34,7 @@ from src.execution.handlers import (
     GripperActionHandler,
     ManipulateActionHandler,
     ManipulationHandlerOptions,
+    NeckActionHandler,
     PipetteActionHandler,
     PowderDispenseActionHandler,
     RelayActionHandler,
@@ -113,6 +115,31 @@ class _Pipette:
     def eject_tip(self) -> bool:
         self.calls.append(("eject_tip", None))
         return True
+
+    def close(self) -> None:
+        return None
+
+
+class _Neck:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int | None, int | None, int | None]] = []
+
+    def move_horizontal(self, pwm: int, time_ms: int | None = None) -> None:
+        self.calls.append(("horizontal", pwm, None, time_ms))
+
+    def move_vertical(self, pwm: int, time_ms: int | None = None) -> None:
+        self.calls.append(("vertical", None, pwm, time_ms))
+
+    def move_both(
+        self,
+        horizontal_pwm: int,
+        vertical_pwm: int,
+        time_ms: int | None = None,
+    ) -> None:
+        self.calls.append(("both", horizontal_pwm, vertical_pwm, time_ms))
+
+    def reset(self, time_ms: int | None = None) -> None:
+        self.calls.append(("reset", None, None, time_ms))
 
     def close(self) -> None:
         return None
@@ -199,9 +226,7 @@ def _runtime_with(
             device_id=device_id,
             capabilities=frozenset({capability}),
             factory=lambda: device,
-            close=lambda value: value.close()
-            if hasattr(value, "close")
-            else None,
+            close=lambda value: value.close() if hasattr(value, "close") else None,
         )
     )
     return runtime
@@ -257,11 +282,7 @@ class DiscreteOutputHandlerTests(unittest.TestCase):
     def test_unknown_executor_is_rejected_by_nested_registry(self):
         context, logs = _context()
         handler = ManipulateActionHandler(
-            {
-                "known": lambda _parameters, _context: (
-                    ActionHandlerResult.succeeded()
-                )
-            }
+            {"known": lambda _parameters, _context: ActionHandlerResult.succeeded()}
         )
 
         result = handler({"执行器": "unknown"}, context)
@@ -291,9 +312,7 @@ class GripperActionHandlerTests(unittest.TestCase):
         )
         context, _logs = _context()
 
-        self.assertTrue(
-            handler({"操作": "关"}, context).successful
-        )
+        self.assertTrue(handler({"操作": "关"}, context).successful)
         self.assertEqual(
             [("close", ArmId.LEFT)] * 3,
             gripper.calls,
@@ -351,6 +370,55 @@ class PipetteActionHandlerTests(unittest.TestCase):
         self.assertEqual("error", logs[-1][1])
 
 
+class NeckActionHandlerTests(unittest.TestCase):
+    def test_neck_moves_both_axes_with_normalized_parameters(self):
+        neck = _Neck()
+        runtime = _runtime_with(NECK, DeviceCapability.NECK_MOTION, neck)
+        context, _logs = _context()
+
+        result = NeckActionHandler(runtime)(
+            {
+                "操作": "双轴移动",
+                "水平PWM": "1700",
+                "垂直PWM": "1500",
+                "时长ms": "250",
+            },
+            context,
+        )
+
+        self.assertTrue(result.successful)
+        self.assertEqual([("both", 1700, 1500, 250)], neck.calls)
+
+    def test_neck_reset_uses_unified_runtime(self):
+        neck = _Neck()
+        runtime = _runtime_with(NECK, DeviceCapability.NECK_MOTION, neck)
+        context, _logs = _context()
+
+        result = NeckActionHandler(runtime)(
+            {"操作": "复位", "时长ms": 0},
+            context,
+        )
+
+        self.assertTrue(result.successful)
+        self.assertEqual([("reset", None, None, 0)], neck.calls)
+
+    def test_neck_rejects_invalid_parameters_before_device_initialization(self):
+        neck = _Neck()
+        runtime = _runtime_with(NECK, DeviceCapability.NECK_MOTION, neck)
+        context, logs = _context()
+
+        result = NeckActionHandler(runtime)(
+            {"操作": "水平移动", "水平PWM": 3000},
+            context,
+        )
+
+        self.assertFalse(result.successful)
+        self.assertIs(ActionResultCode.INVALID_PARAMETERS, result.code)
+        self.assertEqual([], neck.calls)
+        self.assertEqual(DeviceState.REGISTERED, runtime.snapshot(NECK).state)
+        self.assertEqual("error", logs[-1][1])
+
+
 class DisplayAndPowderHandlerTests(unittest.TestCase):
     def test_expression_alias_and_runtime_owned_shutdown(self):
         display = _ExpressionDisplay()
@@ -362,12 +430,8 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
         handler = ExpressionDisplayActionHandler(runtime)
         context, _logs = _context()
 
-        self.assertTrue(
-            handler({"expression": "happy"}, context).successful
-        )
-        self.assertTrue(
-            handler({"操作": "close"}, context).successful
-        )
+        self.assertTrue(handler({"expression": "happy"}, context).successful)
+        self.assertTrue(handler({"操作": "close"}, context).successful)
 
         self.assertEqual(["happy"], display.expressions)
         self.assertTrue(display.closed)
@@ -488,6 +552,16 @@ class ManipulationRuntimeIntegrationTests(unittest.TestCase):
             ("relay", {"执行器": "继电器", "编号": 1, "操作": "开"}),
             ("gripper", {"执行器": "夹爪", "操作": "开"}),
             ("pipette", {"执行器": "吸液枪", "操作": "吸", "容量": 10}),
+            (
+                "neck",
+                {
+                    "执行器": "颈部",
+                    "操作": "双轴移动",
+                    "水平PWM": 1600,
+                    "垂直PWM": 1600,
+                    "时长ms": 0,
+                },
+            ),
             (
                 "display",
                 {"执行器": "expression", "expression": "happy"},

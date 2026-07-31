@@ -73,6 +73,29 @@ class ActionSchemaTests(unittest.TestCase):
             result.issues[0].code,
         )
 
+    def test_neck_schema_applies_defaults_and_rejects_out_of_range_pwm(self):
+        valid = validate_action_parameters(
+            ActionType.MANIPULATE,
+            {"执行器": "颈部", "操作": "复位"},
+        )
+        invalid = validate_action_parameters(
+            ActionType.MANIPULATE,
+            {
+                "执行器": "颈部",
+                "操作": "水平移动",
+                "水平PWM": 2501,
+            },
+        )
+
+        self.assertTrue(valid.is_valid)
+        self.assertEqual(1600, valid.parameters["水平PWM"])
+        self.assertEqual(1000, valid.parameters["时长ms"])
+        self.assertFalse(invalid.is_valid)
+        self.assertIn(
+            ActionParameterIssueCode.OUT_OF_RANGE,
+            {issue.code for issue in invalid.issues},
+        )
+
 
 class _RecordingWebSocket:
     def __init__(self) -> None:

@@ -17,12 +17,14 @@ from ...device_runtime import (
     DigitalOutputs,
     ExpressionDisplay,
     GripperControl,
+    NeckMotion,
     Pipette,
     PowderDispenser,
     ToolChanger,
 )
 from ...device_runtime.ids import (
     EXPRESSION_DISPLAY,
+    NECK,
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
@@ -103,6 +105,38 @@ class PipetteCommand:
                 "吐液速度",
             ),
             full_dispense=(full_dispense or dispense_mode == "全吐"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class NeckCommand:
+    operation: str
+    horizontal_pwm: int | None = None
+    vertical_pwm: int | None = None
+    time_ms: int = 1000
+
+    @classmethod
+    def from_parameters(cls, parameters: ActionParameters) -> NeckCommand:
+        operation = str(parameters.get("操作", "复位")).strip()
+        if operation not in {"水平移动", "垂直移动", "双轴移动", "复位"}:
+            raise ValueError(f"未知的颈部操作: {operation}")
+
+        time_ms = _bounded_int(parameters.get("时长ms", 1000), "时长ms", 0, 9999)
+        horizontal_pwm = (
+            _bounded_int(parameters.get("水平PWM", 1600), "水平PWM", 500, 2500)
+            if operation in {"水平移动", "双轴移动"}
+            else None
+        )
+        vertical_pwm = (
+            _bounded_int(parameters.get("垂直PWM", 1600), "垂直PWM", 500, 2500)
+            if operation in {"垂直移动", "双轴移动"}
+            else None
+        )
+        return cls(
+            operation=operation,
+            horizontal_pwm=horizontal_pwm,
+            vertical_pwm=vertical_pwm,
+            time_ms=time_ms,
         )
 
 
@@ -334,8 +368,7 @@ class GripperActionHandler:
             except Exception as exc:
                 last_error = exc
                 context.log(
-                    "执行夹爪出错 "
-                    f"({attempt}/{self._options.gripper_max_attempts})",
+                    f"执行夹爪出错 ({attempt}/{self._options.gripper_max_attempts})",
                     "warn",
                 )
             else:
@@ -495,6 +528,99 @@ class PipetteActionHandler:
             "pipette.dispense",
             lambda: pipette.dispense(capacity_ul),
         )
+
+
+class NeckActionHandler:
+    _OPERATION = "neck.move"
+
+    def __init__(self, device_runtime: DeviceRuntime) -> None:
+        self._device_runtime = device_runtime
+
+    def __call__(
+        self,
+        parameters: ActionParameters,
+        context: ActionExecutionContext,
+    ) -> ActionHandlerResult:
+        try:
+            command = NeckCommand.from_parameters(parameters)
+        except (TypeError, ValueError) as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                f"颈部参数无效: {exc}",
+                operation=self._OPERATION,
+                device_id=NECK,
+            )
+
+        try:
+            neck = self._device_runtime.require(NECK, NeckMotion)
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"颈部设备不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=NECK,
+                error=exc,
+            )
+
+        try:
+            self._execute(neck, command, context)
+        except (ActionCancelledError, ActionTimeoutError):
+            raise
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"颈部运动执行失败: {exc}",
+                operation=self._OPERATION,
+                device_id=NECK,
+                error=exc,
+            )
+
+        context.log(f"颈部{command.operation}执行成功", "info")
+        return context.success(operation=self._OPERATION, device_id=NECK)
+
+    @staticmethod
+    def _execute(
+        neck: NeckMotion,
+        command: NeckCommand,
+        context: ActionExecutionContext,
+    ) -> None:
+        if command.operation == "水平移动":
+            horizontal_pwm = _required_neck_pwm(
+                command.horizontal_pwm,
+                "水平PWM",
+            )
+            context.invoke(
+                "neck.move_horizontal",
+                lambda: neck.move_horizontal(horizontal_pwm, command.time_ms),
+            )
+        elif command.operation == "垂直移动":
+            vertical_pwm = _required_neck_pwm(command.vertical_pwm, "垂直PWM")
+            context.invoke(
+                "neck.move_vertical",
+                lambda: neck.move_vertical(vertical_pwm, command.time_ms),
+            )
+        elif command.operation == "双轴移动":
+            horizontal_pwm = _required_neck_pwm(
+                command.horizontal_pwm,
+                "水平PWM",
+            )
+            vertical_pwm = _required_neck_pwm(command.vertical_pwm, "垂直PWM")
+            context.invoke(
+                "neck.move_both",
+                lambda: neck.move_both(
+                    horizontal_pwm,
+                    vertical_pwm,
+                    command.time_ms,
+                ),
+            )
+        else:
+            context.invoke(
+                "neck.reset",
+                lambda: neck.reset(command.time_ms),
+            )
 
 
 class ExpressionDisplayActionHandler:
@@ -926,6 +1052,7 @@ def create_manipulation_handler(
         "继电器": RelayActionHandler(device_runtime),
         "夹爪": GripperActionHandler(device_runtime, options),
         "吸液枪": PipetteActionHandler(device_runtime),
+        "颈部": NeckActionHandler(device_runtime),
         "表情屏": expression_handler,
         "表情": expression_handler,
         "expression_display": expression_handler,
@@ -946,6 +1073,24 @@ def _positive_int(value: object, label: str) -> int:
     if normalized <= 0:
         raise ValueError(f"{label}必须大于0")
     return normalized
+
+
+def _bounded_int(
+    value: object,
+    label: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    normalized = int(value)
+    if not minimum <= normalized <= maximum:
+        raise ValueError(f"{label}必须在{minimum}到{maximum}之间")
+    return normalized
+
+
+def _required_neck_pwm(value: int | None, label: str) -> int:
+    if value is None:
+        raise RuntimeError(f"missing {label}")
+    return value
 
 
 def _required_capacity(command: PipetteCommand) -> int:

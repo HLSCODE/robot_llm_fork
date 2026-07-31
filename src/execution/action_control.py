@@ -12,6 +12,7 @@ from ..device_runtime.ids import (
     CAMERA,
     EXPRESSION_DISPLAY,
     MOBILE_BASE,
+    NECK,
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
@@ -46,9 +47,7 @@ class ActionStopTarget:
             raise TypeError("stop target required_modes must be a frozenset")
         if not self.required_modes:
             raise ValueError("stop target must declare at least one mode")
-        if not all(
-            isinstance(mode, StopMode) for mode in self.required_modes
-        ):
+        if not all(isinstance(mode, StopMode) for mode in self.required_modes):
             raise TypeError("stop target modes must be StopMode values")
         unsupported = self.required_modes - {
             StopMode.QUICK,
@@ -93,86 +92,51 @@ class ActionControlPolicy:
         if len(set(self.device_ids)) != len(self.device_ids):
             raise ValueError("control policy device_ids must be unique")
         if any(
-            not isinstance(device_id, str) or not device_id.strip()
-            for device_id in self.device_ids
+            not isinstance(device_id, str) or not device_id.strip() for device_id in self.device_ids
         ):
             raise ValueError("control policy device_ids must not be empty")
 
-        stop_device_ids = tuple(
-            target.device_id for target in self.stop_targets
-        )
+        stop_device_ids = tuple(target.device_id for target in self.stop_targets)
         if len(set(stop_device_ids)) != len(stop_device_ids):
             raise ValueError("control policy stop targets must be unique")
         unknown_targets = set(stop_device_ids) - set(self.device_ids)
         if unknown_targets:
             values = ", ".join(sorted(unknown_targets))
-            raise ValueError(
-                f"stop targets are missing from device_ids: {values}"
-            )
+            raise ValueError(f"stop targets are missing from device_ids: {values}")
 
         latency = self.expected_max_cancel_latency_seconds
         if latency is not None and latency <= 0:
-            raise ValueError(
-                "expected max cancel latency must be positive"
-            )
+            raise ValueError("expected max cancel latency must be positive")
 
-        if (
-            self.cancellation_mode
-            is ActionCancellationMode.BOUNDED_COOPERATIVE
-        ):
+        if self.cancellation_mode is ActionCancellationMode.BOUNDED_COOPERATIVE:
             if self.blocking_device_call:
-                raise ValueError(
-                    "bounded cooperative policy cannot contain "
-                    "a blocking device call"
-                )
+                raise ValueError("bounded cooperative policy cannot contain a blocking device call")
             if latency is None:
-                raise ValueError(
-                    "bounded cooperative policy must declare cancel latency"
-                )
+                raise ValueError("bounded cooperative policy must declare cancel latency")
             if self.stop_targets:
-                raise ValueError(
-                    "bounded cooperative policy cannot have stop targets"
-                )
+                raise ValueError("bounded cooperative policy cannot have stop targets")
             if self.hardware_validation_required:
-                raise ValueError(
-                    "bounded cooperative policy cannot require "
-                    "hardware validation"
-                )
+                raise ValueError("bounded cooperative policy cannot require hardware validation")
             return
 
         if not self.blocking_device_call:
-            raise ValueError(
-                "hardware cancellation policy must contain "
-                "a blocking device call"
-            )
+            raise ValueError("hardware cancellation policy must contain a blocking device call")
         if latency is not None:
-            raise ValueError(
-                "unvalidated hardware policy cannot claim cancel latency"
-            )
+            raise ValueError("unvalidated hardware policy cannot claim cancel latency")
 
-        if (
-            self.cancellation_mode
-            is ActionCancellationMode.AFTER_BLOCKING_CALL
-        ):
+        if self.cancellation_mode is ActionCancellationMode.AFTER_BLOCKING_CALL:
             if self.stop_targets:
-                raise ValueError(
-                    "after-blocking-call policy cannot have stop targets"
-                )
+                raise ValueError("after-blocking-call policy cannot have stop targets")
             if self.hardware_validation_required:
                 raise ValueError(
-                    "after-blocking-call policy cannot require "
-                    "stop hardware validation"
+                    "after-blocking-call policy cannot require stop hardware validation"
                 )
             return
 
         if not self.stop_targets:
-            raise ValueError(
-                "device-assisted policy must declare stop targets"
-            )
+            raise ValueError("device-assisted policy must declare stop targets")
         if not self.hardware_validation_required:
-            raise ValueError(
-                "device-assisted policy must require hardware validation"
-            )
+            raise ValueError("device-assisted policy must require hardware validation")
 
     def to_event_data(self) -> dict[str, Any]:
         return {
@@ -180,15 +144,9 @@ class ActionControlPolicy:
             "cancellation_mode": self.cancellation_mode.value,
             "blocking_device_call": self.blocking_device_call,
             "device_ids": list(self.device_ids),
-            "stop_targets": [
-                target.to_event_data() for target in self.stop_targets
-            ],
-            "expected_max_cancel_latency_seconds": (
-                self.expected_max_cancel_latency_seconds
-            ),
-            "hardware_validation_required": (
-                self.hardware_validation_required
-            ),
+            "stop_targets": [target.to_event_data() for target in self.stop_targets],
+            "expected_max_cancel_latency_seconds": (self.expected_max_cancel_latency_seconds),
+            "hardware_validation_required": (self.hardware_validation_required),
         }
 
 
@@ -212,17 +170,10 @@ def validate_control_policy_routes(
 
     details: list[str] = []
     if missing_policies:
-        details.append(
-            "missing policies: " + ", ".join(sorted(missing_policies))
-        )
+        details.append("missing policies: " + ", ".join(sorted(missing_policies)))
     if orphaned_policies:
-        details.append(
-            "orphaned policies: " + ", ".join(sorted(orphaned_policies))
-        )
-    raise ValueError(
-        f"{route_group} control policy routes mismatch; "
-        + "; ".join(details)
-    )
+        details.append("orphaned policies: " + ", ".join(sorted(orphaned_policies)))
+    raise ValueError(f"{route_group} control policy routes mismatch; " + "; ".join(details))
 
 
 def resolve_wait_control_policy(
@@ -271,9 +222,7 @@ def resolve_change_tool_control_policy(
     parameters: ActionParameters,
 ) -> ActionControlPolicy:
     additional_devices = (
-        (PIPETTE,)
-        if str(parameters.get("Operation", "取")).strip() == "放"
-        else ()
+        (PIPETTE,) if str(parameters.get("Operation", "取")).strip() == "放" else ()
     )
     return _robot_stoppable_policy(
         "tool_rack.change_tool",
@@ -304,9 +253,7 @@ def _cooperative_policy(operation: str) -> ActionControlPolicy:
         operation=operation,
         cancellation_mode=ActionCancellationMode.BOUNDED_COOPERATIVE,
         blocking_device_call=False,
-        expected_max_cancel_latency_seconds=(
-            COOPERATIVE_CANCEL_MAX_LATENCY_SECONDS
-        ),
+        expected_max_cancel_latency_seconds=(COOPERATIVE_CANCEL_MAX_LATENCY_SECONDS),
     )
 
 
@@ -334,33 +281,35 @@ def _robot_stoppable_policy(
         stop_targets=(
             ActionStopTarget(
                 device_id=ROBOT_SYSTEM,
-                required_modes=frozenset(
-                    {StopMode.QUICK, StopMode.EMERGENCY}
-                ),
+                required_modes=frozenset({StopMode.QUICK, StopMode.EMERGENCY}),
             ),
         ),
         hardware_validation_required=True,
     )
 
 
-MOVE_CONTROL_POLICIES: Mapping[str, ActionControlPolicy] = MappingProxyType({
-    "机械臂": _robot_stoppable_policy("robot_system.move_to_pose"),
-    "身体": _blocking_policy("body_axis.move_to", BODY_AXIS),
-})
+MOVE_CONTROL_POLICIES: Mapping[str, ActionControlPolicy] = MappingProxyType(
+    {
+        "机械臂": _robot_stoppable_policy("robot_system.move_to_pose"),
+        "身体": _blocking_policy("body_axis.move_to", BODY_AXIS),
+    }
+)
 
 BASE_MOVE_CONTROL_POLICIES: Mapping[
     str,
     ActionControlPolicy,
-] = MappingProxyType({
-    "position": _blocking_policy(
-        "mobile_base.move_to_position",
-        MOBILE_BASE,
-    ),
-    "distance": _blocking_policy(
-        "mobile_base.move_slowly",
-        MOBILE_BASE,
-    ),
-})
+] = MappingProxyType(
+    {
+        "position": _blocking_policy(
+            "mobile_base.move_to_position",
+            MOBILE_BASE,
+        ),
+        "distance": _blocking_policy(
+            "mobile_base.move_slowly",
+            MOBILE_BASE,
+        ),
+    }
+)
 
 _EXPRESSION_CONTROL_POLICY = _blocking_policy(
     "expression_display.execute",
@@ -369,28 +318,31 @@ _EXPRESSION_CONTROL_POLICY = _blocking_policy(
 MANIPULATE_CONTROL_POLICIES: Mapping[
     str,
     ActionControlPolicy,
-] = MappingProxyType({
-    "快换手": _blocking_policy(
-        "tool_changer.set_locked",
-        TOOL_CHANGER,
-    ),
-    "继电器": _blocking_policy("relay.set_channel", RELAY_BANK),
-    "夹爪": _blocking_policy("gripper.execute", ROBOT_SYSTEM),
-    "吸液枪": _blocking_policy("pipette.execute", PIPETTE),
-    "表情屏": _EXPRESSION_CONTROL_POLICY,
-    "表情": _EXPRESSION_CONTROL_POLICY,
-    "expression_display": _EXPRESSION_CONTROL_POLICY,
-    "expression": _EXPRESSION_CONTROL_POLICY,
-    "右臂转圈注液": _robot_stoppable_policy(
-        "circle_dispense.execute",
-        PIPETTE,
-    ),
-    "智能加粉": _blocking_policy(
-        "powder_dispense.run",
-        POWDER_DISPENSER,
-    ),
-    "加粉装置": _blocking_policy(
-        "powder_dispenser.execute",
-        POWDER_DISPENSER,
-    ),
-})
+] = MappingProxyType(
+    {
+        "快换手": _blocking_policy(
+            "tool_changer.set_locked",
+            TOOL_CHANGER,
+        ),
+        "继电器": _blocking_policy("relay.set_channel", RELAY_BANK),
+        "夹爪": _blocking_policy("gripper.execute", ROBOT_SYSTEM),
+        "吸液枪": _blocking_policy("pipette.execute", PIPETTE),
+        "颈部": _blocking_policy("neck.move", NECK),
+        "表情屏": _EXPRESSION_CONTROL_POLICY,
+        "表情": _EXPRESSION_CONTROL_POLICY,
+        "expression_display": _EXPRESSION_CONTROL_POLICY,
+        "expression": _EXPRESSION_CONTROL_POLICY,
+        "右臂转圈注液": _robot_stoppable_policy(
+            "circle_dispense.execute",
+            PIPETTE,
+        ),
+        "智能加粉": _blocking_policy(
+            "powder_dispense.run",
+            POWDER_DISPENSER,
+        ),
+        "加粉装置": _blocking_policy(
+            "powder_dispenser.execute",
+            POWDER_DISPENSER,
+        ),
+    }
+)

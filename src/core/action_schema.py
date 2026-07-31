@@ -159,10 +159,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "text",
                         "点位",
                         required=True,
-                        placeholder=(
-                            "例如: [-0.048, -0.269, -0.101, "
-                            "3.109, -0.094, -1.592]"
-                        ),
+                        placeholder=("例如: [-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]"),
                     ),
                     "补偿": _field("object", "补偿配置"),
                     "定位补偿": _field("object", "旧定位补偿配置"),
@@ -258,7 +255,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
     },
     ActionType.MANIPULATE.value: {
         "label": "执行类",
-        "description": "快换手、继电器、夹爪、吸液枪等执行器操作",
+        "description": "快换手、继电器、夹爪、吸液枪、颈部等执行器操作",
         "variant_key": "执行器",
         "variants": {
             "快换手": _variant(
@@ -382,6 +379,45 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                     ),
                 },
             ),
+            "颈部": _variant(
+                "控制颈部水平和垂直舵机",
+                {
+                    "执行器": _field(
+                        "select",
+                        "执行器",
+                        options=["颈部"],
+                        default="颈部",
+                    ),
+                    "操作": _field(
+                        "select",
+                        "操作",
+                        options=["水平移动", "垂直移动", "双轴移动", "复位"],
+                        default="复位",
+                    ),
+                    "水平PWM": _field(
+                        "number",
+                        "水平PWM",
+                        default=1600,
+                        minimum=500,
+                        maximum=2500,
+                    ),
+                    "垂直PWM": _field(
+                        "number",
+                        "垂直PWM",
+                        default=1600,
+                        minimum=500,
+                        maximum=2500,
+                    ),
+                    "时长ms": _field(
+                        "number",
+                        "运动时长",
+                        default=1000,
+                        minimum=0,
+                        maximum=9999,
+                        unit="ms",
+                    ),
+                },
+            ),
             "右臂转圈注液": _variant(
                 "Robot2 以给定位姿的 x/y 为圆心画圆，同时控制吸液枪吐液",
                 {
@@ -395,10 +431,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "text",
                         "圆心位姿",
                         required=True,
-                        placeholder=(
-                            "例如: [-0.058,-0.412,-0.154,"
-                            "-2.934,0.428,-2.722]"
-                        ),
+                        placeholder=("例如: [-0.058,-0.412,-0.154,-2.934,0.428,-2.722]"),
                     ),
                     "半径R": _field(
                         "number",
@@ -812,10 +845,7 @@ def get_action_fields(
         return None, ActionParameterIssue(
             code=ActionParameterIssueCode.UNKNOWN_VARIANT,
             field=variant_key,
-            message=(
-                f"{action_type.value} 参数 {variant_key} 必须是 "
-                f"{', '.join(variants)} 之一"
-            ),
+            message=(f"{action_type.value} 参数 {variant_key} 必须是 {', '.join(variants)} 之一"),
         )
     return deepcopy(variants[variant_name]["fields"]), None
 
@@ -855,11 +885,13 @@ def validate_action_parameters(
         elif apply_defaults and "default" in field_schema:
             value = deepcopy(field_schema["default"])
         elif field_schema.get("required", False):
-            issues.append(ActionParameterIssue(
-                code=ActionParameterIssueCode.MISSING_FIELD,
-                field=field_name,
-                message=f"缺少必填动作参数: {field_name}",
-            ))
+            issues.append(
+                ActionParameterIssue(
+                    code=ActionParameterIssueCode.MISSING_FIELD,
+                    field=field_name,
+                    message=f"缺少必填动作参数: {field_name}",
+                )
+            )
             continue
         else:
             continue
@@ -872,11 +904,13 @@ def validate_action_parameters(
 
     if reject_unknown:
         for field_name in parameters.keys() - fields.keys():
-            issues.append(ActionParameterIssue(
-                code=ActionParameterIssueCode.UNKNOWN_FIELD,
-                field=field_name,
-                message=f"未知动作参数: {field_name}",
-            ))
+            issues.append(
+                ActionParameterIssue(
+                    code=ActionParameterIssueCode.UNKNOWN_FIELD,
+                    field=field_name,
+                    message=f"未知动作参数: {field_name}",
+                )
+            )
 
     return ActionParameterValidation(
         parameters=normalized,
@@ -907,11 +941,7 @@ def _validate_field_value(
     schema: ActionFieldSchema,
 ) -> ActionParameterIssue | None:
     field_type = schema["type"]
-    if (
-        schema.get("required", False)
-        and isinstance(value, str)
-        and not value.strip()
-    ):
+    if schema.get("required", False) and isinstance(value, str) and not value.strip():
         return ActionParameterIssue(
             code=ActionParameterIssueCode.MISSING_FIELD,
             field=field_name,

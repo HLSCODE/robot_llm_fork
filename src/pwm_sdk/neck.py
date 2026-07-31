@@ -91,15 +91,15 @@ class NeckController:
         Parameters
         ----------
         pwm : int
-            Target PWM value (clamped to the servo's configured range).
+            Target PWM value within the servo's configured range.
         axis : ServoAxis
             Which servo to move.
         time_ms : int, optional
             Movement duration in milliseconds. Uses the servo's default if omitted.
         """
         cfg = self._cfg(axis)
-        pwm = self._clamp(pwm, cfg)
-        duration = time_ms if time_ms is not None else cfg.default_time
+        pwm = self._validate_pwm(pwm, cfg)
+        duration = self._validate_duration(time_ms if time_ms is not None else cfg.default_time)
         self._send_single(cfg.servo_id, pwm, duration)
         self._current_pwm[axis] = pwm
         time.sleep(duration / 1000)
@@ -140,17 +140,21 @@ class NeckController:
         Parameters
         ----------
         h_pwm : int
-            Target PWM for the horizontal servo (clamped to its range).
+            Target PWM for the horizontal servo.
         v_pwm : int
-            Target PWM for the vertical servo (clamped to its range).
+            Target PWM for the vertical servo.
         time_ms : int, optional
             Movement duration for both servos. Uses each servo's own
             ``default_time`` if omitted.
         """
-        h_pwm = self._clamp(h_pwm, self._h_cfg)
-        v_pwm = self._clamp(v_pwm, self._v_cfg)
-        h_time = time_ms if time_ms is not None else self._h_cfg.default_time
-        v_time = time_ms if time_ms is not None else self._v_cfg.default_time
+        h_pwm = self._validate_pwm(h_pwm, self._h_cfg)
+        v_pwm = self._validate_pwm(v_pwm, self._v_cfg)
+        h_time = self._validate_duration(
+            time_ms if time_ms is not None else self._h_cfg.default_time
+        )
+        v_time = self._validate_duration(
+            time_ms if time_ms is not None else self._v_cfg.default_time
+        )
         h_cmd = _build_single_cmd(self._h_cfg.servo_id, h_pwm, h_time)
         v_cmd = _build_single_cmd(self._v_cfg.servo_id, v_pwm, v_time)
         self._send_raw("{" + h_cmd + v_cmd + "}")
@@ -192,8 +196,12 @@ class NeckController:
             Movement duration in milliseconds for both servos.
             Uses each servo's own default if omitted.
         """
-        h_time = time_ms if time_ms is not None else self._h_cfg.default_time
-        v_time = time_ms if time_ms is not None else self._v_cfg.default_time
+        h_time = self._validate_duration(
+            time_ms if time_ms is not None else self._h_cfg.default_time
+        )
+        v_time = self._validate_duration(
+            time_ms if time_ms is not None else self._v_cfg.default_time
+        )
 
         h_cmd = _build_single_cmd(self._h_cfg.servo_id, self._h_cfg.initial_pwm, h_time)
         v_cmd = _build_single_cmd(self._v_cfg.servo_id, self._v_cfg.initial_pwm, v_time)
@@ -225,13 +233,21 @@ class NeckController:
         return self._h_cfg if axis == ServoAxis.HORIZONTAL else self._v_cfg
 
     @staticmethod
-    def _clamp(pwm: int, cfg: ServoConfig) -> int:
-        return max(cfg.pwm_min, min(cfg.pwm_max, pwm))
+    def _validate_pwm(pwm: int, cfg: ServoConfig) -> int:
+        normalized = int(pwm)
+        if not cfg.pwm_min <= normalized <= cfg.pwm_max:
+            raise ValueError(f"pwm must be within [{cfg.pwm_min}, {cfg.pwm_max}], got {normalized}")
+        return normalized
+
+    @staticmethod
+    def _validate_duration(time_ms: int) -> int:
+        normalized = int(time_ms)
+        if not 0 <= normalized <= 9999:
+            raise ValueError(f"time_ms must be between 0 and 9999, got {normalized}")
+        return normalized
 
     def _send_single(self, servo_id: int, pwm: int, time_ms: int) -> None:
         self._send_raw(_build_single_cmd(servo_id, pwm, time_ms))
 
     def _send_raw(self, data: str) -> None:
-        self._transport.transact_with_strategy(
-            WriteOnlyStrategy(data.encode("ascii"))
-        )
+        self._transport.transact_with_strategy(WriteOnlyStrategy(data.encode("ascii")))

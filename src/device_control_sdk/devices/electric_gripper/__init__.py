@@ -13,6 +13,15 @@ from .registers import (
     SaveStatus,
 )
 
-StatefulElectricGripper = ElectricGripper
-ElectricGripperSnapshot = object
-
+__all__ = [
+    "DEFAULT_GRIPPER_ADDRESS",
+    "ElectricGripper",
+    "EmergencyStopStatus",
+    "ExcitationState",
+    "GripAction",
+    "GripperRegister",
+    "HomingDirection",
+    "InitializationStatus",
+    "MotionStatus",
+    "SaveStatus",
+]
