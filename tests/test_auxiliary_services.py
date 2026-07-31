@@ -273,12 +273,19 @@ class ApplicationHostCompositionTests(unittest.TestCase):
                 calls.append("devices")
                 return {}
 
+        class FakeLocalization:
+            def close(self):
+                calls.append("localization")
+
         _shutdown_application(
             FakeHost(),
-            SimpleNamespace(devices=FakeDevices()),
+            SimpleNamespace(
+                localization=FakeLocalization(),
+                devices=FakeDevices(),
+            ),
         )
 
-        self.assertEqual(["auxiliary", "devices"], calls)
+        self.assertEqual(["auxiliary", "localization", "devices"], calls)
 
     def test_non_loopback_websocket_binding_uses_resolved_endpoint(self):
         args = SimpleNamespace(

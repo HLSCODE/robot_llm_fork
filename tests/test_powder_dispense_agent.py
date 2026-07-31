@@ -63,6 +63,12 @@ class PowderDispenseAgentTests(unittest.TestCase):
         self.assertIn(("rotation_stop", None), controller.calls)
         self.assertIn(("lift_safe", 1), controller.calls)
         self.assertIn(("rotation_home", 3), controller.calls)
+        self.assertEqual(1, len(result.round_records))
+        record = result.round_records[0]
+        self.assertEqual(1, record.round_number)
+        self.assertEqual(20000, record.rotation_steps)
+        self.assertAlmostEqual(1.0, record.round_delta_mg)
+        self.assertAlmostEqual(100.0, record.remaining_before_mg)
 
 
 if __name__ == "__main__":

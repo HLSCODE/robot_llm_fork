@@ -202,6 +202,11 @@ def _shutdown_application(
         logger.exception("附加服务宿主关闭失败")
 
     try:
+        services.localization.close()
+    except Exception:
+        logger.exception("定位服务关闭失败")
+
+    try:
         errors = services.devices.shutdown_all()
     except Exception:
         logger.exception("设备运行时关闭失败")

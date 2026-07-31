@@ -22,6 +22,7 @@ from .data_collection import (
     DataCollectionRecorder,
     DataCollectionService,
 )
+from .localization import LocalizationService
 from .safety import SafetyService
 from .services import (
     ApplicationServices,
@@ -49,12 +50,14 @@ def create_application_services(
     )
     device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
+    localization = LocalizationService()
     engine = ActionEngine(
         device_runtime,
         settings.execution,
         settings.devices,
         settings.vision,
         settings.secrets,
+        localization.latest,
     )
     manager = ExecutionManager(
         engine=engine,
@@ -105,6 +108,7 @@ def create_application_services(
     )
     return ApplicationServices(
         camera_access=camera_access,
+        localization=localization,
         composition=composition,
         data_collection=data_collection,
         execution=execution,

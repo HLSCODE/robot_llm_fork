@@ -14,6 +14,8 @@ from .models import (
     DeviceInitializationError,
     DeviceNotRegisteredError,
     DeviceSnapshot,
+    DeviceSafeStateResult,
+    DeviceSafeStateStatus,
     DeviceState,
     DeviceStopResult,
     DeviceStopStatus,
@@ -35,6 +37,7 @@ class DeviceRegistration(Generic[T]):
     capabilities: frozenset[DeviceCapability]
     factory: Callable[[], T]
     close: Callable[[T], None]
+    enter_safe_state: Callable[[T], None] | None = None
 
 
 @dataclass(slots=True)
@@ -187,6 +190,14 @@ class DeviceRuntime:
             for device_id in reversed(motion_device_ids)
         )
 
+    def enter_safe_states(self) -> tuple[DeviceSafeStateResult, ...]:
+        """Apply every ready device's explicitly registered safe-state policy."""
+        device_ids = self.find_by_capability(DeviceCapability.SAFE_STATE)
+        return tuple(
+            self._enter_safe_state(device_id)
+            for device_id in reversed(device_ids)
+        )
+
     def shutdown(self, device_id: str) -> None:
         record = self._record(device_id)
         with record.lock:
@@ -296,4 +307,33 @@ class DeviceRuntime:
                 device_id=device_id,
                 mode=mode,
                 status=DeviceStopStatus.STOPPED,
+            )
+
+    def _enter_safe_state(self, device_id: str) -> DeviceSafeStateResult:
+        record = self._record(device_id)
+        with record.lock:
+            if record.state is not DeviceState.READY:
+                return DeviceSafeStateResult(
+                    device_id=device_id,
+                    status=DeviceSafeStateStatus.NOT_READY,
+                )
+            action = record.registration.enter_safe_state
+            if action is None:
+                return DeviceSafeStateResult(
+                    device_id=device_id,
+                    status=DeviceSafeStateStatus.FAILED,
+                    error="safe-state capability has no registered policy",
+                )
+            try:
+                action(record.instance)
+            except Exception as exc:
+                logger.warning("Device %s safe state failed: %s", device_id, exc)
+                return DeviceSafeStateResult(
+                    device_id=device_id,
+                    status=DeviceSafeStateStatus.FAILED,
+                    error=str(exc),
+                )
+            return DeviceSafeStateResult(
+                device_id=device_id,
+                status=DeviceSafeStateStatus.APPLIED,
             )

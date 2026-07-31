@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import partial
 import logging
 
 from ...application import DataCollectionError, DataCollectionState
@@ -222,7 +223,9 @@ class TeleoperationWebSocketHandler:
                 return
 
         try:
-            self._server._services.teleoperation.start()
+            await asyncio.to_thread(
+                self._server._services.teleoperation.start
+            )
         except Exception as exc:
             await websocket.send(
                 self._server._json_msg(
@@ -311,11 +314,14 @@ class TeleoperationWebSocketHandler:
             # 立即发送到机械臂
             if self._server._robot_system:
                 try:
-                    success = self._server._services.teleoperation.follow(
-                        arm,
-                        joints,
-                        follow=follow,
-                        trajectory_mode=trajectory_mode,
+                    success = await asyncio.to_thread(
+                        partial(
+                            self._server._services.teleoperation.follow,
+                            arm,
+                            joints,
+                            follow=follow,
+                            trajectory_mode=trajectory_mode,
+                        )
                     )
                     if not success:
                         logger.warning(
@@ -407,15 +413,22 @@ class TeleoperationWebSocketHandler:
             # 并行执行双臂指令
             if self._server._robot_system:
                 try:
-                    success_results = {}
-                    for arm_name, joints in joints_data.items():
-                        success = self._server._services.teleoperation.follow(
-                            arm_name,
-                            joints,
-                            follow=follow,
-                            trajectory_mode=trajectory_mode,
+                    arms = tuple(joints_data)
+                    results = await asyncio.gather(
+                        *(
+                            asyncio.to_thread(
+                                partial(
+                                    self._server._services.teleoperation.follow,
+                                    arm_name,
+                                    joints_data[arm_name],
+                                    follow=follow,
+                                    trajectory_mode=trajectory_mode,
+                                )
+                            )
+                            for arm_name in arms
                         )
-                        success_results[arm_name] = success
+                    )
+                    success_results = dict(zip(arms, results, strict=True))
 
                     if not all(success_results.values()):
                         failed_arms = [
@@ -523,7 +536,9 @@ class TeleoperationWebSocketHandler:
             self._server._teleop_msg_counts[arm_name] = 0
             self._server._last_grip[arm_name] = None  # 重置夹爪跟踪状态
         if not any(self._server._teleop_modes.values()):
-            self._server._services.teleoperation.stop()
+            await asyncio.to_thread(
+                self._server._services.teleoperation.stop
+            )
 
         logger.info("遥操作模式已停止: %s，共执行指令 %s", arms_to_stop, total_counts)
         await websocket.send(

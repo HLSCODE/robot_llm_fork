@@ -80,6 +80,7 @@ class ActionEngine:
         device_settings: DeviceSettings,
         vision_settings: VisionSettings,
         secret_settings: SecretSettings,
+        localization_reader,
     ) -> None:
         self._device_runtime = device_runtime
         self.execution_context = ExecutionContext()
@@ -110,6 +111,7 @@ class ActionEngine:
         self._tapping_config_provider = device_settings.tapping_config
         self._vision_settings = vision_settings
         self._secret_settings = secret_settings
+        self._localization_reader = localization_reader
         self._handler_registry = self._create_handler_registry()
 
     def _create_handler_registry(self) -> ActionHandlerRegistry:
@@ -120,6 +122,7 @@ class ActionEngine:
                 self.execution_context,
                 self._motion_handler_options,
                 self._vision_settings,
+                self._localization_reader,
             ),
             BodyMoveActionHandler(
                 self._device_runtime,

@@ -7,6 +7,7 @@ from typing import Protocol
 
 from ..device_runtime import (
     DeviceRuntime,
+    DeviceSafeStateResult,
     DeviceStopResult,
     DeviceStopStatus,
     StopMode,
@@ -40,6 +41,7 @@ class SafetyStopReport:
     execution_before: ExecutionSnapshot
     execution_after: ExecutionSnapshot
     devices: tuple[DeviceStopResult, ...] = ()
+    safe_devices: tuple[DeviceSafeStateResult, ...] = ()
     errors: tuple[str, ...] = ()
 
     @property
@@ -48,6 +50,7 @@ class SafetyStopReport:
             not self.execution_after.active
             and not self.errors
             and all(result.successful for result in self.devices)
+            and all(result.successful for result in self.safe_devices)
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -71,6 +74,14 @@ class SafetyStopReport:
                     "error": result.error,
                 }
                 for result in self.devices
+            ],
+            "safe_devices": [
+                {
+                    "device_id": result.device_id,
+                    "status": result.status.value,
+                    "error": result.error,
+                }
+                for result in self.safe_devices
             ],
             "errors": list(self.errors),
         }
@@ -138,6 +149,7 @@ class SafetyService:
             else:
                 devices = self._runtime.stop_all(mode)
                 self._release_sessions_after_device_stop(devices, errors)
+            safe_devices = self._runtime.enter_safe_states()
 
             after = self._wait_for_execution(before, timeout, errors)
             return SafetyStopReport(
@@ -145,6 +157,7 @@ class SafetyService:
                 execution_before=before,
                 execution_after=after,
                 devices=devices,
+                safe_devices=safe_devices,
                 errors=tuple(errors),
             )
 

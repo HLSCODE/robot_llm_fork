@@ -33,6 +33,7 @@ class DeviceCapability(str, Enum):
     POWDER_DISPENSER = "powder_dispenser"
     CAMERA = "camera"
     EXPRESSION_DISPLAY = "expression_display"
+    SAFE_STATE = "safe_state"
 
 
 class StopMode(str, Enum):
@@ -48,6 +49,12 @@ class DeviceStopStatus(str, Enum):
     FAILED = "failed"
 
 
+class DeviceSafeStateStatus(str, Enum):
+    APPLIED = "applied"
+    NOT_READY = "not_ready"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True, slots=True)
 class DeviceStopResult:
     device_id: str
@@ -60,6 +67,20 @@ class DeviceStopResult:
         return self.status in {
             DeviceStopStatus.STOPPED,
             DeviceStopStatus.NOT_READY,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceSafeStateResult:
+    device_id: str
+    status: DeviceSafeStateStatus
+    error: str = ""
+
+    @property
+    def successful(self) -> bool:
+        return self.status in {
+            DeviceSafeStateStatus.APPLIED,
+            DeviceSafeStateStatus.NOT_READY,
         }
 
 

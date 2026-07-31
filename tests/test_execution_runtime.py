@@ -10,6 +10,7 @@ from src.device_runtime import (
     DeviceCapability,
     DeviceRegistration,
     DeviceRuntime,
+    DeviceSafeStateStatus,
     DeviceStopStatus,
     ResourceArbiter,
     ResourceBusyError,
@@ -210,6 +211,38 @@ class DeviceRuntimeTests(unittest.TestCase):
             runtime.declared_stop_modes("quick-only"),
         )
 
+    def test_safe_state_policies_are_applied_and_reported_independently(self):
+        runtime = DeviceRuntime()
+        safe_calls: list[str] = []
+        for device_id in ("relay", "tool"):
+            runtime.register(
+                DeviceRegistration(
+                    device_id=device_id,
+                    capabilities=frozenset({DeviceCapability.SAFE_STATE}),
+                    factory=_CloseTracker,
+                    close=lambda device: device.close(),
+                    enter_safe_state=(
+                        lambda _device, value=device_id: safe_calls.append(value)
+                    ),
+                )
+            )
+        runtime.initialize("relay")
+
+        results = {
+            result.device_id: result
+            for result in runtime.enter_safe_states()
+        }
+
+        self.assertEqual(["relay"], safe_calls)
+        self.assertEqual(
+            DeviceSafeStateStatus.APPLIED,
+            results["relay"].status,
+        )
+        self.assertEqual(
+            DeviceSafeStateStatus.NOT_READY,
+            results["tool"].status,
+        )
+
 
 class ExecutionManagerTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -384,6 +417,25 @@ class ApplicationServiceTests(unittest.TestCase):
         self.assertFalse(services.teleoperation.active)
         self.assertIsNone(services.resources.owner_of(ROBOT_SYSTEM))
         self.assertEqual(StopMode.QUICK, robot.last_stop_mode)
+
+    def test_controlled_stop_applies_initialized_discrete_device_safe_states(self):
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
+        relay = services.device_runtime.initialize("relay-bank")
+        tool = services.device_runtime.initialize("tool-changer")
+        pipette = services.device_runtime.initialize("pipette")
+        relay.set_channel(1, True)
+        tool.set_locked(False)
+
+        report = services.safety.stop(StopMode.CONTROLLED)
+
+        self.assertTrue(report.complete)
+        self.assertEqual({1: False, 2: False}, relay.channels)
+        self.assertTrue(tool.locked)
+        self.assertTrue(pipette.safe)
+        self.assertEqual(3, len(report.safe_devices))
 
 
 if __name__ == "__main__":

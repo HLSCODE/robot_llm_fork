@@ -307,6 +307,7 @@ class ActionControlPolicyTests(unittest.TestCase):
             DeviceSettings(),
             VisionSettings(),
             SecretSettings(),
+            lambda **_kwargs: None,
         )
         wait = SequenceItem.from_definition(ActionDefinition("wait", "wait", ActionType.WAIT, {}))
         vision = SequenceItem.from_definition(
@@ -340,6 +341,7 @@ class ActionControlPolicyTests(unittest.TestCase):
                 vveai_model="balance-model",
             ),
             SecretSettings(vveai_api_key="vision-secret"),
+            lambda **_kwargs: None,
         )
 
         with patch(
@@ -386,6 +388,7 @@ class ActionControlPreflightTests(unittest.TestCase):
             DeviceSettings(),
             VisionSettings(),
             SecretSettings(),
+            lambda **_kwargs: None,
         )
         item = SequenceItem.from_definition(
             ActionDefinition(

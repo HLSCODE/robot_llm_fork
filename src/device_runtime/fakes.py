@@ -223,6 +223,9 @@ class SimulatedDigitalOutputs:
     def close(self) -> None:
         return None
 
+    def enter_safe_state(self) -> None:
+        self.channels.update({1: False, 2: False})
+
 
 class SimulatedToolChanger:
     def __init__(self) -> None:
@@ -234,8 +237,14 @@ class SimulatedToolChanger:
     def close(self) -> None:
         return None
 
+    def enter_safe_state(self) -> None:
+        self.locked = True
+
 
 class SimulatedPipette:
+    def __init__(self) -> None:
+        self.safe = False
+
     def initialize(self) -> bool:
         return True
 
@@ -259,6 +268,9 @@ class SimulatedPipette:
 
     def close(self) -> None:
         return None
+
+    def enter_safe_state(self) -> None:
+        self.safe = True
 
 
 class SimulatedPowderDispenser:

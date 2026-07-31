@@ -35,6 +35,7 @@ from .camera_access import CameraAccessService
 from .command_runtime import CommandRuntime
 from .composition import CompositionService
 from .safety import SafetyService
+from .localization import LocalizationService
 
 if TYPE_CHECKING:
     from .data_collection import DataCollectionService
@@ -440,6 +441,7 @@ def _arm_id(arm: str | ArmId) -> ArmId:
 @dataclass(frozen=True, slots=True)
 class ApplicationServices:
     camera_access: CameraAccessService
+    localization: LocalizationService
     composition: CompositionService
     data_collection: DataCollectionService
     execution: ExecutionService

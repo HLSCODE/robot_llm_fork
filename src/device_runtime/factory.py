@@ -62,12 +62,14 @@ def _registration(
     capabilities: set[DeviceCapability],
     factory: Callable[[], Any],
     close: Callable[[Any], None] | None = None,
+    enter_safe_state: Callable[[Any], None] | None = None,
 ) -> DeviceRegistration[Any]:
     return DeviceRegistration(
         device_id=device_id,
         capabilities=frozenset(capabilities),
         factory=factory,
         close=close or (lambda device: device.close()),
+        enter_safe_state=enter_safe_state,
     )
 
 
@@ -106,15 +108,22 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
         ),
         _registration(
             RELAY_BANK,
-            {DeviceCapability.DIGITAL_OUTPUT},
+            {DeviceCapability.DIGITAL_OUTPUT, DeviceCapability.SAFE_STATE},
             SimulatedDigitalOutputs,
+            enter_safe_state=lambda device: device.enter_safe_state(),
         ),
         _registration(
             TOOL_CHANGER,
-            {DeviceCapability.TOOL_CHANGER},
+            {DeviceCapability.TOOL_CHANGER, DeviceCapability.SAFE_STATE},
             SimulatedToolChanger,
+            enter_safe_state=lambda device: device.enter_safe_state(),
         ),
-        _registration(PIPETTE, {DeviceCapability.PIPETTE}, SimulatedPipette),
+        _registration(
+            PIPETTE,
+            {DeviceCapability.PIPETTE, DeviceCapability.SAFE_STATE},
+            SimulatedPipette,
+            enter_safe_state=lambda device: device.enter_safe_state(),
+        ),
         _registration(
             POWDER_DISPENSER,
             {
@@ -175,22 +184,25 @@ def _register_real_devices(
     runtime.register(
         _registration(
             RELAY_BANK,
-            {DeviceCapability.DIGITAL_OUTPUT},
+            {DeviceCapability.DIGITAL_OUTPUT, DeviceCapability.SAFE_STATE},
             lambda: _relay_factory(settings.devices),
+            enter_safe_state=lambda device: device.enter_safe_state(),
         )
     )
     runtime.register(
         _registration(
             TOOL_CHANGER,
-            {DeviceCapability.TOOL_CHANGER},
+            {DeviceCapability.TOOL_CHANGER, DeviceCapability.SAFE_STATE},
             lambda: _tool_changer_factory(settings.devices),
+            enter_safe_state=lambda device: device.enter_safe_state(),
         )
     )
     runtime.register(
         _registration(
             PIPETTE,
-            {DeviceCapability.PIPETTE},
+            {DeviceCapability.PIPETTE, DeviceCapability.SAFE_STATE},
             lambda: _pipette_factory(settings.devices),
+            enter_safe_state=lambda device: device.enter_safe_state(),
         )
     )
     runtime.register(

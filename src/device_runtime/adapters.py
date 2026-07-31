@@ -654,6 +654,10 @@ class RelayBankAdapter:
     def close(self) -> None:
         self._controller.close()
 
+    def enter_safe_state(self) -> None:
+        for channel in (1, 2):
+            self.set_channel(channel, False)
+
 
 class ToolChangerAdapter:
     """Expose lock state instead of serial command strings."""
@@ -669,6 +673,9 @@ class ToolChangerAdapter:
 
     def close(self) -> None:
         self._controller.close()
+
+    def enter_safe_state(self) -> None:
+        self.set_locked(True)
 
 
 class PipetteAdapter:
@@ -710,3 +717,7 @@ class PipetteAdapter:
 
     def close(self) -> None:
         self._controller.close()
+
+    def enter_safe_state(self) -> None:
+        if not self._controller.initialize():
+            raise RuntimeError("pipette failed to return to initialized position")

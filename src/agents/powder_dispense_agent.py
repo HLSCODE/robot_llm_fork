@@ -27,6 +27,26 @@ class PowderDispenseOutcome(str, Enum):
     READING_ANOMALY = "reading_anomaly"
 
 
+class PowderRoundOutcome(str, Enum):
+    CONTINUE = "continue"
+    TARGET_REACHED = "target_reached"
+    OVER_TARGET = "over_target"
+    READING_ANOMALY = "reading_anomaly"
+
+
+@dataclass(frozen=True, slots=True)
+class PowderDispenseRound:
+    round_number: int
+    reading_before_g: float
+    reading_after_g: float
+    added_before_mg: float
+    remaining_before_mg: float
+    tolerance_mg: float
+    rotation_steps: int
+    round_delta_mg: float
+    outcome: PowderRoundOutcome
+
+
 @dataclass(frozen=True, slots=True)
 class PowderDispenseResult:
     outcome: PowderDispenseOutcome
@@ -36,6 +56,7 @@ class PowderDispenseResult:
     added_mg: float
     rounds: int
     message: str
+    round_records: tuple[PowderDispenseRound, ...] = ()
 
     @property
     def successful(self) -> bool:
@@ -71,12 +92,14 @@ class PowderDispenseAgent:
         log: Callable[[str], None] | None = None,
         should_stop: Callable[[], bool] | None = None,
         sleep: Callable[[float], None] | None = None,
+        audit_round: Callable[[PowderDispenseRound], None] | None = None,
     ) -> None:
         self._controller = controller
         self._read_balance = read_balance
         self._log = log or (lambda _msg: None)
         self._should_stop = should_stop or (lambda: False)
         self._sleep = sleep or time.sleep
+        self._audit_round = audit_round or (lambda _record: None)
 
     def run(self, config: PowderDispenseConfig) -> PowderDispenseResult:
         if config.target_mg <= 0:
@@ -92,6 +115,7 @@ class PowderDispenseAgent:
         initial_g = 0.0
         current_g = 0.0
         rounds = 0
+        round_records: list[PowderDispenseRound] = []
 
         try:
             ctrl.enable_all()
@@ -114,6 +138,7 @@ class PowderDispenseAgent:
                         config,
                         rounds - 1,
                         "用户停止",
+                        round_records,
                     )
 
                 added_mg = (current_g - initial_g) * 1000.0
@@ -127,6 +152,7 @@ class PowderDispenseAgent:
                         config,
                         rounds - 1,
                         "加粉超量",
+                        round_records,
                     )
                 if remaining_mg <= config.tolerance_mg:
                     return self._result(
@@ -136,6 +162,7 @@ class PowderDispenseAgent:
                         config,
                         rounds - 1,
                         "达到目标",
+                        round_records,
                     )
 
                 step = self._choose_step(remaining_mg, config)
@@ -149,6 +176,25 @@ class PowderDispenseAgent:
                 previous_g = current_g
                 current_g = self._read_balance_retry(config)
                 delta_mg = (current_g - previous_g) * 1000.0
+                outcome = self._round_outcome(
+                    current_g=current_g,
+                    initial_g=initial_g,
+                    config=config,
+                    delta_mg=delta_mg,
+                )
+                record = PowderDispenseRound(
+                    round_number=rounds,
+                    reading_before_g=previous_g,
+                    reading_after_g=current_g,
+                    added_before_mg=added_mg,
+                    remaining_before_mg=remaining_mg,
+                    tolerance_mg=config.tolerance_mg,
+                    rotation_steps=step,
+                    round_delta_mg=delta_mg,
+                    outcome=outcome,
+                )
+                round_records.append(record)
+                self._audit_round(record)
                 if delta_mg < -config.max_drop_mg:
                     return self._result(
                         PowderDispenseOutcome.READING_ANOMALY,
@@ -157,6 +203,7 @@ class PowderDispenseAgent:
                         config,
                         rounds,
                         "读数异常下降",
+                        round_records,
                     )
 
             return self._result(
@@ -166,6 +213,7 @@ class PowderDispenseAgent:
                 config,
                 config.max_rounds,
                 "达到最大轮次但未达到目标",
+                round_records,
             )
         finally:
             self._return_safe(ctrl, config)
@@ -203,6 +251,23 @@ class PowderDispenseAgent:
                 self._log(f"{label}失败: {exc}")
 
     @staticmethod
+    def _round_outcome(
+        *,
+        current_g: float,
+        initial_g: float,
+        config: PowderDispenseConfig,
+        delta_mg: float,
+    ) -> PowderRoundOutcome:
+        if delta_mg < -config.max_drop_mg:
+            return PowderRoundOutcome.READING_ANOMALY
+        remaining_mg = config.target_mg - (current_g - initial_g) * 1000.0
+        if remaining_mg < -config.tolerance_mg:
+            return PowderRoundOutcome.OVER_TARGET
+        if remaining_mg <= config.tolerance_mg:
+            return PowderRoundOutcome.TARGET_REACHED
+        return PowderRoundOutcome.CONTINUE
+
+    @staticmethod
     def _result(
         outcome: PowderDispenseOutcome,
         initial_g: float,
@@ -210,6 +275,7 @@ class PowderDispenseAgent:
         config: PowderDispenseConfig,
         rounds: int,
         message: str,
+        round_records: list[PowderDispenseRound],
     ) -> PowderDispenseResult:
         return PowderDispenseResult(
             outcome=outcome,
@@ -219,6 +285,7 @@ class PowderDispenseAgent:
             added_mg=(final_g - initial_g) * 1000.0,
             rounds=rounds,
             message=message,
+            round_records=tuple(round_records),
         )
 
 

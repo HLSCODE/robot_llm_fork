@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from ...core.execution_context import ExecutionContext
 from ...core.move_compensation import resolve_robot_target_pose
@@ -91,11 +92,13 @@ class RobotMoveActionHandler:
         execution_context: ExecutionContext,
         options: MotionHandlerOptions,
         vision_settings: VisionSettings,
+        localization_reader: Callable[..., dict[str, Any] | None],
     ) -> None:
         self._device_runtime = device_runtime
         self._execution_context = execution_context
         self._options = options
         self._vision_settings = vision_settings
+        self._localization_reader = localization_reader
 
     def __call__(
         self,
@@ -117,6 +120,7 @@ class RobotMoveActionHandler:
                 arm_name,
                 self._execution_context,
                 self._vision_settings,
+                self._localization_reader,
                 lambda message: context.log(message, "info"),
             )
             arm = ArmId.parse(arm_name)

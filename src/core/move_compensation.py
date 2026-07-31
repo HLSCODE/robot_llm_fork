@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from .execution_context import ExecutionContext
 from .pose_compensation import compensate_pose, parse_pose
@@ -8,6 +8,7 @@ from .settings import VisionSettings
 
 
 LogFn = Callable[[str], None]
+LocalizationReader = Callable[..., dict[str, Any] | None]
 
 
 def _normalize_mode(mode: str | None) -> str:
@@ -36,6 +37,7 @@ def resolve_robot_target_pose(
     arm: str,
     context: ExecutionContext,
     vision_settings: VisionSettings,
+    localization_reader: LocalizationReader,
     log_fn: LogFn | None = None,
 ) -> list[float]:
     """Resolve a robot move target after optional UDP or vision compensation."""
@@ -53,9 +55,7 @@ def resolve_robot_target_pose(
         if not teach_offset:
             raise RuntimeError("UDP定位补偿已启用，但动作中缺少创建时定位基准")
 
-        from ..gui.udp_receive import get_latest_position
-
-        current_offset = get_latest_position(max_age=2.0, wait_timeout=1.5)
+        current_offset = localization_reader(max_age=2.0, wait_timeout=1.5)
         if current_offset is None:
             raise RuntimeError("UDP定位补偿已启用，但未收到当前有效定位数据")
 

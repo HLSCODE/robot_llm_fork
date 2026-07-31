@@ -839,6 +839,18 @@ class PowderDispenseActionHandler:
             log=lambda message: context.log(message, "info"),
             should_stop=lambda: context.stop_requested,
             sleep=context.sleep,
+            audit_round=lambda record: context.log(
+                "智能加粉轮次审计: "
+                f"round={record.round_number}, "
+                f"before_g={record.reading_before_g:.4f}, "
+                f"after_g={record.reading_after_g:.4f}, "
+                f"remaining_mg={record.remaining_before_mg:.1f}, "
+                f"tolerance_mg={record.tolerance_mg:.1f}, "
+                f"rotation_steps={record.rotation_steps}, "
+                f"delta_mg={record.round_delta_mg:.1f}, "
+                f"outcome={record.outcome.value}",
+                "info",
+            ),
         )
         try:
             result = agent.run(config)

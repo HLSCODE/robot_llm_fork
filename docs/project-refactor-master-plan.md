@@ -2,7 +2,7 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-30
+> 最近更新：2026-07-31
 >
 > 当前里程碑：M4 — 依赖、启动配置和用户数据交付边界已收敛
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
@@ -87,6 +87,10 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - 轨迹示教和遥操作持有完整会话周期的机械臂资源租约。
 - 受控取消、软件快停和软件急停已由 `SafetyService` 统一编排；GUI 与 WebSocket
   共用逐设备结果，当前 RealMan 停止链路待真实硬件验收。
+- 继电器、快换手和移液枪的安全态已注册到 `DeviceRuntime`；受控停止、快停和
+  急停统一执行“继电器全断、快换手锁止、移液枪回初始化位”，并逐设备报告结果。
+- UDP 定位接收器已提升为应用级 `LocalizationService`，由组合根唯一创建和关闭；
+  core、执行引擎与 GUI 只通过显式依赖读取定位，不再依赖 GUI 全局单例。
 - WebSocket 写操作已使用共享密钥认证和单控制客户端租约；租约超时、控制者
   断线或发送失败只释放其所属遥操作/采集会话，观察者断线不再停止全局遥操作。
 - WebSocket 权限拒绝和写操作分发使用不包含凭据/payload 的结构化安全审计；
@@ -295,7 +299,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | B-014 | P1 | DONE | RealMan adapter 接入统一运行时，业务层移除 `rm_*` 和原生控制器访问 |
 | B-015 | P1 | DOING | Provider 注册表和可复用核心契约测试已落地；待明确并接入第二种真实机械臂 adapter，执行软硬件契约验收 |
 | B-016 | P1 | DONE | RealMan 型号、双臂连接、运动/夹爪参数、工具架臂/槽位位姿/停留时间已进入强类型 Provider 配置；删除 controller 硬编码工作流和旧配置入口 |
-| B-017 | P1 | TODO | 定义继电器、快换手、移液枪等非连续运动输出的安全态和停机策略 |
+| B-017 | P1 | DONE | DeviceRuntime 统一注册并报告继电器全断、快换手锁止和移液枪回初始化位安全策略，SafetyService 在所有停止模式下执行 |
 
 ### 7.4 完成标准
 
@@ -477,7 +481,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 |---|---|---|---|
 | F-V-001 | P1 | DONE | 相机已接入 ResourceArbiter |
 | F-V-002 | P1 | DONE | 相机生命周期归 DeviceRuntime，短任务和长预览/采集均使用显式 CameraSession |
-| F-V-003 | P1 | TODO | 移除 core 对 gui.udp_receive 的依赖 |
+| F-V-003 | P1 | DONE | UDP 定位由 ApplicationServices 持有的 LocalizationService 提供，core/执行/GUI 均使用显式注入，旧 GUI 全局接收器已删除 |
 | F-V-004 | P2 | TODO | 建立 VisionService 和 typed result |
 | F-V-005 | P2 | TODO | 模型、标定、工位配置版本化 |
 | F-V-006 | P2 | TODO | 统一调试图片和临时文件生命周期 |
@@ -500,8 +504,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | F-T-001 | P0 | DONE | 遥操作会话租约与序列执行互斥 |
 | F-T-002 | P0 | DOING | 断线释放租约和 RealMan 软件快停/急停链路已实现；心跳超时、其他设备停止和硬件验收待完成 |
 | F-T-003 | P1 | DOING | 已建立 TeleoperationService，会话状态和所有者仍需增强 |
-| F-T-004 | P1 | TODO | 增加控制租约和心跳 |
-| F-T-005 | P1 | TODO | 增加消息频率、背压和丢帧策略 |
+| F-T-004 | P1 | DONE | WebSocket 已实现单控制者租约、续期心跳、超时监控和断线资源释放 |
+| F-T-005 | P1 | DONE | 已实现请求限频、并发上限、有界 WebSocket 入站队列和 TCP 背压；硬件调用移出事件循环，命令不静默丢弃 |
 | F-T-006 | P2 | TODO | 遥操作事件和错误统一审计 |
 | F-T-007 | P3 | TODO | 延迟、抖动和吞吐基准 |
 
@@ -543,7 +547,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 |---|---|---|---|
 | F-P-001 | P0 | DONE | 达到最大轮次但未达到目标明确返回 `MAX_ROUNDS_REACHED` 失败终态，并映射稳定错误码 `target_not_reached` |
 | F-P-002 | P1 | DOING | 加粉流程已接入统一取消、结构化 handler result、可取消等待和安全回位；待真实硬件验收 |
-| F-P-003 | P1 | TODO | 记录每轮读数、动作、阈值和结果 |
+| F-P-003 | P1 | DONE | PowderDispenseResult 保留逐轮前后读数、剩余量、容差、旋转步数、增量和判定，执行日志输出结构化轮次审计 |
 | F-P-004 | P2 | TODO | 为规则策略建立离线回归测试 |
 | F-P-005 | P2 | TODO | 区分当前规则 Agent 与未来四 Agent 方案文档 |
 | F-P-006 | P3 | TODO | 评审是否立项 LLM 多 Agent 粉末流程 |
@@ -622,7 +626,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | ID | 优先级 | 状态 | 工作项 |
 |---|---|---|---|
 | G-001 | P0 | DONE | pytest 统一收集现有测试；Windows/Python 3.12 CI 使用冻结 lock 执行统一质量入口 |
-| G-002 | P0 | DOING | 已建立 fake device/runtime，transport/LLM fake 待补充 |
+| G-002 | P0 | DONE | 已建立 fake device/runtime、可脚本化 FakeTransport 和可复用 FakeLLMClient，并覆盖调用记录、故障与生命周期测试 |
 | G-003 | P0 | DONE | 内置动作/技能由应用版本交付；组合根仅在用户库缺失时安装，现有用户文件永不覆盖 |
 | G-004 | P1 | DONE | unit/contract 已覆盖 runtime、资源、执行状态、依赖边界及全部 WebSocket action、错误码和 route/schema 所有权 |
 | G-005 | P1 | DONE | Ruff 覆盖收敛主线与测试；Mypy 覆盖 WebSocket、DeviceRuntime、ExecutionRuntime 和 LLM 核心类型 |
@@ -905,6 +909,7 @@ M4 工程治理与清理
 | 2026-07-27 | M1/M2 | A/B/D/F | 统一执行与设备运行时首轮落地 | TODO → DOING | ApplicationServices、ExecutionManager、DeviceRuntime、ResourceArbiter、TeleoperationService；GUI/AI/WS 直接切换并删除旧执行器 | - |
 | 2026-07-27 | M2 | B/D/F | 机械臂供应商边界收敛 | TODO → DONE | 建立核心/可选能力、RealMan adapter、统一状态与错误模型；迁移 GUI/执行/视觉/数据采集并删除直连脚本 | - |
 | 2026-07-28 | M2 | A/B/D/F | 统一安全停止软件链路 | B-001 TODO → DONE；ER-006 保持 DOING | 建立停止能力矩阵、逐设备结果与 SafetyService；RealMan 快停/急停接入 GUI/WS，真实硬件验收待完成 | - |
+| 2026-07-31 | M4 | B/F/G | 定位、离散安全态、遥操作流控和测试能力收敛 | B-017、F-V-003、F-T-004、F-T-005、F-P-003 → DONE；G-002 DOING → DONE | 定位服务应用级持有；停止统一应用离散安全态；遥操作阻塞 I/O 移出事件循环；补齐粉末逐轮审计和共享 Transport/LLM fake | - |
 | 2026-07-28 | M2 | A/C/D | GUI 与附加服务统一宿主 | A-013/C-014 TODO → DONE | 删除 GUI/Server 二选一组合路径；WebSocket 进入受管理 asyncio 线程并共享唯一 ApplicationServices，默认仅监听本机 | - |
 | 2026-07-28 | M2 | C/D | 编排状态与持久化收敛 | C-015 TODO → DONE | GUI/WebSocket 不再直接访问 JSON 存储；动作、任务和当前序列由线程安全 CompositionService 独占，写入采用原子替换并发布跨线程变更事件 | - |
 | 2026-07-29 | M2 | A/B | 动作 handler 与执行控制首批收敛 | B-007 TODO → DOING；A-007 保持 DOING | 建立唯一 ActionHandlerRegistry、注册完整性校验和统一动作 deadline/cancel 上下文；首批拆出 WAIT/INSPECT，阻塞调用不使用脱离资源租约的后台超时线程 | - |

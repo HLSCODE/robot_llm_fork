@@ -123,6 +123,12 @@
 ```
 仅在执行失败时返回错误消息。
 
+服务端按连接顺序处理关节指令，不静默丢帧。每客户端请求频率受
+`WEBSOCKET_MAX_REQUESTS_PER_SECOND` 限制，连接入站队列受
+`WEBSOCKET_MAX_QUEUED_MESSAGES` 限制；队列饱和时由 WebSocket/TCP 向发送端
+施加背压。机械臂 SDK 调用在线程池中执行，不阻塞其他连接的心跳、租约过期检测
+和服务关闭。客户端应维持推荐的 50Hz，不应依赖服务端替其合并过期轨迹点。
+
 ---
 
 ### 4. 停止遥操作
@@ -375,9 +381,9 @@ WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
 WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
 ```
 
-当前 WebSocket API 版本为 `1.0`。包括 50Hz 关节指令在内的每个请求都必须
+当前 WebSocket API 版本为 `2.0`。包括 50Hz 关节指令在内的每个请求都必须
 携带 `api_version: "2.0"` 和唯一 `request_id`；默认每客户端上限为每秒
-120 个请求。
+120 个请求，入站队列大小由 `WEBSOCKET_MAX_QUEUED_MESSAGES` 配置。
 
 启动服务：
 ```bash

@@ -1121,10 +1121,12 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            from .udp_receive import get_localization_receiver
-
-            receiver = get_localization_receiver()
-            position = receiver.get_latest(max_age=10.0, valid_only=False, wait_timeout=0.0)
+            receiver = self._services.localization
+            position = receiver.latest(
+                max_age=10.0,
+                valid_only=False,
+                wait_timeout=0.0,
+            )
             if position is None:
                 error = receiver.last_error
                 self.localization_pose_value_label.setText(f"UDP -- ({error})" if error else "UDP --")
@@ -1404,6 +1406,7 @@ class MainWindow(QMainWindow):
         dialog = ActionConfigDialog(
             action_type,
             self.settings.vision,
+            localization_reader=self._services.localization.latest,
             existing_names=self._collect_action_names(),
             move_target=move_target,
         )
@@ -1560,6 +1563,7 @@ class MainWindow(QMainWindow):
             self.settings.vision,
             action_data,
             self,
+            localization_reader=self._services.localization.latest,
             existing_names=self._collect_action_names(),
         )
         if not dialog.exec():
@@ -2482,6 +2486,7 @@ class MainWindow(QMainWindow):
             self.settings.vision,
             action_data,
             self,
+            localization_reader=self._services.localization.latest,
         )
         if not dialog.exec():
             return

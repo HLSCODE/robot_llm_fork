@@ -196,12 +196,14 @@ class ActionConfigDialog(QDialog):
         vision_settings: VisionSettings,
         action_data: dict = None,
         parent=None,
+        localization_reader=None,
         existing_names: set = None,
         move_target: str = None,
     ):
         super().__init__(parent)
         self.action_type = action_type
         self._vision_settings = vision_settings
+        self._localization_reader = localization_reader
         self.action_data = action_data or {}
         self._existing_names = existing_names or set()
         self._move_target = move_target  # 新建时预设的移动目标（"机械臂移动" / "身体移动"）
@@ -1089,9 +1091,12 @@ class ActionConfigDialog(QDialog):
 
     def _capture_localization_reference(self):
         try:
-            from .udp_receive import get_latest_position
-
-            position = get_latest_position(max_age=2.0, wait_timeout=1.5)
+            if self._localization_reader is None:
+                raise RuntimeError("定位服务未注入")
+            position = self._localization_reader(
+                max_age=2.0,
+                wait_timeout=1.5,
+            )
         except Exception as exc:
             QMessageBox.warning(self, "定位补偿", f"读取 UDP 定位失败:\n{exc}")
             return

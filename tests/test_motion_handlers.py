@@ -153,6 +153,7 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
             ExecutionContext(),
             options,
             VisionSettings(),
+            lambda **_kwargs: None,
         )
         context, logs = _action_context()
 
@@ -185,6 +186,7 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
             ExecutionContext(),
             MotionHandlerOptions(),
             VisionSettings(),
+            lambda **_kwargs: None,
         )
         context, logs = _action_context()
 
@@ -283,6 +285,7 @@ class BaseMoveActionHandlerTests(unittest.TestCase):
                 ExecutionContext(),
                 MotionHandlerOptions(),
                 VisionSettings(),
+                lambda **_kwargs: None,
             ),
             BodyMoveActionHandler(
                 DeviceRuntime(),
