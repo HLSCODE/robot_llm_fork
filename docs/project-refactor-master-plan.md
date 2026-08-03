@@ -2,10 +2,10 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-31
+> 最近更新：2026-08-03
 >
-> 当前里程碑：M4 — GUI 启动生命周期与 simulation 主流程已收敛
-> 计划进度：93/115（92 DONE + 1 DROPPED，80.9%）
+> 当前里程碑：M4 — GUI 应用状态与 action schema 表单已收敛
+> 计划进度：97/115（96 DONE + 1 DROPPED，84.3%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -24,6 +24,7 @@
 | F. 遥操作 | [遥操作说明](teleop.md) |
 | F. 数据采集 | [数据采集说明](data-collection.md) |
 | F. 智能加粉 | [智能闭环加粉 Agent](powder_dispense_agent.md) |
+| D. GUI 应用架构 | [GUI 应用架构](gui-application-architecture.md) |
 | G. 工程与数据治理 | [工程质量门禁](quality-gates.md)、[依赖、配置与用户数据治理](data-config-governance.md) |
 
 本计划覆盖的是当前仓库可确认的问题。后续发现的新问题应进入对应 Track 的 backlog，不能因为没有列在首版文档中而被忽略。
@@ -397,15 +398,16 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 ## 9. Track D：GUI 应用架构
 
-### 9.1 当前问题
+### 9.1 当前状态与剩余问题
 
-- `MainWindow` 同时管理 UI、设备、编排、执行、任务和相机测试。
-- `dialogs.py` 集中维护大量动作类型表单和参数构建。
+- 任务组合草稿已经由 `TaskComposerService` 独占，`MainWindow` 只渲染和转发用户意图。
+- 设备连接状态和执行按钮状态分别由 `DeviceViewModel`、`ExecutionViewModel`
+  从运行时快照派生，不再使用 GUI 平行布尔变量。
+- `ActionConfigDialog` 已由统一 action schema 生成全部动作和 variant 字段，
+  旧的逐动作 UI/参数构建分派已删除。
+- `MainWindow` 仍集中承担较多 Qt 视图协调和通知展示职责。
 - `widgets` 与 GUI 业务状态耦合，部分 AI 组件反向持有 MainWindow。
-- 手工执行和 AI 执行有两套状态。
-- 部分按钮直接调用硬件控制器。
 - 窗口关闭可能无超时等待执行线程。
-- GUI 启动过程使用嵌套 `QEventLoop` 等待语音初始化，启动状态复杂。
 
 ### 9.2 目标
 
@@ -424,10 +426,10 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | D-002 | P1 | DONE | ExecutionBridge 已成为纯 Qt 事件 adapter |
 | D-003 | P1 | DONE | ExecutionBridge 不再拥有序列 worker；安全停止仅用短生命周期 I/O 调度线程避免阻塞 Qt 主线程 |
 | D-004 | P1 | DONE | MainWindow 不再关闭设备；应用宿主先停附加服务，再统一关闭 DeviceRuntime |
-| D-005 | P2 | TODO | 提取 TaskComposerService |
-| D-006 | P2 | TODO | 提取 DeviceViewModel/Service |
-| D-007 | P2 | TODO | 提取 ExecutionViewModel |
-| D-008 | P2 | TODO | action schema 驱动通用表单 |
+| D-005 | P2 | DONE | `TaskComposerService` 独占任务/动作组合草稿、排序、循环和序列展开 |
+| D-006 | P2 | DONE | `DeviceViewModel` 从 DeviceManagementService 快照派生 GUI 设备状态，删除窗口连接布尔值 |
+| D-007 | P2 | DONE | `ExecutionViewModel` 从 ExecutionService 状态机派生暂停/恢复/取消能力和按钮状态 |
+| D-008 | P2 | DONE | `ActionConfigDialog` 按唯一 action schema 通用渲染字段、variant、默认值、范围、枚举、只读和校验 |
 | D-009 | P2 | DONE | 生命周期、手动控制、轨迹示教和位姿读取已进入 Application Service |
 | D-010 | P2 | DONE | 删除启动布尔组合和嵌套事件循环；显式 startup lifecycle 管理 speech wait、硬件初始化、ready/failed/closed，等待使用异步 signal + 单次超时 |
 | D-011 | P3 | TODO | 统一 UI 状态、错误和通知组件 |
@@ -692,7 +694,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | ADR-M-006 | Accepted | simulation | 替换设备实现，不替换状态机 |
 | ADR-M-007 | Accepted | 配置模型 | 组合根一次解析环境，向业务层注入不可变领域 settings；敏感配置独立快照 |
 | ADR-M-008 | Accepted | 数据目录 | built-in catalog 与可配置 user data root 分离；只初始化缺失文件 |
-| ADR-M-009 | Proposed | GUI 状态管理 | application service + Qt adapter/view-model |
+| ADR-M-009 | Accepted | GUI 状态管理 | application service + Qt adapter/view-model；业务状态不由 QWidget 持有 |
 | ADR-M-010 | Proposed | 四 Agent 粉末方案 | 作为独立立项，不纳入基础重构默认范围 |
 
 ADR 状态：`Proposed`、`Accepted`、`Superseded`、`Rejected`。
@@ -984,6 +986,7 @@ M4 工程治理与清理
 | 2026-08-03 | M4 | G | 运行日志治理 | G-014 TODO → DONE | 删除启动器内嵌日志初始化；新增独立 LoggingSettings 和集中日志组件，控制台保持可读文本，文件统一 JSON Lines、每日轮转和按天保留；ContextVar 传播 operation/request_id，ExecutionManager worker 显式绑定 run_id | 331 tests + 32 subtests，覆盖率 44.65%，14 golden cases；完整质量门禁和 wheel smoke |
 | 2026-08-03 | M4 | G | 性能预算与回归监控 | G-015 TODO → DONE | 新增 strict schema v1 性能预算和无硬件 runner；批量执行请求解析、动作校验、资源租约、schema 深拷贝与 LLM golden suite，预热后取 5 次样本中位数；机器可读原子报告和超预算失败进入 Windows/Linux 统一质量入口 | 336 tests + 32 subtests，覆盖率 44.65%，14 golden cases；5/5 性能预算通过，完整质量门禁和 wheel smoke |
 | 2026-08-03 | M4 | A/D | GUI 启动状态机与 simulation smoke | A-009 DOING → DONE；D-010/D-012 TODO → DONE | 删除两个启动布尔和构造期嵌套 QEventLoop；新增显式 lifecycle，语音等待改为非阻塞 signal + timer；真实 MainWindow 在 offscreen simulation 中验证共享服务、fake 设备启动、开始/暂停/恢复/取消、终态日志、资源释放和关闭 | 342 tests + 32 subtests，覆盖率 52.35% 并将门禁提升至 50%；完整质量门禁、5/5 性能预算和 wheel smoke |
+| 2026-08-03 | M4 | D/G | GUI 应用状态与 schema 表单收敛 | D-005/D-006/D-007/D-008、ER-018 TODO → DONE | TaskComposerService 独占组合草稿；Device/Execution ViewModel 从运行时快照派生状态；删除 MainWindow 平行布尔和 ExecutionBridge 控制双入口；1300 余行逐动作表单分支替换为唯一 schema 通用渲染与校验；新增边界进入 Mypy | 348 tests + 32 subtests，覆盖率 55.09%；21 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 
 ## 22. 建议的首批实施顺序
 

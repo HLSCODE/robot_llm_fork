@@ -54,6 +54,12 @@ from .teleoperation import (
     TeleoperationSnapshot,
     websocket_teleoperation_owner,
 )
+from .task_composer import (
+    ComposedAction,
+    ComposedTask,
+    ComposerEntry,
+    TaskComposerService,
+)
 
 __all__ = [
     "ApplicationServices",
@@ -66,6 +72,9 @@ __all__ = [
     "CompositionEvent",
     "CompositionRevisionConflict",
     "CompositionService",
+    "ComposedAction",
+    "ComposedTask",
+    "ComposerEntry",
     "ConfirmedCommand",
     "DataCollectionEpisodeStarted",
     "DataCollectionEpisodeStopped",
@@ -94,6 +103,7 @@ __all__ = [
     "SafetyService",
     "SafetyStopReport",
     "TaskSummary",
+    "TaskComposerService",
     "TeleoperationService",
     "TeleoperationArmSnapshot",
     "TeleoperationCommandResult",

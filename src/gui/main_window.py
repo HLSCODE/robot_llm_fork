@@ -31,6 +31,8 @@ from PyQt6.QtWidgets import (
 from ..ai_integration.execution_bridge import ExecutionBridge
 from ..application import (
     ApplicationServices,
+    ComposedAction,
+    ComposedTask,
     CompositionChangeType,
     CompositionEvent,
     CompositionRevisionConflict,
@@ -47,7 +49,6 @@ from ..device_runtime import StopMode
 from ..device_runtime.ids import (
     BODY_AXIS,
     MOBILE_BASE,
-    RELAY_BANK,
     ROBOT_SYSTEM,
 )
 from ..widgets import ActionListWidget, ControlPanel, LogWidget, SequenceListWidget
@@ -55,6 +56,7 @@ from ..widgets.ai_assistant import AIAssistantWidget
 from .composition_bridge import CompositionBridge
 from .dialogs import ActionConfigDialog
 from .startup import GuiStartupLifecycle, GuiStartupState
+from .view_models import DeviceViewModel, ExecutionViewModel
 
 
 class TaskLibraryListWidget(QListWidget):
@@ -85,7 +87,7 @@ class TaskLibraryListWidget(QListWidget):
 
 
 class TaskComposerListWidget(QListWidget):
-    order_changed = pyqtSignal()
+    order_changed = pyqtSignal(int, int)
     task_dropped = pyqtSignal(str, int)
     action_dropped = pyqtSignal(object, int)
 
@@ -171,12 +173,10 @@ class TaskComposerListWidget(QListWidget):
             payload = json.loads(bytes(event.mimeData().data("application/x-task-composer-item")).decode("utf-8"))
             source_row = payload["row"]
             if 0 <= source_row < self.count():
-                item = self.takeItem(source_row)
                 if source_row < insert_row:
                     insert_row -= 1
-                self.insertItem(insert_row, item)
-                self.setCurrentRow(insert_row)
-                self.order_changed.emit()
+                insert_row = min(insert_row, self.count() - 1)
+                self.order_changed.emit(source_row, insert_row)
                 event.accept()
             return
 
@@ -207,6 +207,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._services = services
         self._execution_bridge = ExecutionBridge(services)
+        self._device_view_model = DeviceViewModel(services.devices)
+        self._execution_view_model = ExecutionViewModel(services.execution)
         self.actions: dict[ActionType, list[ActionDefinition]] = {
             ActionType.MOVE: [],
             ActionType.BASE_MOVE: [],
@@ -218,12 +220,7 @@ class MainWindow(QMainWindow):
             ActionType.VISION_RELOCALIZE: [],
             ActionType.TRAJECTORY: []
         }
-        self.is_paused = False
         self.settings = services.settings
-        self.robot1_connected = False
-        self.robot2_connected = False
-
-        self.body_connected = False
         self.robot_pose_cache = {"robot1": None, "robot2": None}
         self.pose_timer = None
         self._startup_lifecycle = GuiStartupLifecycle()
@@ -256,6 +253,10 @@ class MainWindow(QMainWindow):
         self._execution_bridge.execution_completed.connect(
             self.on_execution_completed
         )
+        self._execution_bridge.execution_status_changed.connect(
+            lambda _status: self._render_execution_state()
+        )
+        self._render_execution_state()
 
         # 设置 AI助手的主窗口引用（用于执行桥接器）
         if hasattr(self, 'ai_assistant_widget'):
@@ -684,7 +685,7 @@ class MainWindow(QMainWindow):
         self.task_composer_list.setMinimumHeight(140)
         self.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
         self.task_composer_list.action_dropped.connect(self._add_action_to_composer)
-        self.task_composer_list.order_changed.connect(self._refresh_task_composer_display)
+        self.task_composer_list.order_changed.connect(self._move_composed_task_rows)
         composer_layout.addWidget(composer_title)
         composer_layout.addWidget(self.task_composer_list)
         layout.addLayout(composer_layout, stretch=1)
@@ -881,12 +882,13 @@ class MainWindow(QMainWindow):
         return panel
 
     def update_basic_control_buttons(self):
-        gripper_ready = self.robot_system is not None and self.robot1_connected
+        state = self._device_view_model.snapshot()
+        gripper_ready = state.robot_ready
         if hasattr(self, "gripper_open_btn"):
             self.gripper_open_btn.setEnabled(gripper_ready)
         if hasattr(self, "gripper_close_btn"):
             self.gripper_close_btn.setEnabled(gripper_ready)
-        relay_ready = RELAY_BANK in self._services.device_runtime.registered_device_ids()
+        relay_ready = state.relay_ready
         for attr in ("relay_y1_on_btn", "relay_y1_off_btn", "relay_y2_on_btn", "relay_y2_off_btn"):
             if hasattr(self, attr):
                 getattr(self, attr).setEnabled(relay_ready)
@@ -905,7 +907,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", f"继电器 {channel} {action_text}失败:\n{e}")
 
     def on_gripper_open_clicked(self):
-        if self.robot_system is None or not self.robot1_connected:
+        if not self._device_view_model.snapshot().robot_ready:
             QMessageBox.warning(self, "警告", "Robot1 未连接")
             return
 
@@ -924,7 +926,7 @@ class MainWindow(QMainWindow):
             self.log_widget.append_log(f"Robot1 夹爪打开异常: {e}")
 
     def on_gripper_close_clicked(self):
-        if self.robot_system is None or not self.robot1_connected:
+        if not self._device_view_model.snapshot().robot_ready:
             QMessageBox.warning(self, "警告", "Robot1 未连接")
             return
 
@@ -1255,17 +1257,11 @@ class MainWindow(QMainWindow):
 
         try:
             self._services.devices.initialize(ROBOT_SYSTEM)
-            self.robot1_connected = True
-            self.robot2_connected = True
-            self.update_robot_status("robot1", True)
-            self.update_robot_status("robot2", True)
+            self._render_device_state()
             self.refresh_arm_poses()
             self.log_widget.append_log("机械臂初始化完成")
         except Exception as e:
-            self.robot1_connected = False
-            self.robot2_connected = False
-            self.update_robot_status("robot1", False)
-            self.update_robot_status("robot2", False)
+            self._render_device_state()
             self.log_widget.append_log(f"机械臂初始化异常: {str(e)}")
 
     def initialize_move_controller(self) -> None:
@@ -1277,32 +1273,18 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.log_widget.append_log(f"底盘移动控制器初始化失败：{e}")
 
-    def update_robot_status(self, robot_name: str, connected: bool):
-        """更新机械臂状态指示灯"""
-        if robot_name == "robot1":
-            indicator = self.robot1_status_indicator
-            status_text = self.robot1_status_text
-        else:
-            indicator = self.robot2_status_indicator
-            status_text = self.robot2_status_text
-
-        if connected:
-            indicator.setStyleSheet("background-color: #22c55e; border-radius: 8px;")
-            status_text.setText("已连接")
-        else:
-            indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
-            status_text.setText("未连接")
-
+    def _render_device_state(self) -> None:
+        state = self._device_view_model.snapshot()
+        for indicator, label, ready in (
+            (self.robot1_status_indicator, self.robot1_status_text, state.robot_ready),
+            (self.robot2_status_indicator, self.robot2_status_text, state.robot_ready),
+            (self.body_status_indicator, self.body_status_text, state.body_ready),
+            (self.pipette_status_indicator, self.hand_status_text, state.pipette_ready),
+        ):
+            color = "#22c55e" if ready else "#ef4444"
+            indicator.setStyleSheet(f"background-color: {color}; border-radius: 8px;")
+            label.setText("已连接" if ready else "未连接")
         self.update_basic_control_buttons()
-
-    def update_hand_status(self, connected: bool):
-        """更新末端工具状态指示灯"""
-        if connected:
-            self.pipette_status_indicator.setStyleSheet("background-color: #22c55e; border-radius: 8px;")
-            self.hand_status_text.setText("已连接")
-        else:
-            self.pipette_status_indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
-            self.hand_status_text.setText("未连接")
 
     def initialize_pipette(self):
         """Initialize the runtime-owned pipette."""
@@ -1310,14 +1292,14 @@ class MainWindow(QMainWindow):
         self.init_pipette_btn.setEnabled(False)
         try:
             success = self._services.manual_control.initialize_pipette()
-            self.update_hand_status(bool(success))
+            self._render_device_state()
             if success:
                 self.log_widget.append_log("移液枪初始化成功")
             else:
                 self.log_widget.append_log("移液枪初始化失败")
                 QMessageBox.warning(self, "警告", "移液枪初始化失败，请检查串口或设备")
         except Exception as e:
-            self.update_hand_status(False)
+            self._render_device_state()
             self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
             QMessageBox.warning(self, "警告", f"移液枪初始化异常: {e}")
         finally:
@@ -1328,13 +1310,13 @@ class MainWindow(QMainWindow):
         self.log_widget.append_log("自动初始化移液枪...")
         try:
             success = self._services.manual_control.initialize_pipette()
-            self.update_hand_status(bool(success))
+            self._render_device_state()
             if success:
                 self.log_widget.append_log("移液枪初始化成功")
             else:
                 self.log_widget.append_log("移液枪初始化失败")
         except Exception as e:
-            self.update_hand_status(False)
+            self._render_device_state()
             self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
 
     def eject_pipette_tip(self):
@@ -1360,21 +1342,11 @@ class MainWindow(QMainWindow):
 
         try:
             self._services.devices.initialize(BODY_AXIS)
-            self.body_connected = True
-            self.update_body_status(True)
+            self._render_device_state()
             self.log_widget.append_log("身体初始化成功")
         except Exception as e:
             self.log_widget.append_log(f"身体初始化异常: {str(e)}")
-            self.update_body_status(False)
-
-    def update_body_status(self, connected: bool):
-        """更新身体状态指示灯"""
-        if connected:
-            self.body_status_indicator.setStyleSheet("background-color: #22c55e; border-radius: 8px;")
-            self.body_status_text.setText("已连接")
-        else:
-            self.body_status_indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
-            self.body_status_text.setText("未连接")
+            self._render_device_state()
 
     def _collect_action_names(self) -> set:
         """收集当前所有动作的名称（用于去重校验）"""
@@ -1397,10 +1369,8 @@ class MainWindow(QMainWindow):
 
         dialog = ActionConfigDialog(
             action_type,
-            self.settings.vision,
-            localization_reader=self._services.localization.latest,
             existing_names=self._collect_action_names(),
-            move_target=move_target,
+            initial_variant=move_target,
         )
         if dialog.exec():
             action = dialog.get_action_definition()
@@ -1552,10 +1522,8 @@ class MainWindow(QMainWindow):
         }
         dialog = ActionConfigDialog(
             action.type,
-            self.settings.vision,
             action_data,
             self,
-            localization_reader=self._services.localization.latest,
             existing_names=self._collect_action_names(),
         )
         if not dialog.exec():
@@ -1792,25 +1760,15 @@ class MainWindow(QMainWindow):
         self._add_task_name_to_composer(task_name, self.task_composer_list.count())
 
     def _add_task_name_to_composer(self, task_name: str, insert_row: int | None = None):
+        self._services.task_composer.add_task(task_name, index=insert_row)
         step_count = self._task_step_count(task_name)
-        item = QListWidgetItem()
-        item.setData(Qt.ItemDataRole.UserRole, {"kind": "task", "task_name": task_name})
-        if insert_row is None or insert_row >= self.task_composer_list.count():
-            self.task_composer_list.addItem(item)
-        else:
-            self.task_composer_list.insertItem(max(0, insert_row), item)
         self._refresh_task_composer_display()
 
         if hasattr(self, "log_widget"):
             self.log_widget.append_log(f"已加入任务组合: {task_name} ({step_count} 步)")
 
     def _add_action_to_composer(self, action: ActionDefinition, insert_row: int | None = None):
-        item = QListWidgetItem()
-        item.setData(Qt.ItemDataRole.UserRole, {"kind": "action", "action": action})
-        if insert_row is None or insert_row >= self.task_composer_list.count():
-            self.task_composer_list.addItem(item)
-        else:
-            self.task_composer_list.insertItem(max(0, insert_row), item)
+        self._services.task_composer.add_action(action, index=insert_row)
         self._refresh_task_composer_display()
 
         if hasattr(self, "log_widget"):
@@ -1819,7 +1777,7 @@ class MainWindow(QMainWindow):
     def remove_task_from_composer(self):
         row = self.task_composer_list.currentRow()
         if row >= 0:
-            self.task_composer_list.takeItem(row)
+            self._services.task_composer.remove(row)
             self._refresh_task_composer_display()
 
     def move_composed_task_up(self):
@@ -1834,10 +1792,16 @@ class MainWindow(QMainWindow):
         if current_row < 0 or target_row < 0 or target_row >= self.task_composer_list.count():
             return
 
-        item = self.task_composer_list.takeItem(current_row)
-        self.task_composer_list.insertItem(target_row, item)
-        self.task_composer_list.setCurrentRow(target_row)
+        self._services.task_composer.move(current_row, target_row)
         self._refresh_task_composer_display()
+        self.task_composer_list.setCurrentRow(target_row)
+
+    def _move_composed_task_rows(self, source_row: int, target_row: int) -> None:
+        if source_row == target_row:
+            return
+        self._services.task_composer.move(source_row, target_row)
+        self._refresh_task_composer_display()
+        self.task_composer_list.setCurrentRow(target_row)
 
     def repeat_composer_selection(self):
         rows = self._selected_contiguous_rows(self.task_composer_list, "请选择要循环的连续任务或动作")
@@ -1856,33 +1820,18 @@ class MainWindow(QMainWindow):
         if not ok or repeat_count <= 1:
             return
 
-        entries = [
-            self._clone_composer_entry(self.task_composer_list.item(row).data(Qt.ItemDataRole.UserRole))
-            for row in range(self.task_composer_list.count())
-        ]
         start_row = rows[0]
         end_row = rows[-1]
-        block = [self._clone_composer_entry(entries[row]) for row in rows]
-        insert_at = end_row + 1
-
-        repeated_entries = entries[:insert_at]
-        for _ in range(repeat_count - 1):
-            repeated_entries.extend(self._clone_composer_entry(entry) for entry in block)
-        repeated_entries.extend(entries[insert_at:])
-
-        self.task_composer_list.clear()
-        for entry in repeated_entries:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, entry)
-            self.task_composer_list.addItem(item)
-
+        block_length = end_row - start_row + 1
+        self._services.task_composer.repeat(start_row, end_row, repeat_count)
         self._refresh_task_composer_display()
-        for row in range(start_row, start_row + len(block) * repeat_count):
+        for row in range(start_row, start_row + block_length * repeat_count):
             self.task_composer_list.item(row).setSelected(True)
         self.log_widget.append_log(f"组合块已设置为循环 {repeat_count} 次")
 
     def clear_task_composer(self):
-        self.task_composer_list.clear()
+        self._services.task_composer.clear()
+        self._refresh_task_composer_display()
 
     def expand_composed_tasks(self, replace: bool):
         sequence = self._build_composed_task_sequence()
@@ -1925,66 +1874,33 @@ class MainWindow(QMainWindow):
         self.log_widget.append_log(f"组合任务已保存: {stored_name}")
 
     def _build_composed_task_sequence(self) -> list[SequenceItem]:
-        sequence: list[SequenceItem] = []
-        for row in range(self.task_composer_list.count()):
-            list_item = self.task_composer_list.item(row)
-            entry = list_item.data(Qt.ItemDataRole.UserRole)
-            if entry.get("kind") == "action":
-                cloned_item = SequenceItem(
-                    uuid=str(uuid4()),
-                    definition=entry["action"],
-                    status=SequenceItemStatus.PENDING,
-                )
-                sequence.append(cloned_item)
-                continue
-
-            task_name = entry.get("task_name", "")
-            try:
-                task_items = (
-                    self._services.composition.flattened_task(
-                        task_name
-                    )
-                )
-            except FileNotFoundError:
-                task_items = ()
-            for task_item in task_items:
-                cloned_item = SequenceItem(
-                    uuid=str(uuid4()),
-                    definition=task_item.definition,
-                    status=SequenceItemStatus.PENDING,
-                )
-                sequence.append(cloned_item)
-        return sequence
-
-    def _clone_composer_entry(self, entry: dict) -> dict:
-        if entry.get("kind") == "action":
-            return {"kind": "action", "action": entry["action"]}
-        return {"kind": "task", "task_name": entry.get("task_name", "")}
+        return list(self._services.task_composer.build_sequence())
 
     def _refresh_task_composer_display(self):
-        for row in range(self.task_composer_list.count()):
-            item = self.task_composer_list.item(row)
-            entry = item.data(Qt.ItemDataRole.UserRole)
-            if entry.get("kind") == "action":
-                action = entry["action"]
+        self.task_composer_list.clear()
+        for entry in self._services.task_composer.entries():
+            item = QListWidgetItem()
+            if isinstance(entry, ComposedAction):
+                action = entry.action
+                item.setData(Qt.ItemDataRole.UserRole, True)
                 item.setText(f"{action.name} (动作)")
                 item.setIcon(self._create_action_card_icon(action))
                 item.setToolTip(f"{action.name}\n类型: {action.type.value}\n拖动可调整顺序")
+                self.task_composer_list.addItem(item)
                 continue
 
-            task_name = entry.get("task_name", "")
+            if not isinstance(entry, ComposedTask):
+                raise TypeError(f"unsupported composer entry: {type(entry).__name__}")
+            task_name = entry.task_name
+            item.setData(Qt.ItemDataRole.UserRole, True)
             step_count = self._task_step_count(task_name)
             item.setText(f"{task_name} ({step_count} 步)")
             item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
             item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖动可调整顺序")
+            self.task_composer_list.addItem(item)
 
     def _task_step_count(self, task_name: str) -> int:
-        try:
-            return len(
-                self._services.composition.flattened_task(task_name)
-            )
-        except FileNotFoundError:
-            return 0
+        return self._services.task_composer.step_count(ComposedTask(task_name))
 
     # ── 动作类型卡片风格（与 widget_components 保持一致）──
     _CARD_STYLE = {
@@ -2214,7 +2130,7 @@ class MainWindow(QMainWindow):
 
     def execute_wake_welcome_task(self, task_name: str) -> None:
         """Execute a configured wake lifecycle task without affecting the composer."""
-        if self._execution_bridge.is_executing():
+        if self._execution_view_model.snapshot().active:
             self.log_widget.append_log(f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}")
             return
 
@@ -2229,7 +2145,7 @@ class MainWindow(QMainWindow):
         self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务")
 
     def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
-        if self._execution_bridge.is_executing():
+        if self._execution_view_model.snapshot().active:
             QMessageBox.warning(self, "警告", "当前已有序列正在执行")
             return
 
@@ -2283,26 +2199,19 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "提交执行失败")
 
     def toggle_pause(self):
-        if self._execution_bridge.is_executing():
-            if self.is_paused:
-                if not self._execution_bridge.resume_execution():
-                    return
-                self.control_panel.pause_btn.setText("⏸ 暂停")
-                if hasattr(self, 'pause_composed_task_btn'):
-                    self.pause_composed_task_btn.setText("⏸ 暂停")
-                self.log_widget.append_log("执行继续")
-            else:
-                if not self._execution_bridge.pause_execution():
-                    return
-                self.control_panel.pause_btn.setText("▶ 继续")
-                if hasattr(self, 'pause_composed_task_btn'):
-                    self.pause_composed_task_btn.setText("▶ 继续")
-                self.log_widget.append_log("执行暂停")
-            self.is_paused = not self.is_paused
+        before = self._execution_view_model.snapshot()
+        after = self._execution_view_model.toggle_pause()
+        if after.state is before.state:
+            return
+        self._render_execution_state()
+        self.log_widget.append_log(
+            "执行继续" if after.can_pause else "执行暂停"
+        )
 
     def stop_execution(self):
-        if self._execution_bridge.is_executing():
-            self._execution_bridge.stop_execution()
+        state = self._execution_view_model.snapshot()
+        if state.can_cancel:
+            self._execution_view_model.cancel()
             self.log_widget.append_log(
                 "已发送任务停止请求（非硬件急停，将在当前动作可中断点停止）"
             )
@@ -2317,14 +2226,26 @@ class MainWindow(QMainWindow):
         self.log_widget.append_log(
             "序列执行成功" if success else "序列执行失败或已停止"
         )
-        self.is_paused = False
-        self.control_panel.pause_btn.setText("⏸ 暂停")
-        if hasattr(self, 'pause_composed_task_btn'):
-            self.pause_composed_task_btn.setText("⏸ 暂停")
+        self._render_execution_state()
         self._execution_display_list = self.sequence_list
         self._set_trajectory_buttons_enabled(True)
         self._resume_pose_refresh()
         self.refresh_arm_poses()
+
+    def _render_execution_state(self) -> None:
+        state = self._execution_view_model.snapshot()
+        self.control_panel.pause_btn.setText(state.pause_button_text)
+        self.control_panel.pause_btn.setEnabled(
+            state.can_pause or state.can_resume
+        )
+        self.control_panel.stop_btn.setEnabled(state.can_cancel)
+        if hasattr(self, "pause_composed_task_btn"):
+            self.pause_composed_task_btn.setText(state.pause_button_text)
+            self.pause_composed_task_btn.setEnabled(
+                state.can_pause or state.can_resume
+            )
+        if hasattr(self, "stop_composed_task_btn"):
+            self.stop_composed_task_btn.setEnabled(state.can_cancel)
 
     def on_step_started(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.sequence_list)
@@ -2475,10 +2396,8 @@ class MainWindow(QMainWindow):
         }
         dialog = ActionConfigDialog(
             action_def.type,
-            self.settings.vision,
             action_data,
             self,
-            localization_reader=self._services.localization.latest,
         )
         if not dialog.exec():
             return

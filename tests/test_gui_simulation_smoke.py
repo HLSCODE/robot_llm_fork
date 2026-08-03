@@ -4,6 +4,7 @@ from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from src.application import create_application_services
@@ -80,9 +81,10 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertTrue(self.window.isVisible())
         self.assertTrue(self.services.simulation)
         self.assertEqual(GuiStartupState.READY, self.window.startup_state)
-        self.assertTrue(self.window.robot1_connected)
-        self.assertTrue(self.window.robot2_connected)
-        self.assertTrue(self.window.body_connected)
+        device_state = self.window._device_view_model.snapshot()
+        self.assertTrue(device_state.robot_ready)
+        self.assertTrue(device_state.body_ready)
+        self.assertTrue(device_state.pipette_ready)
         self.assertIsNotNone(
             self.services.device_runtime.get_if_ready(ROBOT_SYSTEM)
         )
@@ -123,8 +125,11 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.window.control_panel.start_btn.click()
         self.assertTrue(
             _wait_until(
-                lambda: self.services.execution.snapshot().state
-                is ExecutionState.RUNNING
+                lambda: (
+                    self.services.execution.snapshot().state
+                    is ExecutionState.RUNNING
+                    and self.window.control_panel.pause_btn.isEnabled()
+                )
             )
         )
 
@@ -160,6 +165,35 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         )
         self.assertEqual("⏸ 暂停", self.window.control_panel.pause_btn.text())
         self.assertEqual({}, self.services.resources.snapshot())
+
+    def test_task_composer_widget_renders_service_owned_draft(self) -> None:
+        first = ActionDefinition(
+            id="composer-first",
+            name="Composer first",
+            type=ActionType.WAIT,
+            parameters={"wait_seconds": 1.0},
+        )
+        second = ActionDefinition(
+            id="composer-second",
+            name="Composer second",
+            type=ActionType.WAIT,
+            parameters={"wait_seconds": 1.0},
+        )
+        self.window._add_action_to_composer(first, 0)
+        self.window._add_action_to_composer(second, 1)
+
+        self.window.task_composer_list.order_changed.emit(0, 1)
+
+        entries = self.services.task_composer.entries()
+        self.assertEqual(
+            ["composer-second", "composer-first"],
+            [entry.action.id for entry in entries],
+        )
+        self.assertTrue(
+            self.window.task_composer_list.item(0).data(
+                Qt.ItemDataRole.UserRole
+            )
+        )
 
 
 class GuiSpeechStartupSmokeTests(unittest.TestCase):

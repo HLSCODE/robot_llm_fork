@@ -161,6 +161,7 @@ files = [
     "src/core/config_validation.py",
     "src/core/storage.py",
     "src/application/builtin_data.py",
+    "src/application/task_composer.py",
     "src/robot_server/protocol.py",
     "src/robot_server/routing.py",
     "src/robot_server/request_limits.py",
@@ -172,6 +173,7 @@ files = [
     "src/execution/action_handlers.py",
     "src/execution/models.py",
     "src/gui/startup.py",
+    "src/gui/view_models.py",
 ]
 check_untyped_defs = true
 disallow_untyped_defs = true

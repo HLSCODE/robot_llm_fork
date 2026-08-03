@@ -40,6 +40,7 @@ from .composition import CompositionService
 from .safety import SafetyService
 from .localization import LocalizationService
 from .teleoperation import TeleoperationService
+from .task_composer import TaskComposerService
 
 if TYPE_CHECKING:
     from .data_collection import DataCollectionService
@@ -455,6 +456,7 @@ class ApplicationServices:
     camera_access: CameraAccessService
     localization: LocalizationService
     composition: CompositionService
+    task_composer: TaskComposerService
     data_collection: DataCollectionService
     execution: ExecutionService
     devices: DeviceManagementService

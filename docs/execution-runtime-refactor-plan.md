@@ -240,7 +240,7 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 | ER-015 | P1 | DONE | GUI simulation smoke tests | 真实 MainWindow offscreen 覆盖启动、暂停、恢复、取消、终态日志和资源清理 |
 | ER-016 | P1 | TODO | 真实设备验收 | 所有设备逐项记录结果 |
 | ER-017 | P2 | DONE | 拆分 WebSocket handler | execution/device/composition/interaction/teleoperation 已按领域拆分，Server 只保留传输与路由 |
-| ER-018 | P2 | TODO | 拆分 MainWindow service/view-model | UI 不含设备细节 |
+| ER-018 | P2 | DONE | 拆分 MainWindow service/view-model | TaskComposerService 独占草稿；Device/Execution ViewModel 从运行时快照派生状态，窗口不再持有平行设备/执行布尔值 |
 | ER-019 | P2 | DONE | typed action schema | GUI/WS/Skill 共用唯一 action schema 和参数校验 |
 | ER-020 | P3 | DONE | 删除旧执行器和开关 | 不存在 legacy backend |
 
@@ -398,7 +398,7 @@ RealMan 停止专项验收：
 | WebSocket 远程暴露缺少 Origin/TLS 部署验收 | P1 | 保持默认仅监听本机；远程部署通过可信反向代理提供 wss 并校验 Origin |
 | 视觉流程内部仍包含长同步调用 | P1 | 标记不可即时取消区段，并通过设备停止能力和硬件测试验证最大延迟 |
 | 底层设备错误尚未统一映射到细分错误码 | P1 | 在 adapter 边界建立厂商错误映射并保留原始诊断上下文 |
-| GUI/WebSocket 大类仍承担过多状态 | P2 | 提取 handler、service 和 view-model |
+| MainWindow 仍承担较多 Qt 视图协调与通知展示 | P2 | 继续按 D-011 收敛统一 UI state、错误和通知组件 |
 | simulation 与真实设备差异 | P1 | 同状态机 + contract + 硬件清单 |
 
 ## 9. 架构决策记录
@@ -436,3 +436,4 @@ RealMan 停止专项验收：
 | 2026-07-29 | WebSocket 协议治理 | ER-014 保持 DOING | 强制 API 1.0 版本声明且不保留旧协议兼容；消息大小、频率、并发、排队和发送超时配置化，明确请求单播、系统广播和相机订阅语义 |
 | 2026-07-29 | AI 审批与加粉终态 | ER-010 保持 DONE | GUI/WebSocket 只接受已校验且必须显式确认的 AI 预览；删除自动执行开关；加粉达到最大轮次未达标返回失败并映射 `target_not_reached` |
 | 2026-08-03 | GUI simulation 与专项状态同步 | ER-014/ER-015/ER-017/ER-019 TODO/DOING → DONE | 删除 GUI 启动布尔组合和嵌套事件循环；异步 speech wait 状态机及 offscreen 主流程 smoke 纳入统一门禁；同步已完成的全 action contract、领域 handler 拆分和 typed schema 状态 | 342 tests + 32 subtests，覆盖率 52.35% |
+| 2026-08-03 | GUI service/view-model | ER-018 TODO → DONE | TaskComposerService 独占组合草稿；Device/Execution ViewModel 从运行时状态机派生展示和控制能力；ExecutionBridge 仅保留 Qt 事件/提交/安全停止适配；GUI 表单全部切换唯一 action schema | 348 tests + 32 subtests，覆盖率 55.09% |

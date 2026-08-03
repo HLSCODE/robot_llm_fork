@@ -33,6 +33,7 @@ from .services import (
     TrajectoryTeachingService,
 )
 from .teleoperation import TeleoperationService
+from .task_composer import TaskComposerService
 
 
 def create_application_services(
@@ -48,6 +49,7 @@ def create_application_services(
             tasks_directory=data_paths.tasks_directory,
         )
     )
+    task_composer = TaskComposerService(composition)
     device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
     localization = LocalizationService()
@@ -110,6 +112,7 @@ def create_application_services(
         camera_access=camera_access,
         localization=localization,
         composition=composition,
+        task_composer=task_composer,
         data_collection=data_collection,
         execution=execution,
         devices=devices,

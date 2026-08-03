@@ -14,8 +14,6 @@ from ..device_runtime import StopMode
 from ..execution import (
     ExecutionEvent,
     ExecutionEventType,
-    ExecutionState,
-    ExecutionStateError,
 )
 
 
@@ -70,32 +68,6 @@ class ExecutionBridge(QObject):
 
         return True
 
-    def pause_execution(self) -> bool:
-        try:
-            self._execution.pause()
-            return True
-        except ExecutionStateError as exc:
-            self.log_message.emit(f"暂停失败: {exc}")
-            return False
-
-    def resume_execution(self) -> bool:
-        try:
-            self._execution.resume()
-            return True
-        except ExecutionStateError as exc:
-            self.log_message.emit(f"恢复失败: {exc}")
-            return False
-
-    def stop_execution(self) -> None:
-        try:
-            self._execution.cancel()
-        except ExecutionStateError:
-            return
-        self.execution_status_changed.emit("停止中...")
-        self.log_message.emit(
-            "已发送任务停止请求（非硬件急停，将在当前动作可中断点停止）"
-        )
-
     def request_safety_stop(self, mode: StopMode) -> bool:
         if mode not in {StopMode.QUICK, StopMode.EMERGENCY}:
             raise ValueError("Qt safety request must be quick or emergency")
@@ -134,22 +106,6 @@ class ExecutionBridge(QObject):
         finally:
             with self._safety_request_lock:
                 self._safety_request_active = False
-
-    def get_execution_status(self) -> str:
-        state = self._execution.snapshot().state
-        return {
-            ExecutionState.IDLE: "空闲",
-            ExecutionState.STARTING: "启动中",
-            ExecutionState.RUNNING: "执行中",
-            ExecutionState.PAUSED: "已暂停",
-            ExecutionState.CANCELLING: "停止中",
-            ExecutionState.SUCCEEDED: "执行完成",
-            ExecutionState.FAILED: "执行失败",
-            ExecutionState.CANCELLED: "已停止",
-        }[state]
-
-    def is_executing(self) -> bool:
-        return self._execution.snapshot().active
 
     def _on_event(self, event: ExecutionEvent) -> None:
         event_type = event.event_type
