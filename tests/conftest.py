@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from src.core.data_paths import ApplicationDataPaths
 

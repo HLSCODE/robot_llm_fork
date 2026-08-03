@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-31
 >
-> 当前里程碑：M4 — 工程质量、可观测性与性能回归已收敛
-> 计划进度：90/115（89 DONE + 1 DROPPED，78.3%）
+> 当前里程碑：M4 — GUI 启动生命周期与 simulation 主流程已收敛
+> 计划进度：93/115（92 DONE + 1 DROPPED，80.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -256,7 +256,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | A-006 | P1 | DOING | 实现唯一 ExecutionManager；待硬件验收和更多竞态测试 |
 | A-007 | P1 | DONE | 唯一注册表、全部具体动作 handler 和结构化 ActionHandlerResult 已落地 |
 | A-008 | P1 | DONE | WebSocket 已迁移；路由、全部 action 最小合法请求、payload 边界、错误码和响应 DTO contract test 已进入 pytest |
-| A-009 | P1 | DOING | GUI 手工和 AI 已迁移，待 GUI smoke test |
+| A-009 | P1 | DONE | GUI 手工与 AI 共用唯一 ApplicationServices/ExecutionRuntime；offscreen smoke 覆盖真实窗口装配及执行控制 |
 | A-010 | P1 | DONE | GUI 文本、真实语音和 WebSocket 命令统一进入 CommandRuntime；入口不再持有私有预览缓存 |
 | A-011 | P1 | DONE | simulation 与真实模式共用状态机和执行入口 |
 | A-012 | P3 | DONE | 删除 legacy executor，未引入 backend 开关 |
@@ -429,9 +429,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | D-007 | P2 | TODO | 提取 ExecutionViewModel |
 | D-008 | P2 | TODO | action schema 驱动通用表单 |
 | D-009 | P2 | DONE | 生命周期、手动控制、轨迹示教和位姿读取已进入 Application Service |
-| D-010 | P2 | TODO | 重构启动初始化状态机 |
+| D-010 | P2 | DONE | 删除启动布尔组合和嵌套事件循环；显式 startup lifecycle 管理 speech wait、硬件初始化、ready/failed/closed，等待使用异步 signal + 单次超时 |
 | D-011 | P3 | TODO | 统一 UI 状态、错误和通知组件 |
-| D-012 | P3 | TODO | 增加 GUI 自动化 smoke tests |
+| D-012 | P3 | DONE | Windows/Linux offscreen GUI smoke 构造真实 MainWindow + simulation services，覆盖启动、暂停、恢复、取消、日志终态和资源清理 |
 
 ### 9.4 完成标准
 
@@ -673,7 +673,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | G-009 | P2 | DONE | 配置拆分为不可变领域 settings；业务层移除全局单例和隐式回退，敏感配置单独建模 |
 | G-010 | P2 | DONE | 依赖按 server/gui/ai/data/vision/voice/kws/hardware 分组，提供 full 聚合组并刷新冻结 lock |
 | G-011 | P2 | DONE | 提供 `robot-llm`/`python -m src` 入口；wheel 构建、隔离安装和入口 smoke test 纳入质量门禁 |
-| G-012 | P2 | DONE | pytest-cov 纳入统一质量入口；除自动生成 RealMan ctypes 绑定外全量统计 `src`，以 44.42% 基线建立 44% 强制阈值和 XML 报告 |
+| G-012 | P2 | DONE | pytest-cov 纳入统一质量入口；除自动生成 RealMan ctypes 绑定外全量统计 `src`，初始 44% 门禁在 GUI smoke 纳入后提升到 50%，生成 XML 报告 |
 | G-013 | P2 | DONE | Windows/Linux Python 3.12 执行统一质量入口；GUI/Server/Hardware extra 在两平台隔离安装并执行无外设冒烟验证 |
 | G-014 | P2 | DONE | 集中日志组件输出控制台文本和 JSON Lines 文件；每日轮转、保留周期可配置；执行线程自动绑定 run_id，WebSocket 请求绑定 request_id/action |
 | G-015 | P3 | DONE | 版本化预算覆盖请求解析、动作校验、资源租约、schema 快照和离线 LLM 规划；预热后多样本取中位数，JSON 报告和超预算失败进入统一质量门禁 |
@@ -911,7 +911,7 @@ M4 工程治理与清理
 - [x] pytest、Windows 最小 CI、核心 Ruff 和 Mypy 门禁生效。
 - [x] 覆盖率阈值和 Windows/Linux 测试矩阵生效。
 - [ ] Ruff/Mypy 静态检查在历史问题清零后扩展到全仓。
-- [ ] 无硬件 simulation 可回归主要流程。
+- [x] 无硬件 simulation 可回归 GUI、统一执行、取消和资源清理主流程。
 - [ ] 关键真实硬件验收有记录。
 - [x] 配置、依赖、打包和平台支持策略清晰。
 - [x] 动作、任务和技能具有版本、原子写和一次性前向迁移。
@@ -983,6 +983,7 @@ M4 工程治理与清理
 | 2026-08-03 | M4 | G | 覆盖率与跨平台依赖矩阵 | G-012/G-013 TODO → DONE | pytest-cov 进入统一质量入口，以除生成式 RealMan ctypes 绑定外的全量 `src` 建立 44% 门禁；Windows/Linux 运行统一质量矩阵，GUI/Server/Hardware extra 在两个平台分别隔离安装并执行无外设冒烟验证 | 324 tests + 32 subtests，覆盖率 44.42%，14 golden cases；本地完整门禁通过，Linux 由 CI 执行 |
 | 2026-08-03 | M4 | G | 运行日志治理 | G-014 TODO → DONE | 删除启动器内嵌日志初始化；新增独立 LoggingSettings 和集中日志组件，控制台保持可读文本，文件统一 JSON Lines、每日轮转和按天保留；ContextVar 传播 operation/request_id，ExecutionManager worker 显式绑定 run_id | 331 tests + 32 subtests，覆盖率 44.65%，14 golden cases；完整质量门禁和 wheel smoke |
 | 2026-08-03 | M4 | G | 性能预算与回归监控 | G-015 TODO → DONE | 新增 strict schema v1 性能预算和无硬件 runner；批量执行请求解析、动作校验、资源租约、schema 深拷贝与 LLM golden suite，预热后取 5 次样本中位数；机器可读原子报告和超预算失败进入 Windows/Linux 统一质量入口 | 336 tests + 32 subtests，覆盖率 44.65%，14 golden cases；5/5 性能预算通过，完整质量门禁和 wheel smoke |
+| 2026-08-03 | M4 | A/D | GUI 启动状态机与 simulation smoke | A-009 DOING → DONE；D-010/D-012 TODO → DONE | 删除两个启动布尔和构造期嵌套 QEventLoop；新增显式 lifecycle，语音等待改为非阻塞 signal + timer；真实 MainWindow 在 offscreen simulation 中验证共享服务、fake 设备启动、开始/暂停/恢复/取消、终态日志、资源释放和关闭 | 342 tests + 32 subtests，覆盖率 52.35% 并将门禁提升至 50%；完整质量门禁、5/5 性能预算和 wheel smoke |
 
 ## 22. 建议的首批实施顺序
 

@@ -118,7 +118,7 @@ source = ["src"]
 omit = ["src/arm_sdk/rm_ctypes_wrap.py"]
 
 [tool.coverage.report]
-fail_under = 44
+fail_under = 50
 skip_covered = true
 
 [tool.ruff]
@@ -171,6 +171,7 @@ files = [
     "src/device_runtime/models.py",
     "src/execution/action_handlers.py",
     "src/execution/models.py",
+    "src/gui/startup.py",
 ]
 check_untyped_defs = true
 disallow_untyped_defs = true

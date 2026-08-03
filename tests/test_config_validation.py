@@ -109,6 +109,25 @@ class ConfigurationValidationTests(unittest.TestCase):
             {issue.code for issue in report.errors},
         )
 
+    def test_non_positive_voice_startup_wait_is_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S=0,
+                ),
+                _options(),
+            )
+
+        self.assertEqual(
+            {"invalid_number"},
+            {issue.code for issue in report.errors},
+        )
+        self.assertEqual(
+            "VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S",
+            report.errors[0].field,
+        )
+
     def test_non_loopback_binding_without_tls_is_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(

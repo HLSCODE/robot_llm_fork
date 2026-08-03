@@ -120,6 +120,11 @@ def validate_startup_configuration(
         issues,
         "SAFETY_STOP_WAIT_TIMEOUT_SECONDS",
     )
+    _positive_value(
+        settings.voice.voice_speech_startup_wait_timeout_s,
+        issues,
+        "VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S",
+    )
     _non_negative_value(
         settings.execution.execution_arm_move_retry_delay_seconds,
         issues,

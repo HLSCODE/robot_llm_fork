@@ -58,7 +58,7 @@ uv sync --frozen --all-extras --group dev
 |---|---|---|---|
 | Unit | 无硬件、无网络 | 纯模型、状态机、校验器、算法和服务行为 | 必须 |
 | Contract | fake/stub 边界 | WebSocket、设备能力、Provider 和持久化格式契约 | 必须 |
-| Simulation integration | simulation runtime | 跨服务主要流程、取消、资源冲突和清理 | 逐步纳入 |
+| Simulation integration | simulation runtime | 跨服务主要流程、取消、资源冲突和清理 | GUI/执行核心流程必须，其他领域逐步纳入 |
 | Hardware acceptance | 受控真实设备 | 时延、限位、急停、恢复、精度和协议兼容 | 独立执行 |
 
 测试名称必须描述可观察行为。协议公开 action、稳定错误码或 schema 发生变化时，应在同一
@@ -105,11 +105,13 @@ Mypy 先覆盖已完成收敛、类型边界较稳定的核心文件：
 - `src/` 中所有第一方源码默认纳入统计。
 - 排除自动生成的 RealMan ctypes 绑定 `src/arm_sdk/rm_ctypes_wrap.py`；该文件应通过供应商 SDK
   兼容性和真实硬件验收验证，不把生成代码行数计入业务单测目标。
-- 初始总覆盖率阈值为 44%；建立门禁时的实测基线为 44.42%。任何变更低于阈值都会失败。
+- 初始总覆盖率阈值为 44%；GUI simulation smoke 纳入后实测为 52.35%，门禁已提升到 50%。
+  任何变更低于当前阈值都会失败。
 - 阈值只能随测试补齐逐步提高；如需降低，必须在主重构计划记录原因、影响和恢复任务。
 
 覆盖率 XML 输出为 `coverage.xml`，仅作为本地或 CI 产物，不纳入版本控制。覆盖率通过只说明
-自动化路径满足当前基线，不代表 simulation integration 或 hardware acceptance 已完成。
+自动化路径满足当前基线，且 GUI/ExecutionRuntime 核心 simulation integration 已纳入；这仍不
+代表视觉、语音、外部服务 simulation 或 hardware acceptance 已完成。
 
 真实硬件、外部网络、生产密钥和用户数据不进入普通 CI。需要这些资源的验收必须记录设备、
 固件、配置、标定版本、测试条件和结果，并单独归档。

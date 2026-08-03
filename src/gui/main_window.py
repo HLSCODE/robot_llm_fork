@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from PyQt6.QtCore import QEventLoop, QMimeData, QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtCore import QMimeData, QSize, Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QColor, QDrag, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
@@ -54,6 +54,7 @@ from ..widgets import ActionListWidget, ControlPanel, LogWidget, SequenceListWid
 from ..widgets.ai_assistant import AIAssistantWidget
 from .composition_bridge import CompositionBridge
 from .dialogs import ActionConfigDialog
+from .startup import GuiStartupLifecycle, GuiStartupState
 
 
 class TaskLibraryListWidget(QListWidget):
@@ -225,8 +226,7 @@ class MainWindow(QMainWindow):
         self.body_connected = False
         self.robot_pose_cache = {"robot1": None, "robot2": None}
         self.pose_timer = None
-        self._startup_initialization_started = False
-        self._startup_hardware_initialized = False
+        self._startup_lifecycle = GuiStartupLifecycle()
         self._speech_startup_wait_timer = None
 
         self.init_ui()
@@ -270,72 +270,64 @@ class MainWindow(QMainWindow):
         """Return the runtime-owned robot system for read/teach diagnostics."""
         return self._services.device_runtime.get_if_ready(ROBOT_SYSTEM)
 
+    @property
+    def startup_state(self) -> GuiStartupState:
+        return self._startup_lifecycle.state
+
     def start_startup_initialization(self):
         """启动 GUI 显示前的必要初始化流程。"""
-        if self._startup_initialization_started:
+        if not self._startup_lifecycle.begin():
             return
-        self._startup_initialization_started = True
 
-        speech_start_requested = False
-        if hasattr(self, 'ai_assistant_widget'):
-            speech_start_requested = (
-                self.ai_assistant_widget.start_voice_speech_runtime_if_configured()
-            )
+        try:
+            speech_start_requested = False
+            if hasattr(self, 'ai_assistant_widget'):
+                speech_start_requested = (
+                    self.ai_assistant_widget.start_voice_speech_runtime_if_configured()
+                )
+        except Exception:
+            self._startup_lifecycle.mark_failed()
+            raise
 
         if not speech_start_requested:
             self.initialize_startup_hardware()
-        else:
-            startup_loop = QEventLoop(self)
+            return
+        if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
+            return
 
-            def quit_startup_loop(_speech_ready: bool = False):
-                startup_loop.quit()
-
-            timeout_s = max(
-                0.0,
-                self.settings.voice.voice_speech_startup_wait_timeout_s,
-            )
-            if timeout_s > 0:
-                self._speech_startup_wait_timer = QTimer(self)
-                self._speech_startup_wait_timer.setSingleShot(True)
-                self._speech_startup_wait_timer.timeout.connect(
-                    self._on_speech_startup_wait_timeout
-                )
-                self._speech_startup_wait_timer.timeout.connect(startup_loop.quit)
-                self._speech_startup_wait_timer.start(int(timeout_s * 1000))
-            self.ai_assistant_widget.speech_runtime_startup_finished.connect(
-                quit_startup_loop
-            )
-            startup_loop.exec()
-            try:
-                self.ai_assistant_widget.speech_runtime_startup_finished.disconnect(
-                    quit_startup_loop
-                )
-            except TypeError:
-                pass
+        timeout_s = self.settings.voice.voice_speech_startup_wait_timeout_s
+        if timeout_s <= 0:
+            self._startup_lifecycle.mark_failed()
+            raise ValueError("voice speech startup wait timeout must be positive")
+        self._speech_startup_wait_timer = QTimer(self)
+        self._speech_startup_wait_timer.setSingleShot(True)
+        self._speech_startup_wait_timer.timeout.connect(
+            self._on_speech_startup_wait_timeout
+        )
+        self._speech_startup_wait_timer.start(int(timeout_s * 1000))
 
     def initialize_startup_hardware(self, speech_ready: bool = False):
         """初始化启动阶段硬件；若启用 ASR/KWS，则在语音 runtime 之后执行。"""
-        if self._startup_hardware_initialized:
+        if not self._startup_lifecycle.begin_hardware_initialization():
             return
-        self._startup_hardware_initialized = True
         if self._speech_startup_wait_timer is not None:
             self._speech_startup_wait_timer.stop()
             self._speech_startup_wait_timer = None
 
-        # 自动初始化机械臂和移液枪
-        self.initialize_robots()
-
-        # 初始化底盘移动控制器
-        if self.settings.devices.body_di_pan:
-            self.initialize_move_controller()
-
-        # 注释掉下面 2 行，防止启动时升降平台高度变化
-        self.initialize_body()
-        self.initialize_pipette_on_startup()
+        try:
+            self.initialize_robots()
+            if self.settings.devices.body_di_pan:
+                self.initialize_move_controller()
+            self.initialize_body()
+            self.initialize_pipette_on_startup()
+        except Exception:
+            self._startup_lifecycle.mark_failed()
+            raise
+        self._startup_lifecycle.mark_ready()
 
     def _on_speech_startup_wait_timeout(self):
         """Continue hardware startup if ASR/KWS first-load is still downloading."""
-        if self._startup_hardware_initialized:
+        if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
             return
         if hasattr(self, "ai_assistant_widget"):
             self.ai_assistant_widget.notify_speech_startup_wait_timeout()
@@ -2690,4 +2682,5 @@ class MainWindow(QMainWindow):
         if hasattr(self, "ai_assistant_widget"):
             self.ai_assistant_widget.shutdown()
         self._composition_bridge.close()
+        self._startup_lifecycle.close()
         event.accept()

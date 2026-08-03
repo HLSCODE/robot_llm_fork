@@ -2,8 +2,8 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-07-29
-> 当前阶段：核心运行时、入口、handler、结果协议和资源所有权已收敛，进入供应商验证与硬件验收
+> 最近更新：2026-08-03
+> 当前阶段：核心运行时、入口、handler、结果协议、资源所有权和 GUI simulation 已收敛，进入供应商验证与硬件验收
 > 上级计划：[Robot LLM 项目重构总计划](project-refactor-master-plan.md)
 
 ## 1. 范围与决策
@@ -236,12 +236,12 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 | ER-011 | P1 | DOING | 阻塞动作可取消和超时 | 全动作控制策略、执行前能力校验和事件输出已落地；待 RealMan 最大停止延迟验收 |
 | ER-012 | P1 | DONE | camera session/resource | 预览、测试、语音、视觉动作和数据采集通过显式租约互斥，非相机序列不被阻塞 |
 | ER-013 | P1 | DONE | 机械臂能力接口补强 | GUI、执行、视觉、示教和数据采集不依赖 RM 原生字段 |
-| ER-014 | P1 | DOING | WebSocket contract tests | 请求/执行关联、同步快速终态、权限和错误信封已覆盖；待全 action schema 固化 |
-| ER-015 | P1 | TODO | GUI simulation smoke tests | 按钮和步骤状态正确 |
+| ER-014 | P1 | DONE | WebSocket contract tests | 全 action 最小合法请求、payload 边界、请求/执行关联、同步终态、权限、错误信封和 typed DTO 已覆盖 |
+| ER-015 | P1 | DONE | GUI simulation smoke tests | 真实 MainWindow offscreen 覆盖启动、暂停、恢复、取消、终态日志和资源清理 |
 | ER-016 | P1 | TODO | 真实设备验收 | 所有设备逐项记录结果 |
-| ER-017 | P2 | TODO | 拆分 WebSocket handler | 协议和应用用例分离 |
+| ER-017 | P2 | DONE | 拆分 WebSocket handler | execution/device/composition/interaction/teleoperation 已按领域拆分，Server 只保留传输与路由 |
 | ER-018 | P2 | TODO | 拆分 MainWindow service/view-model | UI 不含设备细节 |
-| ER-019 | P2 | TODO | typed action schema | GUI/WS/Skill 共用校验 |
+| ER-019 | P2 | DONE | typed action schema | GUI/WS/Skill 共用唯一 action schema 和参数校验 |
 | ER-020 | P3 | DONE | 删除旧执行器和开关 | 不存在 legacy backend |
 
 ## 5. 下一阶段实施顺序
@@ -305,20 +305,18 @@ MANIPULATE 执行器的 handler 路由集合与策略集合完全一致，新增
 1. WebSocket 已增加认证、控制所有者、`request_id` 和稳定错误码。
 2. `execution_finished` 已明确返回 `run_id/state/success/error/failure`，
    并通过同一 request/run 完成两阶段审计。
-3. API 1.0 强制版本校验、消息/频率/并发/发送限制，以及
+3. API 2.0 强制版本校验、消息/频率/并发/发送限制，以及
    单播/广播/相机订阅语义已落地。
-4. 拆分 execution/device/camera/teleop/data-collection handler。
+4. 已拆分 execution/device/composition/interaction/teleoperation handler。
 5. GUI 提取 execution/device view-model。
-6. 继续补全 action contract test 和 GUI simulation smoke test。
+6. 全 action contract 和 GUI simulation smoke 已进入统一质量门禁。
 
 ## 6. 自动化验证
 
 当前命令：
 
-```bash
-python -m compileall -q src tests
-python -m unittest discover -s tests -v
-git diff --check
+```powershell
+uv run --frozen --group dev python scripts/run_quality_checks.py
 ```
 
 现有测试覆盖：
@@ -437,3 +435,4 @@ RealMan 停止专项验收：
 | 2026-07-29 | WebSocket 安全与执行关联 | ER-007 TODO → DONE；ER-014 TODO → DOING | 写操作认证和单控制租约落地；直接响应、执行事件及业务终态贯通 request_id/action/run_id，错误信封稳定且内部异常不泄露，补充同步快速终态竞态测试 |
 | 2026-07-29 | WebSocket 协议治理 | ER-014 保持 DOING | 强制 API 1.0 版本声明且不保留旧协议兼容；消息大小、频率、并发、排队和发送超时配置化，明确请求单播、系统广播和相机订阅语义 |
 | 2026-07-29 | AI 审批与加粉终态 | ER-010 保持 DONE | GUI/WebSocket 只接受已校验且必须显式确认的 AI 预览；删除自动执行开关；加粉达到最大轮次未达标返回失败并映射 `target_not_reached` |
+| 2026-08-03 | GUI simulation 与专项状态同步 | ER-014/ER-015/ER-017/ER-019 TODO/DOING → DONE | 删除 GUI 启动布尔组合和嵌套事件循环；异步 speech wait 状态机及 offscreen 主流程 smoke 纳入统一门禁；同步已完成的全 action contract、领域 handler 拆分和 typed schema 状态 | 342 tests + 32 subtests，覆盖率 52.35% |
