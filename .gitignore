@@ -11,6 +11,7 @@ data/
 data/*
 !data/regression/
 !data/regression/llm_planning_cases.json
+!data/regression/performance_budgets.json
 temp_models/
 models/
 
@@ -26,6 +27,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 coverage.xml
+performance-report.json
 htmlcov/
 config.env
 env/

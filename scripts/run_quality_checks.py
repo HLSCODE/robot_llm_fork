@@ -44,6 +44,14 @@ QUALITY_CHECKS = (
         arguments=("-m", "src.llm.regression"),
     ),
     QualityCheck(
+        name="Performance regression",
+        arguments=(
+            "scripts/run_performance_benchmarks.py",
+            "--output",
+            "performance-report.json",
+        ),
+    ),
+    QualityCheck(
         name="Wheel package smoke",
         arguments=("scripts/validate_package.py",),
     ),

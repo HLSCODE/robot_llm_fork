@@ -125,6 +125,7 @@ skip_covered = true
 target-version = "py312"
 line-length = 100
 include = [
+    "scripts/run_performance_benchmarks.py",
     "scripts/run_quality_checks.py",
     "scripts/validate_optional_extra.py",
     "scripts/validate_package.py",
@@ -152,6 +153,7 @@ select = [
 [tool.mypy]
 python_version = "3.12"
 files = [
+    "scripts/run_performance_benchmarks.py",
     "src/core/settings.py",
     "src/core/json_documents.py",
     "src/core/logging_config.py",

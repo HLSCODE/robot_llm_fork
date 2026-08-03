@@ -15,7 +15,8 @@ CI 配置长期漂移。普通质量门禁不连接机械臂、相机、串口�
 3. Mypy：严格检查协议、路由、请求流控、运行时模型和 LLM 基础数据模型。
 4. Pytest + coverage：运行 unit、contract 和 simulation 级测试，并强制全源码覆盖率阈值。
 5. LLM golden regression：离线验证规划输出的 strict schema 和稳定错误分类。
-6. Wheel smoke：构建 wheel、检查关键模块、隔离安装并调用 `robot-llm --check-config`。
+6. Performance regression：对五条无 I/O 关键路径执行多样本中位数预算检查。
+7. Wheel smoke：构建 wheel、检查关键模块、隔离安装并调用 `robot-llm --check-config`。
 
 普通质量门禁同时在 Windows/Linux 执行；真实硬件验收仍是独立工作，不能用普通 CI 结果替代。
 
@@ -40,6 +41,7 @@ uv run --frozen pytest --cov --cov-report=term
 uv run --frozen ruff check .
 uv run --frozen mypy
 uv run --frozen python -m src.llm.regression
+uv run --frozen python scripts/run_performance_benchmarks.py --output performance-report.json
 uv run --frozen python scripts/validate_package.py
 ```
 
