@@ -74,6 +74,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             self.services.execution.wait(timeout=1)
         self.window.close()
         QApplication.processEvents()
+        self.window.shutdown_after_event_loop()
         self.services.localization.close()
         self.assertEqual({}, self.services.devices.shutdown_all())
 
@@ -195,6 +196,61 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             )
         )
 
+    def test_ai_widget_uses_narrow_signals_without_main_window_reference(self) -> None:
+        item = SequenceItem.from_definition(
+            ActionDefinition(
+                id="ai-signal-item",
+                name="AI signal item",
+                type=ActionType.WAIT,
+                parameters={"wait_seconds": 1.0},
+            )
+        )
+
+        self.assertFalse(hasattr(self.window.ai_assistant_widget, "_main_window"))
+        self.window.ai_assistant_widget.sequence_visualization_requested.emit(
+            [item],
+            True,
+            0,
+        )
+
+        entries = self.services.composition.sequence_entries()
+        self.assertEqual("ai-signal-item", entries[0].definition.id)
+
+    def test_close_requests_execution_cancel_without_blocking_visible_gui(self) -> None:
+        item = SequenceItem.from_definition(
+            ActionDefinition(
+                id="close-cancel-wait",
+                name="Close cancel wait",
+                type=ActionType.WAIT,
+                parameters={"wait_seconds": 5.0},
+            )
+        )
+        self.services.composition.replace_sequence([item], origin="close-test")
+        self.window.start_execution()
+        self.assertTrue(
+            _wait_until(
+                lambda: self.services.execution.snapshot().state
+                is ExecutionState.RUNNING
+            )
+        )
+
+        started_at = monotonic()
+        self.window.close()
+        QApplication.processEvents()
+
+        self.assertLess(monotonic() - started_at, 0.5)
+        self.assertIn(
+            self.services.execution.snapshot().state,
+            {ExecutionState.CANCELLING, ExecutionState.CANCELLED},
+        )
+        self.assertIn(
+            "应用正在关闭，后台资源将按顺序释放...",
+            [
+                notification.message
+                for notification in self.window._notifications.snapshot().history
+            ],
+        )
+
 
 class GuiSpeechStartupSmokeTests(unittest.TestCase):
     @classmethod
@@ -230,6 +286,7 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
             if window is not None:
                 window.close()
                 QApplication.processEvents()
+                window.shutdown_after_event_loop()
             services.localization.close()
             self.assertEqual({}, services.devices.shutdown_all())
 

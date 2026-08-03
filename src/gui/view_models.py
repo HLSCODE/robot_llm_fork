@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from ..application import DeviceManagementService, ExecutionService
 from ..device_runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
-from ..execution import ExecutionState
+from ..execution import ExecutionState, ExecutionStateError
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +70,10 @@ class ExecutionViewModel:
     def cancel(self) -> ExecutionViewState:
         state = self.snapshot()
         if state.can_cancel:
-            self._execution.cancel()
+            try:
+                self._execution.cancel()
+            except ExecutionStateError:
+                pass
         return self.snapshot()
 
 

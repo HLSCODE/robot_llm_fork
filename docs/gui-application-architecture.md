@@ -22,6 +22,7 @@ CompositionService   DeviceManagement   ExecutionService
 
 ExecutionBridge: ExecutionManager event -> Qt signal
 CompositionBridge: CompositionService event -> Qt signal
+GuiNotificationCenter: operational message -> history/log/status/modal
 ```
 
 ## 2. 当前职责
@@ -31,6 +32,7 @@ CompositionBridge: CompositionService event -> Qt signal
 - 组合窗口、面板、对话框和 Qt 信号。
 - 将点击、拖放和表单结果转换为应用服务调用。
 - 渲染 service/view-model 返回的状态。
+- 通过 `GuiNotificationCenter` 发布操作状态和用户可见错误。
 - 不保存设备连接或暂停状态的平行布尔值。
 - 不创建设备实例，不创建序列执行 worker，不直接访问 JSON 仓储。
 
@@ -67,7 +69,16 @@ pause/resume/cancel 直接进入 `ExecutionService`，窗口不维护 `is_paused
 Qt signals；安全停止使用短生命周期 I/O 调度线程，避免阻塞主线程。它不再
 提供第二套 pause/resume/cancel 或执行状态查询 API。
 
-### 2.5 SchemaActionForm
+### 2.5 GuiNotificationCenter
+
+- 使用 `GuiNotificationLevel` 和不可变 `GuiNotification` 表达通知。
+- 同一发布动作统一写入有界历史、运行日志和状态栏。
+- 模态展示与确认通过 `NotificationDialogPresenter` 边界实现，测试可注入 fake，
+  MainWindow 不直接调用 `QMessageBox`。
+- 后台执行日志通过 Qt signal 进入通知中心，通知顺序允许反映真实并发事件；
+  调用方读取历史而不是依赖某条消息永久保持为 latest。
+
+### 2.6 SchemaActionForm
 
 `ActionConfigDialog` 从 `src/core/action_schema.py` 获取唯一 schema，并通用支持：
 
@@ -108,9 +119,26 @@ canonical schema；只有文件选择器、设备发现等纯交互增强才可�
 新增 HTTP 等入口时，复用同一 `ApplicationServices`，不得创建第二份 runtime、
 设备连接、执行 manager 或任务仓储。
 
-## 5. 当前遗留项
+## 5. 组件协作与关闭
 
-- D-011：统一 GUI 状态、错误和通知组件，继续降低 MainWindow 的 Qt 协调体积。
-- AI Assistant 仍反向持有 MainWindow，需要后续改为窄接口或信号协作。
-- 窗口关闭的有界等待和错误反馈仍需进一步统一。
+AI Assistant 不获取 MainWindow 对象。它通过以下窄信号协作：
+
+- `welcome_task_execution_requested`；
+- `sequence_visualization_requested`；
+- step、loop 和 execution terminal 展示事件。
+
+关闭分为两个阶段：
+
+1. `closeEvent` 请求执行取消、相机线程中断和交互 worker 停止，关闭窗口时不等待。
+2. Qt 事件循环退出后，launcher 调用 `shutdown_after_event_loop()`；相机和交互线程
+   使用显式超时等待，然后附加服务、定位服务和 DeviceRuntime 按宿主顺序关闭。
+
+线程未在期限内退出会记录明确错误，不会被静默吞掉。
+
+## 6. 当前遗留项
+
+- MainWindow 仍包含较多 Qt 面板构造代码，可按动作库、设备控制和状态展示等
+  稳定视图域继续拆分，但不得把业务状态重新放回 QWidget。
+- ActionConfigDialog 内部的表单校验提示仍属于对话框局部交互；如后续需要统一
+  非模态体验，应通过注入 presenter 实现，不得引入全局 UI 单例。
 - 真实设备的逐项验收、RealMan 停止延迟和恢复条件仍按总计划执行。

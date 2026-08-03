@@ -173,6 +173,7 @@ files = [
     "src/execution/action_handlers.py",
     "src/execution/models.py",
     "src/gui/startup.py",
+    "src/gui/notifications.py",
     "src/gui/view_models.py",
 ]
 check_untyped_defs = true

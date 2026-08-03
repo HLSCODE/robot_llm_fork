@@ -4,6 +4,7 @@ AI助手 Tab 组件
 """
 import asyncio
 import logging
+from time import monotonic
 from typing import Any, Dict
 
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
@@ -34,6 +35,9 @@ from ..voice_interaction import (
 from .voice_audio_player import VoiceAudioPlayer
 
 logger = logging.getLogger(__name__)
+
+
+INTERACTION_SHUTDOWN_TIMEOUT_SECONDS = 3.0
 
 
 class VoiceSessionWorker(QObject):
@@ -142,6 +146,13 @@ class AIAssistantWidget(QWidget):
     提供自然语言交互和动作序列预览功能
     """
     speech_runtime_startup_finished = pyqtSignal(bool)
+    welcome_task_execution_requested = pyqtSignal(str)
+    sequence_visualization_requested = pyqtSignal(object, bool, int)
+    step_started = pyqtSignal(int, object)
+    step_completed = pyqtSignal(int, object)
+    step_failed = pyqtSignal(int, object, str)
+    loop_progress = pyqtSignal(str, int, int)
+    execution_completed = pyqtSignal(bool)
 
     def __init__(self, services: ApplicationServices, parent=None):
         super().__init__(parent)
@@ -192,9 +203,6 @@ class AIAssistantWidget(QWidget):
             self,
             output_gate=self._voice_audio_output_gate,
         )
-
-        # 主窗口引用，用于同步动作序列到右侧
-        self._main_window = None
 
         # 当前预览数据
         self._current_preview: Dict[str, Any] | None = None
@@ -416,15 +424,6 @@ class AIAssistantWidget(QWidget):
         # Welcome
         self._add_bot_message("你好！我是 AI 动作助手。\n\n你可以直接输入消息、问题或机器人指令，不需要先唤醒。\n\n示例：\n• 帮我抓一个瓶子\n• 你现在看到了什么\n• 吸取 500 微升液体")
 
-    def set_main_window(self, main_window):
-        """设置主窗口引用，并桥接执行信号到右侧序列列表（仅应调用一次）。"""
-        self._main_window = main_window
-        self._execution_bridge.step_started.connect(main_window.on_step_started)
-        self._execution_bridge.step_completed.connect(main_window.on_step_completed)
-        self._execution_bridge.step_failed.connect(main_window.on_step_failed)
-        self._execution_bridge.loop_progress.connect(main_window.on_loop_progress)
-        self._execution_bridge.execution_completed.connect(main_window.on_execution_completed)
-
     def _connect_signals(self):
         """连接信号"""
         # AI 运行上下文只负责执行状态；对话/意图事件由 voice_interaction 返回。
@@ -437,6 +436,15 @@ class AIAssistantWidget(QWidget):
         # 执行桥接器信号
         self._execution_bridge.log_message.connect(self._on_execution_log)
         self._execution_bridge.execution_status_changed.connect(self._on_status_changed)
+        self._execution_bridge.step_started.connect(self.step_started.emit)
+        self._execution_bridge.step_completed.connect(self.step_completed.emit)
+        self._execution_bridge.step_failed.connect(self.step_failed.emit)
+        self._execution_bridge.loop_progress.connect(self.loop_progress.emit)
+        self._execution_bridge.execution_completed.connect(
+            self.execution_completed.emit
+        )
+        self._shutdown_prepared = False
+        self._shutdown_complete = False
         self._voice_audio_player.error_occurred.connect(self._on_voice_audio_error)
         self._update_speech_runtime_controls()
 
@@ -792,10 +800,10 @@ class AIAssistantWidget(QWidget):
                 self.status_label.setText("状态: 未识别到有效语音")
         elif event_type == "wake_welcome_requested":
             task_name = str((event.get("data") or {}).get("task_name") or "").strip()
-            if self._main_window is None or not task_name:
+            if not task_name:
                 logger.debug("跳过唤醒欢迎动作: task=%s", task_name or "<empty>")
             else:
-                self._main_window.execute_wake_welcome_task(task_name)
+                self.welcome_task_execution_requested.emit(task_name)
         elif event_type == "ignored":
             self._add_system_message(event.get("text") or "已忽略")
             if self._speech_runtime_active and is_voice_source:
@@ -998,11 +1006,8 @@ class AIAssistantWidget(QWidget):
 
     def _on_sequence_execution_started(self, sequence: list):
         """执行开始（携带序列数据，同步到右侧窗口）"""
-        if self._main_window and sequence:
-            # 与 AIController 中执行启动延迟一致，逐项「飞入」右侧卡片区
-            self._main_window.add_ai_sequence(
-                sequence, replace=True, stagger_interval_ms=50
-            )
+        if sequence:
+            self.sequence_visualization_requested.emit(sequence, True, 50)
 
     @pyqtSlot(bool, str)
     def _on_execution_finished(self, success: bool, message: str):
@@ -1034,8 +1039,11 @@ class AIAssistantWidget(QWidget):
         """获取AI控制器"""
         return self._ai_controller
 
-    def shutdown(self) -> None:
-        """Stop interaction tasks and release LLM network resources."""
+    def prepare_shutdown(self) -> None:
+        """Request interaction workers to stop without blocking the Qt GUI."""
+        if self._shutdown_prepared:
+            return
+        self._shutdown_prepared = True
         if hasattr(self, "_voice_timeout_timer"):
             self._voice_timeout_timer.stop()
         self._voice_controller.cancel_active_turn()
@@ -1045,5 +1053,21 @@ class AIAssistantWidget(QWidget):
         for thread in (self._voice_thread, self._speech_thread):
             if thread is not None and thread.isRunning():
                 thread.quit()
-                thread.wait(3000)
+
+    def shutdown(self) -> None:
+        """Finish interaction cleanup within one shared timeout budget."""
+        if self._shutdown_complete:
+            return
+        self.prepare_shutdown()
+        deadline = monotonic() + INTERACTION_SHUTDOWN_TIMEOUT_SECONDS
+        for thread in (self._voice_thread, self._speech_thread):
+            if thread is None or not thread.isRunning():
+                continue
+            remaining_ms = max(0, int((deadline - monotonic()) * 1000))
+            if remaining_ms == 0 or not thread.wait(remaining_ms):
+                logger.error(
+                    "交互线程未在关闭期限内退出: %s",
+                    thread.objectName() or type(thread).__name__,
+                )
         self._ai_controller.close()
+        self._shutdown_complete = True

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Thread
 from types import SimpleNamespace
 import unittest
 
+from PyQt6.QtCore import QThread
 from PyQt6.QtWidgets import QApplication
 
 from src.application import (
@@ -19,6 +21,10 @@ from src.core.storage import JsonCompositionRepository
 from src.device_runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui.dialogs import SchemaActionForm
+from src.gui.notifications import (
+    GuiNotificationCenter,
+    GuiNotificationLevel,
+)
 from src.gui.view_models import DeviceViewModel, ExecutionViewModel
 
 
@@ -150,6 +156,64 @@ class SchemaActionFormTests(unittest.TestCase):
                 form.deleteLater()
 
 
+class GuiNotificationCenterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.application = QApplication.instance() or QApplication([])
+
+    def test_notifications_have_one_history_log_status_and_modal_path(self) -> None:
+        parent = SchemaActionForm(ActionType.WAIT)
+        logs: list[str] = []
+        statuses: list[str] = []
+        presenter = _FakeNotificationPresenter()
+        notifications = GuiNotificationCenter(
+            parent,
+            log_sink=logs.append,
+            status_sink=statuses.append,
+            presenter=presenter,
+            history_limit=2,
+        )
+
+        notifications.info("ready")
+        warning = notifications.warning("device unavailable")
+        notifications.error("execution failed", modal=False)
+
+        state = notifications.snapshot()
+        self.assertEqual(
+            ["device unavailable", "execution failed"],
+            [item.message for item in state.history],
+        )
+        self.assertEqual(GuiNotificationLevel.ERROR, state.latest.level)
+        self.assertEqual(
+            ["ready", "device unavailable", "execution failed"],
+            logs,
+        )
+        self.assertEqual(logs, statuses)
+        self.assertEqual([warning], presenter.shown)
+        presenter.confirmed = True
+        self.assertTrue(notifications.confirm("continue?"))
+        parent.deleteLater()
+
+    def test_worker_notification_is_presented_on_gui_thread(self) -> None:
+        parent = SchemaActionForm(ActionType.WAIT)
+        sink_threads: list[QThread] = []
+        notifications = GuiNotificationCenter(
+            parent,
+            log_sink=lambda _message: sink_threads.append(QThread.currentThread()),
+            status_sink=lambda _message: None,
+            presenter=_FakeNotificationPresenter(),
+        )
+        gui_thread = QThread.currentThread()
+        worker = Thread(target=lambda: notifications.info("background event"))
+
+        worker.start()
+        worker.join()
+        QApplication.processEvents()
+
+        self.assertEqual([gui_thread], sink_threads)
+        parent.deleteLater()
+
+
 class _FakeExecutionService:
     def __init__(self) -> None:
         self.state = ExecutionState.IDLE
@@ -173,6 +237,18 @@ class _FakeExecutionService:
 
     def cancel(self) -> None:
         self.state = ExecutionState.CANCELLING
+
+
+class _FakeNotificationPresenter:
+    def __init__(self) -> None:
+        self.shown = []
+        self.confirmed = False
+
+    def show(self, _parent, notification) -> None:
+        self.shown.append(notification)
+
+    def confirm(self, _parent, _title: str, _message: str) -> bool:
+        return self.confirmed
 
 
 if __name__ == "__main__":

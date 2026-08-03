@@ -107,6 +107,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
         settings,
         services,
     )
+    window = None
     try:
         app = QApplication([sys.argv[0]])
         app.setStyle("Fusion")
@@ -115,6 +116,11 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
         _start_auxiliary_services(auxiliary_host)
         return app.exec()
     finally:
+        if window is not None:
+            try:
+                window.shutdown_after_event_loop()
+            except Exception:
+                logger.exception("GUI 后台资源关闭失败")
         _shutdown_application(auxiliary_host, services)
 
 

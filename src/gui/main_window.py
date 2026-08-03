@@ -19,7 +19,6 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
-    QMessageBox,
     QPushButton,
     QSplitter,
     QTabWidget,
@@ -55,6 +54,7 @@ from ..widgets import ActionListWidget, ControlPanel, LogWidget, SequenceListWid
 from ..widgets.ai_assistant import AIAssistantWidget
 from .composition_bridge import CompositionBridge
 from .dialogs import ActionConfigDialog
+from .notifications import GuiNotificationCenter
 from .startup import GuiStartupLifecycle, GuiStartupState
 from .view_models import DeviceViewModel, ExecutionViewModel
 
@@ -227,6 +227,14 @@ class MainWindow(QMainWindow):
         self._speech_startup_wait_timer = None
 
         self.init_ui()
+        self._notifications = GuiNotificationCenter(
+            self,
+            log_sink=self.log_widget.append_log,
+            status_sink=lambda message: self.statusBar().showMessage(
+                message,
+                5000,
+            ),
+        )
         self._sequence_revision = (
             services.composition.sequence_revision
         )
@@ -248,7 +256,7 @@ class MainWindow(QMainWindow):
         self._execution_bridge.step_started.connect(self.on_step_started)
         self._execution_bridge.step_completed.connect(self.on_step_completed)
         self._execution_bridge.step_failed.connect(self.on_step_failed)
-        self._execution_bridge.log_message.connect(self.log_widget.append_log)
+        self._execution_bridge.log_message.connect(self._notifications.info)
         self._execution_bridge.loop_progress.connect(self.on_loop_progress)
         self._execution_bridge.execution_completed.connect(
             self.on_execution_completed
@@ -258,11 +266,22 @@ class MainWindow(QMainWindow):
         )
         self._render_execution_state()
 
-        # 设置 AI助手的主窗口引用（用于执行桥接器）
         if hasattr(self, 'ai_assistant_widget'):
-            self.ai_assistant_widget.set_main_window(self)
             self.ai_assistant_widget.speech_runtime_startup_finished.connect(
                 self.initialize_startup_hardware
+            )
+            self.ai_assistant_widget.welcome_task_execution_requested.connect(
+                self.execute_wake_welcome_task
+            )
+            self.ai_assistant_widget.sequence_visualization_requested.connect(
+                self.add_ai_sequence
+            )
+            self.ai_assistant_widget.step_started.connect(self.on_step_started)
+            self.ai_assistant_widget.step_completed.connect(self.on_step_completed)
+            self.ai_assistant_widget.step_failed.connect(self.on_step_failed)
+            self.ai_assistant_widget.loop_progress.connect(self.on_loop_progress)
+            self.ai_assistant_widget.execution_completed.connect(
+                self.on_execution_completed
             )
         self.start_startup_initialization()
 
@@ -901,14 +920,15 @@ class MainWindow(QMainWindow):
                 channel_number,
                 turn_on,
             )
-            self.log_widget.append_log(f"继电器 {channel} 已{action_text}")
+            self._notifications.info(f"继电器 {channel} 已{action_text}")
         except Exception as e:
-            self.log_widget.append_log(f"继电器 {channel} {action_text}失败: {e}")
-            QMessageBox.warning(self, "警告", f"继电器 {channel} {action_text}失败:\n{e}")
+            self._notifications.warning(
+                f"继电器 {channel} {action_text}失败:\n{e}"
+            )
 
     def on_gripper_open_clicked(self):
         if not self._device_view_model.snapshot().robot_ready:
-            QMessageBox.warning(self, "警告", "Robot1 未连接")
+            self._notifications.warning("Robot1 未连接")
             return
 
         try:
@@ -917,17 +937,15 @@ class MainWindow(QMainWindow):
                 opened=True,
             )
             if success:
-                self.log_widget.append_log("Robot1 夹爪已打开")
+                self._notifications.info("Robot1 夹爪已打开")
             else:
-                QMessageBox.warning(self, "警告", "夹爪打开失败")
-                self.log_widget.append_log("Robot1 夹爪打开失败")
+                self._notifications.warning("Robot1 夹爪打开失败")
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"夹爪打开异常: {e}")
-            self.log_widget.append_log(f"Robot1 夹爪打开异常: {e}")
+            self._notifications.warning(f"Robot1 夹爪打开异常: {e}")
 
     def on_gripper_close_clicked(self):
         if not self._device_view_model.snapshot().robot_ready:
-            QMessageBox.warning(self, "警告", "Robot1 未连接")
+            self._notifications.warning("Robot1 未连接")
             return
 
         try:
@@ -936,17 +954,15 @@ class MainWindow(QMainWindow):
                 opened=False,
             )
             if success:
-                self.log_widget.append_log("Robot1 夹爪已关闭")
+                self._notifications.info("Robot1 夹爪已关闭")
             else:
-                QMessageBox.warning(self, "警告", "夹爪关闭失败")
-                self.log_widget.append_log("Robot1 夹爪关闭失败")
+                self._notifications.warning("Robot1 夹爪关闭失败")
         except Exception as e:
-            QMessageBox.warning(self, "警告", f"夹爪关闭异常: {e}")
-            self.log_widget.append_log(f"Robot1 夹爪关闭异常: {e}")
+            self._notifications.warning(f"Robot1 夹爪关闭异常: {e}")
 
     def record_trajectory(self, robot_name: str):
         if self.robot_system is None:
-            QMessageBox.warning(self, "警告", f"{robot_name.upper()} 未连接")
+            self._notifications.warning(f"{robot_name.upper()} 未连接")
             return
 
         default_path = self._next_trajectory_file(robot_name)
@@ -961,14 +977,14 @@ class MainWindow(QMainWindow):
 
         teaching_started = False
         try:
-            self.log_widget.append_log(f"{robot_name.upper()} 开始拖动示教")
+            self._notifications.info(f"{robot_name.upper()} 开始拖动示教")
             self._services.trajectory_teaching.start(robot_name)
             teaching_started = True
 
-            QMessageBox.information(
-                self,
-                "轨迹录制",
-                f"{robot_name.upper()} 正在录制。请手动拖动机械臂，完成后点击确定停止并保存。"
+            self._notifications.info(
+                f"{robot_name.upper()} 正在录制。请手动拖动机械臂，完成后点击确定停止并保存。",
+                title="轨迹录制",
+                modal=True,
             )
 
             Path(filename).parent.mkdir(parents=True, exist_ok=True)
@@ -976,14 +992,14 @@ class MainWindow(QMainWindow):
                 filename
             )
             teaching_started = False
-            self.log_widget.append_log(
+            self._notifications.info(
                 f"{robot_name.upper()} 轨迹已保存: "
                 f"{save_result.path}, 点数: {save_result.point_count}"
             )
-            QMessageBox.information(
-                self,
-                "轨迹已保存",
+            self._notifications.info(
                 f"保存到:\n{save_result.path}",
+                title="轨迹已保存",
+                modal=True,
             )
             return str(save_result.path)
         except Exception as e:
@@ -991,17 +1007,17 @@ class MainWindow(QMainWindow):
                 try:
                     self._services.trajectory_teaching.cancel()
                 except Exception as stop_error:
-                    self.log_widget.append_log(
+                    self._notifications.warning(
                         f"{robot_name.upper()} 停止拖动示教失败: "
-                        f"{stop_error}"
+                        f"{stop_error}",
+                        modal=False,
                     )
-            QMessageBox.warning(self, "警告", f"轨迹录制异常: {e}")
-            self.log_widget.append_log(f"{robot_name.upper()} 轨迹录制异常: {e}")
+            self._notifications.warning(f"轨迹录制异常: {e}")
         return None
 
     def run_trajectory(self, robot_name: str):
         if self.robot_system is None:
-            QMessageBox.warning(self, "警告", f"{robot_name.upper()} 未连接")
+            self._notifications.warning(f"{robot_name.upper()} 未连接")
             return
 
         start_dir = self._trajectory_dir(robot_name)
@@ -1026,12 +1042,10 @@ class MainWindow(QMainWindow):
         self._start_sequence_execution([SequenceItem.from_definition(action)], display_list=None, label="轨迹")
 
     def on_trajectory_succeeded(self, message: str):
-        self.log_widget.append_log(message)
-        QMessageBox.information(self, "轨迹", message)
+        self._notifications.info(message, title="轨迹", modal=True)
 
     def on_trajectory_failed(self, message: str):
-        self.log_widget.append_log(message)
-        QMessageBox.warning(self, "轨迹", message)
+        self._notifications.warning(message, title="轨迹")
 
     def _trajectory_dir(self, robot_name: str) -> Path:
         return Path(__file__).resolve().parents[1] / "actions" / "Path" / robot_name
@@ -1185,12 +1199,12 @@ class MainWindow(QMainWindow):
             pose = self.robot_pose_cache.get(robot_name)
 
         if pose is None:
-            QMessageBox.warning(self, "警告", f"{robot_name.upper()} 位姿不可用")
+            self._notifications.warning(f"{robot_name.upper()} 位姿不可用")
             return
 
         pose_text = f"[{', '.join([f'{v:.6f}' for v in pose])}]"
         QApplication.clipboard().setText(pose_text)
-        self.log_widget.append_log(f"Copied {robot_name.upper()} pose: {pose_text}")
+        self._notifications.info(f"已复制 {robot_name.upper()} 位姿: {pose_text}")
 
     def create_status_bar(self) -> QWidget:
         """设备状态栏：竖向两行，每行四个设备"""
@@ -1253,25 +1267,31 @@ class MainWindow(QMainWindow):
 
     def initialize_robots(self):
         """初始化机械臂"""
-        self.log_widget.append_log("开始初始化机械臂...")
+        self._notifications.info("开始初始化机械臂...")
 
         try:
             self._services.devices.initialize(ROBOT_SYSTEM)
             self._render_device_state()
             self.refresh_arm_poses()
-            self.log_widget.append_log("机械臂初始化完成")
+            self._notifications.info("机械臂初始化完成")
         except Exception as e:
             self._render_device_state()
-            self.log_widget.append_log(f"机械臂初始化异常: {str(e)}")
+            self._notifications.warning(
+                f"机械臂初始化异常: {e}",
+                modal=False,
+            )
 
     def initialize_move_controller(self) -> None:
         """初始化底盘移动控制器"""
         try:
-            self.log_widget.append_log("初始化底盘移动控制器...")
+            self._notifications.info("初始化底盘移动控制器...")
             self._services.devices.initialize(MOBILE_BASE)
-            self.log_widget.append_log("底盘移动控制器初始化成功")
+            self._notifications.info("底盘移动控制器初始化成功")
         except Exception as e:
-            self.log_widget.append_log(f"底盘移动控制器初始化失败：{e}")
+            self._notifications.warning(
+                f"底盘移动控制器初始化失败：{e}",
+                modal=False,
+            )
 
     def _render_device_state(self) -> None:
         state = self._device_view_model.snapshot()
@@ -1288,64 +1308,68 @@ class MainWindow(QMainWindow):
 
     def initialize_pipette(self):
         """Initialize the runtime-owned pipette."""
-        self.log_widget.append_log("开始初始化移液枪...")
+        self._notifications.info("开始初始化移液枪...")
         self.init_pipette_btn.setEnabled(False)
         try:
             success = self._services.manual_control.initialize_pipette()
             self._render_device_state()
             if success:
-                self.log_widget.append_log("移液枪初始化成功")
+                self._notifications.info("移液枪初始化成功")
             else:
-                self.log_widget.append_log("移液枪初始化失败")
-                QMessageBox.warning(self, "警告", "移液枪初始化失败，请检查串口或设备")
+                self._notifications.warning(
+                    "移液枪初始化失败，请检查串口或设备"
+                )
         except Exception as e:
             self._render_device_state()
-            self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
-            QMessageBox.warning(self, "警告", f"移液枪初始化异常: {e}")
+            self._notifications.warning(f"移液枪初始化异常: {e}")
         finally:
             self.init_pipette_btn.setEnabled(True)
 
     def initialize_pipette_on_startup(self):
         """Initialize pipette automatically when app starts."""
-        self.log_widget.append_log("自动初始化移液枪...")
+        self._notifications.info("自动初始化移液枪...")
         try:
             success = self._services.manual_control.initialize_pipette()
             self._render_device_state()
             if success:
-                self.log_widget.append_log("移液枪初始化成功")
+                self._notifications.info("移液枪初始化成功")
             else:
-                self.log_widget.append_log("移液枪初始化失败")
+                self._notifications.warning("移液枪初始化失败", modal=False)
         except Exception as e:
             self._render_device_state()
-            self.log_widget.append_log(f"移液枪初始化异常: {str(e)}")
+            self._notifications.warning(
+                f"移液枪初始化异常: {e}",
+                modal=False,
+            )
 
     def eject_pipette_tip(self):
         """Eject pipette tip manually."""
         self.init_pipette_btn.setEnabled(False)
         try:
-            self.log_widget.append_log("正在退枪头...")
+            self._notifications.info("正在退枪头...")
             success = self._services.manual_control.eject_pipette_tip()
             if success:
-                self.log_widget.append_log("枪头已退出")
+                self._notifications.info("枪头已退出")
             else:
-                self.log_widget.append_log("退枪头失败")
-                QMessageBox.warning(self, "警告", "退枪头失败")
+                self._notifications.warning("退枪头失败")
         except Exception as e:
-            self.log_widget.append_log(f"退枪头异常: {str(e)}")
-            QMessageBox.warning(self, "警告", f"退枪头异常: {e}")
+            self._notifications.warning(f"退枪头异常: {e}")
         finally:
             self.init_pipette_btn.setEnabled(True)
 
     def initialize_body(self):
         """初始化身体（ModbusMotor）"""
-        self.log_widget.append_log("开始初始化身体...")
+        self._notifications.info("开始初始化身体...")
 
         try:
             self._services.devices.initialize(BODY_AXIS)
             self._render_device_state()
-            self.log_widget.append_log("身体初始化成功")
+            self._notifications.info("身体初始化成功")
         except Exception as e:
-            self.log_widget.append_log(f"身体初始化异常: {str(e)}")
+            self._notifications.warning(
+                f"身体初始化异常: {e}",
+                modal=False,
+            )
             self._render_device_state()
 
     def _collect_action_names(self) -> set:
@@ -1448,7 +1472,7 @@ class MainWindow(QMainWindow):
             action,
             origin="gui",
         )
-        self.log_widget.append_log(f"轨迹动作已创建: {name}")
+        self._notifications.info(f"轨迹动作已创建: {name}")
 
     def delete_action(self):
         current_tab = self.action_tabs.currentIndex()
@@ -1457,7 +1481,7 @@ class MainWindow(QMainWindow):
         if current_tab == 0:
             current_item = self.move_list.currentItem()
             if current_item is None:
-                QMessageBox.warning(self, "警告", "请先选择一个要删除的动作")
+                self._notifications.warning("请先选择一个要删除的动作")
                 return
             
             action = current_item.data(Qt.ItemDataRole.UserRole)
@@ -1490,7 +1514,7 @@ class MainWindow(QMainWindow):
 
         current_item = action_list.currentItem()
         if current_item is None:
-            QMessageBox.warning(self, "警告", "请先选择一个要删除的动作")
+            self._notifications.warning("请先选择一个要删除的动作")
             return
 
         action = current_item.data(Qt.ItemDataRole.UserRole)
@@ -1507,12 +1531,12 @@ class MainWindow(QMainWindow):
 
         current_item = action_list.currentItem()
         if current_item is None:
-            QMessageBox.warning(self, "警告", "请先选择要修改的动作")
+            self._notifications.warning("请先选择要修改的动作")
             return
 
         action = current_item.data(Qt.ItemDataRole.UserRole)
         if action is None:
-            QMessageBox.warning(self, "警告", "无法读取选中的动作")
+            self._notifications.warning("无法读取选中的动作")
             return
 
         action_data = {
@@ -1537,7 +1561,7 @@ class MainWindow(QMainWindow):
                 origin="gui",
             )
         except KeyError:
-            QMessageBox.warning(self, "警告", "未找到目标动作")
+            self._notifications.warning("未找到目标动作")
             return
 
     def refresh_action_list(self, action_type: ActionType):
@@ -1617,8 +1641,9 @@ class MainWindow(QMainWindow):
             self._render_sequence(
                 self._services.composition.sequence_entries()
             )
-            self.log_widget.append_log(
+            self._notifications.warning(
                 "序列已被其他入口修改，本次本地编辑未覆盖远程变更"
+                , modal=False
             )
             return
         self._sequence_revision = (
@@ -1753,7 +1778,7 @@ class MainWindow(QMainWindow):
     def add_task_to_composer(self):
         current_item = self.task_library_list.currentItem()
         if current_item is None:
-            QMessageBox.warning(self, "警告", "请先选择一个已保存任务")
+            self._notifications.warning("请先选择一个已保存任务")
             return
 
         task_name = current_item.data(Qt.ItemDataRole.UserRole)
@@ -1765,14 +1790,14 @@ class MainWindow(QMainWindow):
         self._refresh_task_composer_display()
 
         if hasattr(self, "log_widget"):
-            self.log_widget.append_log(f"已加入任务组合: {task_name} ({step_count} 步)")
+            self._notifications.info(f"已加入任务组合: {task_name} ({step_count} 步)")
 
     def _add_action_to_composer(self, action: ActionDefinition, insert_row: int | None = None):
         self._services.task_composer.add_action(action, index=insert_row)
         self._refresh_task_composer_display()
 
         if hasattr(self, "log_widget"):
-            self.log_widget.append_log(f"已加入动作组合: {action.name}")
+            self._notifications.info(f"已加入动作组合: {action.name}")
 
     def remove_task_from_composer(self):
         row = self.task_composer_list.currentRow()
@@ -1827,7 +1852,7 @@ class MainWindow(QMainWindow):
         self._refresh_task_composer_display()
         for row in range(start_row, start_row + block_length * repeat_count):
             self.task_composer_list.item(row).setSelected(True)
-        self.log_widget.append_log(f"组合块已设置为循环 {repeat_count} 次")
+        self._notifications.info(f"组合块已设置为循环 {repeat_count} 次")
 
     def clear_task_composer(self):
         self._services.task_composer.clear()
@@ -1836,7 +1861,7 @@ class MainWindow(QMainWindow):
     def expand_composed_tasks(self, replace: bool):
         sequence = self._build_composed_task_sequence()
         if not sequence:
-            QMessageBox.warning(self, "警告", "请先向组合计划中添加至少一个任务")
+            self._notifications.warning("请先向组合计划中添加至少一个任务")
             return
 
         if replace:
@@ -1851,12 +1876,14 @@ class MainWindow(QMainWindow):
             )
 
         mode = "替换" if replace else "追加"
-        self.log_widget.append_log(f"任务组合已{mode}到序列，共 {len(sequence)} 个动作")
+        self._notifications.info(
+            f"任务组合已{mode}到序列，共 {len(sequence)} 个动作"
+        )
 
     def save_composed_task(self):
         sequence = self._build_composed_task_sequence()
         if not sequence:
-            QMessageBox.warning(self, "警告", "请先向组合计划中添加至少一个任务")
+            self._notifications.warning("请先向组合计划中添加至少一个任务")
             return
 
         filename, _ = QFileDialog.getSaveFileName(
@@ -1871,7 +1898,7 @@ class MainWindow(QMainWindow):
             sequence,
             origin="gui",
         )
-        self.log_widget.append_log(f"组合任务已保存: {stored_name}")
+        self._notifications.info(f"组合任务已保存: {stored_name}")
 
     def _build_composed_task_sequence(self) -> list[SequenceItem]:
         return list(self._services.task_composer.build_sequence())
@@ -2067,7 +2094,7 @@ class MainWindow(QMainWindow):
     def save_task(self):
         entries = self.sequence_list.get_entries()
         if not entries:
-            QMessageBox.warning(self, "警告", "序列为空,无需保存")
+            self._notifications.warning("序列为空，无需保存")
             return
 
         filename, _ = QFileDialog.getSaveFileName(
@@ -2085,7 +2112,7 @@ class MainWindow(QMainWindow):
                     origin="gui",
                 )
             )
-            self.log_widget.append_log(f"任务已保存: {stored_name}")
+            self._notifications.info(f"任务已保存: {stored_name}")
 
     def load_task(self):
         filename, _ = QFileDialog.getOpenFileName(
@@ -2102,20 +2129,16 @@ class MainWindow(QMainWindow):
                     origin="gui",
                 )
             except (FileNotFoundError, ValueError):
-                QMessageBox.warning(
-                    self,
-                    "警告",
-                    f"任务不存在: {task_name}",
-                )
+                self._notifications.warning(f"任务不存在: {task_name}")
                 return
-            self.log_widget.append_log(f"任务已加载: {task_name}")
+            self._notifications.info(f"任务已加载: {task_name}")
 
     def start_execution(self):
         sequence = list(
             self._services.composition.flattened_sequence()
         )
         if not sequence:
-            QMessageBox.warning(self, "警告", "请先添加动作到序列中")
+            self._notifications.warning("请先添加动作到序列中")
             return
 
         self._start_sequence_execution(sequence, display_list=self.sequence_list, label="动作编排序列")
@@ -2123,7 +2146,9 @@ class MainWindow(QMainWindow):
     def execute_composed_task(self):
         sequence = self._build_composed_task_sequence()
         if not sequence:
-            QMessageBox.warning(self, "警告", "请先向组合计划中添加至少一个任务或动作")
+            self._notifications.warning(
+                "请先向组合计划中添加至少一个任务或动作"
+            )
             return
 
         self._start_sequence_execution(sequence, display_list=None, label="任务组合序列")
@@ -2131,7 +2156,10 @@ class MainWindow(QMainWindow):
     def execute_wake_welcome_task(self, task_name: str) -> None:
         """Execute a configured wake lifecycle task without affecting the composer."""
         if self._execution_view_model.snapshot().active:
-            self.log_widget.append_log(f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}")
+            self._notifications.warning(
+                f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}",
+                modal=False,
+            )
             return
 
         try:
@@ -2139,17 +2167,20 @@ class MainWindow(QMainWindow):
         except FileNotFoundError:
             entries = ()
         if not entries:
-            self.log_widget.append_log(f"跳过唤醒欢迎任务，任务不存在或为空: {task_name}")
+            self._notifications.warning(
+                f"跳过唤醒欢迎任务，任务不存在或为空: {task_name}",
+                modal=False,
+            )
             return
 
         self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务")
 
     def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
         if self._execution_view_model.snapshot().active:
-            QMessageBox.warning(self, "警告", "当前已有序列正在执行")
+            self._notifications.warning("当前已有序列正在执行")
             return
 
-        self.log_widget.append_log(f"开始执行{label}...")
+        self._notifications.info(f"开始执行{label}...")
         self._execution_display_list = display_list
         self._set_trajectory_buttons_enabled(False)
         self._pause_pose_refresh()
@@ -2196,7 +2227,7 @@ class MainWindow(QMainWindow):
         ):
             self._set_trajectory_buttons_enabled(True)
             self._resume_pose_refresh()
-            QMessageBox.warning(self, "警告", "提交执行失败")
+            self._notifications.warning("提交执行失败")
 
     def toggle_pause(self):
         before = self._execution_view_model.snapshot()
@@ -2204,7 +2235,7 @@ class MainWindow(QMainWindow):
         if after.state is before.state:
             return
         self._render_execution_state()
-        self.log_widget.append_log(
+        self._notifications.info(
             "执行继续" if after.can_pause else "执行暂停"
         )
 
@@ -2212,20 +2243,26 @@ class MainWindow(QMainWindow):
         state = self._execution_view_model.snapshot()
         if state.can_cancel:
             self._execution_view_model.cancel()
-            self.log_widget.append_log(
+            self._notifications.warning(
                 "已发送任务停止请求（非硬件急停，将在当前动作可中断点停止）"
+                , modal=False
             )
         else:
-            self.log_widget.append_log("当前没有正在执行的任务")
+            self._notifications.info("当前没有正在执行的任务")
 
     def request_safety_stop(self, mode: StopMode) -> None:
         if not self._execution_bridge.request_safety_stop(mode):
-            self.log_widget.append_log("已有设备停止请求正在处理中")
+            self._notifications.warning(
+                "已有设备停止请求正在处理中",
+                modal=False,
+            )
 
     def on_execution_completed(self, success: bool):
-        self.log_widget.append_log(
-            "序列执行成功" if success else "序列执行失败或已停止"
-        )
+        message = "序列执行成功" if success else "序列执行失败或已停止"
+        if success:
+            self._notifications.info(message)
+        else:
+            self._notifications.warning(message, modal=False)
         self._render_execution_state()
         self._execution_display_list = self.sequence_list
         self._set_trajectory_buttons_enabled(True)
@@ -2264,7 +2301,10 @@ class MainWindow(QMainWindow):
         display_list = getattr(self, "_execution_display_list", self.sequence_list)
         if display_list is not None:
             display_list.update_item_status(item)
-        QMessageBox.critical(self, "执行失败", f"步骤 {index + 1} 失败:\n{error_msg}")
+        self._notifications.error(
+            f"步骤 {index + 1} 失败:\n{error_msg}",
+            title="执行失败",
+        )
 
     def on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int):
         """更新循环块执行进度显示"""
@@ -2330,7 +2370,7 @@ class MainWindow(QMainWindow):
                     selected_items.append(SequenceItem.from_dict(child.to_dict()))
 
         if not selected_items:
-            QMessageBox.warning(self, "警告", "未找到可循环的动作")
+            self._notifications.warning("未找到可循环的动作")
             return
 
         # 从后往前移除（避免索引偏移）
@@ -2355,7 +2395,7 @@ class MainWindow(QMainWindow):
         self.sequence_list.setCurrentItem(tree_item)
 
         total_steps = len(selected_items) * repeat_count
-        self.log_widget.append_log(
+        self._notifications.info(
             f"已创建循环块: {len(selected_items)}个动作 × {repeat_count}次 = {total_steps}步"
         )
         self._publish_current_sequence()
@@ -2363,10 +2403,10 @@ class MainWindow(QMainWindow):
     def _selected_contiguous_rows(self, list_widget: QListWidget, empty_message: str) -> list[int] | None:
         rows = sorted(index.row() for index in list_widget.selectedIndexes())
         if not rows:
-            QMessageBox.warning(self, "警告", empty_message)
+            self._notifications.warning(empty_message)
             return None
         if rows != list(range(rows[0], rows[-1] + 1)):
-            QMessageBox.warning(self, "警告", "只能循环连续选中的项目")
+            self._notifications.warning("只能循环连续选中的项目")
             return None
         return rows
 
@@ -2380,12 +2420,14 @@ class MainWindow(QMainWindow):
     def edit_sequence_item(self):
         current_tree_item = self.sequence_list.currentItem()
         if current_tree_item is None:
-            QMessageBox.warning(self, "警告", "请先选择要修改的序列项")
+            self._notifications.warning("请先选择要修改的序列项")
             return
 
         seq_item = current_tree_item.data(0, Qt.ItemDataRole.UserRole)
         if not isinstance(seq_item, SequenceItem):
-            QMessageBox.warning(self, "警告", "请选择一个动作项（不能修改循环块本身）")
+            self._notifications.warning(
+                "请选择一个动作项（不能修改循环块本身）"
+            )
             return
 
         action_def = seq_item.definition
@@ -2406,7 +2448,7 @@ class MainWindow(QMainWindow):
         seq_item.definition = updated_definition
         self.sequence_list.update_item_status(seq_item)
         self._publish_current_sequence()
-        self.log_widget.append_log(f"已更新序列动作: {updated_definition.name}")
+        self._notifications.info(f"已更新序列动作: {updated_definition.name}")
 
     def add_ai_sequence(
         self,
@@ -2435,7 +2477,9 @@ class MainWindow(QMainWindow):
                     normalized,
                     origin="gui-ai",
                 )
-            self.log_widget.append_log(f"已同步执行序列到右侧，共 {len(normalized)} 个动作")
+            self._notifications.info(
+                f"已同步执行序列到右侧，共 {len(normalized)} 个动作"
+            )
             return
 
         from PyQt6.QtCore import QTimer
@@ -2444,7 +2488,7 @@ class MainWindow(QMainWindow):
             self._services.composition.clear_sequence(
                 origin="gui-ai",
             )
-        self.log_widget.append_log(
+        self._notifications.info(
             f"正在将 {len(normalized)} 个动作载入右侧序列区（逐项显示）..."
         )
 
@@ -2463,15 +2507,11 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(stagger_interval_ms * i, make_add(item))
 
     def clear_sequence(self):
-        reply = QMessageBox.question(
-            self, "确认", "确定要清空所有序列吗?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if reply == QMessageBox.StandardButton.Yes:
+        if self._notifications.confirm("确定要清空所有序列吗？"):
             self._services.composition.clear_sequence(
                 origin="gui",
             )
-            self.log_widget.append_log("序列已清空")
+            self._notifications.info("序列已清空")
 
     def refresh_sequence_numbers(self, selected_row: int | None = None):
         """刷新树中所有顶层项的显示序号"""
@@ -2523,13 +2563,18 @@ class MainWindow(QMainWindow):
                     # 等待至少一路相机上线
                     deadline = time.time() + 10
                     online = []
-                    while time.time() < deadline:
+                    while (
+                        time.time() < deadline
+                        and not self.isInterruptionRequested()
+                    ):
                         info = mgr.get_cameras_info()
                         online = [c for c in info if c.get("online")]
                         if online:
                             break
                         time.sleep(0.3)
                     else:
+                        if self.isInterruptionRequested():
+                            return
                         all_info = mgr.get_cameras_info()
                         errors = []
                         for c in all_info:
@@ -2543,7 +2588,10 @@ class MainWindow(QMainWindow):
 
                     # 尝试取帧
                     deadline = time.time() + 10
-                    while time.time() < deadline:
+                    while (
+                        time.time() < deadline
+                        and not self.isInterruptionRequested()
+                    ):
                         if hasattr(mgr, "get_latest_raw_frames"):
                             # RealSense：取原始帧（与视觉抓取 executor.py 一致）
                             raw = mgr.get_latest_raw_frames(camera_name)
@@ -2578,6 +2626,8 @@ class MainWindow(QMainWindow):
                                     return
                         time.sleep(0.2)
 
+                    if self.isInterruptionRequested():
+                        return
                     self.result.emit(False, "取帧超时（10 秒内未获得有效帧）")
 
                 except Exception as e:
@@ -2587,7 +2637,11 @@ class MainWindow(QMainWindow):
                         session.close()
 
         def on_result(success, msg):
-            self.log_widget.append_log(f"[相机测试] {msg}")
+            message = f"[相机测试] {msg}"
+            if success:
+                self._notifications.info(message)
+            else:
+                self._notifications.warning(message, modal=False)
             self.test_camera_btn.setEnabled(True)
             self.test_camera_btn.setText("测试相机")
 
@@ -2596,10 +2650,30 @@ class MainWindow(QMainWindow):
         self._camera_test_thread.start()
 
     def closeEvent(self, event):
+        execution_state = self._execution_view_model.snapshot()
+        if execution_state.active:
+            self._execution_view_model.cancel()
+        self._notifications.info("应用正在关闭，后台资源将按顺序释放...")
         if self.pose_timer is not None:
             self.pose_timer.stop()
+        camera_thread = getattr(self, "_camera_test_thread", None)
+        if camera_thread is not None and camera_thread.isRunning():
+            camera_thread.requestInterruption()
         if hasattr(self, "ai_assistant_widget"):
-            self.ai_assistant_widget.shutdown()
+            self.ai_assistant_widget.prepare_shutdown()
         self._composition_bridge.close()
         self._startup_lifecycle.close()
         event.accept()
+
+    def shutdown_after_event_loop(self) -> None:
+        """Finish bounded worker cleanup after the visible GUI has closed."""
+        camera_thread = getattr(self, "_camera_test_thread", None)
+        if camera_thread is not None and camera_thread.isRunning():
+            camera_thread.requestInterruption()
+            if not camera_thread.wait(2000):
+                self._notifications.warning(
+                    "相机测试线程未在 2 秒内退出，将由设备关闭流程继续清理",
+                    modal=False,
+                )
+        if hasattr(self, "ai_assistant_widget"):
+            self.ai_assistant_widget.shutdown()

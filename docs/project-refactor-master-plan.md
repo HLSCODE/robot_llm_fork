@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-03
 >
-> 当前里程碑：M4 — GUI 应用状态与 action schema 表单已收敛
-> 计划进度：97/115（96 DONE + 1 DROPPED，84.3%）
+> 当前里程碑：M4 — GUI 通知、组件协作与关闭生命周期已收敛
+> 计划进度：98/115（97 DONE + 1 DROPPED，85.2%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -405,9 +405,12 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   从运行时快照派生，不再使用 GUI 平行布尔变量。
 - `ActionConfigDialog` 已由统一 action schema 生成全部动作和 variant 字段，
   旧的逐动作 UI/参数构建分派已删除。
-- `MainWindow` 仍集中承担较多 Qt 视图协调和通知展示职责。
-- `widgets` 与 GUI 业务状态耦合，部分 AI 组件反向持有 MainWindow。
-- 窗口关闭可能无超时等待执行线程。
+- `GuiNotificationCenter` 已统一 MainWindow 的日志、状态栏、通知历史、模态错误和确认出口。
+- AI Assistant 只通过窄 Qt 信号请求欢迎任务、序列可视化和执行状态展示，
+  不再持有或调用 MainWindow。
+- `closeEvent` 只发出执行取消、相机中断和交互停止请求；可阻塞的有界等待在
+  Qt 事件循环退出后执行，再由应用宿主统一关闭附加服务和设备。
+- `MainWindow` 仍集中承担较多 Qt 视图构造和面板协调职责，可继续按稳定视图域拆分。
 
 ### 9.2 目标
 
@@ -432,7 +435,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | D-008 | P2 | DONE | `ActionConfigDialog` 按唯一 action schema 通用渲染字段、variant、默认值、范围、枚举、只读和校验 |
 | D-009 | P2 | DONE | 生命周期、手动控制、轨迹示教和位姿读取已进入 Application Service |
 | D-010 | P2 | DONE | 删除启动布尔组合和嵌套事件循环；显式 startup lifecycle 管理 speech wait、硬件初始化、ready/failed/closed，等待使用异步 signal + 单次超时 |
-| D-011 | P3 | TODO | 统一 UI 状态、错误和通知组件 |
+| D-011 | P3 | DONE | `GuiNotificationCenter` 统一日志、状态栏、通知历史、模态错误和确认；AI 使用窄信号协作；关闭采用非阻塞请求 + 事件循环后有界等待 |
 | D-012 | P3 | DONE | Windows/Linux offscreen GUI smoke 构造真实 MainWindow + simulation services，覆盖启动、暂停、恢复、取消、日志终态和资源清理 |
 
 ### 9.4 完成标准
@@ -987,6 +990,7 @@ M4 工程治理与清理
 | 2026-08-03 | M4 | G | 性能预算与回归监控 | G-015 TODO → DONE | 新增 strict schema v1 性能预算和无硬件 runner；批量执行请求解析、动作校验、资源租约、schema 深拷贝与 LLM golden suite，预热后取 5 次样本中位数；机器可读原子报告和超预算失败进入 Windows/Linux 统一质量入口 | 336 tests + 32 subtests，覆盖率 44.65%，14 golden cases；5/5 性能预算通过，完整质量门禁和 wheel smoke |
 | 2026-08-03 | M4 | A/D | GUI 启动状态机与 simulation smoke | A-009 DOING → DONE；D-010/D-012 TODO → DONE | 删除两个启动布尔和构造期嵌套 QEventLoop；新增显式 lifecycle，语音等待改为非阻塞 signal + timer；真实 MainWindow 在 offscreen simulation 中验证共享服务、fake 设备启动、开始/暂停/恢复/取消、终态日志、资源释放和关闭 | 342 tests + 32 subtests，覆盖率 52.35% 并将门禁提升至 50%；完整质量门禁、5/5 性能预算和 wheel smoke |
 | 2026-08-03 | M4 | D/G | GUI 应用状态与 schema 表单收敛 | D-005/D-006/D-007/D-008、ER-018 TODO → DONE | TaskComposerService 独占组合草稿；Device/Execution ViewModel 从运行时快照派生状态；删除 MainWindow 平行布尔和 ExecutionBridge 控制双入口；1300 余行逐动作表单分支替换为唯一 schema 通用渲染与校验；新增边界进入 Mypy | 348 tests + 32 subtests，覆盖率 55.09%；21 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
+| 2026-08-03 | M4 | D/G | GUI 通知、协作与关闭生命周期收敛 | D-011 TODO → DONE | 新增 typed GuiNotificationCenter；MainWindow 删除直接 QMessageBox 和散落日志出口；通知通过 QObject signal 回到 GUI 线程；AI Assistant 删除 MainWindow 反向引用并改用窄 Qt 信号；活动执行关闭时立即请求取消，相机/交互先非阻塞停止，事件循环退出后按有界预算等待 | 352 tests + 32 subtests，覆盖率 55.30%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 
 ## 22. 建议的首批实施顺序
 
