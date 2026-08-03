@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-03
 >
-> 当前里程碑：M4 — GUI 通知、组件协作与关闭生命周期已收敛
-> 计划进度：98/115（97 DONE + 1 DROPPED，85.2%）
+> 当前里程碑：M4 — GUI 稳定视图域已拆分
+> 计划进度：100/117（99 DONE + 1 DROPPED，85.5%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -410,7 +410,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   不再持有或调用 MainWindow。
 - `closeEvent` 只发出执行取消、相机中断和交互停止请求；可阻塞的有界等待在
   Qt 事件循环退出后执行，再由应用宿主统一关闭附加服务和设备。
-- `MainWindow` 仍集中承担较多 Qt 视图构造和面板协调职责，可继续按稳定视图域拆分。
+- 动作库/任务库、序列/任务组合器、设备状态/位姿和手动控制已拆成四个稳定视图组件；
+  `MainWindow` 只组合组件、连接意图信号并调用渲染接口，不保留旧控件属性别名。
 
 ### 9.2 目标
 
@@ -437,6 +438,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | D-010 | P2 | DONE | 删除启动布尔组合和嵌套事件循环；显式 startup lifecycle 管理 speech wait、硬件初始化、ready/failed/closed，等待使用异步 signal + 单次超时 |
 | D-011 | P3 | DONE | `GuiNotificationCenter` 统一日志、状态栏、通知历史、模态错误和确认；AI 使用窄信号协作；关闭采用非阻塞请求 + 事件循环后有界等待 |
 | D-012 | P3 | DONE | Windows/Linux offscreen GUI smoke 构造真实 MainWindow + simulation services，覆盖启动、暂停、恢复、取消、日志终态和资源清理 |
+| D-013 | P2 | DONE | 提取 `ActionLibraryView` 与 `WorkflowEditorView`，统一动作库、任务库、序列和任务组合器的构造、意图信号及执行控件渲染接口 |
+| D-014 | P2 | DONE | 提取 `DeviceStatusView` 与 `DeviceControlView`，统一设备状态、位姿、定位和手动控制视图；组件不持有设备或应用服务 |
 
 ### 9.4 完成标准
 
@@ -991,6 +994,7 @@ M4 工程治理与清理
 | 2026-08-03 | M4 | A/D | GUI 启动状态机与 simulation smoke | A-009 DOING → DONE；D-010/D-012 TODO → DONE | 删除两个启动布尔和构造期嵌套 QEventLoop；新增显式 lifecycle，语音等待改为非阻塞 signal + timer；真实 MainWindow 在 offscreen simulation 中验证共享服务、fake 设备启动、开始/暂停/恢复/取消、终态日志、资源释放和关闭 | 342 tests + 32 subtests，覆盖率 52.35% 并将门禁提升至 50%；完整质量门禁、5/5 性能预算和 wheel smoke |
 | 2026-08-03 | M4 | D/G | GUI 应用状态与 schema 表单收敛 | D-005/D-006/D-007/D-008、ER-018 TODO → DONE | TaskComposerService 独占组合草稿；Device/Execution ViewModel 从运行时快照派生状态；删除 MainWindow 平行布尔和 ExecutionBridge 控制双入口；1300 余行逐动作表单分支替换为唯一 schema 通用渲染与校验；新增边界进入 Mypy | 348 tests + 32 subtests，覆盖率 55.09%；21 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-03 | M4 | D/G | GUI 通知、协作与关闭生命周期收敛 | D-011 TODO → DONE | 新增 typed GuiNotificationCenter；MainWindow 删除直接 QMessageBox 和散落日志出口；通知通过 QObject signal 回到 GUI 线程；AI Assistant 删除 MainWindow 反向引用并改用窄 Qt 信号；活动执行关闭时立即请求取消，相机/交互先非阻塞停止，事件循环退出后按有界预算等待 | 352 tests + 32 subtests，覆盖率 55.30%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
+| 2026-08-03 | M4 | D/G | GUI 稳定视图域拆分 | D-013/D-014 TODO → DONE | 提取 ActionLibraryView、WorkflowEditorView、DeviceStatusView、DeviceControlView；MainWindow 删除约 800 行控件构造与旧属性，改为连接参数化意图信号和调用渲染接口，不保留兼容别名；新增组件进入 Mypy | 352 tests + 32 subtests，覆盖率 55.34%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 
 ## 22. 建议的首批实施顺序
 

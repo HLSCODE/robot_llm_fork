@@ -93,11 +93,23 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             self.services.device_runtime.get_if_ready(BODY_AXIS)
         )
         self.assertTrue(
-            self.window.ai_assistant_widget.simulation_checkbox.isChecked()
+            self.window.action_library_view.ai_assistant.simulation_checkbox.isChecked()
         )
         self.assertFalse(
-            self.window.ai_assistant_widget.simulation_checkbox.isEnabled()
+            self.window.action_library_view.ai_assistant.simulation_checkbox.isEnabled()
         )
+        self.assertIsNotNone(self.window.workflow_view.sequence_list)
+        self.assertIsNotNone(self.window.device_status_view)
+        self.assertIsNotNone(self.window.device_control_view)
+        for removed_alias in (
+            "sequence_list",
+            "control_panel",
+            "task_composer_list",
+            "ai_assistant_widget",
+            "robot1_status_indicator",
+            "gripper_open_btn",
+        ):
+            self.assertFalse(hasattr(self.window, removed_alias))
 
         self.window.close()
         QApplication.processEvents()
@@ -119,31 +131,31 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         )
         self.assertTrue(
             _wait_until(
-                lambda: self.window.sequence_list.topLevelItemCount() == 1
+                lambda: self.window.workflow_view.sequence_list.topLevelItemCount() == 1
             )
         )
 
-        self.window.control_panel.start_btn.click()
+        self.window.workflow_view.control_panel.start_btn.click()
         self.assertTrue(
             _wait_until(
                 lambda: (
                     self.services.execution.snapshot().state
                     is ExecutionState.RUNNING
-                    and self.window.control_panel.pause_btn.isEnabled()
+                    and self.window.workflow_view.control_panel.pause_btn.isEnabled()
                 )
             )
         )
 
-        self.window.control_panel.pause_btn.click()
+        self.window.workflow_view.control_panel.pause_btn.click()
         self.assertTrue(
             _wait_until(
                 lambda: self.services.execution.snapshot().state
                 is ExecutionState.PAUSED
             )
         )
-        self.assertIn("继续", self.window.control_panel.pause_btn.text())
+        self.assertIn("继续", self.window.workflow_view.control_panel.pause_btn.text())
 
-        self.window.control_panel.pause_btn.click()
+        self.window.workflow_view.control_panel.pause_btn.click()
         self.assertTrue(
             _wait_until(
                 lambda: self.services.execution.snapshot().state
@@ -151,7 +163,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             )
         )
 
-        self.window.control_panel.stop_btn.click()
+        self.window.workflow_view.control_panel.stop_btn.click()
         self.assertTrue(
             _wait_until(
                 lambda: self.services.execution.snapshot().state
@@ -164,7 +176,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
                 in self.window.log_widget.toPlainText()
             )
         )
-        self.assertEqual("⏸ 暂停", self.window.control_panel.pause_btn.text())
+        self.assertEqual("⏸ 暂停", self.window.workflow_view.control_panel.pause_btn.text())
         self.assertEqual({}, self.services.resources.snapshot())
 
     def test_task_composer_widget_renders_service_owned_draft(self) -> None:
@@ -183,7 +195,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.window._add_action_to_composer(first, 0)
         self.window._add_action_to_composer(second, 1)
 
-        self.window.task_composer_list.order_changed.emit(0, 1)
+        self.window.workflow_view.task_composer_list.order_changed.emit(0, 1)
 
         entries = self.services.task_composer.entries()
         self.assertEqual(
@@ -191,7 +203,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             [entry.action.id for entry in entries],
         )
         self.assertTrue(
-            self.window.task_composer_list.item(0).data(
+            self.window.workflow_view.task_composer_list.item(0).data(
                 Qt.ItemDataRole.UserRole
             )
         )
@@ -206,8 +218,8 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             )
         )
 
-        self.assertFalse(hasattr(self.window.ai_assistant_widget, "_main_window"))
-        self.window.ai_assistant_widget.sequence_visualization_requested.emit(
+        self.assertFalse(hasattr(self.window.action_library_view.ai_assistant, "_main_window"))
+        self.window.action_library_view.ai_assistant.sequence_visualization_requested.emit(
             [item],
             True,
             0,
@@ -276,7 +288,7 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 window.startup_state,
             )
 
-            window.ai_assistant_widget.speech_runtime_startup_finished.emit(True)
+            window.action_library_view.ai_assistant.speech_runtime_startup_finished.emit(True)
             self.assertTrue(
                 _wait_until(
                     lambda: window.startup_state is GuiStartupState.READY

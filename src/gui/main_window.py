@@ -1,4 +1,3 @@
-import json
 import math
 import time
 from collections.abc import Sequence
@@ -6,22 +5,16 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from PyQt6.QtCore import QMimeData, QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QDrag, QIcon
+from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QFrame,
-    QGroupBox,
-    QHBoxLayout,
     QInputDialog,
-    QLabel,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
-    QPushButton,
     QSplitter,
-    QTabWidget,
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -50,158 +43,16 @@ from ..device_runtime.ids import (
     MOBILE_BASE,
     ROBOT_SYSTEM,
 )
-from ..widgets import ActionListWidget, ControlPanel, LogWidget, SequenceListWidget
-from ..widgets.ai_assistant import AIAssistantWidget
+from ..widgets import LogWidget
 from .composition_bridge import CompositionBridge
+from .device_view import DeviceControlView, DeviceStatusView
 from .dialogs import ActionConfigDialog
 from .notifications import GuiNotificationCenter
 from .startup import GuiStartupLifecycle, GuiStartupState
 from .view_models import DeviceViewModel, ExecutionViewModel
+from .workflow_view import ActionLibraryView, WorkflowEditorView
 
 
-class TaskLibraryListWidget(QListWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setDragEnabled(True)
-        self.setViewMode(QListWidget.ViewMode.ListMode)
-        self.setIconSize(QSize(28, 28))
-        self.setSpacing(2)
-        self.setResizeMode(QListWidget.ResizeMode.Adjust)
-
-    def startDrag(self, supportedActions):
-        current_item = self.currentItem()
-        if current_item is None:
-            return
-
-        task_name = current_item.data(Qt.ItemDataRole.UserRole)
-        if not task_name:
-            return
-
-        mime = QMimeData()
-        mime.setData("application/x-task-name", task_name.encode("utf-8"))
-
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        drag.setPixmap(current_item.icon().pixmap(50, 50))
-        drag.exec(Qt.DropAction.CopyAction)
-
-
-class TaskComposerListWidget(QListWidget):
-    order_changed = pyqtSignal(int, int)
-    task_dropped = pyqtSignal(str, int)
-    action_dropped = pyqtSignal(object, int)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setDragEnabled(True)
-        self.setDropIndicatorShown(True)
-        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self.setViewMode(QListWidget.ViewMode.IconMode)
-        self.setFlow(QListWidget.Flow.LeftToRight)
-        self.setSpacing(12)
-        self.setIconSize(QSize(130, 88))
-        self.setStyleSheet("""
-            QListWidget {
-                background-color: #f8fafc;
-                border: 2px dashed #cbd5e1;
-                border-radius: 12px;
-                padding: 4px;
-            }
-            QListWidget::item {
-                border: 2px solid transparent;
-                border-radius: 10px;
-                padding: 1px;
-                font-size: 11px;
-                font-weight: bold;
-                background: transparent;
-            }
-            QListWidget::item:hover {
-                border-color: #93c5fd;
-                background: rgba(59, 130, 246, 0.06);
-            }
-            QListWidget::item:selected {
-                border: 2px solid #3b82f6;
-                background: rgba(59, 130, 246, 0.10);
-            }
-        """)
-
-    def startDrag(self, supportedActions):
-        current_item = self.currentItem()
-        if current_item is None:
-            return
-
-        entry = current_item.data(Qt.ItemDataRole.UserRole)
-        if not entry:
-            return
-
-        payload = {
-            "row": self.currentRow(),
-        }
-        mime = QMimeData()
-        mime.setData("application/x-task-composer-item", json.dumps(payload).encode("utf-8"))
-
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        drag.setPixmap(current_item.icon().pixmap(80, 54))
-        drag.exec(Qt.DropAction.MoveAction)
-
-    def dragEnterEvent(self, event):
-        if (
-            event.mimeData().hasFormat("application/x-task-name")
-            or event.mimeData().hasFormat("application/x-action")
-            or event.mimeData().hasFormat("application/x-task-composer-item")
-        ):
-            event.accept()
-        else:
-            event.ignore()
-
-    def dragMoveEvent(self, event):
-        if (
-            event.mimeData().hasFormat("application/x-task-name")
-            or event.mimeData().hasFormat("application/x-action")
-            or event.mimeData().hasFormat("application/x-task-composer-item")
-        ):
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event):
-        insert_row = self._drop_row(event)
-
-        if event.mimeData().hasFormat("application/x-task-composer-item"):
-            payload = json.loads(bytes(event.mimeData().data("application/x-task-composer-item")).decode("utf-8"))
-            source_row = payload["row"]
-            if 0 <= source_row < self.count():
-                if source_row < insert_row:
-                    insert_row -= 1
-                insert_row = min(insert_row, self.count() - 1)
-                self.order_changed.emit(source_row, insert_row)
-                event.accept()
-            return
-
-        if event.mimeData().hasFormat("application/x-task-name"):
-            task_name = bytes(event.mimeData().data("application/x-task-name")).decode("utf-8")
-            self.task_dropped.emit(task_name, insert_row)
-            event.accept()
-            return
-
-        if event.mimeData().hasFormat("application/x-action"):
-            data = event.mimeData().data("application/x-action")
-            action_dict = json.loads(bytes(data).decode("utf-8"))
-            action = ActionDefinition.from_dict(action_dict)
-            self.action_dropped.emit(action, insert_row)
-            event.accept()
-            return
-
-        event.ignore()
-
-    def _drop_row(self, event) -> int:
-        position = event.position().toPoint() if hasattr(event, "position") else event.pos()
-        item = self.itemAt(position)
-        if item is None:
-            return self.count()
-        return self.row(item)
 class MainWindow(QMainWindow):
     def __init__(self, services: ApplicationServices):
         super().__init__()
@@ -246,7 +97,7 @@ class MainWindow(QMainWindow):
             self._on_composition_changed,
             Qt.ConnectionType.QueuedConnection,
         )
-        self.sequence_list.sequence_changed.connect(
+        self.workflow_view.sequence_list.sequence_changed.connect(
             self._publish_current_sequence
         )
         self.load_actions()
@@ -266,21 +117,22 @@ class MainWindow(QMainWindow):
         )
         self._render_execution_state()
 
-        if hasattr(self, 'ai_assistant_widget'):
-            self.ai_assistant_widget.speech_runtime_startup_finished.connect(
+        ai_assistant = self.action_library_view.ai_assistant
+        if ai_assistant is not None:
+            ai_assistant.speech_runtime_startup_finished.connect(
                 self.initialize_startup_hardware
             )
-            self.ai_assistant_widget.welcome_task_execution_requested.connect(
+            ai_assistant.welcome_task_execution_requested.connect(
                 self.execute_wake_welcome_task
             )
-            self.ai_assistant_widget.sequence_visualization_requested.connect(
+            ai_assistant.sequence_visualization_requested.connect(
                 self.add_ai_sequence
             )
-            self.ai_assistant_widget.step_started.connect(self.on_step_started)
-            self.ai_assistant_widget.step_completed.connect(self.on_step_completed)
-            self.ai_assistant_widget.step_failed.connect(self.on_step_failed)
-            self.ai_assistant_widget.loop_progress.connect(self.on_loop_progress)
-            self.ai_assistant_widget.execution_completed.connect(
+            ai_assistant.step_started.connect(self.on_step_started)
+            ai_assistant.step_completed.connect(self.on_step_completed)
+            ai_assistant.step_failed.connect(self.on_step_failed)
+            ai_assistant.loop_progress.connect(self.on_loop_progress)
+            ai_assistant.execution_completed.connect(
                 self.on_execution_completed
             )
         self.start_startup_initialization()
@@ -301,9 +153,10 @@ class MainWindow(QMainWindow):
 
         try:
             speech_start_requested = False
-            if hasattr(self, 'ai_assistant_widget'):
+            ai_assistant = self.action_library_view.ai_assistant
+            if ai_assistant is not None:
                 speech_start_requested = (
-                    self.ai_assistant_widget.start_voice_speech_runtime_if_configured()
+                    ai_assistant.start_voice_speech_runtime_if_configured()
                 )
         except Exception:
             self._startup_lifecycle.mark_failed()
@@ -349,8 +202,7 @@ class MainWindow(QMainWindow):
         """Continue hardware startup if ASR/KWS first-load is still downloading."""
         if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
             return
-        if hasattr(self, "ai_assistant_widget"):
-            self.ai_assistant_widget.notify_speech_startup_wait_timeout()
+        self.action_library_view.ai_assistant.notify_speech_startup_wait_timeout()
         self.initialize_startup_hardware(False)
 
     def init_ui(self):
@@ -369,25 +221,79 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # 顶部：设备状态栏（加高，双行显示）
-        self.status_bar = self.create_status_bar()
-        layout.addWidget(self.status_bar)
-
-        self.pose_panel = self.create_pose_panel()
-        layout.addWidget(self.pose_panel)
+        self.device_status_view = DeviceStatusView()
+        layout.addWidget(self.device_status_view)
 
         # 底部：横向 Splitter，左=动作库，右=序列+控制+日志
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        left_panel = self.create_left_panel()
-        right_panel = self.create_right_panel()
+        self.action_library_view = ActionLibraryView(self._services)
+        self.workflow_view = WorkflowEditorView()
+        self.device_control_view = DeviceControlView()
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(2, 2, 2, 2)
+        right_layout.setSpacing(2)
+        right_layout.addWidget(self.workflow_view, stretch=1)
+        right_layout.addWidget(self.device_control_view)
+        self.log_widget = LogWidget()
+        right_layout.addWidget(self.log_widget)
 
-        splitter.addWidget(left_panel)
+        self._connect_view_signals()
+
+        splitter.addWidget(self.action_library_view)
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
 
         layout.addWidget(splitter, stretch=1)
+
+        self.pose_timer = QTimer(self)
+        self.pose_timer.setInterval(1000)
+        self.pose_timer.timeout.connect(self.refresh_arm_poses)
+        self.pose_timer.start()
+
+    def _connect_view_signals(self) -> None:
+        library = self.action_library_view
+        library.create_requested.connect(self.create_action)
+        library.edit_requested.connect(self.edit_action)
+        library.delete_requested.connect(self.delete_action)
+        library.camera_test_requested.connect(self.test_camera)
+        library.task_add_requested.connect(self.add_task_to_composer)
+
+        workflow = self.workflow_view
+        workflow.start_requested.connect(self.start_execution)
+        workflow.pause_requested.connect(self.toggle_pause)
+        workflow.stop_requested.connect(self.stop_execution)
+        workflow.safety_stop_requested.connect(self.request_safety_stop)
+        workflow.move_up_requested.connect(self.move_item_up)
+        workflow.move_down_requested.connect(self.move_item_down)
+        workflow.edit_requested.connect(self.edit_sequence_item)
+        workflow.repeat_requested.connect(self.repeat_sequence_selection)
+        workflow.delete_requested.connect(self.delete_item)
+        workflow.clear_requested.connect(self.clear_sequence)
+        workflow.save_requested.connect(self.save_task)
+        workflow.load_requested.connect(self.load_task)
+        workflow.composer_remove_requested.connect(self.remove_task_from_composer)
+        workflow.composer_move_up_requested.connect(self.move_composed_task_up)
+        workflow.composer_move_down_requested.connect(self.move_composed_task_down)
+        workflow.composer_repeat_requested.connect(self.repeat_composer_selection)
+        workflow.composer_clear_requested.connect(self.clear_task_composer)
+        workflow.composer_refresh_requested.connect(self.refresh_task_library)
+        workflow.composer_add_requested.connect(self.add_task_to_composer)
+        workflow.composer_execute_requested.connect(self.execute_composed_task)
+        workflow.composer_save_requested.connect(self.save_composed_task)
+        workflow.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
+        workflow.task_composer_list.action_dropped.connect(self._add_action_to_composer)
+        workflow.task_composer_list.order_changed.connect(self._move_composed_task_rows)
+
+        device_status = self.device_status_view
+        device_status.refresh_requested.connect(self.refresh_arm_poses)
+        device_status.copy_pose_requested.connect(self.copy_robot_pose)
+        controls = self.device_control_view
+        controls.gripper_requested.connect(self._set_gripper_state)
+        controls.relay_requested.connect(self._set_relay_state)
+        controls.pipette_eject_requested.connect(self.eject_pipette_tip)
 
     def create_menu(self):
         menubar = self.menuBar()
@@ -562,403 +468,33 @@ class MainWindow(QMainWindow):
         }
         """
 
-    def create_left_panel(self) -> QWidget:
-        """动作库面板：Tab横向标签 + 动作列表（受Splitter宽度控制）+ 按钮"""
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(2)
-
-        # Tab 标签横向排列（标签在顶部）
-        self.action_tabs = QTabWidget()
-        self.action_tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self.action_tabs.setMovable(False)
-
-        self.move_list = ActionListWidget()
-        self.manipulate_list = ActionListWidget()
-        self.inspect_list = ActionListWidget()
-        self.change_gun_list = ActionListWidget()
-        self.vision_capture_list = ActionListWidget()
-        self.trajectory_list = ActionListWidget()
-
-        self.action_tabs.addTab(self.move_list, "移动类")
-        self.action_tabs.addTab(self.manipulate_list, "执行类")
-        self.action_tabs.addTab(self.inspect_list, "检测类")
-        self.action_tabs.addTab(self.change_gun_list, "换枪类")
-        self.action_tabs.addTab(self.vision_capture_list, "视觉类")
-
-        # AI助手 Tab
-        self.ai_assistant_widget = AIAssistantWidget(self._services)
-        self.action_tabs.addTab(self.ai_assistant_widget, "🤖 AI助手")
-
-        self.action_tabs.addTab(self.trajectory_list, "轨迹类")
-
-        layout.addWidget(self.action_tabs, stretch=2)
-
-        task_library_group = QGroupBox("已保存任务")
-        task_library_layout = QVBoxLayout(task_library_group)
-        task_library_layout.setContentsMargins(6, 6, 6, 6)
-        task_library_layout.setSpacing(4)
-        self.task_library_list = TaskLibraryListWidget()
-        self.task_library_list.setMinimumHeight(140)
-        self.task_library_list.itemDoubleClicked.connect(lambda _: self.add_task_to_composer())
-        task_library_layout.addWidget(self.task_library_list)
-        layout.addWidget(task_library_group, stretch=1)
-        self.refresh_task_library()
-
-        # 底部按钮行
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(4)
-        self.create_btn = QPushButton("新建动作")
-        self.create_btn.setMinimumHeight(32)
-        self.create_btn.clicked.connect(self.create_action)
-        self.edit_btn = QPushButton("修改动作")
-        self.edit_btn.setMinimumHeight(32)
-        self.edit_btn.clicked.connect(self.edit_action)
-        self.delete_btn = QPushButton("删除动作")
-        self.delete_btn.setMinimumHeight(32)
-        self.delete_btn.clicked.connect(self.delete_action)
-        btn_layout.addWidget(self.create_btn)
-        btn_layout.addWidget(self.edit_btn)
-        btn_layout.addWidget(self.delete_btn)
-
-        self.test_camera_btn = QPushButton("📷 测试相机")
-        self.test_camera_btn.setMinimumHeight(32)
-        self.test_camera_btn.setStyleSheet("""
-            QPushButton { background: #10b981; color: #fff; font-weight: 700; border: none; border-radius: 6px; padding: 6px 12px; }
-            QPushButton:hover { background: #059669; }
-        """)
-        self.test_camera_btn.clicked.connect(self.test_camera)
-        btn_layout.addWidget(self.test_camera_btn)
-        layout.addLayout(btn_layout)
-
-        return panel
-
-    def create_right_panel(self) -> QWidget:
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(2, 2, 2, 2)
-        layout.setSpacing(2)
-
-        self.workflow_tabs = QTabWidget()
-        self.workflow_tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self.workflow_tabs.setMovable(False)
-
-        action_page = QWidget()
-        action_layout = QVBoxLayout(action_page)
-        action_layout.setContentsMargins(2, 2, 2, 2)
-        action_layout.setSpacing(2)
-
-        self.sequence_list = SequenceListWidget()
-        self.sequence_list.setMinimumHeight(140)
-        action_layout.addWidget(self.sequence_list, stretch=2)
-
-        self.control_panel = ControlPanel()
-        self.control_panel.start_clicked.connect(self.start_execution)
-        self.control_panel.pause_clicked.connect(self.toggle_pause)
-        self.control_panel.stop_clicked.connect(self.stop_execution)
-        self.control_panel.quick_stop_clicked.connect(
-            lambda: self.request_safety_stop(StopMode.QUICK)
-        )
-        self.control_panel.emergency_stop_clicked.connect(
-            lambda: self.request_safety_stop(StopMode.EMERGENCY)
-        )
-        self.control_panel.move_up_clicked.connect(self.move_item_up)
-        self.control_panel.move_down_clicked.connect(self.move_item_down)
-        self.control_panel.edit_clicked.connect(self.edit_sequence_item)
-        self.control_panel.repeat_clicked.connect(self.repeat_sequence_selection)
-        self.control_panel.delete_clicked.connect(self.delete_item)
-        self.control_panel.clear_clicked.connect(self.clear_sequence)
-        self.control_panel.save_clicked.connect(self.save_task)
-        self.control_panel.load_clicked.connect(self.load_task)
-        action_layout.addWidget(self.control_panel)
-
-        task_page = QWidget()
-        task_layout = QVBoxLayout(task_page)
-        task_layout.setContentsMargins(2, 2, 2, 2)
-        task_layout.setSpacing(2)
-        self.task_composer_panel = self.create_task_composer_panel()
-        task_layout.addWidget(self.task_composer_panel, stretch=1)
-
-        self.workflow_tabs.addTab(action_page, "动作编排")
-        self.workflow_tabs.addTab(task_page, "任务组合")
-        layout.addWidget(self.workflow_tabs, stretch=1)
-
-        self.basic_control_panel = self.create_basic_control_panel()
-        layout.addWidget(self.basic_control_panel)
-
-        self.log_widget = LogWidget()
-        layout.addWidget(self.log_widget)
-
-        return panel
-    def create_task_composer_panel(self) -> QWidget:
-        panel = QGroupBox("任务组合器")
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
-
-        composer_layout = QVBoxLayout()
-        composer_title = QLabel("组合计划")
-        composer_title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
-        self.task_composer_list = TaskComposerListWidget()
-        self.task_composer_list.setMinimumHeight(140)
-        self.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
-        self.task_composer_list.action_dropped.connect(self._add_action_to_composer)
-        self.task_composer_list.order_changed.connect(self._move_composed_task_rows)
-        composer_layout.addWidget(composer_title)
-        composer_layout.addWidget(self.task_composer_list)
-        layout.addLayout(composer_layout, stretch=1)
-
-        # Row 1: 编辑操作 — 与动作编排的控制面板顺序一致
-        edit_row = QHBoxLayout()
-        edit_row.setSpacing(4)
-        self.task_up_btn = QPushButton("↑ 上移")
-        self.task_up_btn.setMinimumHeight(28)
-        self.task_up_btn.clicked.connect(self.move_composed_task_up)
-        self.task_down_btn = QPushButton("↓ 下移")
-        self.task_down_btn.setMinimumHeight(28)
-        self.task_down_btn.clicked.connect(self.move_composed_task_down)
-        self.task_repeat_btn = QPushButton("🔁 循环")
-        self.task_repeat_btn.setMinimumHeight(28)
-        self.task_repeat_btn.clicked.connect(self.repeat_composer_selection)
-        self.remove_task_btn = QPushButton("🗑 移除")
-        self.remove_task_btn.setMinimumHeight(28)
-        self.remove_task_btn.clicked.connect(self.remove_task_from_composer)
-        self.clear_composer_btn = QPushButton("✕ 清空")
-        self.clear_composer_btn.setMinimumHeight(28)
-        self.clear_composer_btn.clicked.connect(self.clear_task_composer)
-        edit_row.addWidget(self.task_up_btn)
-        edit_row.addWidget(self.task_down_btn)
-        edit_row.addWidget(self.task_repeat_btn)
-        edit_row.addWidget(self.remove_task_btn)
-        edit_row.addWidget(self.clear_composer_btn)
-        layout.addLayout(edit_row)
-
-        # Row 2: 文件操作 — 与保存/载入对应
-        file_row = QHBoxLayout()
-        file_row.setSpacing(4)
-        self.refresh_tasks_btn = QPushButton("🔄 刷新")
-        self.refresh_tasks_btn.setMinimumHeight(28)
-        self.refresh_tasks_btn.clicked.connect(self.refresh_task_library)
-        self.add_task_btn = QPushButton("＋ 添加")
-        self.add_task_btn.setMinimumHeight(28)
-        self.add_task_btn.clicked.connect(self.add_task_to_composer)
-        file_row.addWidget(self.refresh_tasks_btn)
-        file_row.addWidget(self.add_task_btn)
-        layout.addLayout(file_row)
-
-        # Row 3: 执行操作 — 与动作编排控制面板一致
-        exec_row = QHBoxLayout()
-        exec_row.setSpacing(4)
-        self.execute_composed_task_btn = QPushButton("▶ 执行当前组合")
-        self.execute_composed_task_btn.setMinimumHeight(32)
-        self.execute_composed_task_btn.setStyleSheet("""
-            QPushButton { background: #22c55e; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #16a34a; }
-        """)
-        self.execute_composed_task_btn.clicked.connect(self.execute_composed_task)
-        self.pause_composed_task_btn = QPushButton("⏸ 暂停")
-        self.pause_composed_task_btn.setMinimumHeight(32)
-        self.pause_composed_task_btn.setStyleSheet("""
-            QPushButton { background: #f59e0b; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #d97706; }
-        """)
-        self.pause_composed_task_btn.clicked.connect(self.toggle_pause)
-        exec_row.addWidget(self.execute_composed_task_btn)
-        exec_row.addWidget(self.pause_composed_task_btn)
-        layout.addLayout(exec_row)
-
-        # Row 4: 停止 + 保存
-        stop_row = QHBoxLayout()
-        stop_row.setSpacing(4)
-        self.stop_composed_task_btn = QPushButton("⏹ 停止任务")
-        self.stop_composed_task_btn.setMinimumHeight(32)
-        self.stop_composed_task_btn.setAccessibleName("停止任务")
-        self.stop_composed_task_btn.setToolTip(
-            "请求当前任务在可中断点停止；不会触发设备硬件急停"
-        )
-        self.stop_composed_task_btn.setStyleSheet("""
-            QPushButton { background: #ef4444; color: #fff; font-weight: 700; border: none; border-radius: 6px; font-size: 14px; }
-            QPushButton:hover { background: #dc2626; }
-        """)
-        self.stop_composed_task_btn.clicked.connect(self.stop_execution)
-        self.save_combined_task_btn = QPushButton("💾 保存组合")
-        self.save_combined_task_btn.setMinimumHeight(32)
-        self.save_combined_task_btn.setStyleSheet("""
-            QPushButton { background: #3b82f6; color: #fff; font-weight: 700; border: none; border-radius: 6px; }
-            QPushButton:hover { background: #2563eb; }
-        """)
-        self.save_combined_task_btn.clicked.connect(self.save_composed_task)
-        stop_row.addWidget(self.stop_composed_task_btn)
-        stop_row.addWidget(self.save_combined_task_btn)
-        layout.addLayout(stop_row)
-
-        return panel
-
-    def create_pose_panel(self) -> QWidget:
-        panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
-
-        header_layout = QHBoxLayout()
-        title = QLabel("📍 机械臂位姿")
-        title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
-        self.refresh_pose_btn = QPushButton("刷新")
-        self.refresh_pose_btn.setFixedHeight(24)
-        self.refresh_pose_btn.clicked.connect(self.refresh_arm_poses)
-        header_layout.addWidget(title)
-        header_layout.addStretch()
-        header_layout.addWidget(self.refresh_pose_btn)
-        layout.addLayout(header_layout)
-
-        self.robot1_pose_value_label, self.copy_robot1_pose_btn = self._build_pose_row(layout, "R1")
-        self.robot2_pose_value_label, self.copy_robot2_pose_btn = self._build_pose_row(layout, "R2")
-        self.localization_pose_value_label = self._build_localization_row(layout)
-
-        self.pose_timer = QTimer(self)
-        self.pose_timer.setInterval(1000)
-        self.pose_timer.timeout.connect(self.refresh_arm_poses)
-        self.pose_timer.start()
-
-        return panel
-
-    def create_basic_control_panel(self) -> QWidget:
-        panel = QFrame()
-        panel.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
-
-        title = QLabel("🎮 基础控制")
-        title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
-        layout.addWidget(title)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(6)
-
-        self.gripper_open_btn = QPushButton("🔓 夹爪打开")
-        self.gripper_open_btn.setMinimumHeight(28)
-        self.gripper_open_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
-            QPushButton:hover { background: #f0fdf4; border-color: #22c55e; color: #16a34a; }
-        """)
-        self.gripper_open_btn.clicked.connect(self.on_gripper_open_clicked)
-
-        self.gripper_close_btn = QPushButton("🔒 夹爪关闭")
-        self.gripper_close_btn.setMinimumHeight(28)
-        self.gripper_close_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
-            QPushButton:hover { background: #fef2f2; border-color: #ef4444; color: #dc2626; }
-        """)
-        self.gripper_close_btn.clicked.connect(self.on_gripper_close_clicked)
-
-        self.init_pipette_btn = QPushButton("💉 退枪头")
-        self.init_pipette_btn.setMinimumHeight(28)
-        self.init_pipette_btn.setStyleSheet("""
-            QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
-            QPushButton:hover { background: #fffbeb; border-color: #f59e0b; color: #d97706; }
-        """)
-        self.init_pipette_btn.clicked.connect(self.eject_pipette_tip)
-
-        btn_layout.addWidget(self.gripper_open_btn)
-        btn_layout.addWidget(self.gripper_close_btn)
-        btn_layout.addWidget(self.init_pipette_btn)
-        layout.addLayout(btn_layout)
-
-        relay_group = QGroupBox("继电器控制")
-        relay_layout = QVBoxLayout(relay_group)
-        relay_layout.setContentsMargins(8, 6, 8, 6)
-        relay_layout.setSpacing(6)
-
-        relay_btn_row = QHBoxLayout()
-        relay_btn_row.setSpacing(6)
-        self.relay_y1_on_btn = QPushButton("Y1 开")
-        self.relay_y1_off_btn = QPushButton("Y1 关")
-        self.relay_y2_on_btn = QPushButton("Y2 开")
-        self.relay_y2_off_btn = QPushButton("Y2 关")
-        for btn in (
-            self.relay_y1_on_btn, self.relay_y1_off_btn,
-            self.relay_y2_on_btn, self.relay_y2_off_btn,
-        ):
-            btn.setMinimumHeight(28)
-            btn.setStyleSheet("""
-                QPushButton { border: 1px solid #e2e8f0; border-radius: 6px; font-weight: 500; }
-                QPushButton:hover { background: #f8fafc; }
-            """)
-            relay_btn_row.addWidget(btn)
-
-        self.relay_y1_on_btn.clicked.connect(lambda: self._set_relay_state("Y1", True))
-        self.relay_y1_off_btn.clicked.connect(lambda: self._set_relay_state("Y1", False))
-        self.relay_y2_on_btn.clicked.connect(lambda: self._set_relay_state("Y2", True))
-        self.relay_y2_off_btn.clicked.connect(lambda: self._set_relay_state("Y2", False))
-        relay_layout.addLayout(relay_btn_row)
-        layout.addWidget(relay_group)
-        self.relay_group = relay_group
-
-        self.update_basic_control_buttons()
-        return panel
-
-    def update_basic_control_buttons(self):
-        state = self._device_view_model.snapshot()
-        gripper_ready = state.robot_ready
-        if hasattr(self, "gripper_open_btn"):
-            self.gripper_open_btn.setEnabled(gripper_ready)
-        if hasattr(self, "gripper_close_btn"):
-            self.gripper_close_btn.setEnabled(gripper_ready)
-        relay_ready = state.relay_ready
-        for attr in ("relay_y1_on_btn", "relay_y1_off_btn", "relay_y2_on_btn", "relay_y2_off_btn"):
-            if hasattr(self, attr):
-                getattr(self, attr).setEnabled(relay_ready)
-
-    def _set_relay_state(self, channel: str, turn_on: bool):
+    def _set_relay_state(self, channel: int, turn_on: bool):
         action_text = "打开" if turn_on else "关闭"
         try:
-            channel_number = {"Y1": 1, "Y2": 2}[channel]
-            self._services.manual_control.set_relay(
-                channel_number,
-                turn_on,
-            )
-            self._notifications.info(f"继电器 {channel} 已{action_text}")
+            self._services.manual_control.set_relay(channel, turn_on)
+            self._notifications.info(f"继电器 Y{channel} 已{action_text}")
         except Exception as e:
             self._notifications.warning(
-                f"继电器 {channel} {action_text}失败:\n{e}"
+                f"继电器 Y{channel} {action_text}失败:\n{e}"
             )
 
-    def on_gripper_open_clicked(self):
+    def _set_gripper_state(self, opened: bool) -> None:
         if not self._device_view_model.snapshot().robot_ready:
             self._notifications.warning("Robot1 未连接")
             return
 
+        action = "打开" if opened else "关闭"
         try:
             success = self._services.manual_control.set_gripper(
                 "left",
-                opened=True,
+                opened=opened,
             )
             if success:
-                self._notifications.info("Robot1 夹爪已打开")
+                self._notifications.info(f"Robot1 夹爪已{action}")
             else:
-                self._notifications.warning("Robot1 夹爪打开失败")
+                self._notifications.warning(f"Robot1 夹爪{action}失败")
         except Exception as e:
-            self._notifications.warning(f"Robot1 夹爪打开异常: {e}")
-
-    def on_gripper_close_clicked(self):
-        if not self._device_view_model.snapshot().robot_ready:
-            self._notifications.warning("Robot1 未连接")
-            return
-
-        try:
-            success = self._services.manual_control.set_gripper(
-                "left",
-                opened=False,
-            )
-            if success:
-                self._notifications.info("Robot1 夹爪已关闭")
-            else:
-                self._notifications.warning("Robot1 夹爪关闭失败")
-        except Exception as e:
-            self._notifications.warning(f"Robot1 夹爪关闭异常: {e}")
+            self._notifications.warning(f"Robot1 夹爪{action}异常: {e}")
 
     def record_trajectory(self, robot_name: str):
         if self.robot_system is None:
@@ -1064,7 +600,7 @@ class MainWindow(QMainWindow):
         return trajectory_dir / f"trajectory_{next_number:03d}.txt"
 
     def _set_trajectory_buttons_enabled(self, enabled: bool):
-        self.update_basic_control_buttons()
+        self._render_device_state()
         if not enabled:
             for attr in (
                 "record_robot1_path_btn",
@@ -1083,51 +619,12 @@ class MainWindow(QMainWindow):
         if self.pose_timer is not None and not self.pose_timer.isActive():
             self.pose_timer.start()
 
-    def _build_pose_row(self, parent_layout: QVBoxLayout, robot_label: str):
-        row = QHBoxLayout()
-        row_label = QLabel(f"{robot_label}:")
-        row_label.setFixedWidth(28)
-        row_label.setStyleSheet("font-weight: 700; color: #334155;")
-
-        pose_label = QLabel("--")
-        pose_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-
-        copy_btn = QPushButton("复制")
-        copy_btn.setFixedHeight(24)
-        copy_btn.clicked.connect(lambda _, name=robot_label.lower().replace("r", "robot"): self.copy_robot_pose(name))
-
-        row.addWidget(row_label)
-        row.addWidget(pose_label, stretch=1)
-        row.addWidget(copy_btn)
-        parent_layout.addLayout(row)
-
-        return pose_label, copy_btn
-
-    def _build_localization_row(self, parent_layout: QVBoxLayout):
-        row = QHBoxLayout()
-        row_label = QLabel("底盘:")
-        row_label.setFixedWidth(36)
-        row_label.setStyleSheet("font-weight: 700; color: #334155;")
-
-        localization_label = QLabel("--")
-        localization_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        localization_label.setStyleSheet("color: #64748b;")
-
-        row.addWidget(row_label)
-        row.addWidget(localization_label, stretch=1)
-        parent_layout.addLayout(row)
-
-        return localization_label
-
     def refresh_arm_poses(self):
         self._refresh_single_robot_pose("robot1")
         self._refresh_single_robot_pose("robot2")
         self.refresh_localization_position()
 
     def refresh_localization_position(self):
-        if not hasattr(self, "localization_pose_value_label"):
-            return
-
         try:
             receiver = self._services.localization
             position = receiver.latest(
@@ -1137,25 +634,24 @@ class MainWindow(QMainWindow):
             )
             if position is None:
                 error = receiver.last_error
-                self.localization_pose_value_label.setText(f"UDP -- ({error})" if error else "UDP --")
+                text = f"UDP -- ({error})" if error else "UDP --"
+                self.device_status_view.render_localization(text)
                 return
         except Exception as exc:
-            self.localization_pose_value_label.setText(f"UDP error: {exc}")
+            self.device_status_view.render_localization(f"UDP error: {exc}")
             return
 
-        self.localization_pose_value_label.setText(self.format_localization_text(position))
+        self.device_status_view.render_localization(self.format_localization_text(position))
 
     def _refresh_single_robot_pose(self, robot_name: str):
         pose = self._get_current_pose(robot_name)
-        label = self.robot1_pose_value_label if robot_name == "robot1" else self.robot2_pose_value_label
-
         if pose is None:
             self.robot_pose_cache[robot_name] = None
-            label.setText("--")
+            self.device_status_view.render_pose(robot_name, "--")
             return
 
         self.robot_pose_cache[robot_name] = pose
-        label.setText(self.format_pose_text(pose))
+        self.device_status_view.render_pose(robot_name, self.format_pose_text(pose))
 
     def _get_current_pose(self, robot_name: str):
         try:
@@ -1206,65 +702,6 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText(pose_text)
         self._notifications.info(f"已复制 {robot_name.upper()} 位姿: {pose_text}")
 
-    def create_status_bar(self) -> QWidget:
-        """设备状态栏：竖向两行，每行四个设备"""
-        bar = QFrame()
-        bar.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        bar.setMinimumHeight(72)
-        bar.setMaximumHeight(90)
-        layout = QVBoxLayout(bar)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(4)
-
-        title = QLabel("🔌 设备状态")
-        title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
-        layout.addWidget(title)
-
-        status_layout = QHBoxLayout()
-        status_layout.setSpacing(16)
-
-        def make_status_item(label_text: str, indicator_name: str):
-            """创建 [圆点 + 文字] 的水平组合"""
-            item_widget = QWidget()
-            item_layout = QHBoxLayout(item_widget)
-            item_layout.setContentsMargins(0, 0, 0, 0)
-            item_layout.setSpacing(4)
-            indicator = QLabel()
-            indicator.setFixedSize(16, 16)
-            indicator.setStyleSheet("background-color: #ef4444; border-radius: 8px;")
-            indicator.setObjectName(indicator_name + "_indicator")
-            text = QLabel(label_text)
-            text.setObjectName(indicator_name + "_status_text")
-            text.setStyleSheet("font-size: 12px;")
-            item_layout.addWidget(indicator)
-            item_layout.addWidget(text)
-            item_layout.addStretch()
-            return item_widget, indicator, text
-
-        r1_widget, self.robot1_status_indicator, r1_text = make_status_item("R1: 未连接", "robot1")
-        r1_text.setObjectName("robot1_status_text")
-        r2_widget, self.robot2_status_indicator, r2_text = make_status_item("R2: 未连接", "robot2")
-        r2_text.setObjectName("robot2_status_text")
-        body_widget, self.body_status_indicator, body_text = make_status_item("body: 未连接", "body")
-        body_text.setObjectName("body_status_text")
-        hand_widget, self.pipette_status_indicator, hand_text = make_status_item("hand: 未连接", "hand")
-        hand_text.setObjectName("hand_status_text")
-
-        # 存储文本标签引用，供 update_* 方法直接使用
-        self.robot1_status_text = r1_text
-        self.robot2_status_text = r2_text
-        self.body_status_text = body_text
-        self.hand_status_text = hand_text
-
-        status_layout.addWidget(r1_widget)
-        status_layout.addWidget(r2_widget)
-        status_layout.addWidget(body_widget)
-        status_layout.addWidget(hand_widget)
-        status_layout.addStretch()
-
-        layout.addLayout(status_layout)
-        return bar
-
     def initialize_robots(self):
         """初始化机械臂"""
         self._notifications.info("开始初始化机械臂...")
@@ -1295,21 +732,13 @@ class MainWindow(QMainWindow):
 
     def _render_device_state(self) -> None:
         state = self._device_view_model.snapshot()
-        for indicator, label, ready in (
-            (self.robot1_status_indicator, self.robot1_status_text, state.robot_ready),
-            (self.robot2_status_indicator, self.robot2_status_text, state.robot_ready),
-            (self.body_status_indicator, self.body_status_text, state.body_ready),
-            (self.pipette_status_indicator, self.hand_status_text, state.pipette_ready),
-        ):
-            color = "#22c55e" if ready else "#ef4444"
-            indicator.setStyleSheet(f"background-color: {color}; border-radius: 8px;")
-            label.setText("已连接" if ready else "未连接")
-        self.update_basic_control_buttons()
+        self.device_status_view.render_state(state)
+        self.device_control_view.render_state(state)
 
     def initialize_pipette(self):
         """Initialize the runtime-owned pipette."""
         self._notifications.info("开始初始化移液枪...")
-        self.init_pipette_btn.setEnabled(False)
+        self.device_control_view.set_pipette_action_enabled(False)
         try:
             success = self._services.manual_control.initialize_pipette()
             self._render_device_state()
@@ -1323,7 +752,7 @@ class MainWindow(QMainWindow):
             self._render_device_state()
             self._notifications.warning(f"移液枪初始化异常: {e}")
         finally:
-            self.init_pipette_btn.setEnabled(True)
+            self.device_control_view.set_pipette_action_enabled(True)
 
     def initialize_pipette_on_startup(self):
         """Initialize pipette automatically when app starts."""
@@ -1344,7 +773,7 @@ class MainWindow(QMainWindow):
 
     def eject_pipette_tip(self):
         """Eject pipette tip manually."""
-        self.init_pipette_btn.setEnabled(False)
+        self.device_control_view.set_pipette_action_enabled(False)
         try:
             self._notifications.info("正在退枪头...")
             success = self._services.manual_control.eject_pipette_tip()
@@ -1355,7 +784,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._notifications.warning(f"退枪头异常: {e}")
         finally:
-            self.init_pipette_btn.setEnabled(True)
+            self.device_control_view.set_pipette_action_enabled(True)
 
     def initialize_body(self):
         """初始化身体（ModbusMotor）"""
@@ -1381,7 +810,7 @@ class MainWindow(QMainWindow):
         return names
 
     def create_action(self):
-        current_tab = self.action_tabs.currentIndex()
+        current_tab = self.action_library_view.action_tabs.currentIndex()
         resolved = self._resolve_action_type_for_current_tab(current_tab)
         if resolved is None:
             return
@@ -1475,11 +904,11 @@ class MainWindow(QMainWindow):
         self._notifications.info(f"轨迹动作已创建: {name}")
 
     def delete_action(self):
-        current_tab = self.action_tabs.currentIndex()
+        current_tab = self.action_library_view.action_tabs.currentIndex()
         
         # 移动类 Tab 需要特殊处理，因为包含多种类型
         if current_tab == 0:
-            current_item = self.move_list.currentItem()
+            current_item = self.action_library_view.action_list(ActionType.MOVE).currentItem()
             if current_item is None:
                 self._notifications.warning("请先选择一个要删除的动作")
                 return
@@ -1504,11 +933,11 @@ class MainWindow(QMainWindow):
             return
 
         list_map = {
-            ActionType.MANIPULATE: self.manipulate_list,
-            ActionType.INSPECT: self.inspect_list,
-            ActionType.CHANGE_GUN: self.change_gun_list,
-            ActionType.VISION_CAPTURE: self.vision_capture_list,
-            ActionType.TRAJECTORY: self.trajectory_list
+            ActionType.MANIPULATE: self.action_library_view.action_list(ActionType.MANIPULATE),
+            ActionType.INSPECT: self.action_library_view.action_list(ActionType.INSPECT),
+            ActionType.CHANGE_GUN: self.action_library_view.action_list(ActionType.CHANGE_GUN),
+            ActionType.VISION_CAPTURE: self.action_library_view.action_list(ActionType.VISION_CAPTURE),
+            ActionType.TRAJECTORY: self.action_library_view.action_list(ActionType.TRAJECTORY)
         }
         action_list = list_map[action_type]
 
@@ -1571,25 +1000,25 @@ class MainWindow(QMainWindow):
 
         # 移动类的所有子类型都显示在 move_list 中
         if action_type in {ActionType.MOVE, ActionType.BASE_MOVE}:
-            self.move_list.clear()
+            self.action_library_view.action_list(ActionType.MOVE).clear()
             for action in self.actions[ActionType.MOVE]:
-                self.move_list.add_action(action)
+                self.action_library_view.action_list(ActionType.MOVE).add_action(action)
             for action in self.actions[ActionType.BASE_MOVE]:
-                self.move_list.add_action(action)
+                self.action_library_view.action_list(ActionType.MOVE).add_action(action)
             return
 
         if action_type in {ActionType.VISION_CAPTURE, ActionType.VISION_RELOCALIZE}:
-            self.vision_capture_list.clear()
+            self.action_library_view.action_list(ActionType.VISION_CAPTURE).clear()
             for action in self.actions[ActionType.VISION_CAPTURE]:
-                self.vision_capture_list.add_action(action)
+                self.action_library_view.action_list(ActionType.VISION_CAPTURE).add_action(action)
             for action in self.actions[ActionType.VISION_RELOCALIZE]:
-                self.vision_capture_list.add_action(action)
+                self.action_library_view.action_list(ActionType.VISION_CAPTURE).add_action(action)
             return
 
         list_map = {
-            ActionType.INSPECT: self.inspect_list,
-            ActionType.CHANGE_GUN: self.change_gun_list,
-            ActionType.TRAJECTORY: self.trajectory_list
+            ActionType.INSPECT: self.action_library_view.action_list(ActionType.INSPECT),
+            ActionType.CHANGE_GUN: self.action_library_view.action_list(ActionType.CHANGE_GUN),
+            ActionType.TRAJECTORY: self.action_library_view.action_list(ActionType.TRAJECTORY)
         }
         action_list = list_map[action_type]
         action_list.clear()
@@ -1630,7 +1059,7 @@ class MainWindow(QMainWindow):
     def _publish_current_sequence(self) -> None:
         try:
             self._services.composition.replace_sequence(
-                self.sequence_list.get_entries(),
+                self.workflow_view.sequence_list.get_entries(),
                 origin="gui",
                 expected_revision=self._sequence_revision,
             )
@@ -1654,23 +1083,23 @@ class MainWindow(QMainWindow):
         self,
         entries: Sequence[SequenceEntry],
     ) -> None:
-        self.sequence_list.blockSignals(True)
+        self.workflow_view.sequence_list.blockSignals(True)
         try:
-            self.sequence_list.clear_sequence()
+            self.workflow_view.sequence_list.clear_sequence()
             for entry in entries:
                 if isinstance(entry, LoopBlock):
-                    self.sequence_list.add_loop_block(entry)
+                    self.workflow_view.sequence_list.add_loop_block(entry)
                 elif isinstance(entry, SequenceItem):
-                    self.sequence_list.add_sequence_item(entry)
+                    self.workflow_view.sequence_list.add_sequence_item(entry)
         finally:
-            self.sequence_list.blockSignals(False)
+            self.workflow_view.sequence_list.blockSignals(False)
 
     def _refresh_execute_merged_list(self):
-        self.manipulate_list.clear()
+        self.action_library_view.action_list(ActionType.MANIPULATE).clear()
         for action in self.actions[ActionType.MANIPULATE]:
-            self.manipulate_list.add_action(action)
+            self.action_library_view.action_list(ActionType.MANIPULATE).add_action(action)
         for action in self.actions[ActionType.WAIT]:
-            self.manipulate_list.add_action(action)
+            self.action_library_view.action_list(ActionType.MANIPULATE).add_action(action)
 
     def _resolve_action_type_for_current_tab(self, current_tab: int):
         action_type_map = {
@@ -1728,14 +1157,14 @@ class MainWindow(QMainWindow):
         return action_type_map.get(current_tab)
 
     def _get_current_action_list_widget(self):
-        current_tab = self.action_tabs.currentIndex()
+        current_tab = self.action_library_view.action_tabs.currentIndex()
         tab_list_map = {
-            0: self.move_list,
-            1: self.manipulate_list,
-            2: self.inspect_list,
-            3: self.change_gun_list,
-            4: self.vision_capture_list,
-            6: self.trajectory_list
+            0: self.action_library_view.action_list(ActionType.MOVE),
+            1: self.action_library_view.action_list(ActionType.MANIPULATE),
+            2: self.action_library_view.action_list(ActionType.INSPECT),
+            3: self.action_library_view.action_list(ActionType.CHANGE_GUN),
+            4: self.action_library_view.action_list(ActionType.VISION_CAPTURE),
+            6: self.action_library_view.action_list(ActionType.TRAJECTORY)
         }
         return tab_list_map.get(current_tab)
 
@@ -1743,7 +1172,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "task_library_list"):
             return
 
-        self.task_library_list.clear()
+        self.action_library_view.task_library_list.clear()
         for summary in self._services.composition.list_tasks():
             task_name = summary.name
             step_count = summary.step_count
@@ -1753,7 +1182,7 @@ class MainWindow(QMainWindow):
             item.setIcon(self._create_task_list_icon())
             item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖到组合计划中")
             item.setData(Qt.ItemDataRole.UserRole, task_name)
-            self.task_library_list.addItem(item)
+            self.action_library_view.task_library_list.addItem(item)
 
     def _create_task_list_icon(self) -> QIcon:
         from PyQt6.QtGui import QFont, QPainter, QPixmap
@@ -1776,13 +1205,13 @@ class MainWindow(QMainWindow):
         return QIcon(pixmap)
 
     def add_task_to_composer(self):
-        current_item = self.task_library_list.currentItem()
+        current_item = self.action_library_view.task_library_list.currentItem()
         if current_item is None:
             self._notifications.warning("请先选择一个已保存任务")
             return
 
         task_name = current_item.data(Qt.ItemDataRole.UserRole)
-        self._add_task_name_to_composer(task_name, self.task_composer_list.count())
+        self._add_task_name_to_composer(task_name, self.workflow_view.task_composer_list.count())
 
     def _add_task_name_to_composer(self, task_name: str, insert_row: int | None = None):
         self._services.task_composer.add_task(task_name, index=insert_row)
@@ -1800,7 +1229,7 @@ class MainWindow(QMainWindow):
             self._notifications.info(f"已加入动作组合: {action.name}")
 
     def remove_task_from_composer(self):
-        row = self.task_composer_list.currentRow()
+        row = self.workflow_view.task_composer_list.currentRow()
         if row >= 0:
             self._services.task_composer.remove(row)
             self._refresh_task_composer_display()
@@ -1812,24 +1241,24 @@ class MainWindow(QMainWindow):
         self._move_composed_task(1)
 
     def _move_composed_task(self, offset: int):
-        current_row = self.task_composer_list.currentRow()
+        current_row = self.workflow_view.task_composer_list.currentRow()
         target_row = current_row + offset
-        if current_row < 0 or target_row < 0 or target_row >= self.task_composer_list.count():
+        if current_row < 0 or target_row < 0 or target_row >= self.workflow_view.task_composer_list.count():
             return
 
         self._services.task_composer.move(current_row, target_row)
         self._refresh_task_composer_display()
-        self.task_composer_list.setCurrentRow(target_row)
+        self.workflow_view.task_composer_list.setCurrentRow(target_row)
 
     def _move_composed_task_rows(self, source_row: int, target_row: int) -> None:
         if source_row == target_row:
             return
         self._services.task_composer.move(source_row, target_row)
         self._refresh_task_composer_display()
-        self.task_composer_list.setCurrentRow(target_row)
+        self.workflow_view.task_composer_list.setCurrentRow(target_row)
 
     def repeat_composer_selection(self):
-        rows = self._selected_contiguous_rows(self.task_composer_list, "请选择要循环的连续任务或动作")
+        rows = self._selected_contiguous_rows(self.workflow_view.task_composer_list, "请选择要循环的连续任务或动作")
         if rows is None:
             return
 
@@ -1851,7 +1280,7 @@ class MainWindow(QMainWindow):
         self._services.task_composer.repeat(start_row, end_row, repeat_count)
         self._refresh_task_composer_display()
         for row in range(start_row, start_row + block_length * repeat_count):
-            self.task_composer_list.item(row).setSelected(True)
+            self.workflow_view.task_composer_list.item(row).setSelected(True)
         self._notifications.info(f"组合块已设置为循环 {repeat_count} 次")
 
     def clear_task_composer(self):
@@ -1904,7 +1333,7 @@ class MainWindow(QMainWindow):
         return list(self._services.task_composer.build_sequence())
 
     def _refresh_task_composer_display(self):
-        self.task_composer_list.clear()
+        self.workflow_view.task_composer_list.clear()
         for entry in self._services.task_composer.entries():
             item = QListWidgetItem()
             if isinstance(entry, ComposedAction):
@@ -1913,7 +1342,7 @@ class MainWindow(QMainWindow):
                 item.setText(f"{action.name} (动作)")
                 item.setIcon(self._create_action_card_icon(action))
                 item.setToolTip(f"{action.name}\n类型: {action.type.value}\n拖动可调整顺序")
-                self.task_composer_list.addItem(item)
+                self.workflow_view.task_composer_list.addItem(item)
                 continue
 
             if not isinstance(entry, ComposedTask):
@@ -1924,7 +1353,7 @@ class MainWindow(QMainWindow):
             item.setText(f"{task_name} ({step_count} 步)")
             item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
             item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖动可调整顺序")
-            self.task_composer_list.addItem(item)
+            self.workflow_view.task_composer_list.addItem(item)
 
     def _task_step_count(self, task_name: str) -> int:
         return self._services.task_composer.step_count(ComposedTask(task_name))
@@ -2092,7 +1521,7 @@ class MainWindow(QMainWindow):
         return QIcon(pixmap)
 
     def save_task(self):
-        entries = self.sequence_list.get_entries()
+        entries = self.workflow_view.sequence_list.get_entries()
         if not entries:
             self._notifications.warning("序列为空，无需保存")
             return
@@ -2141,7 +1570,7 @@ class MainWindow(QMainWindow):
             self._notifications.warning("请先添加动作到序列中")
             return
 
-        self._start_sequence_execution(sequence, display_list=self.sequence_list, label="动作编排序列")
+        self._start_sequence_execution(sequence, display_list=self.workflow_view.sequence_list, label="动作编排序列")
 
     def execute_composed_task(self):
         sequence = self._build_composed_task_sequence()
@@ -2208,18 +1637,18 @@ class MainWindow(QMainWindow):
 
         # 刷新 UI（仅当有 display_list 时）
         if display_list is not None:
-            for i in range(self.sequence_list.topLevelItemCount()):
-                tree_item = self.sequence_list.topLevelItem(i)
+            for i in range(self.workflow_view.sequence_list.topLevelItemCount()):
+                tree_item = self.workflow_view.sequence_list.topLevelItem(i)
                 entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
                 if isinstance(entry, LoopBlock):
-                    self.sequence_list._update_loop_display(tree_item, entry)
+                    self.workflow_view.sequence_list._update_loop_display(tree_item, entry)
                     for j in range(tree_item.childCount()):
                         child_tree = tree_item.child(j)
                         child_entry = child_tree.data(0, Qt.ItemDataRole.UserRole)
                         if isinstance(child_entry, SequenceItem):
-                            self.sequence_list._update_item_display(child_tree, child_entry, j)
+                            self.workflow_view.sequence_list._update_item_display(child_tree, child_entry, j)
                 elif isinstance(entry, SequenceItem):
-                    self.sequence_list._update_item_display(tree_item, entry, i)
+                    self.workflow_view.sequence_list._update_item_display(tree_item, entry, i)
 
         if not self._execution_bridge.execute_sequence_items(
             entries,
@@ -2264,28 +1693,21 @@ class MainWindow(QMainWindow):
         else:
             self._notifications.warning(message, modal=False)
         self._render_execution_state()
-        self._execution_display_list = self.sequence_list
+        self._execution_display_list = self.workflow_view.sequence_list
         self._set_trajectory_buttons_enabled(True)
         self._resume_pose_refresh()
         self.refresh_arm_poses()
 
     def _render_execution_state(self) -> None:
         state = self._execution_view_model.snapshot()
-        self.control_panel.pause_btn.setText(state.pause_button_text)
-        self.control_panel.pause_btn.setEnabled(
-            state.can_pause or state.can_resume
+        self.workflow_view.render_execution_controls(
+            state.pause_button_text,
+            state.can_pause or state.can_resume,
+            state.can_cancel,
         )
-        self.control_panel.stop_btn.setEnabled(state.can_cancel)
-        if hasattr(self, "pause_composed_task_btn"):
-            self.pause_composed_task_btn.setText(state.pause_button_text)
-            self.pause_composed_task_btn.setEnabled(
-                state.can_pause or state.can_resume
-            )
-        if hasattr(self, "stop_composed_task_btn"):
-            self.stop_composed_task_btn.setEnabled(state.can_cancel)
 
     def on_step_started(self, index: int, item: SequenceItem):
-        display_list = getattr(self, "_execution_display_list", self.sequence_list)
+        display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
         if display_list is not None:
             display_list.update_item_status(item)
             tree_item = display_list._find_item_by_entry(item)
@@ -2293,12 +1715,12 @@ class MainWindow(QMainWindow):
                 display_list.scrollToItem(tree_item)
 
     def on_step_completed(self, index: int, item: SequenceItem):
-        display_list = getattr(self, "_execution_display_list", self.sequence_list)
+        display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
         if display_list is not None:
             display_list.update_item_status(item)
 
     def on_step_failed(self, index: int, item: SequenceItem, error_msg: str):
-        display_list = getattr(self, "_execution_display_list", self.sequence_list)
+        display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
         if display_list is not None:
             display_list.update_item_status(item)
         self._notifications.error(
@@ -2308,40 +1730,40 @@ class MainWindow(QMainWindow):
 
     def on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int):
         """更新循环块执行进度显示"""
-        tree_item = self.sequence_list._item_map.get(loop_uuid)
+        tree_item = self.workflow_view.sequence_list._item_map.get(loop_uuid)
         if tree_item is not None:
             entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(entry, LoopBlock):
                 entry.current_iteration = current_iteration
-                self.sequence_list._update_loop_display(tree_item, entry)
+                self.workflow_view.sequence_list._update_loop_display(tree_item, entry)
 
     def move_item_up(self):
-        current_row = self.sequence_list.currentRow()
+        current_row = self.workflow_view.sequence_list.currentRow()
         if current_row > 0:
-            item = self.sequence_list.takeItem(current_row)
-            self.sequence_list.insertItem(current_row - 1, item)
+            item = self.workflow_view.sequence_list.takeItem(current_row)
+            self.workflow_view.sequence_list.insertItem(current_row - 1, item)
             self.refresh_sequence_numbers(selected_row=current_row - 1)
             self._publish_current_sequence()
 
     def move_item_down(self):
-        current_row = self.sequence_list.currentRow()
-        if current_row < self.sequence_list.count() - 1:
-            item = self.sequence_list.takeItem(current_row)
-            self.sequence_list.insertItem(current_row + 1, item)
+        current_row = self.workflow_view.sequence_list.currentRow()
+        if current_row < self.workflow_view.sequence_list.count() - 1:
+            item = self.workflow_view.sequence_list.takeItem(current_row)
+            self.workflow_view.sequence_list.insertItem(current_row + 1, item)
             self.refresh_sequence_numbers(selected_row=current_row + 1)
             self._publish_current_sequence()
 
     def delete_item(self):
-        current_row = self.sequence_list.currentRow()
+        current_row = self.workflow_view.sequence_list.currentRow()
         if current_row >= 0:
-            self.sequence_list.takeItem(current_row)
-            next_row = min(current_row, self.sequence_list.count() - 1)
+            self.workflow_view.sequence_list.takeItem(current_row)
+            next_row = min(current_row, self.workflow_view.sequence_list.count() - 1)
             self.refresh_sequence_numbers(selected_row=next_row)
             self._publish_current_sequence()
 
     def repeat_sequence_selection(self):
         """将选中的连续动作包裹为 LoopBlock 循环容器"""
-        rows = self._selected_contiguous_rows(self.sequence_list, "请选择要循环的连续动作")
+        rows = self._selected_contiguous_rows(self.workflow_view.sequence_list, "请选择要循环的连续动作")
         if rows is None:
             return
 
@@ -2360,7 +1782,7 @@ class MainWindow(QMainWindow):
         # 收集选中的 SequenceItem（从树节点中取出，展开 LoopBlock 的子项）
         selected_items: list[SequenceItem] = []
         for row in rows:
-            tree_item = self.sequence_list.topLevelItem(row)
+            tree_item = self.workflow_view.sequence_list.topLevelItem(row)
             entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(entry, SequenceItem):
                 selected_items.append(entry)
@@ -2375,24 +1797,24 @@ class MainWindow(QMainWindow):
 
         # 从后往前移除（避免索引偏移）
         for row in reversed(rows):
-            self.sequence_list.takeItem(row)
+            self.workflow_view.sequence_list.takeItem(row)
 
         # 创建 LoopBlock 并插入
         loop = LoopBlock.from_sequence_items(selected_items, repeat_count)
         insert_at = rows[0]
         tree_item = QTreeWidgetItem()
-        self.sequence_list._update_loop_display(tree_item, loop)
+        self.workflow_view.sequence_list._update_loop_display(tree_item, loop)
         tree_item.setData(0, Qt.ItemDataRole.UserRole, loop)
-        self.sequence_list._register_item(tree_item, loop)
+        self.workflow_view.sequence_list._register_item(tree_item, loop)
         for i, child_item in enumerate(loop.items):
             child_tree = QTreeWidgetItem()
-            self.sequence_list._update_item_display(child_tree, child_item, i)
+            self.workflow_view.sequence_list._update_item_display(child_tree, child_item, i)
             child_tree.setData(0, Qt.ItemDataRole.UserRole, child_item)
-            self.sequence_list._register_item(child_tree, child_item)
+            self.workflow_view.sequence_list._register_item(child_tree, child_item)
             tree_item.addChild(child_tree)
         tree_item.setExpanded(True)
-        self.sequence_list.insertTopLevelItem(insert_at, tree_item)
-        self.sequence_list.setCurrentItem(tree_item)
+        self.workflow_view.sequence_list.insertTopLevelItem(insert_at, tree_item)
+        self.workflow_view.sequence_list.setCurrentItem(tree_item)
 
         total_steps = len(selected_items) * repeat_count
         self._notifications.info(
@@ -2418,7 +1840,7 @@ class MainWindow(QMainWindow):
         )
 
     def edit_sequence_item(self):
-        current_tree_item = self.sequence_list.currentItem()
+        current_tree_item = self.workflow_view.sequence_list.currentItem()
         if current_tree_item is None:
             self._notifications.warning("请先选择要修改的序列项")
             return
@@ -2446,7 +1868,7 @@ class MainWindow(QMainWindow):
 
         updated_definition = dialog.get_action_definition()
         seq_item.definition = updated_definition
-        self.sequence_list.update_item_status(seq_item)
+        self.workflow_view.sequence_list.update_item_status(seq_item)
         self._publish_current_sequence()
         self._notifications.info(f"已更新序列动作: {updated_definition.name}")
 
@@ -2515,28 +1937,27 @@ class MainWindow(QMainWindow):
 
     def refresh_sequence_numbers(self, selected_row: int | None = None):
         """刷新树中所有顶层项的显示序号"""
-        for i in range(self.sequence_list.topLevelItemCount()):
-            tree_item = self.sequence_list.topLevelItem(i)
+        for i in range(self.workflow_view.sequence_list.topLevelItemCount()):
+            tree_item = self.workflow_view.sequence_list.topLevelItem(i)
             entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
             if isinstance(entry, SequenceItem):
-                self.sequence_list._update_item_display(tree_item, entry, i)
+                self.workflow_view.sequence_list._update_item_display(tree_item, entry, i)
             elif isinstance(entry, LoopBlock):
-                self.sequence_list._update_loop_display(tree_item, entry)
+                self.workflow_view.sequence_list._update_loop_display(tree_item, entry)
                 for j in range(tree_item.childCount()):
                     child_tree = tree_item.child(j)
                     child_entry = child_tree.data(0, Qt.ItemDataRole.UserRole)
                     if isinstance(child_entry, SequenceItem):
-                        self.sequence_list._update_item_display(child_tree, child_entry, j)
-        if selected_row is not None and 0 <= selected_row < self.sequence_list.topLevelItemCount():
-            self.sequence_list.setCurrentRow(selected_row)
+                        self.workflow_view.sequence_list._update_item_display(child_tree, child_entry, j)
+        if selected_row is not None and 0 <= selected_row < self.workflow_view.sequence_list.topLevelItemCount():
+            self.workflow_view.sequence_list.setCurrentRow(selected_row)
 
     def test_camera(self):
         """
         通过 DeviceRuntime 测试相机（与视觉抓取使用同一实例）。
         在独立 QThread 中运行，避免阻塞 UI。
         """
-        self.test_camera_btn.setEnabled(False)
-        self.test_camera_btn.setText("测试中...")
+        self.action_library_view.set_camera_test_running(True)
 
         class _TestWorker(QThread):
             result = pyqtSignal(bool, str)
@@ -2642,8 +2063,7 @@ class MainWindow(QMainWindow):
                 self._notifications.info(message)
             else:
                 self._notifications.warning(message, modal=False)
-            self.test_camera_btn.setEnabled(True)
-            self.test_camera_btn.setText("测试相机")
+            self.action_library_view.set_camera_test_running(False)
 
         self._camera_test_thread = _TestWorker(self._services)
         self._camera_test_thread.result.connect(on_result)
@@ -2659,8 +2079,7 @@ class MainWindow(QMainWindow):
         camera_thread = getattr(self, "_camera_test_thread", None)
         if camera_thread is not None and camera_thread.isRunning():
             camera_thread.requestInterruption()
-        if hasattr(self, "ai_assistant_widget"):
-            self.ai_assistant_widget.prepare_shutdown()
+        self.action_library_view.ai_assistant.prepare_shutdown()
         self._composition_bridge.close()
         self._startup_lifecycle.close()
         event.accept()
@@ -2675,5 +2094,4 @@ class MainWindow(QMainWindow):
                     "相机测试线程未在 2 秒内退出，将由设备关闭流程继续清理",
                     modal=False,
                 )
-        if hasattr(self, "ai_assistant_widget"):
-            self.ai_assistant_widget.shutdown()
+        self.action_library_view.ai_assistant.shutdown()
