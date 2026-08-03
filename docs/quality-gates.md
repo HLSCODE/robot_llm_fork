@@ -1,7 +1,7 @@
 # 工程质量门禁
 
 > 状态：当前实现  
-> 最近更新：2026-07-30
+> 最近更新：2026-08-03
 
 ## 1. 目标
 
@@ -13,11 +13,11 @@ CI 配置长期漂移。普通质量门禁不连接机械臂、相机、串口�
 1. `compileall`：验证 `src/`、`tests/` 和 `scripts/` 的 Python 语法。
 2. Ruff：检查第一方 Python 代码中的语法错误、未定义名称、无效导入和基础风格错误。
 3. Mypy：严格检查协议、路由、请求流控、运行时模型和 LLM 基础数据模型。
-4. Pytest：运行 unit、contract 和 simulation 级测试。
+4. Pytest + coverage：运行 unit、contract 和 simulation 级测试，并强制全源码覆盖率阈值。
 5. LLM golden regression：离线验证规划输出的 strict schema 和稳定错误分类。
 6. Wheel smoke：构建 wheel、检查关键模块、隔离安装并调用 `robot-llm --check-config`。
 
-覆盖率阈值、Linux 测试矩阵和真实硬件验收仍是独立后续工作，不能用普通 CI 结果替代。
+普通质量门禁同时在 Windows/Linux 执行；真实硬件验收仍是独立工作，不能用普通 CI 结果替代。
 
 ## 2. 本地使用
 
@@ -36,7 +36,7 @@ uv run --frozen --group dev python scripts/run_quality_checks.py
 开发过程中也可以单独执行：
 
 ```powershell
-uv run --frozen pytest
+uv run --frozen pytest --cov --cov-report=term
 uv run --frozen ruff check .
 uv run --frozen mypy
 uv run --frozen python -m src.llm.regression
@@ -88,8 +88,26 @@ Mypy 先覆盖已完成收敛、类型边界较稳定的核心文件：
 
 ## 5. CI 行为
 
-`.github/workflows/quality.yml` 在 Windows/Python 3.12 上对 `main`、`master` 的 push 和所有
-pull request 执行。CI 使用 `uv.lock` 的冻结版本，依赖声明与锁文件不一致会直接失败。
+`.github/workflows/quality.yml` 在 Windows/Linux、Python 3.12 上对 `main`、`master` 的 push
+和所有 pull request 执行。CI 使用 `uv.lock` 的冻结版本，依赖声明与锁文件不一致会直接失败。
+
+质量矩阵执行同一个 `scripts/run_quality_checks.py`。可选依赖矩阵则在两个平台分别隔离安装
+`gui`、`server`、`hardware`，再运行 `scripts/validate_optional_extra.py`；冒烟过程只验证导入、
+默认构造和依赖闭包，不访问串口、相机、机械臂、网络或生产数据。隔离安装可以防止某个 extra
+遗漏的依赖被其他 extra 意外补齐。
+
+## 6. 覆盖率策略
+
+`pyproject.toml` 的 `[tool.coverage.*]` 是覆盖率范围和阈值的唯一配置源。当前规则为：
+
+- `src/` 中所有第一方源码默认纳入统计。
+- 排除自动生成的 RealMan ctypes 绑定 `src/arm_sdk/rm_ctypes_wrap.py`；该文件应通过供应商 SDK
+  兼容性和真实硬件验收验证，不把生成代码行数计入业务单测目标。
+- 初始总覆盖率阈值为 44%；建立门禁时的实测基线为 44.42%。任何变更低于阈值都会失败。
+- 阈值只能随测试补齐逐步提高；如需降低，必须在主重构计划记录原因、影响和恢复任务。
+
+覆盖率 XML 输出为 `coverage.xml`，仅作为本地或 CI 产物，不纳入版本控制。覆盖率通过只说明
+自动化路径满足当前基线，不代表 simulation integration 或 hardware acceptance 已完成。
 
 真实硬件、外部网络、生产密钥和用户数据不进入普通 CI。需要这些资源的验收必须记录设备、
 固件、配置、标定版本、测试条件和结果，并单独归档。

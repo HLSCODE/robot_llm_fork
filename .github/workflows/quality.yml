@@ -16,9 +16,25 @@ concurrency:
 
 jobs:
   quality:
-    name: Python 3.12 / Windows
-    runs-on: windows-latest
+    name: Python 3.12 / ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            extras: >-
+              --extra gui --extra server --extra ai --extra data
+              --extra vision --extra hardware
+          - name: Linux
+            os: ubuntu-latest
+            extras: >-
+              --extra gui --extra server --extra ai --extra data
+              --extra vision
+    env:
+      QT_QPA_PLATFORM: offscreen
 
     steps:
       - name: Check out repository
@@ -32,10 +48,45 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install locked development environment
-        run: >-
-          uv sync --frozen --group dev
-          --extra gui --extra server --extra ai
-          --extra vision --extra hardware
+        run: uv sync --frozen --group dev ${{ matrix.extras }}
 
       - name: Run quality gates
-        run: uv run --frozen --group dev python scripts/run_quality_checks.py
+        run: >-
+          uv run --frozen --group dev ${{ matrix.extras }}
+          python scripts/run_quality_checks.py
+
+  optional-extra:
+    name: Optional ${{ matrix.extra }} / ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [Windows, Linux]
+        extra: [gui, server, hardware]
+        include:
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install isolated optional dependency group
+        run: uv sync --frozen --no-dev --extra ${{ matrix.extra }}
+
+      - name: Smoke-test optional dependency group
+        run: >-
+          uv run --frozen --no-dev --extra ${{ matrix.extra }}
+          python scripts/validate_optional_extra.py ${{ matrix.extra }}

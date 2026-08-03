@@ -5,7 +5,7 @@
 > 最近更新：2026-07-31
 >
 > 当前里程碑：M4 — WebSocket 传输安全与运行指标已收敛
-> 计划进度：86/115（85 DONE + 1 DROPPED，74.8%）
+> 计划进度：88/115（87 DONE + 1 DROPPED，76.5%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -644,7 +644,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 当前问题：
 
-- 已建立 pytest 和 Windows 最小 CI，但覆盖率阈值与 Linux 矩阵尚未建立。
+- pytest 已建立 44% 全源码覆盖率门禁；Windows/Linux 质量矩阵和 GUI/Server/Hardware
+  可选依赖隔离矩阵已建立。
 - Ruff 已覆盖收敛主线模块，供应商 SDK、旧设备/视觉/语音模块和联调脚本的历史问题仍需分批清零后纳入。
 - Mypy 已覆盖协议与核心运行时模型，应用服务和其他领域模块仍需逐步扩展。
 - `test_devices.py` 等主要是硬件联调脚本。
@@ -672,8 +673,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | G-009 | P2 | DONE | 配置拆分为不可变领域 settings；业务层移除全局单例和隐式回退，敏感配置单独建模 |
 | G-010 | P2 | DONE | 依赖按 server/gui/ai/data/vision/voice/kws/hardware 分组，提供 full 聚合组并刷新冻结 lock |
 | G-011 | P2 | DONE | 提供 `robot-llm`/`python -m src` 入口；wheel 构建、隔离安装和入口 smoke test 纳入质量门禁 |
-| G-012 | P2 | TODO | 覆盖率目标和质量门禁 |
-| G-013 | P2 | TODO | Windows/Linux 测试矩阵 |
+| G-012 | P2 | DONE | pytest-cov 纳入统一质量入口；除自动生成 RealMan ctypes 绑定外全量统计 `src`，以 44.42% 基线建立 44% 强制阈值和 XML 报告 |
+| G-013 | P2 | DONE | Windows/Linux Python 3.12 执行统一质量入口；GUI/Server/Hardware extra 在两平台隔离安装并执行无外设冒烟验证 |
 | G-014 | P2 | TODO | 日志轮转、结构化日志和 run_id |
 | G-015 | P3 | TODO | 性能基准和回归监控 |
 
@@ -908,7 +909,8 @@ M4 工程治理与清理
 ### 工程质量
 
 - [x] pytest、Windows 最小 CI、核心 Ruff 和 Mypy 门禁生效。
-- [ ] 覆盖率阈值、静态检查全仓扩展和 Linux 测试矩阵生效。
+- [x] 覆盖率阈值和 Windows/Linux 测试矩阵生效。
+- [ ] Ruff/Mypy 静态检查在历史问题清零后扩展到全仓。
 - [ ] 无硬件 simulation 可回归主要流程。
 - [ ] 关键真实硬件验收有记录。
 - [x] 配置、依赖、打包和平台支持策略清晰。
@@ -976,13 +978,13 @@ M4 工程治理与清理
 | 2026-07-30 | M4 | A/C/G | pytest、协议契约与静态质量门禁 | A-008/G-001/G-004/G-005 TODO/DOING → DONE | 建立本地/CI 唯一质量入口和 Windows/Python 3.12 冻结依赖流水线；Ruff 清零收敛主线基础问题，Mypy 检查核心 typed boundary；全部 WebSocket action 具备独立最小合法请求 golden contract，route/schema、payload 边界、稳定错误码和响应 DTO 纳入 pytest | 262 tests + 26 subtests，14 golden cases |
 | 2026-07-30 | M4 | G | 依赖、配置与用户数据治理 | G-003/G-006/G-007/G-008 TODO → DONE | 删除 requirements 双来源；内置 catalog 与可配置用户数据根分离；动作/任务/技能统一 schema v1、v0 原始备份、一次性迁移和原子替换；启动前集中校验活动端口、超时、路径、网络暴露及占位凭据，诊断统一脱敏 | 280 tests + 26 subtests，14 golden cases |
 | 2026-07-30 | M4 | G | 配置、依赖与可安装交付收敛 | G-009/G-010/G-011 TODO → DONE | 删除公开 Config 单例和所有业务层隐式读取，注入十一类不可变领域 settings 并分离 secrets；数据采集与视觉天平改为显式配置注入；拆分 optional extras、刷新 uv.lock，新增 `robot-llm`/模块入口及 wheel 构建、隔离安装、console smoke 质量门禁 | 285 tests + 26 subtests，14 golden cases；Windows all-extras sync + wheel smoke |
+| 2026-08-03 | M4 | G | 覆盖率与跨平台依赖矩阵 | G-012/G-013 TODO → DONE | pytest-cov 进入统一质量入口，以除生成式 RealMan ctypes 绑定外的全量 `src` 建立 44% 门禁；Windows/Linux 运行统一质量矩阵，GUI/Server/Hardware extra 在两个平台分别隔离安装并执行无外设冒烟验证 | 324 tests + 32 subtests，覆盖率 44.42%，14 golden cases；本地完整门禁通过，Linux 由 CI 执行 |
 
 ## 22. 建议的首批实施顺序
 
 1. **B-007/ER-006/ER-011**：动作级声明和软件校验已完成；在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
 2. **B-015**：确定下一种真实机械臂供应商/协议，基于现有 Provider 注册表实现
    adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **G-012/G-013**：确定覆盖率阈值，补 Linux 最小依赖、GUI/Server 和硬件可选依赖矩阵。
-4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+3. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
-5. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+4. 完成 simulation smoke test 后执行逐设备真实硬件验收。

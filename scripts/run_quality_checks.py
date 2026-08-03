@@ -29,8 +29,15 @@ QUALITY_CHECKS = (
         arguments=("-m", "mypy"),
     ),
     QualityCheck(
-        name="Pytest",
-        arguments=("-m", "pytest", "-q"),
+        name="Pytest with coverage",
+        arguments=(
+            "-m",
+            "pytest",
+            "-q",
+            "--cov",
+            "--cov-report=term",
+            "--cov-report=xml:coverage.xml",
+        ),
     ),
     QualityCheck(
         name="LLM golden regression",
