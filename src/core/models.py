@@ -55,20 +55,25 @@ class SequenceItem:
     uuid: str
     definition: ActionDefinition
     status: SequenceItemStatus = SequenceItemStatus.PENDING
+    source_task_name: str | None = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "uuid": self.uuid,
             "definition": self.definition.to_dict(),
             "status": self.status.value
         }
+        if self.source_task_name:
+            data["source_task_name"] = self.source_task_name
+        return data
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SequenceItem':
         return cls(
             uuid=data["uuid"],
             definition=ActionDefinition.from_dict(data["definition"]),
-            status=SequenceItemStatus(data.get("status", "PENDING"))
+            status=SequenceItemStatus(data.get("status", "PENDING")),
+            source_task_name=data.get("source_task_name"),
         )
 
     @classmethod

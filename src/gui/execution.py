@@ -21,8 +21,14 @@ class ExecutionThread(QThread):
     loop_progress = pyqtSignal(str, int, int)  # (loop_uuid, current_iteration, total_iterations)
     log_message = pyqtSignal(str)
 
-    def __init__(self, sequence: list[SequenceEntry], robot_controller: RobotController | None = None, body_controller: ModbusMotor | None = None,
-    move_controller: RobotMoveController | None = None):
+    def __init__(
+        self,
+        sequence: list[SequenceEntry],
+        robot_controller: RobotController | None = None,
+        body_controller: ModbusMotor | None = None,
+        move_controller: RobotMoveController | None = None,
+        task_name: str | None = None,
+    ):
         super().__init__()
         self.sequence = sequence
         self._stop_requested = False
@@ -30,6 +36,8 @@ class ExecutionThread(QThread):
         self._robot_controller = robot_controller
         self._body_controller = body_controller
         self._move_controller = move_controller
+        self._current_task_name = task_name or "manual_sequence"
+        self._current_action_name = ""
 
         self.config = Config.get_instance()
         self.execution_context = ExecutionContext()
@@ -75,6 +83,7 @@ class ExecutionThread(QThread):
                         # 每次迭代克隆子项，保留原始 UUID 以匹配树节点
                         clone = SequenceItem.from_dict(child.to_dict())
                         clone.uuid = child.uuid  # 保持 UUID 一致以便 UI 更新
+                        clone.source_task_name = child.source_task_name
                         flat_sequence.append((clone, entry))
             elif isinstance(entry, SequenceItem):
                 flat_sequence.append((entry, None))
@@ -135,6 +144,10 @@ class ExecutionThread(QThread):
     def _execute_action(self, item: SequenceItem) -> bool:
         definition = item.definition
         params = definition.parameters
+        previous_task_name = self._current_task_name
+        previous_action_name = self._current_action_name
+        self._current_task_name = item.source_task_name or previous_task_name or "manual_sequence"
+        self._current_action_name = definition.name
 
         self.log_message.emit(f"正在执行：{definition.name}")
         self.log_message.emit(f"参数：{params}")
@@ -150,6 +163,9 @@ class ExecutionThread(QThread):
         except Exception as e:
             self.log_message.emit(f"执行错误：{str(e)}")
             return False
+        finally:
+            self._current_task_name = previous_task_name
+            self._current_action_name = previous_action_name
 
     def _execute_move(self, params: dict) -> bool:
         target = params.get('目标', '机械臂')
@@ -513,7 +529,13 @@ class ExecutionThread(QThread):
             should_stop=lambda: self._stop_requested,
         )
         try:
-            result = agent.run(config)
+            result = agent.run(
+                config,
+                context={
+                    "task_name": self._current_task_name,
+                    "action_name": self._current_action_name,
+                },
+            )
         except Exception as e:
             self.log_message.emit(f"智能加粉执行失败: {e}")
             return False

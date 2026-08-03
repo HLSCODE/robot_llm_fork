@@ -893,7 +893,7 @@ class LogWidget(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setReadOnly(True)
-        self.setMaximumHeight(120)
+        self.setMaximumHeight(240)
         self.setStyleSheet("""
             QTextEdit {
                 font-family: "Cascadia Code", "Consolas", "SF Mono", monospace;
