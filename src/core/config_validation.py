@@ -95,6 +95,18 @@ def validate_startup_configuration(
             "LOG_LEVEL",
             f"必须是 {', '.join(sorted(_LOG_LEVELS))} 之一",
         )
+    if not settings.logging.directory.strip():
+        _error(
+            issues,
+            "invalid_log_directory",
+            "LOG_DIRECTORY",
+            "不能为空",
+        )
+    _positive_value(
+        settings.logging.retention_days,
+        issues,
+        "LOG_RETENTION_DAYS",
+    )
 
     _validate_data_paths(settings, issues)
     _validate_data_collection(settings.data_collection, issues)

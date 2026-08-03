@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from ..device_runtime import ResourceArbiter, ResourceLease
+from ..core.logging_config import log_context
 from .action_control import ActionControlPolicy
 from .action_handlers import (
     ActionHandlerResult,
@@ -227,6 +228,17 @@ class ExecutionManager:
         control: ExecutionControl,
         lease: ResourceLease | None,
     ) -> None:
+        with log_context(run_id=run_id, operation="execution.run"):
+            self._run_with_context(run_id, sequence, control, lease)
+
+    def _run_with_context(
+        self,
+        run_id: str,
+        sequence: Sequence[Any],
+        control: ExecutionControl,
+        lease: ResourceLease | None,
+    ) -> None:
+        logger.info("Execution started: origin=%s", self._origin)
         with self._lock:
             if self._run_id != run_id:
                 if lease is not None:
@@ -323,6 +335,7 @@ class ExecutionManager:
                 "raw_error_code": result.raw_error_code,
             },
         )
+        logger.info("Execution finished: state=%s", final_state.value)
 
     def _emit(
         self,

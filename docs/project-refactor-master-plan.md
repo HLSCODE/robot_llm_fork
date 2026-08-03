@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-07-31
 >
-> 当前里程碑：M4 — WebSocket 传输安全与运行指标已收敛
-> 计划进度：88/115（87 DONE + 1 DROPPED，76.5%）
+> 当前里程碑：M4 — 工程质量与运行可观测性持续收敛
+> 计划进度：89/115（88 DONE + 1 DROPPED，77.4%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -675,7 +675,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | G-011 | P2 | DONE | 提供 `robot-llm`/`python -m src` 入口；wheel 构建、隔离安装和入口 smoke test 纳入质量门禁 |
 | G-012 | P2 | DONE | pytest-cov 纳入统一质量入口；除自动生成 RealMan ctypes 绑定外全量统计 `src`，以 44.42% 基线建立 44% 强制阈值和 XML 报告 |
 | G-013 | P2 | DONE | Windows/Linux Python 3.12 执行统一质量入口；GUI/Server/Hardware extra 在两平台隔离安装并执行无外设冒烟验证 |
-| G-014 | P2 | TODO | 日志轮转、结构化日志和 run_id |
+| G-014 | P2 | DONE | 集中日志组件输出控制台文本和 JSON Lines 文件；每日轮转、保留周期可配置；执行线程自动绑定 run_id，WebSocket 请求绑定 request_id/action |
 | G-015 | P3 | TODO | 性能基准和回归监控 |
 
 ## 13. 跨 Track 关键决策
@@ -916,6 +916,7 @@ M4 工程治理与清理
 - [x] 配置、依赖、打包和平台支持策略清晰。
 - [x] 动作、任务和技能具有版本、原子写和一次性前向迁移。
 - [x] 内置动作和技能可重复交付且不覆盖用户数据。
+- [x] 文件日志结构化、按日轮转并可通过 request_id/run_id 关联请求和执行。
 - [ ] legacy 执行实现和过期文档已清理。
 
 ## 20. 进度维护规则
@@ -979,6 +980,7 @@ M4 工程治理与清理
 | 2026-07-30 | M4 | G | 依赖、配置与用户数据治理 | G-003/G-006/G-007/G-008 TODO → DONE | 删除 requirements 双来源；内置 catalog 与可配置用户数据根分离；动作/任务/技能统一 schema v1、v0 原始备份、一次性迁移和原子替换；启动前集中校验活动端口、超时、路径、网络暴露及占位凭据，诊断统一脱敏 | 280 tests + 26 subtests，14 golden cases |
 | 2026-07-30 | M4 | G | 配置、依赖与可安装交付收敛 | G-009/G-010/G-011 TODO → DONE | 删除公开 Config 单例和所有业务层隐式读取，注入十一类不可变领域 settings 并分离 secrets；数据采集与视觉天平改为显式配置注入；拆分 optional extras、刷新 uv.lock，新增 `robot-llm`/模块入口及 wheel 构建、隔离安装、console smoke 质量门禁 | 285 tests + 26 subtests，14 golden cases；Windows all-extras sync + wheel smoke |
 | 2026-08-03 | M4 | G | 覆盖率与跨平台依赖矩阵 | G-012/G-013 TODO → DONE | pytest-cov 进入统一质量入口，以除生成式 RealMan ctypes 绑定外的全量 `src` 建立 44% 门禁；Windows/Linux 运行统一质量矩阵，GUI/Server/Hardware extra 在两个平台分别隔离安装并执行无外设冒烟验证 | 324 tests + 32 subtests，覆盖率 44.42%，14 golden cases；本地完整门禁通过，Linux 由 CI 执行 |
+| 2026-08-03 | M4 | G | 运行日志治理 | G-014 TODO → DONE | 删除启动器内嵌日志初始化；新增独立 LoggingSettings 和集中日志组件，控制台保持可读文本，文件统一 JSON Lines、每日轮转和按天保留；ContextVar 传播 operation/request_id，ExecutionManager worker 显式绑定 run_id | 331 tests + 32 subtests，覆盖率 44.65%，14 golden cases；完整质量门禁和 wheel smoke |
 
 ## 22. 建议的首批实施顺序
 

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from threading import Event
+import logging
 import unittest
 
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.core.logging_config import LoggingContextFilter
 from src.core.settings import ApplicationSettings
 from src.device_runtime import (
     DeviceCapability,
@@ -291,6 +293,37 @@ class ExecutionManagerTests(unittest.TestCase):
         final = handle.wait(1)
         self.assertEqual(ExecutionState.CANCELLED, final.state)
         self.assertIsNone(self.resources.owner_of("robot"))
+
+    def test_worker_logs_are_correlated_with_run_id(self):
+        records: list[logging.LogRecord] = []
+
+        class RecordHandler(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        handler = RecordHandler()
+        handler.addFilter(LoggingContextFilter())
+        manager_logger = logging.getLogger("src.execution.manager")
+        manager_logger.addHandler(handler)
+        manager_logger.setLevel(logging.INFO)
+        try:
+            handle = self.manager.submit(["step"], origin="test")
+            self.assertTrue(self.engine.started.wait(1))
+            self.engine.release.set()
+            handle.wait(1)
+        finally:
+            manager_logger.removeHandler(handler)
+
+        execution_records = [
+            record
+            for record in records
+            if record.getMessage().startswith("Execution ")
+        ]
+        self.assertEqual(2, len(execution_records))
+        self.assertTrue(all(record.run_id == handle.run_id for record in execution_records))
+        self.assertTrue(
+            all(record.operation == "execution.run" for record in execution_records)
+        )
 
     def test_new_run_waits_until_terminal_event_delivery_finishes(self):
         terminal_received = Event()

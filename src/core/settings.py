@@ -13,10 +13,16 @@ _SettingsT = TypeVar("_SettingsT")
 
 @dataclass(frozen=True, slots=True)
 class RuntimeSettings:
-    log_level: str = "INFO"
     simulation_mode: bool = False
     interaction_turn_timeout_s: float = 90.0
     command_preview_ttl_seconds: float = 120.0
+
+
+@dataclass(frozen=True, slots=True)
+class LoggingSettings:
+    level: str = "INFO"
+    directory: str = "logs"
+    retention_days: int = 14
 
 
 @dataclass(frozen=True, slots=True)
@@ -587,6 +593,7 @@ class VoiceSettings:
 @dataclass(frozen=True, slots=True)
 class ApplicationSettings:
     runtime: RuntimeSettings
+    logging: LoggingSettings
     data: DataSettings
     data_collection: DataCollectionSettings
     server: ServerSettings
@@ -603,6 +610,15 @@ class ApplicationSettings:
         """Freeze the environment loader output into domain snapshots."""
         return cls(
             runtime=_snapshot(RuntimeSettings, config),
+            logging=_snapshot(
+                LoggingSettings,
+                config,
+                source_names={
+                    "level": "LOG_LEVEL",
+                    "directory": "LOG_DIRECTORY",
+                    "retention_days": "LOG_RETENTION_DAYS",
+                },
+            ),
             data=_snapshot(DataSettings, config),
             data_collection=_snapshot(
                 DataCollectionSettings,
@@ -623,6 +639,7 @@ class ApplicationSettings:
     def defaults(cls) -> ApplicationSettings:
         return cls(
             runtime=RuntimeSettings(),
+            logging=LoggingSettings(),
             data=DataSettings(),
             data_collection=DataCollectionSettings(),
             server=ServerSettings(),

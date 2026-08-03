@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-from pathlib import Path
 import sys
 from typing import TYPE_CHECKING
 
@@ -16,6 +15,7 @@ from .config_validation import (
     StartupOptions,
     validate_startup_configuration,
 )
+from .logging_config import configure_logging
 from .settings import ApplicationSettings
 
 
@@ -24,24 +24,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-def setup_logging(level: str = "INFO") -> None:
-    """Configure process-level console and daily file logging."""
-    from datetime import datetime
-
-    log_directory = Path(__file__).resolve().parents[2] / "log"
-    log_directory.mkdir(parents=True, exist_ok=True)
-    log_file = log_directory / f"application_{datetime.now().strftime('%Y%m%d')}.log"
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(log_file, encoding="utf-8"),
-        ],
-    )
 
 
 def build_auxiliary_service_host(
@@ -105,7 +87,7 @@ def resolve_startup_options(
             if getattr(args, "websocket_port", None) is not None
             else settings.server.websocket_port
         ),
-        log_level=(getattr(args, "log_level", None) or settings.runtime.log_level),
+        log_level=(getattr(args, "log_level", None) or settings.logging.level),
     )
 
 
@@ -235,7 +217,11 @@ def main() -> int:
 
     options = resolve_startup_options(args, settings)
     args.simulation = options.simulation
-    setup_logging(options.log_level)
+    try:
+        configure_logging(settings.logging, level_override=options.log_level)
+    except (OSError, ValueError) as exc:
+        print(f"日志初始化失败: {exc}", file=sys.stderr)
+        return 2
     report = validate_startup_configuration(settings, options)
     _log_configuration_report(report)
     if report.errors:

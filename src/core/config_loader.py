@@ -89,6 +89,8 @@ class _EnvironmentConfig:
 
     # 系统配置
     LOG_LEVEL: str = "INFO"
+    LOG_DIRECTORY: str = "logs"
+    LOG_RETENTION_DAYS: int = 14
     SIMULATION_MODE: bool = False
     ROBOT_DATA_DIR: str = "data"
     ACTIONS_LIBRARY_PATH: str = ""
@@ -495,6 +497,8 @@ class _EnvironmentConfig:
             os.getenv("VOICE_OPENWAKEWORD_THRESHOLD", "0.6")
         )
         instance.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+        instance.LOG_DIRECTORY = os.getenv("LOG_DIRECTORY", "logs")
+        instance.LOG_RETENTION_DAYS = int(os.getenv("LOG_RETENTION_DAYS", "14"))
         instance.SIMULATION_MODE = os.getenv("SIMULATION_MODE", "false").lower() in (
             "true",
             "1",

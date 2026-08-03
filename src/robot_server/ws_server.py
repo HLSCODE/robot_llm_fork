@@ -116,6 +116,7 @@ from ..application import (
     WEBSOCKET_TELEOPERATION_OWNER_PREFIX,
     websocket_teleoperation_owner,
 )
+from ..core.logging_config import bind_log_context, reset_log_context
 from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
 from .access_control import (
     AuditSink,
@@ -950,6 +951,10 @@ class RobotWebSocketServer:
             )
         )
         context_token = CURRENT_WEBSOCKET_REQUEST.set(request_context)
+        log_context_token = bind_log_context(
+            request_id=request_id,
+            operation=action,
+        )
         admission = self._request_limiter.admit(client_id)
         try:
             if not admission.accepted:
@@ -1027,6 +1032,7 @@ class RobotWebSocketServer:
                 client_id,
                 action,
                 request_id,
+                extra={"request_id": request_id, "operation": action},
             )
             await websocket.send(
                 self._json_msg(
@@ -1063,6 +1069,7 @@ class RobotWebSocketServer:
         finally:
             if admission.accepted:
                 self._request_limiter.release(client_id)
+            reset_log_context(log_context_token)
             CURRENT_WEBSOCKET_REQUEST.reset(context_token)
 
     def _register_client(self, websocket: Any, remote: object) -> str:

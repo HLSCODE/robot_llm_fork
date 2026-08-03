@@ -9,6 +9,7 @@ from src.core.settings import (
     DataCollectionSettings,
     DeviceSettings,
     LLMSettings,
+    LoggingSettings,
     RobotSettings,
     SecretSettings,
     ServerSettings,
@@ -38,6 +39,7 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertIsInstance(settings.devices, DeviceSettings)
         self.assertIsInstance(settings.vision, VisionSettings)
         self.assertIsInstance(settings.llm, LLMSettings)
+        self.assertIsInstance(settings.logging, LoggingSettings)
         self.assertIsInstance(settings.secrets, SecretSettings)
         self.assertIsInstance(settings.voice, VoiceSettings)
         self.assertIsInstance(
@@ -53,6 +55,19 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertTrue(settings.voice.voice_input_enabled)
         self.assertEqual(15, settings.data_collection.fps)
         self.assertEqual(("right",), settings.data_collection.arm_ids)
+
+    def test_logging_settings_use_explicit_environment_names(self) -> None:
+        settings = ApplicationSettings.from_config(
+            SimpleNamespace(
+                LOG_LEVEL="DEBUG",
+                LOG_DIRECTORY="runtime-logs",
+                LOG_RETENTION_DAYS=30,
+            )
+        )
+
+        self.assertEqual("DEBUG", settings.logging.level)
+        self.assertEqual("runtime-logs", settings.logging.directory)
+        self.assertEqual(30, settings.logging.retention_days)
 
     def test_snapshots_and_nested_sequences_are_immutable(self) -> None:
         source_pose = [1, 2, 3, 4, 5, 6]

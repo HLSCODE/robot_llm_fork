@@ -93,6 +93,22 @@ class ConfigurationValidationTests(unittest.TestCase):
             all(issue.severity is ConfigurationSeverity.ERROR for issue in report.errors)
         )
 
+    def test_invalid_logging_storage_values_are_reported(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    LOG_DIRECTORY=" ",
+                    LOG_RETENTION_DAYS=0,
+                ),
+                _options(),
+            )
+
+        self.assertEqual(
+            {"invalid_log_directory", "invalid_number"},
+            {issue.code for issue in report.errors},
+        )
+
     def test_non_loopback_binding_without_tls_is_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(
@@ -270,7 +286,7 @@ class ConfigurationValidationTests(unittest.TestCase):
                     "src.core.launcher.load_application_settings",
                     return_value=config,
                 ),
-                patch("src.core.launcher.setup_logging"),
+                patch("src.core.launcher.configure_logging"),
                 patch("src.core.launcher.run_gui") as run_gui,
             ):
                 exit_code = main()

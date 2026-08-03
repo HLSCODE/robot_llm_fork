@@ -154,6 +154,7 @@ python_version = "3.12"
 files = [
     "src/core/settings.py",
     "src/core/json_documents.py",
+    "src/core/logging_config.py",
     "src/core/data_paths.py",
     "src/core/config_validation.py",
     "src/core/storage.py",
