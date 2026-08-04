@@ -9,6 +9,7 @@ from ..core.json_documents import write_json_atomic
 from ..core.settings import VisionSettings
 from ..core.vision_station_storage import VisionStationStorage, normalize_arm_name
 from ..device_runtime import CameraSource, DepthCameraSource, RobotSystem
+from .models import VisionPipelineResult
 
 _IDENTITY_MATRIX = [
     [1.0, 0.0, 0.0, 0.0],
@@ -33,11 +34,11 @@ class VisionPipelineFixture:
         _settings: VisionSettings,
         log: Callable[[str], None],
         debug_directory: str,
-    ) -> bool:
+    ) -> VisionPipelineResult:
         self.capture_calls.append(dict(parameters))
         self._write_fixture(debug_directory, "capture", parameters)
         log("simulation vision capture completed")
-        return True
+        return VisionPipelineResult(True, frames_processed=1, inference_count=1)
 
     def relocalize(
         self,
@@ -49,7 +50,7 @@ class VisionPipelineFixture:
         _station_storage: VisionStationStorage,
         debug_directory: str,
         log: Callable[[str], None],
-    ) -> bool:
+    ) -> VisionPipelineResult:
         self.relocalization_calls.append(dict(parameters))
         station_id = str(parameters.get("station_id") or "simulation-station")
         arm = normalize_arm_name(str(parameters.get("arm") or "left"))
@@ -64,7 +65,7 @@ class VisionPipelineFixture:
             )
         )
         log("simulation vision relocalization completed")
-        return True
+        return VisionPipelineResult(True, frames_processed=1, inference_count=1)
 
     @staticmethod
     def _write_fixture(

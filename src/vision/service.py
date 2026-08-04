@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import time
 from types import MappingProxyType
 from typing import Protocol
 
@@ -11,10 +12,12 @@ from ..device_runtime import CameraSource, DepthCameraSource, RobotSystem
 from .artifacts import VisionArtifactStore
 from .models import (
     VisionOperation,
+    VisionPipelineResult,
     VisionResult,
     VisionResultCode,
     vision_configuration,
 )
+from .metrics import VisionMetrics, VisionMetricsSnapshot
 
 VisionLog = Callable[[str], None]
 
@@ -28,7 +31,7 @@ class CapturePipeline(Protocol):
         settings: VisionSettings,
         log: VisionLog,
         debug_directory: str,
-    ) -> bool: ...
+    ) -> VisionPipelineResult: ...
 
 
 class RelocalizationPipeline(Protocol):
@@ -42,7 +45,7 @@ class RelocalizationPipeline(Protocol):
         station_storage: VisionStationStorage,
         debug_directory: str,
         log: VisionLog,
-    ) -> bool: ...
+    ) -> VisionPipelineResult: ...
 
 
 class VisionService:
@@ -57,6 +60,8 @@ class VisionService:
         relocalization_pipeline: RelocalizationPipeline | None = None,
         artifact_store: VisionArtifactStore | None = None,
         station_storage: VisionStationStorage | None = None,
+        metrics: VisionMetrics | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._execution_context = execution_context
@@ -73,6 +78,14 @@ class VisionService:
         )
         self._capture_pipeline = capture_pipeline
         self._relocalization_pipeline = relocalization_pipeline
+        self._metrics = metrics or VisionMetrics(
+            model_version=configuration.model_version,
+            calibration_version=configuration.calibration_version,
+        )
+        self._clock = clock
+
+    def metrics_snapshot(self) -> VisionMetricsSnapshot:
+        return self._metrics.snapshot()
 
     def capture(
         self,
@@ -117,22 +130,47 @@ class VisionService:
     def _run(
         self,
         operation: VisionOperation,
-        pipeline: Callable[[str], bool],
+        pipeline: Callable[[str], VisionPipelineResult],
     ) -> VisionResult:
-        with self._artifact_store.begin(operation) as run:
-            successful = pipeline(str(run.staging_directory))
-            artifacts = run.finish(successful=successful)
-        code = VisionResultCode.SUCCEEDED if successful else VisionResultCode.REJECTED
+        started_at = self._clock()
+        try:
+            with self._artifact_store.begin(operation) as run:
+                pipeline_result = pipeline(str(run.staging_directory))
+                artifacts = run.finish(successful=pipeline_result.successful)
+        except Exception:
+            self._metrics.record_failure(
+                operation,
+                duration_seconds=max(0.0, self._clock() - started_at),
+            )
+            raise
+        duration_seconds = max(0.0, self._clock() - started_at)
+        self._metrics.record_result(
+            operation,
+            pipeline_result,
+            duration_seconds=duration_seconds,
+        )
+        code = (
+            VisionResultCode.SUCCEEDED
+            if pipeline_result.successful
+            else VisionResultCode.REJECTED
+        )
         return VisionResult(
             operation=operation,
             code=code,
             message=(
                 f"vision {operation.value} succeeded"
-                if successful
+                if pipeline_result.successful
                 else f"vision {operation.value} rejected"
             ),
             artifacts=artifacts,
-            metadata=MappingProxyType({"run_id": run.run_id}),
+            metadata=MappingProxyType(
+                {
+                    "run_id": run.run_id,
+                    "frames_processed": pipeline_result.frames_processed,
+                    "inference_count": pipeline_result.inference_count,
+                    "duration_seconds": duration_seconds,
+                }
+            ),
         )
 
     def _capture_executor(self) -> CapturePipeline:

@@ -1257,6 +1257,12 @@ class RobotWebSocketServer:
                     "teleoperation_metrics": (
                         self._services.teleoperation.metrics_snapshot().to_dict()
                     ),
+                    "vision_metrics": self._services.vision.metrics_snapshot().to_dict(),
+                    "llm_metrics": (
+                        self._llm_registry.metrics_snapshot().to_dict()
+                        if self._llm_registry is not None
+                        else {}
+                    ),
                     "request_id": data["request_id"],
                 }
             )

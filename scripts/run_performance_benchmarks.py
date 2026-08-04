@@ -25,11 +25,14 @@ from src.core.models import ActionType
 from src.device_runtime import ArmId
 from src.device_runtime.resources import ResourceArbiter
 from src.llm.regression import run_regression_suite
+from src.llm.metrics import LLMCallOutcome, LLMMetrics, LLMUsage
 from src.robot_server.protocol import (
     ACTION_REQUEST_SCHEMAS,
     WEBSOCKET_API_VERSION,
     WebSocketRequest,
 )
+from src.vision.metrics import VisionMetrics
+from src.vision.models import VisionOperation, VisionPipelineResult
 
 
 PERFORMANCE_SCHEMA_VERSION = 1
@@ -111,6 +114,10 @@ def default_benchmarks() -> dict[str, BenchmarkDefinition]:
         BenchmarkDefinition(
             "teleoperation_observability",
             _benchmark_teleoperation_observability,
+        ),
+        BenchmarkDefinition(
+            "llm_vision_observability",
+            _benchmark_llm_vision_observability,
         ),
         BenchmarkDefinition("action_schema_snapshot", _benchmark_action_schema_snapshot),
         BenchmarkDefinition("llm_golden_regression", _benchmark_llm_golden_regression),
@@ -307,6 +314,38 @@ def _benchmark_teleoperation_observability(iterations: int) -> None:
         rel_tol=1e-9,
     ):
         raise RuntimeError("teleoperation observability benchmark measured bad throughput")
+
+
+def _benchmark_llm_vision_observability(iterations: int) -> None:
+    llm_metrics = LLMMetrics()
+    vision_metrics = VisionMetrics(
+        model_version="performance-model",
+        calibration_version="performance-calibration",
+    )
+    usage = LLMUsage(input_tokens=10, output_tokens=5, total_tokens=15)
+    vision_result = VisionPipelineResult(
+        successful=True,
+        frames_processed=1,
+        inference_count=1,
+    )
+    for _ in range(iterations):
+        llm_metrics.record(
+            outcome=LLMCallOutcome.SUCCEEDED,
+            duration_seconds=0.01,
+            task_profile="performance",
+            provider="fixture",
+            model="fixture-model",
+            usage=usage,
+        )
+        vision_metrics.record_result(
+            VisionOperation.CAPTURE,
+            vision_result,
+            duration_seconds=0.02,
+        )
+    if llm_metrics.snapshot().calls_total != iterations:
+        raise RuntimeError("LLM observability benchmark lost calls")
+    if vision_metrics.snapshot().frames_processed_total != iterations:
+        raise RuntimeError("vision observability benchmark lost frames")
 
 
 def _benchmark_action_schema_snapshot(iterations: int) -> None:

@@ -2,7 +2,7 @@
 
 > 状态：Active  
 > 生效日期：2026-07-30  
-> 对应总计划：E-010、E-011、E-012
+> 对应总计划：E-010、E-011、E-012、E-013
 
 ## 1. 目标与边界
 
@@ -96,7 +96,25 @@ TaskRunner / Classifier / SkillPlanner / Vision / Repeat
 因此技能目录指纹与实际进入 Prompt 的能力描述一致。规划结果通过
 `LLMPlanResult.to_dict()` 进入命令预览，避免嵌套 dataclass 无法序列化。
 
-## 5. 离线固定回归基线
+## 5. 运行指标
+
+每个 `LLMRegistry` 持有一个线程安全、生命周期内累计的指标实例；由该 registry
+创建的所有 task client 共用它。`RoutedLLMClient` 是逻辑调用的唯一采集点：
+
+- 调用总数及成功、失败、取消数，耗时总计、最大值、平均值和失败率；
+- fallback 成功次数，以及按 task、成功 provider、成功 model 聚合的调用数；
+- provider 实际报告的 input/output/total token 和美元成本；
+- usage 与成本的覆盖调用数，用于识别供应商未返回统计的情况。
+
+成本字段只累计 provider 响应中明确报告的值。项目不内置会随时间变化的模型价格，
+也不把缺失成本估算成零。逻辑调用指标与 provider health 的逐次尝试指标职责不同：
+前者用于业务 SLI，后者用于路由和熔断诊断。
+
+指标不保存 prompt、响应、消息、原始 usage 或其他请求载荷。`ai_status.metrics` 返回
+当前服务端 registry 快照；已认证客户端也可通过 `server_metrics.llm_metrics` 查询。
+尚未初始化服务端 LLM registry 时返回空对象。指标聚合开销进入版本化无硬件性能预算。
+
+## 6. 离线固定回归基线
 
 固定数据位于
 `data/regression/llm_planning_cases.json`，使用严格的
@@ -125,9 +143,9 @@ runner 完全离线，不读取 API Key、不访问网络，输出稳定 JSON �
 确认行为变化符合预期后才能更新 golden 数据和哈希。
 
 当前基线验证解析、契约和技能展开的确定性，不声称验证在线模型对自然语言的语义
-准确率。在线评测、延迟、token、失败率和成本指标属于 E-013。
+准确率。在线语义质量评测仍需单独建设版本化数据集；运行指标不能代替语义评测。
 
-## 6. 配置
+## 7. 配置
 
 ```dotenv
 # 未显式指定 provider 的调用才允许按此顺序降级；空值表示关闭跨厂商降级。

@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-04
 >
-> 当前里程碑：M4 — 加粉规则策略与架构边界已收敛
-> 计划进度：109/117（107 DONE + 2 DROPPED，93.2%）
+> 当前里程碑：M4 — LLM 与视觉运行指标已收敛
+> 计划进度：111/117（109 DONE + 2 DROPPED，94.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -469,10 +469,12 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   Prompt/provider/model/技能目录来源追踪已贯通非流式、流式和命令预览。
 - 已建立严格 schema v1 的离线 golden 数据集和 runner，固定验证分类、规划、
   Prompt 快照、技能目录及动作展开。
+- 每个 LLMRegistry 已统一聚合逻辑调用结果、延迟、fallback、token 和 provider
+  明确报告的成本；不保留 prompt/响应，不使用硬编码模型价格估算缺失成本。
 
 ### 10.2 当前问题
 
-- 缺少在线语义评测，以及延迟、token、失败率和成本指标。
+- 缺少版本化在线语义质量评测；运行指标不能替代模型质量数据集。
 
 ### 10.3 目标
 
@@ -499,7 +501,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | E-010 | P2 | DONE | 所有 task 统一经过 RoutedLLMClient；支持共享 health、连续失败熔断、半开探测和显式 fallback，单次显式 provider 禁止暗中跨厂商降级 |
 | E-011 | P2 | DONE | TaskProfile 强制显式版本；结果记录 Prompt 模板/请求哈希、实际 provider/model、尝试顺序及技能目录版本与指纹，并贯通命令预览和流式协议 |
 | E-012 | P2 | DONE | 建立 strict schema v1 固定数据集和离线 runner，覆盖分类/规划解析、Prompt 快照、技能目录及技能参数校验/动作展开 |
-| E-013 | P3 | TODO | LLM 延迟、token、失败率和成本指标 |
+| E-013 | P3 | DONE | RoutedLLMClient 统一采集逻辑调用成功/失败/取消、延迟、fallback、task/成功 provider/model、token 和 provider 报告成本；记录 usage/成本覆盖率，不保存 payload，不硬编码价格；通过 ai_status/server_metrics 暴露并纳入性能预算 |
 
 ### 10.5 完成标准
 
@@ -519,7 +521,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - 模型、标定和工位 profile 已具备严格版本语义；未版本化或版本不匹配的数据会失败。
 - 抓取与重定位调试产物使用同一运行会话、原子发布和有界保留策略。
 - simulation 使用确定性 fixture，不加载真实模型或访问硬件。
-- 尚未统一采集性能、帧率、延迟和模型质量指标。
+- VisionService 已统一采集操作结果、实际处理帧数/推理次数、延迟、观测处理 FPS
+  和模型/标定版本；模型语义质量仍由后续版本化真实图像数据集评测。
 
 工作项：
 
@@ -532,7 +535,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | F-V-005 | P2 | DONE | 模型、标定和工位 profile 使用显式版本；工位 schema 原子写入并拒绝 legacy、缺失版本或活动配置不匹配的数据 |
 | F-V-006 | P2 | DONE | 抓取/重定位统一使用 scoped artifact run、失败 manifest、staging 原子发布、保留天数/最大运行数和残留清理策略 |
 | F-V-007 | P2 | DONE | simulation 组合根注入确定性 VisionPipelineFixture；无模型、无相机执行 capture/relocalization 并生成可审计 fixture 产物 |
-| F-V-008 | P3 | TODO | 性能、帧率、延迟和模型指标 |
+| F-V-008 | P3 | DONE | pipeline 改为强类型 VisionPipelineResult 并报告实际帧数/推理次数；VisionService 聚合结果、延迟、观测处理 FPS 和模型/标定版本，通过 server_metrics 暴露且不保存图像/payload；指标开销纳入性能预算 |
 
 ### 11.2 遥操作
 
@@ -1000,6 +1003,7 @@ M4 工程治理与清理
 | 2026-08-04 | M4 | F/G | 视觉服务与数据治理整批收口 | F-V-004/F-V-005/F-V-006/F-V-007 TODO → DONE | 新增 VisionService/typed result；模型、标定、工位 profile 严格版本化；调试产物按 run staging、manifest、原子发布和有界保留；simulation 注入确定性 fixture；删除旧重定位调试目录和 bool executor 双入口 | 359 tests + 32 subtests，覆盖率 55.99%；28 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | F | 遥操作审计与软件性能基线 | F-T-006/F-T-007 TODO → DONE | 新增 typed TeleoperationObservability，统一会话、指令、跳过、错误、watchdog 和安全释放审计；敏感控制载荷不进入事件；聚合耗时、间隔、抖动和吞吐并通过 `server_metrics` 暴露；审计 sink 故障与控制结果隔离；新增确定性无硬件性能预算 | 361 tests + 32 subtests，覆盖率 56.32%；30 个 Mypy 文件、14 golden、6/6 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | F | 加粉规则策略与架构边界收敛 | F-P-004/F-P-005 TODO → DONE；F-P-006 TODO → DROPPED | 新增版本化无硬件策略案例和显式四级阈值配置；修复最终允许轮次达标/超量被误判为最大轮次失败；校验有限数值与策略不变量，读数重试保留异常链且不做末次无效等待；文档明确当前确定性闭环和未立项四 Agent 概念方案，不预埋框架 | 366 tests + 43 subtests，覆盖率 56.42%；31 个 Mypy 文件、14 golden、6/6 性能预算和 wheel smoke 全部通过 |
+| 2026-08-04 | M4 | E/F/G | LLM 与视觉运行指标收敛 | E-013/F-V-008 TODO → DONE | RoutedLLMClient 成为逻辑调用唯一指标切面，聚合结果、延迟、fallback、token 和 provider 报告成本；VisionService 聚合结果、实际帧数/推理次数、延迟、观测处理 FPS 及模型/标定版本；删除视觉 bool pipeline contract，不保留兼容转换；指标不保存 payload，并由 ai_status/server_metrics 暴露 | 369 tests + 43 subtests，覆盖率 56.82%；35 个 Mypy 文件、14 golden、7/7 性能预算和 wheel smoke 全部通过 |
 
 ## 22. 建议的首批实施顺序
 

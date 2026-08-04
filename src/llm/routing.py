@@ -19,6 +19,7 @@ from .errors import (
     LLMTimeoutError,
 )
 from .fingerprints import fingerprint_messages
+from .metrics import LLMCallOutcome, LLMMetrics, parse_llm_usage
 from .tasks.profiles import TaskProfile
 from .types import (
     LLMCallProvenance,
@@ -199,12 +200,16 @@ class RoutedLLMClient(BaseLLMClient):
         explicit_provider: bool,
         provider_loader: ProviderLoader,
         health: ProviderHealthTracker,
+        metrics: LLMMetrics | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._profile = profile
         self._primary_provider = primary_provider
         self._explicit_provider = explicit_provider
         self._provider_loader = provider_loader
         self._health = health
+        self._metrics = metrics or LLMMetrics()
+        self._clock = clock
         self._prompt_template_sha256 = profile.template_sha256
         self._candidates = tuple(dict.fromkeys(
             (
@@ -239,6 +244,37 @@ class RoutedLLMClient(BaseLLMClient):
         ).capabilities()
 
     async def chat(
+        self,
+        messages: list[LLMMessage],
+        **options: Any,
+    ) -> LLMChatResult:
+        started_at = self._clock()
+        try:
+            result = await self._chat_routed(messages, **options)
+        except asyncio.CancelledError:
+            self._record_call_metric(
+                LLMCallOutcome.CANCELLED,
+                started_at=started_at,
+            )
+            raise
+        except Exception:
+            self._record_call_metric(
+                LLMCallOutcome.FAILED,
+                started_at=started_at,
+            )
+            raise
+        provenance = result.provenance
+        self._record_call_metric(
+            LLMCallOutcome.SUCCEEDED,
+            started_at=started_at,
+            provider=provenance.provider if provenance else result.provider,
+            model=provenance.model if provenance else result.model,
+            fallback_used=provenance.fallback_used if provenance else False,
+            usage_payload=result.usage or result.metrics,
+        )
+        return result
+
+    async def _chat_routed(
         self,
         messages: list[LLMMessage],
         **options: Any,
@@ -306,6 +342,50 @@ class RoutedLLMClient(BaseLLMClient):
         )
 
     async def stream_chat(
+        self,
+        messages: list[LLMMessage],
+        **options: Any,
+    ) -> AsyncIterator[LLMStreamEvent]:
+        started_at = self._clock()
+        terminal_event: LLMStreamEvent | None = None
+        try:
+            async for event in self._stream_chat_routed(messages, **options):
+                if event.type in {"done", "error"}:
+                    terminal_event = event
+                yield event
+        except asyncio.CancelledError:
+            self._record_call_metric(
+                LLMCallOutcome.CANCELLED,
+                started_at=started_at,
+            )
+            raise
+        except GeneratorExit:
+            self._record_call_metric(
+                LLMCallOutcome.CANCELLED,
+                started_at=started_at,
+            )
+            raise
+        except Exception:
+            self._record_call_metric(
+                LLMCallOutcome.FAILED,
+                started_at=started_at,
+            )
+            raise
+        provenance = terminal_event.provenance if terminal_event else None
+        self._record_call_metric(
+            (
+                LLMCallOutcome.SUCCEEDED
+                if terminal_event is not None and terminal_event.type == "done"
+                else LLMCallOutcome.FAILED
+            ),
+            started_at=started_at,
+            provider=provenance.provider if provenance else "",
+            model=provenance.model if provenance else "",
+            fallback_used=provenance.fallback_used if provenance else False,
+            usage_payload=terminal_event.metrics if terminal_event else None,
+        )
+
+    async def _stream_chat_routed(
         self,
         messages: list[LLMMessage],
         **options: Any,
@@ -468,6 +548,26 @@ class RoutedLLMClient(BaseLLMClient):
             self._profile.name,
             provider_name,
             type(error).__name__,
+        )
+
+    def _record_call_metric(
+        self,
+        outcome: LLMCallOutcome,
+        *,
+        started_at: float,
+        provider: str = "",
+        model: str = "",
+        fallback_used: bool = False,
+        usage_payload: dict[str, Any] | None = None,
+    ) -> None:
+        self._metrics.record(
+            outcome=outcome,
+            duration_seconds=max(0.0, self._clock() - started_at),
+            task_profile=self._profile.name,
+            provider=provider,
+            model=model,
+            fallback_used=fallback_used,
+            usage=parse_llm_usage(usage_payload),
         )
 
     @staticmethod

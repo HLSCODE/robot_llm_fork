@@ -20,6 +20,7 @@ from typing import Any, Dict, Optional, Sequence
 
 from ..core.settings import LLMSettings, SecretSettings
 from .base import BaseLLMClient
+from .metrics import LLMMetrics, LLMMetricsSnapshot
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
 from .routing import (
@@ -58,6 +59,7 @@ class LLMRegistry:
         secrets: SecretSettings,
         default_provider: str = "openai",
         providers: Optional[Dict[str, BaseLLMClient]] = None,
+        metrics: LLMMetrics | None = None,
     ) -> None:
         self._settings = settings
         self._secrets = secrets
@@ -65,6 +67,7 @@ class LLMRegistry:
         self._providers: Dict[str, BaseLLMClient] = {}
         self._lock = RLock()
         self._closed = False
+        self._metrics = metrics or LLMMetrics()
         self._fallback_providers = self._parse_provider_names(
             settings.llm_fallback_providers
         )
@@ -121,6 +124,7 @@ class LLMRegistry:
         cls,
         providers: object,
     ) -> tuple[str, ...]:
+        values: Sequence[object]
         if isinstance(providers, str):
             values = providers.split(",")
         elif isinstance(providers, (tuple, list)):
@@ -279,7 +283,11 @@ class LLMRegistry:
             explicit_provider=provider is not None,
             provider_loader=self.get_provider,
             health=self._health,
+            metrics=self._metrics,
         )
+
+    def metrics_snapshot(self) -> LLMMetricsSnapshot:
+        return self._metrics.snapshot()
 
     def get_provider_health(self) -> dict[str, dict[str, Any]]:
         """Return health snapshots without forcing lazy provider creation."""

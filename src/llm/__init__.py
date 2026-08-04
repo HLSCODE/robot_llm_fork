@@ -3,6 +3,7 @@ LLM 大模型模块
 提供统一的大模型能力层，用于对话、流式对话、指令分类和动作规划。
 """
 from .base import BaseLLMClient, LLMPlanResult
+from .metrics import LLMCallOutcome, LLMMetrics, LLMMetricsSnapshot, LLMUsage
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
 from .registry import LLMRegistry
@@ -40,10 +41,14 @@ __all__ = [
     "LLMArtifactVersion",
     "LLMCallProvenance",
     "LLMCapability",
+    "LLMCallOutcome",
     "LLMChatResult",
     "LLMContentPart",
     "LLMMessage",
+    "LLMMetrics",
+    "LLMMetricsSnapshot",
     "LLMStreamEvent",
+    "LLMUsage",
     "LLMRegistry",
     "ProviderHealthSnapshot",
     "ProviderHealthStatus",

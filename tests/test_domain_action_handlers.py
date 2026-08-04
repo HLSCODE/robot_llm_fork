@@ -37,6 +37,7 @@ from src.execution.handlers import (
     VisionRelocalizationActionHandler,
 )
 from src.vision.service import VisionService
+from src.vision.models import VisionPipelineResult
 
 
 class _TrajectoryRobot:
@@ -320,11 +321,11 @@ class VisionActionHandlerTests(unittest.TestCase):
             settings,
             log,
             _debug_directory,
-        ) -> bool:
+        ) -> VisionPipelineResult:
             received.append((robot, camera, parameters))
             self.assertIs(self.vision_settings, settings)
             log("capture executor called")
-            return True
+            return VisionPipelineResult(True, frames_processed=1, inference_count=1)
 
         vision = VisionService(
             self.vision_settings,
@@ -361,11 +362,11 @@ class VisionActionHandlerTests(unittest.TestCase):
             _station_storage,
             _debug_directory,
             log,
-        ) -> bool:
+        ) -> VisionPipelineResult:
             received_contexts.append(execution_context)
             self.assertIs(self.vision_settings, settings)
             log("relocalization executor called")
-            return True
+            return VisionPipelineResult(True, frames_processed=1, inference_count=1)
 
         vision = VisionService(
             self.vision_settings,
@@ -397,9 +398,9 @@ class VisionActionHandlerTests(unittest.TestCase):
             _settings,
             _log,
             _debug_directory,
-        ) -> bool:
+        ) -> VisionPipelineResult:
             control.cancel()
-            return True
+            return VisionPipelineResult(True, frames_processed=1, inference_count=1)
 
         vision = VisionService(
             self.vision_settings,

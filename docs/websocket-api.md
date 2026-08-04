@@ -481,8 +481,11 @@ ws.onmessage = (event) => {
 包含当前/峰值/累计连接数、当前/峰值/累计请求数、请求耗时、非法请求、限流、
 繁忙、权限拒绝、内部错误、发送耗时、慢发送、发送失败和超时断连；
 `teleoperation_metrics` 包含遥操作会话、已应用/跳过/失败指令、watchdog、安全
-释放、指令耗时、最大间隔、抖动和观测吞吐。指标不包含 token、请求 payload、
-关节/夹爪控制值、客户端地址或其他高基数个人数据。
+释放、指令耗时、最大间隔、抖动和观测吞吐；`vision_metrics` 包含操作结果、实际
+处理帧数/推理次数、耗时、观测处理 FPS 及模型/标定版本；`llm_metrics` 包含逻辑
+调用结果、耗时、fallback、token 和 provider 明确报告的成本，服务端 LLM 尚未初始化
+时为空对象。指标不包含 prompt、响应、图像、请求 payload、关节/夹爪控制值、
+客户端地址或其他高基数个人数据。
 
 ---
 
@@ -494,7 +497,7 @@ ws.onmessage = (event) => {
 |---|---|---|
 | `authenticate` | 公开 | 使用 `WEBSOCKET_AUTH_TOKEN` 认证当前连接 |
 | `control_status` | 公开 | 查询当前连接认证状态、控制租约和应用层遥操作 owner/活动臂/指令计数快照 |
-| `server_metrics` | 已认证 | 查询 WebSocket 与遥操作应用层聚合指标 |
+| `server_metrics` | 已认证 | 查询 WebSocket、遥操作、视觉和服务端 LLM 聚合指标 |
 | `acquire_control` | 已认证 | 申请唯一控制权 |
 | `control_heartbeat` | 控制者 | 续期控制租约 |
 | `release_control` | 控制者 | 主动释放控制权及其会话资源 |
@@ -2457,6 +2460,14 @@ AI 执行流程结束示例：
       "last_failure_type": null
     }
   },
+  "metrics": {
+    "calls_total": 13,
+    "calls_succeeded_total": 12,
+    "calls_failed_total": 1,
+    "tokens_total": 8421,
+    "reported_cost_calls_total": 10,
+    "reported_cost_usd_total": 0.42
+  },
   "capabilities": ["chat", "stream_chat", "planning"],
   "chat_available": true,
   "chat_provider": "minicpm",
@@ -2495,6 +2506,7 @@ AI 执行流程结束示例：
 | `providers` | `array` | 当前 registry 已注册的 provider 名称 |
 | `loaded_providers` | `array` | 当前进程已经懒加载实例化的 provider 名称 |
 | `provider_health` | `object` | 各 provider 的运行时健康、成功/失败计数和熔断恢复等待；未加载 provider 为 `unknown` |
+| `metrics` | `object` | 当前 LLMRegistry 生命周期内的逻辑调用、延迟、fallback、token 和 provider 报告成本；registry 尚未初始化时为空对象 |
 | `capabilities` | `array` | 聊天 provider 支持的能力 |
 | `chat_available` | `boolean` | 聊天 provider 是否可用 |
 | `chat_provider` | `string` | 当前聊天 profile 解析到的 provider |

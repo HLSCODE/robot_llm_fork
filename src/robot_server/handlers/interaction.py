@@ -286,6 +286,11 @@ class InteractionWebSocketHandler:
                         if self._server._llm_registry
                         else {}
                     ),
+                    "metrics": (
+                        self._server._llm_registry.metrics_snapshot().to_dict()
+                        if self._server._llm_registry
+                        else {}
+                    ),
                     "capabilities": capabilities,
                     "chat_available": chat_available,
                     "chat_provider": chat_client.get_provider_name()

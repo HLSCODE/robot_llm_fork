@@ -1,9 +1,12 @@
 """Vision services and algorithms operating on project device capabilities."""
 
+from .interface import vertical_catch
+from .metrics import VisionMetrics, VisionMetricsSnapshot
 from .models import (
     VisionArtifact,
     VisionConfigurationVersion,
     VisionOperation,
+    VisionPipelineResult,
     VisionResult,
     VisionResultCode,
 )
@@ -13,11 +16,11 @@ __all__ = [
     "VisionArtifact",
     "VisionConfigurationVersion",
     "VisionOperation",
+    "VisionPipelineResult",
     "VisionResult",
     "VisionResultCode",
+    "VisionMetrics",
+    "VisionMetricsSnapshot",
     "VisionService",
+    "vertical_catch",
 ]
-
-from .interface import vertical_catch
-
-__all__ = ["vertical_catch"]

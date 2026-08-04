@@ -21,6 +21,11 @@
       "samples": 5,
       "max_median_ms": 500.0
     },
+    "llm_vision_observability": {
+      "iterations": 10000,
+      "samples": 5,
+      "max_median_ms": 750.0
+    },
     "action_schema_snapshot": {
       "iterations": 250,
       "samples": 5,

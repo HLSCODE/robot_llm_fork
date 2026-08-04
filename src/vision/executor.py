@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Callable
 
 from ..core.settings import VisionSettings
+from .models import VisionPipelineResult
 
 # log_fn: str -> None
 
@@ -21,7 +22,7 @@ def execute_vision_capture(
     settings: VisionSettings,
     log_fn: Callable[[str], None],
     debug_directory: str,
-) -> bool:
+) -> VisionPipelineResult:
     """视觉抓取统一执行入口。
 
     流程：
@@ -40,7 +41,7 @@ def execute_vision_capture(
         log_fn:    日志回调，签名为 (message: str) -> None
 
     Returns:
-        bool: 执行成功/失败
+        Typed pipeline result with outcome and processed frame/inference counts.
     """
     target_robot = params.get("目标机械臂", "robot1")
     workflow = params.get("工作流", settings.vision_default_workflow)
@@ -55,7 +56,7 @@ def execute_vision_capture(
     try:
         if camera is None:
             log_fn("相机管理器未启动，无法取帧")
-            return False
+            return VisionPipelineResult(False, frames_processed=0, inference_count=0)
 
         from .capture import VisionCaptureAction
 
@@ -75,10 +76,10 @@ def execute_vision_capture(
 
         if action.execute():
             log_fn("视觉抓取执行成功")
-            return True
+            return VisionPipelineResult(True, frames_processed=1, inference_count=1)
         log_fn(f"视觉抓取执行失败: {action.last_error or '未知错误'}")
-        return False
+        return VisionPipelineResult(False, frames_processed=1, inference_count=1)
 
     except Exception as e:
         log_fn(f"执行视觉抓取出错: {str(e)}")
-        return False
+        return VisionPipelineResult(False, frames_processed=0, inference_count=0)

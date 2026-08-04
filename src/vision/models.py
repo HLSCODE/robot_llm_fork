@@ -20,6 +20,19 @@ class VisionResultCode(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class VisionPipelineResult:
+    successful: bool
+    frames_processed: int
+    inference_count: int
+
+    def __post_init__(self) -> None:
+        if self.frames_processed < 0:
+            raise ValueError("vision frames_processed must be non-negative")
+        if self.inference_count < 0:
+            raise ValueError("vision inference_count must be non-negative")
+
+
+@dataclass(frozen=True, slots=True)
 class VisionConfigurationVersion:
     schema_version: int
     model_version: str

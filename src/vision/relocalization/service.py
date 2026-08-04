@@ -21,7 +21,7 @@ from ...device_runtime import (
     MotionMode,
     RobotSystem,
 )
-from ..models import vision_configuration
+from ..models import VisionPipelineResult, vision_configuration
 from .geometry import compensate_taught_pose, compute_marker_in_base_from_image
 
 
@@ -310,7 +310,7 @@ def execute_vision_relocalization(
     station_storage: VisionStationStorage,
     debug_directory: str | Path,
     log_fn: LogFn | None = None,
-) -> bool:
+) -> VisionPipelineResult:
     log = log_fn or _default_log
     action_mode = params.get("action_mode") or params.get("动作模式") or "run"
     station_id = str(
@@ -344,7 +344,7 @@ def execute_vision_relocalization(
                 metadata={"teach_profile": True, "marker": profile.get("marker")},
             )
         )
-        return True
+        return VisionPipelineResult(True, frames_processed=1, inference_count=1)
     else:
         profile = station_storage.get_profile(station_id, arm)
         if profile is None:
@@ -400,7 +400,7 @@ def execute_vision_relocalization(
         )
     )
     log(f"视觉重定位完成: 工位={station_id}, {arm_display_name(arm)}")
-    return True
+    return VisionPipelineResult(True, frames_processed=1, inference_count=1)
 
 
 def compensate_pose_with_context(

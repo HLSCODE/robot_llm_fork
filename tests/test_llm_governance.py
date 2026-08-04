@@ -39,6 +39,7 @@ class _FakeProvider(BaseLLMClient):
         chat_text: str = "ok",
         chat_error: Exception | None = None,
         stream_events: list[LLMStreamEvent] | None = None,
+        usage: dict[str, Any] | None = None,
         available: bool = True,
     ) -> None:
         self.name = name
@@ -47,6 +48,7 @@ class _FakeProvider(BaseLLMClient):
         self.stream_events = stream_events or [
             LLMStreamEvent(type="done", text=chat_text)
         ]
+        self.usage = usage
         self.available = available
         self.chat_calls = 0
         self.stream_calls = 0
@@ -79,6 +81,7 @@ class _FakeProvider(BaseLLMClient):
             text=self.chat_text,
             model=self.get_model_name(),
             provider=self.name,
+            usage=self.usage,
         )
 
     async def stream_chat(
@@ -168,6 +171,89 @@ class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
             "healthy",
             registry.get_provider_health()["openai"]["status"],
         )
+
+    async def test_metrics_track_latency_usage_reported_cost_and_failure(self):
+        provider = _FakeProvider(
+            "openai",
+            usage={
+                "prompt_tokens": 12,
+                "completion_tokens": 8,
+                "total_tokens": 20,
+                "cost_usd": 0.004,
+            },
+        )
+        registry = LLMRegistry(
+            settings=_config(),
+            secrets=SecretSettings(),
+            providers={"openai": provider},
+        )
+
+        await registry.chat(user_text="hello", profile=TEST_PROFILE)
+        provider.chat_error = LLMProviderError("failed")
+        with self.assertRaises(LLMProviderError):
+            await registry.chat(
+                user_text="hello",
+                profile=TEST_PROFILE,
+                provider="openai",
+            )
+
+        snapshot = registry.metrics_snapshot()
+        self.assertEqual(2, snapshot.calls_total)
+        self.assertEqual(1, snapshot.calls_succeeded_total)
+        self.assertEqual(1, snapshot.calls_failed_total)
+        self.assertEqual(12, snapshot.input_tokens_total)
+        self.assertEqual(8, snapshot.output_tokens_total)
+        self.assertEqual(20, snapshot.tokens_total)
+        self.assertEqual(1, snapshot.reported_cost_calls_total)
+        self.assertAlmostEqual(0.004, snapshot.reported_cost_usd_total)
+        self.assertEqual(
+            {"openai": 1},
+            dict(snapshot.successful_provider_calls),
+        )
+        self.assertEqual(
+            {"openai-model": 1},
+            dict(snapshot.successful_model_calls),
+        )
+        self.assertAlmostEqual(0.5, snapshot.to_dict()["failure_rate"])
+
+    async def test_stream_metrics_use_terminal_event_without_storing_payload(self):
+        provider = _FakeProvider(
+            "openai",
+            stream_events=[
+                LLMStreamEvent(type="text_delta", text_delta="secret-response"),
+                LLMStreamEvent(
+                    type="done",
+                    text="secret-response",
+                    metrics={
+                        "usage": {
+                            "input_tokens": 3,
+                            "output_tokens": 2,
+                            "total_tokens": 5,
+                        }
+                    },
+                ),
+            ],
+        )
+        registry = LLMRegistry(
+            settings=_config(),
+            secrets=SecretSettings(),
+            providers={"openai": provider},
+        )
+
+        events = [
+            event
+            async for event in registry.stream_chat(
+                user_text="secret-request",
+                profile=TEST_PROFILE,
+            )
+        ]
+
+        self.assertEqual("done", events[-1].type)
+        payload = registry.metrics_snapshot().to_dict()
+        self.assertEqual(1, payload["calls_succeeded_total"])
+        self.assertEqual(5, payload["tokens_total"])
+        self.assertNotIn("secret-request", str(payload))
+        self.assertNotIn("secret-response", str(payload))
 
     async def test_fallback_is_configured_and_explicit_provider_is_pinned(self):
         primary = _FakeProvider(

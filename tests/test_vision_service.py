@@ -16,7 +16,11 @@ from src.core.settings import ApplicationSettings, VisionSettings
 from src.core.vision_station_storage import VisionStationStorage
 from src.execution import ExecutionState
 from src.vision.artifacts import VisionArtifactStore
-from src.vision.models import VisionOperation, vision_configuration
+from src.vision.models import (
+    VisionOperation,
+    VisionPipelineResult,
+    vision_configuration,
+)
 from src.vision.service import VisionService
 
 
@@ -40,14 +44,17 @@ class VisionServiceTests(unittest.TestCase):
             _settings,
             _log,
             debug_directory,
-        ) -> bool:
+        ) -> VisionPipelineResult:
             Path(debug_directory, "frame.jpg").write_bytes(b"fixture-image")
-            return True
+            return VisionPipelineResult(True, frames_processed=2, inference_count=1)
+
+        clock = iter((10.0, 10.04))
 
         service = VisionService(
             self.settings,
             ExecutionContext(),
             capture_pipeline=pipeline,
+            clock=lambda: next(clock),
         )
 
         result = service.capture(object(), object(), {"workflow": "fixture"}, lambda _message: None)
@@ -61,9 +68,18 @@ class VisionServiceTests(unittest.TestCase):
         manifest = json.loads((artifact.path.parent / "manifest.json").read_text(encoding="utf-8"))
         self.assertTrue(manifest["successful"])
         self.assertEqual("detector-2026.08", manifest["configuration"]["model_version"])
+        metrics = service.metrics_snapshot()
+        self.assertEqual(1, metrics.operations_succeeded_total)
+        self.assertEqual(2, metrics.frames_processed_total)
+        self.assertEqual(1, metrics.inference_count_total)
+        self.assertAlmostEqual(
+            50.0,
+            metrics.to_dict()["observed_processing_fps"],
+        )
+        self.assertEqual("detector-2026.08", metrics.model_version)
 
     def test_pipeline_exception_publishes_failed_run_and_preserves_exception(self) -> None:
-        def pipeline(*_args) -> bool:
+        def pipeline(*_args) -> VisionPipelineResult:
             debug_directory = Path(_args[-1])
             (debug_directory / "failure.txt").write_text("diagnostic", encoding="utf-8")
             raise RuntimeError("fixture failure")
@@ -80,6 +96,26 @@ class VisionServiceTests(unittest.TestCase):
         manifests = list((self.root / "debug").rglob("manifest.json"))
         self.assertEqual(1, len(manifests))
         self.assertFalse(json.loads(manifests[0].read_text(encoding="utf-8"))["successful"])
+        self.assertEqual(1, service.metrics_snapshot().operations_failed_total)
+
+    def test_rejected_pipeline_is_counted_separately_from_internal_failure(self) -> None:
+        service = VisionService(
+            self.settings,
+            ExecutionContext(),
+            capture_pipeline=lambda *_args: VisionPipelineResult(
+                False,
+                frames_processed=1,
+                inference_count=1,
+            ),
+        )
+
+        result = service.capture(object(), object(), {}, lambda _message: None)
+
+        self.assertFalse(result.successful)
+        metrics = service.metrics_snapshot()
+        self.assertEqual(1, metrics.operations_rejected_total)
+        self.assertEqual(0, metrics.operations_failed_total)
+        self.assertEqual(1, metrics.frames_processed_total)
 
     def test_artifact_cleanup_removes_stale_temporary_and_bounds_completed_runs(self) -> None:
         store = VisionArtifactStore(

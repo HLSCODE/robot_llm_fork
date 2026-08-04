@@ -69,11 +69,18 @@ def _control_status_services() -> SimpleNamespace:
             "observed_throughput_hz": 50.0,
         }
     )
+    vision_metrics = SimpleNamespace(
+        to_dict=lambda: {
+            "operations_total": 3,
+            "observed_processing_fps": 25.0,
+        }
+    )
     return SimpleNamespace(
         teleoperation=SimpleNamespace(
             snapshot=lambda: snapshot,
             metrics_snapshot=lambda: metrics,
-        )
+        ),
+        vision=SimpleNamespace(metrics_snapshot=lambda: vision_metrics),
     )
 
 
@@ -281,6 +288,8 @@ class WebSocketProtocolContractTests(unittest.TestCase):
             50.0,
             metrics["teleoperation_metrics"]["observed_throughput_hz"],
         )
+        self.assertEqual(3, metrics["vision_metrics"]["operations_total"])
+        self.assertEqual({}, metrics["llm_metrics"])
 
     def test_rate_limit_response_keeps_request_correlation(self):
         server = RobotWebSocketServer(

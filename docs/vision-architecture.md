@@ -30,13 +30,34 @@ ActionEngine
 - `VisionOperation`：capture 或 relocalization；
 - `VisionResultCode`：succeeded 或 rejected；
 - 用户/执行层可消费的 message；
+- pipeline 提供的 `frames_processed`、`inference_count` 和服务测得的处理时长 metadata。
 - 本次运行产生的 `VisionArtifact`；
-- 不可变 metadata，目前包含 run_id。
+- 不可变 metadata，目前包含 run_id、处理计数和耗时。
+
+内部 pipeline 直接返回 `VisionPipelineResult`，包含成功状态、实际处理帧数和推理
+次数；不再接受 `bool` 返回值，也不做兼容转换。
+
+## 3. 指标与性能语义
+
+`VisionService` 是指标的唯一所有者，按服务生命周期线程安全累计：
+
+- 成功、业务拒绝和内部失败操作数；
+- capture/relocalization 调用数；
+- 实际处理帧数、推理次数；
+- 总/最大/平均操作耗时和观测处理 FPS；
+- 当前 model version 与 calibration version。
+
+`observed_processing_fps` 是 `累计处理帧数 / 累计 VisionService 操作耗时`，用于
+代码和 pipeline 回归；它不是相机传感器标称 FPS，也不能替代真实硬件端到端
+验收。pipeline 必须报告真实处理计数，不能用相机标称参数或估算值填充。指标不保存
+图像、路径、检测框、工位参数或请求载荷。已认证客户端可通过
+`server_metrics.vision_metrics` 获取快照。指标聚合开销进入版本化无硬件性能预算。
 
 pipeline 抛出的异常不会被 VisionService 吞掉：产物会以失败 manifest 发布，异常继续
-交给 action handler 映射为设备操作失败。pipeline 返回 false 表示可预期业务拒绝。
+交给 action handler 映射为设备操作失败。pipeline 返回 `successful=false` 表示可预期
+业务拒绝。
 
-## 3. 模型、标定和工位版本
+## 4. 模型、标定和工位版本
 
 活动配置必须提供：
 
@@ -50,7 +71,7 @@ pipeline 抛出的异常不会被 VisionService 吞掉：产物会以失败 mani
 
 未版本化的列表或旧 `{profiles: [...]}` 文档会被拒绝；项目不提供兼容读取路径。
 
-## 4. 调试产物生命周期
+## 5. 调试产物生命周期
 
 所有抓取和重定位产物统一位于 `VISION_DEBUG_SAVE_DIR`：
 
@@ -63,9 +84,10 @@ pipeline 抛出的异常不会被 VisionService 吞掉：产物会以失败 mani
 
 旧的 `VISION_RELOCALIZATION_DEBUG_DIR` 双入口已删除。
 
-## 5. 扩展规则
+## 6. 扩展规则
 
 - 替换检测/分割模型时更新 model version，并运行 simulation、fixture 和真实图片回归。
 - 更新内参、畸变、手眼矩阵或参考系时更新 calibration version，重新采集工位 profile。
 - 新 pipeline 实现消费者需要的最小 callable contract，不得自行创建设备或管理相机生命周期。
-- 性能、帧率、延迟和模型质量指标后续由 F-V-008 纳入统一观测与性能门禁。
+- 替换模型后同时观察成功/拒绝率、推理次数、延迟与处理 FPS；模型准确率仍需由
+  版本化真实图片数据集评测，运行指标不能替代离线质量评估。
