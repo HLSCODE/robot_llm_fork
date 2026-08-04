@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ..application import CompositionService
+from ...application import CompositionService
 
 
 class CompositionBridge(QObject):

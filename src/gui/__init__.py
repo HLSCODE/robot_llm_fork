@@ -1,5 +1,4 @@
-from .main_window import MainWindow
-from .dialogs import ActionPreviewDialog
-from .startup import GuiStartupState
+from .controllers import GuiStartupState, MainWindow
+from .views import ActionPreviewDialog
 
 __all__ = ["MainWindow", "ActionPreviewDialog", "GuiStartupState"]

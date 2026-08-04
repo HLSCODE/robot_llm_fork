@@ -117,8 +117,7 @@ from ..application import (
     websocket_teleoperation_owner,
 )
 from ..core.logging_config import bind_log_context, reset_log_context
-from ..devices.runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
-from .access_control import (
+from .security import (
     AuditSink,
     WebSocketAccessController,
     WebSocketAccessError,
@@ -126,7 +125,7 @@ from .access_control import (
     WebSocketAuditEvent,
     log_websocket_audit_event,
 )
-from .handlers import (
+from .controllers import (
     CompositionWebSocketHandler,
     DeviceWebSocketHandler,
     ExecutionWebSocketHandler,
@@ -144,12 +143,9 @@ from .protocol import (
     WebSocketRequestError,
     WebSocketResponse,
 )
-from .request_limits import WebSocketRequestLimiter
-from .routing import WebSocketRoute, WebSocketRouteRegistry
-from .transport_security import (
-    create_server_ssl_context,
-    normalize_allowed_origins,
-)
+from .protocol import WebSocketRoute, WebSocketRouteRegistry
+from .security import WebSocketRequestLimiter
+from .security import create_server_ssl_context, normalize_allowed_origins
 
 logger = logging.getLogger(__name__)
 
@@ -307,18 +303,6 @@ class RobotWebSocketServer:
         self._device_handler = DeviceWebSocketHandler(self)
         self._teleoperation_handler = TeleoperationWebSocketHandler(self)
         self._routes = self._build_routes()
-
-    @property
-    def _robot_system(self):
-        return self._services.device_runtime.get_if_ready(ROBOT_SYSTEM)
-
-    @property
-    def _body_controller(self):
-        return self._services.device_runtime.get_if_ready(BODY_AXIS)
-
-    @property
-    def _camera_manager(self):
-        return self._services.device_runtime.get_if_ready(CAMERA)
 
     @property
     def name(self) -> str:

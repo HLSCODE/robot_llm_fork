@@ -1,3 +1,5 @@
+"""Thread-safe GUI notification bridge and dialog presenter."""
+
 from __future__ import annotations
 
 from collections import deque

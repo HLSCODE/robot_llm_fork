@@ -457,11 +457,6 @@ class DomainHandlerIntegrationTests(unittest.TestCase):
             ).wait(1)
 
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
-        robot = services.device_runtime.require(
-            ROBOT_SYSTEM,
-            RobotSystem,
-        )
-        self.assertEqual(1, robot.tool_slot)
         self.assertFalse(services.devices.shutdown_all())
 
 

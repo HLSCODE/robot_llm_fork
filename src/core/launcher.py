@@ -97,7 +97,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     from PyQt6.QtWidgets import QApplication
 
     from ..application import create_application_services
-    from ..gui.main_window import MainWindow
+    from ..gui.controllers.main_window import MainWindow
 
     services = create_application_services(
         settings,

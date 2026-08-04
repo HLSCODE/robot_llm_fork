@@ -17,11 +17,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..application import ApplicationServices
-from ..core.models import ActionDefinition, ActionType
-from ..devices import StopMode
-from ..widgets import ActionListWidget, ControlPanel, SequenceListWidget
-from ..widgets.ai_assistant import AIAssistantWidget
+from ...application import ApplicationServices
+from ...core.models import ActionDefinition, ActionType
+from ...devices import StopMode
+from ...widgets import ActionListWidget, ControlPanel, SequenceListWidget
+from ...widgets.ai_assistant import AIAssistantWidget
 
 
 class TaskLibraryListWidget(QListWidget):

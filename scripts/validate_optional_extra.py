@@ -28,7 +28,7 @@ def _check_gui() -> None:
 
     from PyQt6.QtWidgets import QApplication, QWidget
 
-    from src.gui.main_window import MainWindow
+    from src.gui.controllers.main_window import MainWindow
 
     application = QApplication.instance() or QApplication([])
     widget = QWidget()

@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .view_models import DeviceViewState
+from ..view_models.models import DeviceViewState
 
 
 class DeviceStatusView(QWidget):

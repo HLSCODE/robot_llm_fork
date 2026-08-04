@@ -4,8 +4,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .access_control import WebSocketAccessLevel
-from .protocol import ACTION_REQUEST_SCHEMAS, WebSocketRequest
+from ..security import WebSocketAccessLevel
+from .messages import ACTION_REQUEST_SCHEMAS, WebSocketRequest
 
 WebSocketHandler = Callable[
     [Any, WebSocketRequest],

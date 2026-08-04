@@ -1,3 +1,5 @@
+"""Host contract shared by WebSocket presentation controllers."""
+
 from __future__ import annotations
 
 from collections.abc import Coroutine, Mapping
@@ -23,12 +25,6 @@ class WebSocketHandlerHost(Protocol):
     _camera_push_task: Any
     _execution_requests: dict[str, Any]
     _execution_requests_lock: Any
-
-    @property
-    def _robot_system(self) -> Any: ...
-
-    @property
-    def _camera_manager(self) -> Any: ...
 
     def _json_msg(self, data: Mapping[str, Any]) -> str: ...
 

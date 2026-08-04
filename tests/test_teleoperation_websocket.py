@@ -51,7 +51,7 @@ class TeleoperationWebSocketTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        services.device_runtime.initialize(ROBOT_SYSTEM)
+        services.devices.initialize(ROBOT_SYSTEM)
         server = RobotWebSocketServer(services)
         websocket = _RecordingWebSocket()
         client_id = server._register_client(

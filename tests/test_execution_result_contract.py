@@ -151,8 +151,12 @@ class ExecutionResultWebSocketContractTests(unittest.TestCase):
             ),
             execution=SimpleNamespace(snapshot=lambda: snapshot),
             devices=SimpleNamespace(status=lambda: {}),
-            device_runtime=SimpleNamespace(
-                get_if_ready=lambda _device_id: None,
+            camera_access=SimpleNamespace(
+                status=lambda: SimpleNamespace(to_dict=lambda: {
+                    "available": False,
+                    "camera_count": 0,
+                    "cameras": [],
+                }),
             ),
             composition=SimpleNamespace(sequence_entries=lambda: ()),
         )

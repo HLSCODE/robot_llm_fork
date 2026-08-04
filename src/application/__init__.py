@@ -1,4 +1,4 @@
-from .camera_access import CameraAccessService, CameraSession
+from .camera_access import CameraAccessService, CameraSession, CameraStatus
 from .command_runtime import (
     CommandPreview,
     CommandRuntime,
@@ -72,6 +72,7 @@ __all__ = [
     "ApplicationServices",
     "CameraAccessService",
     "CameraSession",
+    "CameraStatus",
     "CommandPreview",
     "CommandRuntime",
     "CommandRuntimeError",

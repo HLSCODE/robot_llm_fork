@@ -141,7 +141,6 @@ def create_application_services(
         safety=safety,
         commands=commands,
         llm=llm,
-        device_runtime=device_runtime,
         resources=resources,
         simulation=simulation,
         settings=settings,

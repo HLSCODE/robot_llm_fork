@@ -33,7 +33,6 @@ from src.devices.robots.realman.adapter import (
 )
 from src.devices.runtime.factory import create_device_runtime
 from src.devices.runtime.fakes import SimulatedRobotSystem
-from src.devices.runtime.ids import ROBOT_SYSTEM
 from src.devices.robots.registry import resolve_robot_provider
 from src.devices.robots.realman.provider import RealManProviderSettings
 from src.execution import ExecutionState
@@ -656,8 +655,10 @@ class RobotApplicationServiceTests(unittest.TestCase):
             simulation=True,
         )
         services.manual_control.set_gripper("left", position=350)
-        robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
-        self.assertEqual(350, robot.gripper_positions[ArmId.LEFT])
+        telemetry = services.robot_query.telemetry_reader().read_arm_telemetry(
+            ArmId.LEFT
+        )
+        self.assertEqual(350, telemetry.gripper.raw_position)
 
         state = services.robot_query.read_state("robot1")
         self.assertEqual(ArmId.LEFT, state.arm)

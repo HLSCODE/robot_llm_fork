@@ -314,8 +314,7 @@ class MotionHandlerIntegrationTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        services.device_runtime.initialize(BODY_AXIS)
-        services.device_runtime.initialize(MOBILE_BASE)
+        services.devices.initialize_many((BODY_AXIS, MOBILE_BASE))
         definitions = (
             ActionDefinition(
                 id="arm",

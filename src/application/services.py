@@ -159,6 +159,10 @@ class DeviceManagementService:
             for snapshot in self._runtime.snapshots()
         }
 
+    def is_ready(self, device_id: str) -> bool:
+        """Return whether a registered device is ready without exposing it."""
+        return self._runtime.snapshot(device_id).ready
+
     def shutdown_all(self, timeout: float = 10.0) -> dict[str, str]:
         report = self._safety.stop(
             StopMode.CONTROLLED,
@@ -470,7 +474,6 @@ class ApplicationServices:
     safety: SafetyService
     commands: CommandRuntime
     llm: LLMRegistry
-    device_runtime: DeviceRuntime
     resources: ResourceArbiter
     simulation: bool
     settings: ApplicationSettings

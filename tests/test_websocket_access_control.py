@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from src.application import DataCollectionState
 from src.execution import ExecutionState
-from src.robot_server.access_control import (
+from src.robot_server.security import (
     WebSocketAccessController,
     WebSocketAccessError,
 )

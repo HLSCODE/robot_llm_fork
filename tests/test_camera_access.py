@@ -32,6 +32,26 @@ from src.voice_interaction import CameraCaptureError, CamerasModuleProvider
 
 
 class CameraAccessServiceTests(unittest.TestCase):
+    def test_status_returns_presentation_safe_snapshot(self):
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
+
+        self.assertEqual(
+            {"available": False, "camera_count": 0, "cameras": []},
+            services.camera_access.status().to_dict(),
+        )
+
+        session = services.camera_access.open("status-test")
+        status = services.camera_access.status()
+
+        self.assertTrue(status.available)
+        self.assertGreater(status.camera_count, 0)
+        self.assertEqual(status.camera_count, len(status.cameras))
+        session.close()
+        self.assertFalse(services.devices.shutdown_all())
+
     def test_camera_session_only_blocks_sequences_that_need_camera(self):
         services = create_application_services(
             ApplicationSettings.defaults(),

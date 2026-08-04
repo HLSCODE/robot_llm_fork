@@ -4,7 +4,7 @@ import ssl
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.robot_server.transport_security import (
+from src.robot_server.security import (
     create_server_ssl_context,
     normalize_allowed_origins,
 )
@@ -39,7 +39,7 @@ class WebSocketTransportSecurityTests(unittest.TestCase):
 
         context = MagicMock()
         with patch(
-            "src.robot_server.transport_security.ssl.SSLContext",
+            "src.robot_server.security.transport.ssl.SSLContext",
             return_value=context,
         ):
             result = create_server_ssl_context("server.crt", "server.key")

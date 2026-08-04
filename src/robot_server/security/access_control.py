@@ -1,3 +1,5 @@
+"""Authentication, authorization, control ownership, and security audit."""
+
 from __future__ import annotations
 
 import hmac

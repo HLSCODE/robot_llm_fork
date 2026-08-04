@@ -1,3 +1,5 @@
+"""AI interaction WebSocket controller."""
+
 from __future__ import annotations
 
 import logging

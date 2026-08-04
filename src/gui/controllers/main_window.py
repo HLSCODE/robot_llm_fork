@@ -20,8 +20,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..ai_integration.execution_bridge import ExecutionBridge
-from ..application import (
+from ..bridges.execution import ExecutionBridge
+from ...application import (
     ApplicationServices,
     ComposedAction,
     ComposedTask,
@@ -29,7 +29,7 @@ from ..application import (
     CompositionEvent,
     CompositionRevisionConflict,
 )
-from ..core.models import (
+from ...core.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
@@ -37,20 +37,20 @@ from ..core.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ..devices import StopMode
-from ..devices.runtime.ids import (
+from ...devices import StopMode
+from ...devices.runtime.ids import (
     BODY_AXIS,
     MOBILE_BASE,
     ROBOT_SYSTEM,
 )
-from ..widgets import LogWidget
-from .composition_bridge import CompositionBridge
-from .device_view import DeviceControlView, DeviceStatusView
-from .dialogs import ActionConfigDialog
-from .notifications import GuiNotificationCenter
+from ...widgets import LogWidget
+from ..bridges.composition import CompositionBridge
+from ..views.device import DeviceControlView, DeviceStatusView
+from ..views.dialogs import ActionConfigDialog
+from ..bridges.notifications import GuiNotificationCenter
 from .startup import GuiStartupLifecycle, GuiStartupState
-from .view_models import DeviceViewModel, ExecutionViewModel
-from .workflow_view import ActionLibraryView, WorkflowEditorView
+from ..view_models.models import DeviceViewModel, ExecutionViewModel
+from ..views.workflow import ActionLibraryView, WorkflowEditorView
 
 
 class MainWindow(QMainWindow):
@@ -136,11 +136,6 @@ class MainWindow(QMainWindow):
                 self.on_execution_completed
             )
         self.start_startup_initialization()
-
-    @property
-    def robot_system(self):
-        """Return the runtime-owned robot system for read/teach diagnostics."""
-        return self._services.device_runtime.get_if_ready(ROBOT_SYSTEM)
 
     @property
     def startup_state(self) -> GuiStartupState:
@@ -497,7 +492,7 @@ class MainWindow(QMainWindow):
             self._notifications.warning(f"Robot1 夹爪{action}异常: {e}")
 
     def record_trajectory(self, robot_name: str):
-        if self.robot_system is None:
+        if not self._device_view_model.snapshot().robot_ready:
             self._notifications.warning(f"{robot_name.upper()} 未连接")
             return
 
@@ -552,7 +547,7 @@ class MainWindow(QMainWindow):
         return None
 
     def run_trajectory(self, robot_name: str):
-        if self.robot_system is None:
+        if not self._device_view_model.snapshot().robot_ready:
             self._notifications.warning(f"{robot_name.upper()} 未连接")
             return
 

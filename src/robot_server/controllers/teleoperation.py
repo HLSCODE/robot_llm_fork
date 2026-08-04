@@ -1,3 +1,5 @@
+"""Teleoperation WebSocket controller."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +8,7 @@ import logging
 
 from ...application import DataCollectionError, DataCollectionState
 from ...application import websocket_teleoperation_owner
+from ...devices.runtime.ids import ROBOT_SYSTEM
 from ..protocol import WebSocketRequest
 from .base import WebSocketHandlerHost
 
@@ -28,7 +31,7 @@ class TeleoperationWebSocketHandler:
         joints_data = data.get("joints")
 
         # 检查机械臂是否已连接
-        if self._server._robot_system is None:
+        if not self._server._services.devices.is_ready(ROBOT_SYSTEM):
             await websocket.send(
                 self._server._json_msg(
                     {"event": "error", "message": "机械臂控制器未初始化"}
@@ -194,7 +197,7 @@ class TeleoperationWebSocketHandler:
             return
 
         # 检查机械臂是否已连接
-        if self._server._robot_system is None:
+        if not self._server._services.devices.is_ready(ROBOT_SYSTEM):
             await websocket.send(
                 self._server._json_msg(
                     {"event": "error", "message": "机械臂控制器未初始化"}
@@ -304,7 +307,7 @@ class TeleoperationWebSocketHandler:
                 return
 
             # 立即发送到机械臂
-            if self._server._robot_system:
+            if self._server._services.devices.is_ready(ROBOT_SYSTEM):
                 try:
                     command = await asyncio.to_thread(
                         partial(
@@ -392,7 +395,7 @@ class TeleoperationWebSocketHandler:
                     return
 
             # 并行执行双臂指令
-            if self._server._robot_system:
+            if self._server._services.devices.is_ready(ROBOT_SYSTEM):
                 try:
                     arms = tuple(joints_data)
                     results = await asyncio.gather(
@@ -665,7 +668,7 @@ class TeleoperationWebSocketHandler:
         position: int,
     ) -> None:
         """在线程池中异步执行夹爪位置指令，不阻塞关节指令流"""
-        if self._server._robot_system is None:
+        if not self._server._services.devices.is_ready(ROBOT_SYSTEM):
             return
         position = max(0, min(1000, int(position)))
         try:

@@ -1,3 +1,5 @@
+"""WebSocket controllers grouped by application use-case domain."""
+
 from .composition import CompositionWebSocketHandler
 from .device import DeviceWebSocketHandler
 from .execution import ExecutionWebSocketHandler

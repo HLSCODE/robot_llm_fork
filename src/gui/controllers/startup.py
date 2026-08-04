@@ -1,4 +1,4 @@
-"""Explicit lifecycle for GUI startup initialization."""
+"""Explicit controller state for GUI startup initialization."""
 
 from __future__ import annotations
 

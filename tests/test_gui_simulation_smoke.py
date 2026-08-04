@@ -14,7 +14,7 @@ from src.core.settings import ApplicationSettings
 from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
-from src.gui.startup import GuiStartupLifecycle
+from src.gui.controllers.startup import GuiStartupLifecycle
 from src.widgets.ai_assistant import AIAssistantWidget
 
 
@@ -88,12 +88,8 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertTrue(device_state.robot_ready)
         self.assertTrue(device_state.body_ready)
         self.assertTrue(device_state.pipette_ready)
-        self.assertIsNotNone(
-            self.services.device_runtime.get_if_ready(ROBOT_SYSTEM)
-        )
-        self.assertIsNotNone(
-            self.services.device_runtime.get_if_ready(BODY_AXIS)
-        )
+        self.assertTrue(self.services.devices.is_ready(ROBOT_SYSTEM))
+        self.assertTrue(self.services.devices.is_ready(BODY_AXIS))
         self.assertTrue(
             self.window.action_library_view.ai_assistant.simulation_checkbox.isChecked()
         )

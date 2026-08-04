@@ -1,3 +1,5 @@
+"""Versioned WebSocket request and response contracts."""
+
 from __future__ import annotations
 
 import re

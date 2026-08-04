@@ -35,11 +35,22 @@ PRESENTATION_DIRECTORIES = (
     "src/robot_server",
     "src/voice_interaction",
 )
-FORBIDDEN_RUNTIME_OPERATIONS = (
-    "initialize",
-    "require",
-    "shutdown",
-    "shutdown_all",
+LEGACY_PRESENTATION_MODULES = (
+    "src/gui/main_window.py",
+    "src/gui/device_view.py",
+    "src/gui/workflow_view.py",
+    "src/gui/dialogs.py",
+    "src/gui/notifications.py",
+    "src/gui/startup.py",
+    "src/gui/view_models.py",
+    "src/ai_integration/execution_bridge.py",
+    "src/robot_server/handlers",
+    "src/robot_server/access_control.py",
+    "src/robot_server/request_limits.py",
+    "src/robot_server/routing.py",
+    "src/robot_server/transport_security.py",
+    "src/robot_server/metrics.py",
+    "src/robot_server/protocol.py",
 )
 LEGACY_HARDWARE_PATHS = (
     "src/arm_sdk",
@@ -175,26 +186,28 @@ class DependencyBoundaryTests(unittest.TestCase):
 
         self.assertEqual([], violations, "\n".join(violations))
 
-    def test_presentation_layers_do_not_control_device_runtime_directly(self):
+    def test_presentation_layers_do_not_access_device_runtime(self):
         violations: list[str] = []
-        forbidden_suffixes = tuple(
-            f".device_runtime.{operation}"
-            for operation in FORBIDDEN_RUNTIME_OPERATIONS
-        )
         for relative_directory in PRESENTATION_DIRECTORIES:
             for path in (PROJECT_ROOT / relative_directory).rglob("*.py"):
                 tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
                 for node in ast.walk(tree):
-                    if not isinstance(node, ast.Call):
-                        continue
-                    call_path = self._attribute_path(node.func)
-                    if call_path.endswith(forbidden_suffixes):
+                    if isinstance(node, ast.Attribute) and node.attr == "device_runtime":
                         violations.append(
                             f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} "
-                            f"calls {call_path}"
+                            "accesses ApplicationServices.device_runtime"
                         )
 
         self.assertEqual([], violations, "\n".join(violations))
+
+    def test_legacy_presentation_modules_are_removed(self):
+        remaining = [
+            relative_path
+            for relative_path in LEGACY_PRESENTATION_MODULES
+            if (PROJECT_ROOT / relative_path).exists()
+        ]
+
+        self.assertEqual([], remaining, "\n".join(remaining))
 
     @staticmethod
     def _imported_modules(node: ast.AST, package: str) -> tuple[str, ...]:

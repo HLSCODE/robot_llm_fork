@@ -1,3 +1,5 @@
+"""Thread-safe WebSocket transport metrics."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

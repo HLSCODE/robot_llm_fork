@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
@@ -12,7 +12,9 @@ from ..application import (
     CommandRuntimeError,
     ExecutionControlAction,
 )
-from .execution_bridge import ExecutionBridge
+
+if TYPE_CHECKING:
+    from ..gui.bridges.execution import ExecutionBridge
 
 logger = logging.getLogger(__name__)
 

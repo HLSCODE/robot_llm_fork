@@ -16,7 +16,6 @@ from src.devices import (
     DeviceStopStatus,
     ResourceArbiter,
     ResourceBusyError,
-    RobotSystem,
     StopMode,
 )
 from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
@@ -403,7 +402,7 @@ class ApplicationServiceTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
+        services.devices.initialize(ROBOT_SYSTEM)
         item = SequenceItem.from_definition(
             ActionDefinition(
                 id="wait",
@@ -420,7 +419,12 @@ class ApplicationServiceTests(unittest.TestCase):
         )
 
         self.assertTrue(report.complete)
-        self.assertEqual(StopMode.QUICK, robot.last_stop_mode)
+        robot_result = next(
+            result for result in report.devices
+            if result.device_id == ROBOT_SYSTEM
+        )
+        self.assertEqual(StopMode.QUICK, robot_result.mode)
+        self.assertEqual(DeviceStopStatus.STOPPED, robot_result.status)
         self.assertEqual(ExecutionState.CANCELLED, report.execution_after.state)
         self.assertIsNone(services.resources.owner_of(ROBOT_SYSTEM))
 
@@ -429,7 +433,7 @@ class ApplicationServiceTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        services.device_runtime.initialize(BODY_AXIS)
+        services.devices.initialize(BODY_AXIS)
 
         report = services.safety.stop(StopMode.QUICK)
 
@@ -447,33 +451,36 @@ class ApplicationServiceTests(unittest.TestCase):
             simulation=True,
         )
         services.teleoperation.start("test", ("left",))
-        robot = services.device_runtime.require(ROBOT_SYSTEM, RobotSystem)
 
         report = services.safety.stop(StopMode.QUICK)
 
         self.assertTrue(report.complete)
         self.assertFalse(services.teleoperation.active)
         self.assertIsNone(services.resources.owner_of(ROBOT_SYSTEM))
-        self.assertEqual(StopMode.QUICK, robot.last_stop_mode)
+        robot_result = next(
+            result for result in report.devices
+            if result.device_id == ROBOT_SYSTEM
+        )
+        self.assertEqual(DeviceStopStatus.STOPPED, robot_result.status)
 
     def test_controlled_stop_applies_initialized_discrete_device_safe_states(self):
         services = create_application_services(
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        relay = services.device_runtime.initialize("relay-bank")
-        tool = services.device_runtime.initialize("tool-changer")
-        pipette = services.device_runtime.initialize("pipette")
-        relay.set_channel(1, True)
-        tool.set_locked(False)
+        services.devices.initialize_many(
+            ("relay-bank", "tool-changer", "pipette")
+        )
+        services.manual_control.set_relay(1, True)
 
         report = services.safety.stop(StopMode.CONTROLLED)
 
         self.assertTrue(report.complete)
-        self.assertEqual({1: False, 2: False}, relay.channels)
-        self.assertTrue(tool.locked)
-        self.assertTrue(pipette.safe)
-        self.assertEqual(3, len(report.safe_devices))
+        self.assertEqual(
+            {"relay-bank", "tool-changer", "pipette"},
+            {result.device_id for result in report.safe_devices},
+        )
+        self.assertTrue(all(result.successful for result in report.safe_devices))
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 from uuid import uuid4
 
 from ..devices import (
@@ -16,6 +16,20 @@ from ..devices.runtime.ids import CAMERA
 
 
 CameraT = TypeVar("CameraT", bound=CameraSource)
+
+
+@dataclass(frozen=True, slots=True)
+class CameraStatus:
+    available: bool
+    camera_count: int
+    cameras: tuple[dict[str, Any], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "available": self.available,
+            "camera_count": self.camera_count,
+            "cameras": [dict(camera) for camera in self.cameras],
+        }
 
 
 @dataclass(slots=True)
@@ -68,6 +82,21 @@ class CameraAccessService:
         purpose: str,
     ) -> CameraSession[DepthCameraSource]:
         return self._open(purpose, DepthCameraSource)
+
+    def status(self) -> CameraStatus:
+        """Return a presentation-safe camera snapshot without exposing runtime."""
+        camera = self._runtime.get_if_ready(CAMERA)
+        if camera is None or not isinstance(camera, CameraSource):
+            return CameraStatus(False, 0, ())
+        camera_count = camera.camera_count
+        return CameraStatus(
+            available=camera_count > 0,
+            camera_count=camera_count,
+            cameras=tuple(
+                dict(camera_info)
+                for camera_info in camera.get_cameras_info()
+            ),
+        )
 
     def _open(
         self,

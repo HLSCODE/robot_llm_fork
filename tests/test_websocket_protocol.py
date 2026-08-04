@@ -5,7 +5,7 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from src.robot_server.handlers import (
+from src.robot_server.controllers import (
     CompositionWebSocketHandler,
     DeviceWebSocketHandler,
     ExecutionWebSocketHandler,
@@ -19,7 +19,7 @@ from src.robot_server.protocol import (
     WebSocketRequest,
     WebSocketResponse,
 )
-from src.robot_server.request_limits import WebSocketRequestLimiter
+from src.robot_server.security import WebSocketRequestLimiter
 from src.robot_server.ws_server import (
     RobotWebSocketServer,
     _BoundedWebSocket,

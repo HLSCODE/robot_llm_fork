@@ -1,3 +1,5 @@
+"""TLS and Origin validation for the WebSocket transport boundary."""
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from src.robot_server.access_control import WebSocketAccessLevel
+from src.robot_server.security import WebSocketAccessLevel
 from src.robot_server.protocol import (
     ACTION_REQUEST_SCHEMAS,
     WEBSOCKET_API_VERSION,
@@ -13,7 +13,7 @@ from src.robot_server.protocol import (
     WebSocketRequestError,
     WebSocketResponse,
 )
-from src.robot_server.routing import WebSocketRoute, WebSocketRouteRegistry
+from src.robot_server.protocol import WebSocketRoute, WebSocketRouteRegistry
 
 
 # This explicit golden list is intentionally independent of the production

@@ -1,3 +1,5 @@
+"""Device WebSocket controller."""
+
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +26,7 @@ class DeviceWebSocketHandler:
         data_collection = (
             self._server._services.data_collection.snapshot()
         )
-        camera = self._server._camera_manager
+        camera = self._server._services.camera_access.status()
         await websocket.send(
             self._server._json_msg(
                 {
@@ -58,11 +60,7 @@ class DeviceWebSocketHandler:
                         ),
                     },
                     "ai_processing": self._server._ai_processing,
-                    "camera": {
-                        "available": camera is not None and camera.camera_count > 0,
-                        "camera_count": camera.camera_count if camera else 0,
-                        "cameras": camera.get_cameras_info() if camera else [],
-                    },
+                    "camera": camera.to_dict(),
                     "minicpm": {
                         "configured": self._server._minicpm_cfg is not None,
                         "gateway": (
@@ -319,30 +317,12 @@ class DeviceWebSocketHandler:
         display_host = (
             "localhost" if self._server._host == "0.0.0.0" else self._server._host
         )
-        if self._server._camera_manager is None:
-            await websocket.send(
-                self._server._json_msg(
-                    {
-                        "event": "camera_status",
-                        "available": False,
-                        "camera_count": 0,
-                        "cameras": [],
-                        "stream_url": f"ws://{display_host}:{self._server._port}/camera/stream",
-                        "frames_url": f"ws://{display_host}:{self._server._port}/camera/frames",
-                    }
-                )
-            )
-            return
-
-        cameras_info = self._server._camera_manager.get_cameras_info()
-        available = self._server._camera_manager.camera_count > 0
+        camera = self._server._services.camera_access.status()
         await websocket.send(
             self._server._json_msg(
                 {
                     "event": "camera_status",
-                    "available": available,
-                    "camera_count": self._server._camera_manager.camera_count,
-                    "cameras": cameras_info,
+                    **camera.to_dict(),
                     "stream_url": f"ws://{display_host}:{self._server._port}/camera/stream",
                     "frames_url": f"ws://{display_host}:{self._server._port}/camera/frames",
                 }
