@@ -5,7 +5,7 @@ import base64
 import logging
 import threading
 
-from ...device_runtime.ids import BODY_AXIS, ROBOT_SYSTEM
+from ...devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from ...execution import ExecutionState
 from ..protocol import WebSocketRequest
 from .base import WebSocketHandlerHost

@@ -8,7 +8,7 @@ from typing import Protocol
 from ..core.execution_context import ExecutionContext
 from ..core.settings import VisionSettings
 from ..core.vision_station_storage import VisionStationStorage
-from ..device_runtime import CameraSource, DepthCameraSource, RobotSystem
+from ..devices import CameraSource, DepthCameraSource, RobotSystem
 from .artifacts import VisionArtifactStore
 from .models import (
     VisionOperation,

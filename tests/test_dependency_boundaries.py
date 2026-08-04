@@ -21,11 +21,12 @@ APPLICATION_BOUNDARY_DIRECTORIES = (
     "src/voice_interaction",
 )
 FORBIDDEN_DEPENDENCIES = (
-    "src.arm_sdk",
-    "src.base_move",
-    "src.cameras.camera_factory",
-    "src.devices",
-    "src.expression_display.display",
+    "src.devices.robots.realman",
+    "src.devices.motion",
+    "src.devices.cameras.camera_factory",
+    "src.devices.tools",
+    "src.devices.displays",
+    "src.devices.transports",
 )
 PRESENTATION_DIRECTORIES = (
     "src/gui",
@@ -40,9 +41,33 @@ FORBIDDEN_RUNTIME_OPERATIONS = (
     "shutdown",
     "shutdown_all",
 )
+LEGACY_HARDWARE_PATHS = (
+    "src/arm_sdk",
+    "src/base_move",
+    "src/cameras",
+    "src/device_control_sdk",
+    "src/device_runtime",
+    "src/expression_display",
+    "src/pwm_sdk",
+    "src/devices/adp.py",
+    "src/devices/kuaihuanshou.py",
+    "src/devices/modbus_motor.py",
+    "src/devices/pwm_neck.py",
+    "src/devices/relay.py",
+    "src/devices/tapping_controller.py",
+)
 
 
 class DependencyBoundaryTests(unittest.TestCase):
+    def test_legacy_hardware_locations_are_removed(self):
+        remaining = [
+            relative_path
+            for relative_path in LEGACY_HARDWARE_PATHS
+            if (PROJECT_ROOT / relative_path).exists()
+        ]
+
+        self.assertEqual([], remaining, "\n".join(remaining))
+
     def test_application_layers_do_not_import_concrete_hardware(self):
         violations: list[str] = []
         for relative_directory in APPLICATION_BOUNDARY_DIRECTORIES:
@@ -51,7 +76,7 @@ class DependencyBoundaryTests(unittest.TestCase):
                     path.relative_to(PROJECT_ROOT).with_suffix("").parts
                 )
                 package = module_name.rpartition(".")[0]
-                tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+                tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
                 for node in ast.walk(tree):
                     for imported in self._imported_modules(node, package):
                         if imported.startswith(FORBIDDEN_DEPENDENCIES):
@@ -62,11 +87,55 @@ class DependencyBoundaryTests(unittest.TestCase):
 
         self.assertEqual([], violations, "\n".join(violations))
 
+    def test_realman_sdk_is_confined_to_realman_directory(self):
+        violations: list[str] = []
+        realman_root = PROJECT_ROOT / "src/devices/robots/realman"
+        for path in (PROJECT_ROOT / "src").rglob("*.py"):
+            if path.is_relative_to(realman_root):
+                continue
+            module_name = ".".join(
+                path.relative_to(PROJECT_ROOT).with_suffix("").parts
+            )
+            package = module_name.rpartition(".")[0]
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
+            for node in ast.walk(tree):
+                for imported in self._imported_modules(node, package):
+                    if imported == "Robotic_Arm" or imported.startswith(
+                        "Robotic_Arm."
+                    ):
+                        violations.append(
+                            f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} "
+                            f"imports {imported}"
+                        )
+
+        self.assertEqual([], violations, "\n".join(violations))
+
+    def test_realman_adapter_does_not_call_vendor_sdk(self):
+        adapter_path = (
+            PROJECT_ROOT / "src/devices/robots/realman/adapter.py"
+        )
+        tree = ast.parse(
+            adapter_path.read_text(encoding="utf-8-sig"),
+            str(adapter_path),
+        )
+        violations = [
+            f"{adapter_path.relative_to(PROJECT_ROOT)}:{node.lineno} "
+            f"accesses vendor member {node.attr}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and (
+                node.attr.startswith("rm_")
+                or node.attr in {"robot1_ctrl", "robot2_ctrl"}
+            )
+        ]
+
+        self.assertEqual([], violations, "\n".join(violations))
+
     def test_application_layers_do_not_call_vendor_robot_api(self):
         violations: list[str] = []
         for relative_directory in APPLICATION_BOUNDARY_DIRECTORIES:
             for path in (PROJECT_ROOT / relative_directory).rglob("*.py"):
-                tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+                tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
                 for node in ast.walk(tree):
                     if not isinstance(node, ast.Attribute):
                         continue
@@ -89,7 +158,7 @@ class DependencyBoundaryTests(unittest.TestCase):
         )
         for relative_directory in PRESENTATION_DIRECTORIES:
             for path in (PROJECT_ROOT / relative_directory).rglob("*.py"):
-                tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+                tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
                 for node in ast.walk(tree):
                     if not isinstance(node, ast.Call):
                         continue

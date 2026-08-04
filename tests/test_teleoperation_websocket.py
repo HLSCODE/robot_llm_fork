@@ -6,7 +6,7 @@ import unittest
 
 from src.application import create_application_services
 from src.core.settings import ApplicationSettings
-from src.device_runtime.ids import ROBOT_SYSTEM
+from src.devices.runtime.ids import ROBOT_SYSTEM
 from src.robot_server.ws_server import RobotWebSocketServer
 
 

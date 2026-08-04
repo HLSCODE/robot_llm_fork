@@ -7,7 +7,7 @@ import json
 import logging
 from threading import Lock
 
-from ..device_runtime import ArmId
+from ..devices import ArmId
 
 teleoperation_audit_logger = logging.getLogger("audit.teleoperation")
 

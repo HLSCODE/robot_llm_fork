@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.device_control_sdk import (
+from src.devices.transports import (
     SerialSettings,
     SerialTransport,
     TransportError,

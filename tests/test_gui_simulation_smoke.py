@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.core.settings import ApplicationSettings
-from src.device_runtime.ids import BODY_AXIS, ROBOT_SYSTEM
+from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.startup import GuiStartupLifecycle

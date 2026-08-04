@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-04
 >
-> 当前里程碑：M5 — 模块目录与依赖边界治理
-> 计划进度：111/123（109 DONE + 2 DROPPED，90.2%）
+> 当前里程碑：M5 — 硬件目录收敛已完成，继续治理应用生命周期与表现层边界
+> 计划进度：113/123（111 DONE + 2 DROPPED，91.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -111,7 +111,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
   WebSocket 输出；handler 路由与策略路由不一致时应用启动失败，避免新增动作
   漏配安全策略。RealMan 最大停止延迟仍待真实硬件验收。
 - 身体轴、继电器、快换手、移液枪、PWM 颈部和表情屏生产链路已统一通过
-  `device_control_sdk.SerialTransport` 访问串口；端口参数、打开重试、RTS/DTR、
+  `devices.transports.SerialTransport` 访问串口；端口参数、打开重试、RTS/DTR、
   超时、互斥收发和幂等关闭由组合根与共享 Transport 管理。
 - PWM 颈部已作为 `MANIPULATE/颈部` 正式接入统一动作 schema、handler、控制策略
   和设备资源租约；水平、垂直、双轴及复位均经 `DeviceRuntime` 调用，参数在设备
@@ -124,6 +124,12 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - 硬件失败已统一为 `DeviceErrorCategory` 和 `DeviceOperationError`；设备、操作、
   稳定分类及可用的供应商原始码贯通 step/terminal event、执行快照、设备状态与
   WebSocket，用户消息不包含底层端口、堆栈或 SDK 诊断。
+- 全部硬件运行时、通信、驱动和产品实现已物理收敛到 `src/devices/`；旧的
+  `device_runtime`、`arm_sdk`、`base_move`、`cameras`、`device_control_sdk`、
+  `pwm_sdk` 和 `expression_display` 顶级目录已直接删除，不保留导入转发。
+- RealMan 已拆分为通用 Provider 定义、独立注册表以及厂商目录内的
+  Provider/Adapter/Driver/Vendor；厂商 SDK 仅允许出现在 RealMan 目录，新增机械臂
+  可在 `src/devices/robots/<provider>/` 下平行实现。
 
 仍需继续收敛的重点：
 
@@ -132,7 +138,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - `src/gui/dialogs.py`
 - `src/execution/engine.py`
 - `src/core/config_loader.py`
-- `src/arm_sdk/controller.py` 的厂商驱动内部职责拆分和错误模型。
+- `src/devices/robots/realman/driver.py` 的厂商驱动内部职责细分和错误模型。
 - 第二种机械臂供应商 adapter 的接入与真实硬件契约验收。
 
 ## 3. 总体目标
@@ -234,21 +240,21 @@ Application Service + Port/Protocol + Provider/Adapter/Driver 的依赖方向。
 
 ```text
 src/devices/
-├── contracts.py / models.py / errors.py
-├── runtime.py / resources.py / factory.py
+├── __init__.py                 # 对上层公开稳定的设备能力 API
+├── runtime/                    # contracts、models、errors、生命周期、资源与 fake
 ├── transports/                 # serial、TCP、CRC、Modbus RTU
 ├── robots/
-│   ├── provider.py             # provider 注册与能力声明
+│   ├── provider.py             # 厂商无关的 provider 定义
+│   ├── registry.py             # provider 注册、查找与失败策略
 │   └── realman/
 │       ├── provider.py         # 配置解析与实例装配
 │       ├── adapter.py          # 项目 capability 到厂商 API 的转换
 │       ├── driver.py           # 厂商连接和底层调用
 │       └── vendor/             # 生成绑定和 DLL
-├── cameras/                    # realsense、opencv
+├── cameras/                    # camera factory、realsense、opencv
 ├── motion/                     # mobile_base、body_axis、neck
-├── tools/                      # gripper、relay、tool_changer、pipette、powder
-├── displays/                   # t5l_dgusii
-└── simulation/                 # 与真实 capability 对齐的 fake
+├── tools/                      # relay、tool_changer、pipette、powder
+└── displays/                   # t5l_dgusii
 ```
 
 角色命名必须保持稳定：Service 负责编排用例和资源策略；Provider 选择并创建产品
@@ -320,9 +326,8 @@ src/devices/
   设备错误分类；真实设备仍需验证各供应商原始码的含义与恢复策略。
 - 部分阻塞 SDK 无法及时响应取消。
 - PWM 舵机实际机械限位、方向和不同负载下的动作时长仍需真实设备验收。
-- 硬件实现仍分散在 `device_runtime`、`arm_sdk`、`base_move`、`cameras`、
-  `devices`、`device_control_sdk`、`pwm_sdk` 和 `expression_display` 等顶级目录；
-  运行时所有权虽已统一，但 Provider、Adapter、Driver、Transport 的物理位置不直观。
+- 硬件物理目录和运行时所有权已经统一；剩余风险主要是真实设备关闭顺序、
+  阻塞 SDK 取消时延、设备在线判定和第二种机械臂 Provider 的契约验证。
 
 ### 7.2 目标
 
@@ -330,7 +335,7 @@ src/devices/
 - 引入 capability 模型，区分设备存在、连接、就绪、故障和模拟。
 - 引入 `ResourceArbiter`，统一序列、遥操作、测试和直接控制的资源租约。
 - 定义安全停止接口和设备恢复策略。
-- 新设备优先采用 `device_control_sdk` 的 Transport/Protocol/Device 分层。
+- 新设备优先采用 `src/devices/transports` 的 Transport/Protocol/Device 分层。
 - 厂商协议只能出现在 driver/adapter 层，上层统一使用项目级能力接口。
 - 核心机械臂能力与可选能力分离，供应商不必伪造不支持的功能。
 - 所有硬件代码收敛到单一 `src/devices/` 领域目录，具体产品采用
@@ -357,8 +362,8 @@ src/devices/
 | B-015 | P1 | DOING | Provider 注册表和可复用核心契约测试已落地；待明确并接入第二种真实机械臂 adapter，执行软硬件契约验收 |
 | B-016 | P1 | DONE | RealMan 型号、双臂连接、运动/夹爪参数、工具架臂/槽位位姿/停留时间已进入强类型 Provider 配置；删除 controller 硬编码工作流和旧配置入口 |
 | B-017 | P1 | DONE | DeviceRuntime 统一注册并报告继电器全断、快换手锁止和移液枪回初始化位安全策略，SafetyService 在所有停止模式下执行 |
-| B-018 | P1 | TODO | 将 device_runtime、arm_sdk、base_move、cameras、devices、device_control_sdk、pwm_sdk、expression_display 整批收敛到 `src/devices/`；更新组合根、打包和依赖边界后直接删除旧目录，不保留转发模块 |
-| B-019 | P1 | TODO | 将 RealMan 按 provider/adapter/driver/vendor 垂直切片；Provider 只负责配置、能力声明和装配，Adapter 只实现项目 capability，Driver 隔离 SDK/协议，为 B-015 第二供应商建立平行目录模板 |
+| B-018 | P1 | DONE | device_runtime、arm_sdk、base_move、cameras、旧 flat devices、device_control_sdk、pwm_sdk、expression_display 已整批收敛到 `src/devices/`；组合根、导入、打包和边界测试已切换，旧目录直接删除且无转发模块 |
+| B-019 | P1 | DONE | RealMan 已按 provider/adapter/driver/vendor 垂直切片，通用 Provider 定义与注册表分离；Adapter 实现项目 capability，Driver/Vendor 隔离 SDK，为第二供应商建立平行目录模板 |
 
 ### 7.4 完成标准
 
@@ -1074,15 +1079,15 @@ M5 模块目录与依赖边界治理
 | 2026-08-04 | M4 | F | 加粉规则策略与架构边界收敛 | F-P-004/F-P-005 TODO → DONE；F-P-006 TODO → DROPPED | 新增版本化无硬件策略案例和显式四级阈值配置；修复最终允许轮次达标/超量被误判为最大轮次失败；校验有限数值与策略不变量，读数重试保留异常链且不做末次无效等待；文档明确当前确定性闭环和未立项四 Agent 概念方案，不预埋框架 | 366 tests + 43 subtests，覆盖率 56.42%；31 个 Mypy 文件、14 golden、6/6 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | E/F/G | LLM 与视觉运行指标收敛 | E-013/F-V-008 TODO → DONE | RoutedLLMClient 成为逻辑调用唯一指标切面，聚合结果、延迟、fallback、token 和 provider 报告成本；VisionService 聚合结果、实际帧数/推理次数、延迟、观测处理 FPS 及模型/标定版本；删除视觉 bool pipeline contract，不保留兼容转换；指标不保存 payload，并由 ai_status/server_metrics 暴露 | 369 tests + 43 subtests，覆盖率 56.82%；35 个 Mypy 文件、14 golden、7/7 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M5 | B/G | 模块目录与依赖边界治理立项 | B-018/B-019/G-016/G-017/G-018/G-019 新增为 TODO | 接受领域模块化单体和局部 MVC/MVVM；规划硬件统一目录、Provider/Adapter/Driver 垂直切片、表现层边界、唯一 LLM 生命周期、core 拆分及无兼容迁移 | 文档评审；未执行代码变更 |
+| 2026-08-04 | M5 | B/G | 硬件目录与 RealMan 垂直切片整批收敛 | B-018/B-019 TODO → DONE | 全部设备运行时、通信与产品实现迁入 `src/devices/` 并删除七个旧顶级包；RealMan 拆为 Provider/Adapter/Driver/Vendor，Adapter 不再访问 `rm_*`，注册表与 Provider 定义分离；新增旧目录、具体硬件和厂商 SDK 泄漏边界测试，更新 wheel 原生库打包 | 372 tests + 43 subtests，覆盖率 56.61%；39 个 Mypy 文件；Ruff、compileall、7/7 性能预算、hardware extra 与 wheel smoke 通过 |
 
 ## 22. 建议的首批实施顺序
 
-1. **B-018/B-019**：先整批完成硬件目录收敛和 RealMan 垂直切片，建立第二供应商可直接平行实现的稳定结构，不保留旧目录导入转发。
-2. **G-017**：将 LLMRegistry 提升到 ApplicationServices，消除 GUI/WebSocket 两套 Provider 生命周期。
-3. **G-016**：在应用服务边界稳定后整理 GUI/WebSocket 表现层目录，并移除其对 DeviceRuntime 的直接读取。
-4. **G-018/G-019**：分批拆解 core、删除兼容/未引用路径，并扩展依赖边界和类型门禁。
-5. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-6. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-7. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+1. **G-017**：将 LLMRegistry 提升到 ApplicationServices，消除 GUI/WebSocket 两套 Provider 生命周期。
+2. **G-016**：在应用服务边界稳定后整理 GUI/WebSocket 表现层目录，并移除其对 DeviceRuntime 的直接读取。
+3. **G-018/G-019**：分批拆解 core、删除兼容/未引用路径，并扩展依赖边界和类型门禁。
+4. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+5. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+6. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
-8. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+7. 完成 simulation smoke test 后执行逐设备真实硬件验收。

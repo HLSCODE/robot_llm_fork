@@ -15,7 +15,7 @@ from ...core.vision_station_storage import (
     arm_display_name,
     normalize_arm_name,
 )
-from ...device_runtime import (
+from ...devices import (
     ArmId,
     CartesianPose,
     MotionMode,

@@ -50,8 +50,8 @@ DataCollectionService                    application
 | `src/data_collection/schema.py` | schema、元数据和字段约束 |
 | `src/data_collection/validation.py` | episode/dataset 校验和 CLI |
 | `src/data_collection/config.py` | 数据采集强类型配置 |
-| `src/device_runtime/camera_models.py` | 厂商无关的深度相机帧 |
-| `src/device_runtime/arm_models.py` | 厂商无关的机械臂遥测 |
+| `src/devices/runtime/camera_models.py` | 厂商无关的深度相机帧 |
+| `src/devices/runtime/arm_models.py` | 厂商无关的机械臂遥测 |
 
 `DataCollectionService` 是 recorder、相机会话和共享遥操作会话的唯一应用层
 所有者。WebSocket 只负责协议 DTO 映射。

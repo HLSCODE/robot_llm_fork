@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ...device_runtime import DeviceRuntime, Pipette, ToolRackControl
-from ...device_runtime.ids import PIPETTE, ROBOT_SYSTEM
+from ...devices import DeviceRuntime, Pipette, ToolRackControl
+from ...devices.runtime.ids import PIPETTE, ROBOT_SYSTEM
 from ..action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,

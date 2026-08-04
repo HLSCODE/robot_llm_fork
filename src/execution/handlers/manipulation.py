@@ -10,7 +10,7 @@ from ...agents.powder_dispense_agent import (
     PowderDispenseOutcome,
     config_from_params,
 )
-from ...device_runtime import (
+from ...devices import (
     ArmId,
     ArmMotion,
     DeviceRuntime,
@@ -22,7 +22,7 @@ from ...device_runtime import (
     PowderDispenser,
     ToolChanger,
 )
-from ...device_runtime.ids import (
+from ...devices.runtime.ids import (
     EXPRESSION_DISPLAY,
     NECK,
     PIPETTE,

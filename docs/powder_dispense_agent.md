@@ -210,7 +210,7 @@ python -m py_compile \
   src/agents/powder_dispense_agent.py \
   src/devices/tapping_controller.py \
   src/execution/engine.py \
-  src/device_runtime/factory.py \
+  src/devices/runtime/factory.py \
   src/gui/dialogs.py \
   src/robot_server/ws_server.py \
   src/core/config_loader.py
@@ -224,6 +224,6 @@ python -m py_compile \
 | `src/devices/tapping_controller.py` | 加粉装置底层控制 |
 | `src/vision/balance_reader_simple.py` | 大模型视觉读取天平 |
 | `src/execution/handlers/manipulation.py` | 加粉 action handler 与统一结果映射 |
-| `src/device_runtime/factory.py` | 加粉设备注册和生命周期 |
+| `src/devices/runtime/factory.py` | 加粉设备注册和生命周期 |
 | `src/gui/dialogs.py` | GUI 动作配置面板 |
 | `src/robot_server/ws_server.py` | WebSocket 动作 schema |

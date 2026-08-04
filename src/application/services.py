@@ -7,7 +7,7 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
 
-from ..device_runtime import (
+from ..devices import (
     ArmId,
     ArmState,
     ArmStateReader,
@@ -25,9 +25,9 @@ from ..device_runtime import (
     TrajectoryControl,
     TrajectorySaveResult,
 )
-from ..device_runtime.errors import normalize_device_error
+from ..devices.runtime.errors import normalize_device_error
 from ..core.settings import ApplicationSettings
-from ..device_runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM
+from ..devices.runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from ..execution import (
     ExecutionHandle,
     ExecutionListener,

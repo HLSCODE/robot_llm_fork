@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from threading import RLock
 from typing import Protocol
 
-from ..device_runtime import (
+from ..devices import (
     DeviceRuntime,
     DeviceSafeStateResult,
     DeviceStopResult,
     DeviceStopStatus,
     StopMode,
 )
-from ..device_runtime.ids import ROBOT_SYSTEM
+from ..devices.runtime.ids import ROBOT_SYSTEM
 from ..execution import ExecutionSnapshot, ExecutionStateError
 
 

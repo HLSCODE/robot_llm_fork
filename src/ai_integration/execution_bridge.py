@@ -10,7 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from ..application import ApplicationServices
 from ..core.models import SequenceItem
-from ..device_runtime import StopMode
+from ..devices import StopMode
 from ..execution import (
     ExecutionEvent,
     ExecutionEventType,

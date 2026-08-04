@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...device_runtime import ArmId, DeviceRuntime, TrajectoryControl
-from ...device_runtime.ids import ROBOT_SYSTEM
+from ...devices import ArmId, DeviceRuntime, TrajectoryControl
+from ...devices.runtime.ids import ROBOT_SYSTEM
 from ..action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,

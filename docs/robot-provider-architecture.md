@@ -27,11 +27,13 @@ GUI / WebSocket / Vision / Data Collection
 
 依赖规则：
 
-- 目录迁移完成后，业务层只能依赖 `src.devices` 导出的模型和 Protocol。
+- 业务层只能依赖 `src.devices` 导出的模型和 Protocol。
 - `rm_*`、`robot1_ctrl`、`robot2_ctrl` 只允许出现在
-  `src/devices/robots/realman/driver.py` 和 `vendor/` 中。
+  `src/devices/robots/realman/driver.py` 和 `vendor/` 中；AST 边界测试禁止它们
+  重新进入 Adapter 或业务层。
 - adapter 把厂商返回码统一转换为异常，把厂商状态统一转换为 `ArmState`。
-- `devices/robots/provider.py` 是 Provider 名称、真实 capability 和创建函数的唯一注册点。
+- `devices/robots/provider.py` 只定义厂商无关的 Provider 类型；
+  `devices/robots/registry.py` 是名称、真实 capability 和创建函数的唯一注册点。
 - 型号、连接和厂商工作流配置先转换为强类型 settings，再创建厂商 driver。
 - 位姿单位固定为米和弧度，关节角固定为度，并体现在类型字段名中。
 - 机械臂实例只由 `DeviceRuntime` 创建、缓存和关闭。
@@ -49,12 +51,12 @@ GUI / WebSocket / Vision / Data Collection
 不建立混放上述角色的 `robot_services` 或通用 `services` 目录。不同机械臂产品按
 垂直切片组织，产品内部再分 provider/adapter/driver。
 
-### 2.2 目标目录
+### 2.2 当前目录
 
 ```text
 src/devices/robots/
-├── provider.py
-├── models.py
+├── provider.py              # Provider 类型与核心能力约束
+├── registry.py              # 唯一注册和查找入口
 ├── realman/
 │   ├── provider.py
 │   ├── adapter.py
@@ -68,8 +70,9 @@ src/devices/robots/
     └── driver.py
 ```
 
-该目录迁移采用直接切换：更新组合根、测试、打包和全部导入后删除
-`device_runtime/`、`arm_sdk/` 等旧位置，不提供转发模块或新旧双栈。
+该目录已完成直接切换：组合根、测试、打包和全部导入已更新，
+`device_runtime/`、`arm_sdk/` 等旧位置已经删除，不提供转发模块或新旧双栈。
+共享机械臂模型与 Protocol 位于 `src/devices/runtime/`。
 
 ## 3. 能力模型
 
@@ -115,8 +118,8 @@ src/devices/robots/
 `ROBOT_PROVIDER=realman` 选择当前实现。未知 Provider 在
 `DeviceRuntime` 组装阶段显式失败，不会回退到 RealMan。
 
-本次直接移除了 `GUN1_*`、`GUN2_*`、`MOVE_SPEED` 配置和
-`src/arm_sdk/config.py`，不提供别名、转发或兼容读取。实际部署的
+本次直接移除了 `GUN1_*`、`GUN2_*`、`MOVE_SPEED` 配置和旧的
+`arm_sdk/config.py`，不提供别名、转发或兼容读取。实际部署的
 `config.env` 如自定义过工具架点位，必须迁移到新的
 `ROBOT_TOOL_RACK_*` 键。
 
@@ -124,8 +127,8 @@ src/devices/robots/
 
 1. 实现 `RobotSystem` 的核心 Protocol；只实现硬件真实支持的可选 Protocol。
 2. 在 provider adapter 内完成单位转换、错误码映射、并发锁和生命周期管理。
-3. 在 `devices.robots.provider` 注册 Provider 名称、创建函数和实际
-   capability 集合；`devices.factory` 不增加供应商分支。
+3. 在 `devices.robots.registry` 注册 Provider 名称、创建函数和实际
+   capability 集合；`devices.runtime.factory` 不增加供应商分支。
 4. 复用核心契约测试，至少覆盖双臂运动、状态读取、夹爪、关闭和结构化接口；
    再为厂商 adapter 增加参数、错误转换、停止和并发专项测试。
 5. 使用 simulation 回归业务流程，再进行真实硬件限速验收。

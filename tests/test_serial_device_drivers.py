@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from src.device_control_sdk import ProtocolError
-from src.device_control_sdk.testing import FakeTransport
-from src.devices.adp import ADP
-from src.devices.kuaihuanshou import Kuaihuanshou
-from src.devices.relay import RelayController
-from src.pwm_sdk import NeckController, ServoAxis
+from src.devices.transports import ProtocolError
+from src.devices.transports.testing import FakeTransport
+from src.devices.tools.pipette.driver import ADP
+from src.devices.tools.relay.driver import RelayController
+from src.devices.tools.tool_changer.driver import Kuaihuanshou
+from src.devices.motion.neck.pwm import NeckController, ServoAxis
 
 
 class SerialDeviceDriverTests(unittest.TestCase):

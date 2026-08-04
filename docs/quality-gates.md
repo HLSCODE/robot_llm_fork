@@ -103,7 +103,7 @@ Mypy 先覆盖已完成收敛、类型边界较稳定的核心文件：
 `pyproject.toml` 的 `[tool.coverage.*]` 是覆盖率范围和阈值的唯一配置源。当前规则为：
 
 - `src/` 中所有第一方源码默认纳入统计。
-- 排除自动生成的 RealMan ctypes 绑定 `src/arm_sdk/rm_ctypes_wrap.py`；该文件应通过供应商 SDK
+- 排除自动生成的 RealMan ctypes 绑定 `src/devices/robots/realman/vendor/rm_ctypes_wrap.py`；该文件应通过供应商 SDK
   兼容性和真实硬件验收验证，不把生成代码行数计入业务单测目标。
 - 初始总覆盖率阈值为 44%；GUI simulation smoke 纳入后实测为 52.35%，门禁已提升到 50%。
   任何变更低于当前阈值都会失败。

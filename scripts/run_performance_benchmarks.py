@@ -22,8 +22,8 @@ from src.application.teleoperation_observability import (
 )
 from src.core.action_schema import get_action_schema, validate_action_parameters
 from src.core.models import ActionType
-from src.device_runtime import ArmId
-from src.device_runtime.resources import ResourceArbiter
+from src.devices import ArmId
+from src.devices.runtime.resources import ResourceArbiter
 from src.llm.regression import run_regression_suite
 from src.llm.metrics import LLMCallOutcome, LLMMetrics, LLMUsage
 from src.robot_server.protocol import (

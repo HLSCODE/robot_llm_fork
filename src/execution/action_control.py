@@ -6,8 +6,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any
 
-from ..device_runtime import StopMode
-from ..device_runtime.ids import (
+from ..devices import StopMode
+from ..devices.runtime.ids import (
     BODY_AXIS,
     CAMERA,
     EXPRESSION_DISPLAY,

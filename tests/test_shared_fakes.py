@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from src.device_control_sdk.core.exceptions import TransportError
-from src.device_control_sdk.testing import FakeTransport
+from src.devices.transports.core.exceptions import TransportError
+from src.devices.transports.testing import FakeTransport
 from src.llm.testing import FakeLLMClient
 from src.llm.types import LLMMessage
 

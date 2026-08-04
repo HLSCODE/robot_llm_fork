@@ -16,13 +16,13 @@ from src.core.settings import (
     SecretSettings,
     VisionSettings,
 )
-from src.device_runtime import (
+from src.devices import (
     DeviceCapability,
     DeviceRegistration,
     DeviceRuntime,
     StopMode,
 )
-from src.device_runtime.ids import (
+from src.devices.runtime.ids import (
     BODY_AXIS,
     CAMERA,
     EXPRESSION_DISPLAY,

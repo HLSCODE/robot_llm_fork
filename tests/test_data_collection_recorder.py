@@ -9,7 +9,7 @@ from src.data_collection.config import DataCollectionConfig
 from src.data_collection.episode_writer import DataCollectionStoragePolicy
 from src.data_collection.recorder import DemonstrationRecorder
 from src.data_collection.schema import DataCollectionFormat
-from src.device_runtime import (
+from src.devices import (
     ArmId,
     ArmState,
     ArmTelemetry,

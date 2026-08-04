@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from ..core.settings import VisionSettings
-from ..device_runtime import (
+from ..devices import (
     ArmId,
     CartesianPose,
     DepthCameraSource,

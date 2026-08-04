@@ -11,7 +11,7 @@ from ...core.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ...device_runtime import StopMode
+from ...devices import StopMode
 from ...execution import (
     ExecutionEvent,
     ExecutionEventType,

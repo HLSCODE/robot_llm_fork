@@ -22,7 +22,7 @@
 4. 根据意图调用对应 task：
    - `chat`：普通大模型对话。
    - `command`：技能规划，生成指令序列。
-   - `vision_question`：通过 `src/cameras/` 采集相机画面并做视觉融合问答。
+   - `vision_question`：通过 `src/devices/cameras/` 采集相机画面并做视觉融合问答。
    - `session_control`：结束、暂停、取消任务等。
 5. 支持流式文本和语音回复；纯语音对话类 task 使用流式语音响应，结构化 task 使用文本响应。
 6. GUI 底部文本框不需要唤醒；真实语音 IO 由 `VoiceSpeechRuntime` 独立启动，
@@ -557,7 +557,7 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 含义：
 
 - `LLM_DEFAULT_PROVIDER`：默认 LLM provider。具体 task 可通过 `TaskProfile.default_provider` 覆盖，单次调用也可传 `provider` 覆盖。
-- `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/cameras/` 支持的 `realsense` / `webcam`。
+- `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/devices/cameras/` 支持的 `realsense` / `webcam`。
 - `VISION_CAMERA_NAME`：视觉问答默认使用的相机名称或序列号；为空时使用所有在线相机。
 - `VOICE_SESSION_TIMEOUT_S`：唤醒后无交互多久自动休眠。
 - `VOICE_TTS_ENABLED`：是否在 `voice_stream` task 中请求模型生成语音回复。`classifier/planner` 等文本 task 不受该配置影响。

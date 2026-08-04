@@ -8,7 +8,7 @@ from src.application import (
     DataCollectionService,
     DataCollectionState,
 )
-from src.device_runtime.ids import ROBOT_SYSTEM
+from src.devices.runtime.ids import ROBOT_SYSTEM
 
 
 class _FakeCameraSession:

@@ -5,12 +5,12 @@ from functools import partial
 from ..core.data_paths import ApplicationDataPaths
 from ..core.settings import ApplicationSettings, DataCollectionSettings
 from ..core.storage import JsonCompositionRepository
-from ..device_runtime import (
+from ..devices import (
     ArmTelemetryReader,
     DepthCameraSource,
     ResourceArbiter,
 )
-from ..device_runtime.factory import create_device_runtime
+from ..devices.runtime.factory import create_device_runtime
 from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
 from ..skill_system import SkillEngine

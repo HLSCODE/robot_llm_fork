@@ -13,9 +13,9 @@ from src.application.teleoperation_observability import (
     TeleoperationObservability,
 )
 from src.core.settings import ApplicationSettings
-from src.device_runtime import ArmId, ResourceArbiter
-from src.device_runtime.factory import create_device_runtime
-from src.device_runtime.ids import ROBOT_SYSTEM
+from src.devices import ArmId, ResourceArbiter
+from src.devices.runtime.factory import create_device_runtime
+from src.devices.runtime.ids import ROBOT_SYSTEM
 
 
 class _FakeClock:

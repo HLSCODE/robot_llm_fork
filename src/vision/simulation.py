@@ -8,7 +8,7 @@ from ..core.execution_context import ExecutionContext, VisionRelocalizationState
 from ..core.json_documents import write_json_atomic
 from ..core.settings import VisionSettings
 from ..core.vision_station_storage import VisionStationStorage, normalize_arm_name
-from ..device_runtime import CameraSource, DepthCameraSource, RobotSystem
+from ..devices import CameraSource, DepthCameraSource, RobotSystem
 from .models import VisionPipelineResult
 
 _IDENTITY_MATRIX = [

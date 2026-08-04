@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Protocol
 
-from ...device_runtime import (
+from ...devices import (
     CameraSource,
     DepthCameraSource,
     DeviceRuntime,
     RobotSystem,
 )
-from ...device_runtime.ids import CAMERA, ROBOT_SYSTEM
+from ...devices.runtime.ids import CAMERA, ROBOT_SYSTEM
 from ...vision.models import VisionResult
 from ..action_handlers import (
     ActionCancelledError,

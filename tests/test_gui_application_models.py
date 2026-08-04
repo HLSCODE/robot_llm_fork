@@ -18,7 +18,7 @@ from src.application import (
 from src.core.action_schema import get_action_schema
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.core.storage import JsonCompositionRepository
-from src.device_runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
+from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui.dialogs import SchemaActionForm
 from src.gui.notifications import (

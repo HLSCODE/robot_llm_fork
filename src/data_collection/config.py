@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.settings import DataCollectionSettings
-from ..device_runtime import ArmId
+from ..devices import ArmId
 from .episode_writer import DataCollectionStoragePolicy
 from .schema import DataCollectionFormat
 

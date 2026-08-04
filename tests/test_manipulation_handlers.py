@@ -5,14 +5,14 @@ import unittest
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.core.settings import ApplicationSettings
-from src.device_runtime import (
+from src.devices import (
     ArmId,
     DeviceCapability,
     DeviceRegistration,
     DeviceRuntime,
     DeviceState,
 )
-from src.device_runtime.ids import (
+from src.devices.runtime.ids import (
     EXPRESSION_DISPLAY,
     NECK,
     PIPETTE,

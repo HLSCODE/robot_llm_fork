@@ -8,7 +8,7 @@ from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.core.logging_config import LoggingContextFilter
 from src.core.settings import ApplicationSettings
-from src.device_runtime import (
+from src.devices import (
     DeviceCapability,
     DeviceRegistration,
     DeviceRuntime,
@@ -19,7 +19,7 @@ from src.device_runtime import (
     RobotSystem,
     StopMode,
 )
-from src.device_runtime.ids import BODY_AXIS, ROBOT_SYSTEM
+from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import (
     EngineCallbacks,
     EngineResult,
@@ -166,7 +166,7 @@ class DeviceRuntimeTests(unittest.TestCase):
             runtime.initialize(device_id)
 
         with self.assertLogs(
-            "src.device_runtime.runtime",
+            "src.devices.runtime.runtime",
             level="WARNING",
         ):
             results = {

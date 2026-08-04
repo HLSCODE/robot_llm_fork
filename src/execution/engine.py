@@ -11,7 +11,7 @@ from ..core.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ..device_runtime import DeviceNotRegisteredError, DeviceRuntime
+from ..devices import DeviceNotRegisteredError, DeviceRuntime
 from ..core.settings import (
     DeviceSettings,
     ExecutionSettings,

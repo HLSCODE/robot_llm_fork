@@ -42,8 +42,8 @@ def _check_hardware() -> None:
         "serial",
         "pyrealsense2",
         "Robotic_Arm.rm_robot_interface",
-        "src.arm_sdk.controller",
-        "src.cameras.realsense_manager",
+        "src.devices.robots.realman.driver",
+        "src.devices.cameras.realsense_manager",
     )
     for module_name in modules:
         importlib.import_module(module_name)

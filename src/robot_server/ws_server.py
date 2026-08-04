@@ -117,7 +117,7 @@ from ..application import (
     websocket_teleoperation_owner,
 )
 from ..core.logging_config import bind_log_context, reset_log_context
-from ..device_runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
+from ..devices.runtime.ids import BODY_AXIS, CAMERA, ROBOT_SYSTEM
 from .access_control import (
     AuditSink,
     WebSocketAccessController,

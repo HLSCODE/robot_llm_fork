@@ -1,15 +1,109 @@
-"""串口 / ModBus 设备驱动"""
+"""Stable device capabilities and runtime API.
 
-from .adp import ADP
-from .kuaihuanshou import Kuaihuanshou
-from .modbus_motor import ModbusMotor
-from .pwm_neck import PWMNeckController
-from .relay import RelayController
+Concrete products live below domain-specific provider packages. Application
+and execution code import only the symbols exported here.
+"""
+
+from .runtime.arm_models import (
+    ArmId,
+    ArmState,
+    ArmTelemetry,
+    CartesianPose,
+    GripperTelemetry,
+    JointVector,
+    MotionMode,
+    MotionOptions,
+    RobotOperationError,
+    TrajectorySaveResult,
+)
+from .runtime.camera_models import DepthCameraFrame
+from .runtime.contracts import (
+    ArmMotion,
+    ArmStateReader,
+    ArmTelemetryReader,
+    BodyAxis,
+    CameraSource,
+    DepthCameraSource,
+    DigitalOutputs,
+    ExpressionDisplay,
+    GripperControl,
+    MobileBase,
+    NeckMotion,
+    Pipette,
+    PowderDispenser,
+    RobotSystem,
+    RobotTeleoperation,
+    StoppableDevice,
+    ToolChanger,
+    ToolRackControl,
+    TrajectoryControl,
+)
+from .runtime.models import (
+    DeviceCapability,
+    DeviceContractError,
+    DeviceErrorCategory,
+    DeviceInitializationError,
+    DeviceNotRegisteredError,
+    DeviceOperationError,
+    DeviceSafeStateResult,
+    DeviceSafeStateStatus,
+    DeviceSnapshot,
+    DeviceState,
+    DeviceStopResult,
+    DeviceStopStatus,
+    ResourceBusyError,
+    StopMode,
+)
+from .runtime.resources import ResourceArbiter, ResourceLease
+from .runtime.runtime import DeviceRegistration, DeviceRuntime
 
 __all__ = [
-    "ADP",
-    "Kuaihuanshou",
-    "ModbusMotor",
-    "PWMNeckController",
-    "RelayController",
+    "ArmId",
+    "ArmMotion",
+    "ArmState",
+    "ArmStateReader",
+    "ArmTelemetry",
+    "ArmTelemetryReader",
+    "BodyAxis",
+    "CameraSource",
+    "CartesianPose",
+    "DepthCameraFrame",
+    "DepthCameraSource",
+    "DeviceCapability",
+    "DeviceContractError",
+    "DeviceErrorCategory",
+    "DeviceInitializationError",
+    "DeviceNotRegisteredError",
+    "DeviceOperationError",
+    "DeviceRegistration",
+    "DeviceRuntime",
+    "DeviceSafeStateResult",
+    "DeviceSafeStateStatus",
+    "DeviceSnapshot",
+    "DeviceState",
+    "DeviceStopResult",
+    "DeviceStopStatus",
+    "DigitalOutputs",
+    "ExpressionDisplay",
+    "GripperControl",
+    "GripperTelemetry",
+    "JointVector",
+    "MobileBase",
+    "MotionMode",
+    "MotionOptions",
+    "NeckMotion",
+    "Pipette",
+    "PowderDispenser",
+    "ResourceArbiter",
+    "ResourceBusyError",
+    "ResourceLease",
+    "RobotOperationError",
+    "RobotSystem",
+    "RobotTeleoperation",
+    "StopMode",
+    "StoppableDevice",
+    "ToolChanger",
+    "ToolRackControl",
+    "TrajectoryControl",
+    "TrajectorySaveResult",
 ]

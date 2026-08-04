@@ -15,7 +15,7 @@ from src.application import (
 )
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.core.settings import ApplicationSettings
-from src.device_runtime import (
+from src.devices import (
     DeviceCapability,
     DeviceContractError,
     DeviceErrorCategory,
@@ -25,7 +25,7 @@ from src.device_runtime import (
     ResourceArbiter,
     ResourceBusyError,
 )
-from src.device_runtime.ids import CAMERA, ROBOT_SYSTEM
+from src.devices.runtime.ids import CAMERA, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.robot_server.ws_server import RobotWebSocketServer
 from src.voice_interaction import CameraCaptureError, CamerasModuleProvider

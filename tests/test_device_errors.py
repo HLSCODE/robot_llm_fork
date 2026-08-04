@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import unittest
 
-from src.device_control_sdk import (
+from src.devices.transports import (
     ProtocolError,
     TransportError,
     TransportErrorCategory,
 )
-from src.device_runtime import (
+from src.devices import (
     ArmId,
     DeviceErrorCategory,
     DeviceInitializationError,
     RobotOperationError,
 )
-from src.device_runtime.errors import normalize_device_error
+from src.devices.runtime.errors import normalize_device_error
 from src.execution import (
     ActionExecutionContext,
     ActionResultCode,

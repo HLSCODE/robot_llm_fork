@@ -2,7 +2,7 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-08-03
+> 最近更新：2026-08-04
 > 当前阶段：核心运行时、入口、handler、结果协议、资源所有权和 GUI simulation 已收敛，进入供应商验证与硬件验收
 > 上级计划：[Robot LLM 项目重构总计划](project-refactor-master-plan.md)
 
@@ -73,11 +73,14 @@
 | `ActionHandlerRegistry` | 唯一 ActionType 分发、重复注册拒绝和完整性校验 | 已落地 |
 | `ActionExecutionContext` | 单动作 deadline、暂停、协作取消和阻塞调用边界 | 已落地，待逐设备补强 |
 | `ActionEngine` | 序列展开、状态推进、事件转换和 handler 分发 | 已不包含具体设备/领域执行实现 |
-| `src/device_runtime/contracts.py` | 设备能力协议 | 已落地 |
+| `src/devices/runtime/contracts.py` | 设备能力协议 | 已落地 |
 | `DeviceRuntime` | 注册、初始化、查询、停止、重连和关闭 | 已落地 |
 | `ResourceArbiter` | 非阻塞独占资源租约 | 已落地 |
-| `src/device_runtime/adapters.py` | RealMan、继电器、快换手、移液枪协议适配 | 已落地 |
-| `src/device_runtime/fakes.py` | 无硬件 simulation | 已落地 |
+| `src/devices/robots/realman/adapter.py`、`src/devices/tools/adapters.py` | RealMan 与离散工具协议适配 | 已落地 |
+| `src/devices/runtime/fakes.py` | 无硬件 simulation | 已落地 |
+| `src/devices/robots/provider.py`、`registry.py` | 厂商无关 Provider 定义与唯一注册表 | 已落地 |
+| `src/devices/robots/realman/` | RealMan Provider/Adapter/Driver/Vendor 垂直切片 | 已落地 |
+| `src/devices/transports/` | 共享串口、协议与可复用设备通信 | 已落地 |
 
 ### 2.2 已注册设备
 

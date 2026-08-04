@@ -37,8 +37,8 @@ from ..core.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ..device_runtime import StopMode
-from ..device_runtime.ids import (
+from ..devices import StopMode
+from ..devices.runtime.ids import (
     BODY_AXIS,
     MOBILE_BASE,
     ROBOT_SYSTEM,

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from threading import RLock
 import time
 
-from ..device_runtime import (
+from ..devices import (
     ArmId,
     DeviceOperationError,
     DeviceRuntime,
@@ -17,8 +17,8 @@ from ..device_runtime import (
     ResourceLease,
     RobotTeleoperation,
 )
-from ..device_runtime.errors import normalize_device_error
-from ..device_runtime.ids import ROBOT_SYSTEM
+from ..devices.runtime.errors import normalize_device_error
+from ..devices.runtime.ids import ROBOT_SYSTEM
 from .teleoperation_observability import (
     TeleoperationAuditEvent,
     TeleoperationEventOutcome,

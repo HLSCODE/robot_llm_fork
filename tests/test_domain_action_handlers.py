@@ -12,7 +12,7 @@ from src.core.settings import (
     ApplicationSettings,
     ExecutionSettings,
 )
-from src.device_runtime import (
+from src.devices import (
     ArmId,
     DeviceCapability,
     DeviceRegistration,
@@ -20,8 +20,8 @@ from src.device_runtime import (
     DeviceState,
     RobotSystem,
 )
-from src.device_runtime.factory import create_device_runtime
-from src.device_runtime.ids import CAMERA, PIPETTE, ROBOT_SYSTEM
+from src.devices.runtime.factory import create_device_runtime
+from src.devices.runtime.ids import CAMERA, PIPETTE, ROBOT_SYSTEM
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,

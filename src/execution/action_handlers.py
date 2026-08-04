@@ -8,8 +8,8 @@ import time
 from typing import Any, Protocol, TypeVar
 
 from ..core.models import ActionType
-from ..device_runtime.errors import normalize_device_error
-from ..device_runtime.models import DeviceErrorCategory
+from ..devices.runtime.errors import normalize_device_error
+from ..devices.runtime.models import DeviceErrorCategory
 from .action_control import (
     ActionControlPolicy,
     ActionControlPolicyResolver,

@@ -6,7 +6,7 @@ from src.application import create_application_services
 from src.core.execution_context import ExecutionContext
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.core.settings import ApplicationSettings, VisionSettings
-from src.device_runtime import (
+from src.devices import (
     ArmId,
     CartesianPose,
     DeviceCapability,
@@ -14,7 +14,7 @@ from src.device_runtime import (
     DeviceRuntime,
     MotionMode,
 )
-from src.device_runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
+from src.devices.runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,

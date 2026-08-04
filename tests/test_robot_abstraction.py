@@ -12,7 +12,7 @@ from unittest.mock import patch
 from src.application import create_application_services
 from src.core.models import ActionDefinition, ActionType, SequenceItem
 from src.core.settings import ApplicationSettings, RobotSettings
-from src.device_runtime import (
+from src.devices import (
     ArmId,
     ArmTelemetryReader,
     CartesianPose,
@@ -26,18 +26,16 @@ from src.device_runtime import (
     RobotSystem,
     StopMode,
 )
-from src.device_runtime.adapters import (
+from src.devices.robots.realman.adapter import (
     RealManRobotAdapter,
     RealManToolRackOptions,
     RealManToolRackSlot,
 )
-from src.device_runtime.factory import create_device_runtime
-from src.device_runtime.fakes import SimulatedRobotSystem
-from src.device_runtime.ids import ROBOT_SYSTEM
-from src.device_runtime.robot_providers import (
-    RealManProviderSettings,
-    resolve_robot_provider,
-)
+from src.devices.runtime.factory import create_device_runtime
+from src.devices.runtime.fakes import SimulatedRobotSystem
+from src.devices.runtime.ids import ROBOT_SYSTEM
+from src.devices.robots.registry import resolve_robot_provider
+from src.devices.robots.realman.provider import RealManProviderSettings
 from src.execution import ExecutionState
 
 
@@ -144,6 +142,134 @@ class _FakeRealManController:
         self.robot1_ctrl = _FakeArmBackend()
         self.robot2_ctrl = _FakeArmBackend()
         self.closed = False
+
+    def _arm_controller(self, arm):
+        return self.robot1_ctrl if arm == "left" else self.robot2_ctrl
+
+    def stop_arm(self, arm, *, emergency):
+        robot = self._arm_controller(arm).robot
+        return robot.rm_set_arm_stop() if emergency else robot.rm_set_arm_slow_stop()
+
+    def move_to_pose(
+        self,
+        arm,
+        pose,
+        *,
+        linear,
+        velocity,
+        blend_radius,
+        connected,
+        blocking,
+    ):
+        backend = self._arm_controller(arm)
+        method = backend.robot.rm_movel if linear else backend.robot.rm_movej_p
+        with backend.sdk_lock:
+            return method(
+                pose,
+                v=velocity,
+                r=blend_radius,
+                connect=int(connected),
+                block=int(blocking),
+            )
+
+    def read_state(self, arm, *, blocking=True):
+        backend = self._arm_controller(arm)
+        if not backend.sdk_lock.acquire(blocking=blocking):
+            return None
+        try:
+            return backend.robot.rm_get_current_arm_state()
+        finally:
+            backend.sdk_lock.release()
+
+    def read_telemetry(self, arm, *, blocking=True):
+        backend = self._arm_controller(arm)
+        if not backend.sdk_lock.acquire(blocking=blocking):
+            return None
+        try:
+            robot = backend.robot
+            return {
+                "state": robot.rm_get_current_arm_state(),
+                "gripper": robot.rm_get_gripper_state(),
+                "joint_currents": robot.rm_get_current_joint_current(),
+                "wrench": robot.rm_get_force_data(),
+            }
+        finally:
+            backend.sdk_lock.release()
+
+    def release_gripper(self, arm, *, speed, timeout_s):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            return backend.robot.rm_set_gripper_release(
+                speed=speed,
+                block=True,
+                timeout=timeout_s,
+            )
+
+    def grip(self, arm, *, speed, force, timeout_s):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            return backend.robot.rm_set_gripper_pick_on(
+                speed=speed,
+                block=True,
+                timeout=timeout_s,
+                force=force,
+            )
+
+    def set_gripper_position(self, arm, position, *, timeout_s):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            return backend.robot.rm_set_gripper_position(
+                position,
+                block=True,
+                timeout=timeout_s,
+            )
+
+    def follow_joints(self, arm, joints, *, follow, trajectory_mode):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            return backend.robot.rm_movej_canfd(
+                joints,
+                follow,
+                trajectory_mode=trajectory_mode,
+            )
+
+    def initialize_joints(
+        self,
+        arm,
+        joints,
+        *,
+        velocity,
+        radius,
+        connected,
+        blocking,
+    ):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            return backend.robot.rm_movej(
+                joints,
+                velocity,
+                radius,
+                int(connected),
+                int(blocking),
+            )
+
+    def set_drag_teaching(self, arm, *, enabled):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            if enabled:
+                return backend.robot.rm_start_drag_teach(1)
+            return backend.robot.rm_stop_drag_teach()
+
+    def save_trajectory(self, arm, path):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            return backend.robot.rm_save_trajectory(path)
+
+    def send_trajectory(self, arm, path):
+        return self.demo_send_project(arm, path)
+
+    def is_trajectory_complete(self, arm):
+        return self.demo_get_program_run_state(arm)
 
     def demo_send_project(self, *_args, **_kwargs):
         return True
@@ -329,11 +455,11 @@ class RealManRobotAdapterTests(unittest.TestCase):
     def test_adapter_reports_real_telemetry_and_derives_velocity(self):
         with (
             patch(
-                "src.device_runtime.adapters.time.monotonic_ns",
+                "src.devices.robots.realman.adapter.time.monotonic_ns",
                 side_effect=(1_000_000_000, 2_000_000_000),
             ),
             patch(
-                "src.device_runtime.adapters.time.time_ns",
+                "src.devices.robots.realman.adapter.time.time_ns",
                 side_effect=(10_000_000_000, 11_000_000_000),
             ),
         ):

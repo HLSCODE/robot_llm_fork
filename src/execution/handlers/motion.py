@@ -6,7 +6,7 @@ from typing import Any, Callable
 from ...core.execution_context import ExecutionContext
 from ...core.move_compensation import resolve_robot_target_pose
 from ...core.settings import VisionSettings
-from ...device_runtime import (
+from ...devices import (
     ArmId,
     ArmMotion,
     BodyAxis,
@@ -15,7 +15,7 @@ from ...device_runtime import (
     MobileBase,
     MotionMode,
 )
-from ...device_runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
+from ...devices.runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
 from ..action_handlers import (
     ActionCancelledError,
     ActionExecutionContext,

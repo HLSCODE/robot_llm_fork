@@ -6,8 +6,8 @@ from enum import Enum
 from threading import RLock
 from typing import Any, Protocol
 
-from ..device_runtime import ArmId, ArmTelemetryReader, DepthCameraSource
-from ..device_runtime.ids import ROBOT_SYSTEM
+from ..devices import ArmId, ArmTelemetryReader, DepthCameraSource
+from ..devices.runtime.ids import ROBOT_SYSTEM
 from .camera_access import CameraAccessService, CameraSession
 from .teleoperation import DATA_COLLECTION_TELEOPERATION_OWNER
 

@@ -5,14 +5,14 @@ from threading import RLock
 from typing import Generic, TypeVar
 from uuid import uuid4
 
-from ..device_runtime import (
+from ..devices import (
     CameraSource,
     DepthCameraSource,
     DeviceRuntime,
     ResourceArbiter,
     ResourceLease,
 )
-from ..device_runtime.ids import CAMERA
+from ..devices.runtime.ids import CAMERA
 
 
 CameraT = TypeVar("CameraT", bound=CameraSource)

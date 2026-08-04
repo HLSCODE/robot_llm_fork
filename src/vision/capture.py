@@ -28,7 +28,7 @@ from sklearn.mixture import GaussianMixture
 from ultralytics import YOLO, SAM
 
 from ..core.settings import VisionSettings
-from ..device_runtime import (
+from ..devices import (
     ArmId,
     CartesianPose,
     DepthCameraSource,
