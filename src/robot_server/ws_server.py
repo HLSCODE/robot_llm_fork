@@ -1254,6 +1254,9 @@ class RobotWebSocketServer:
                 {
                     "event": "server_metrics",
                     "metrics": self._metrics.snapshot().to_dict(),
+                    "teleoperation_metrics": (
+                        self._services.teleoperation.metrics_snapshot().to_dict()
+                    ),
                     "request_id": data["request_id"],
                 }
             )

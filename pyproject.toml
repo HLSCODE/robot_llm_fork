@@ -163,6 +163,8 @@ files = [
     "src/core/vision_station_storage.py",
     "src/application/builtin_data.py",
     "src/application/task_composer.py",
+    "src/application/teleoperation.py",
+    "src/application/teleoperation_observability.py",
     "src/robot_server/protocol.py",
     "src/robot_server/routing.py",
     "src/robot_server/request_limits.py",

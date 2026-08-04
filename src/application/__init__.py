@@ -54,6 +54,13 @@ from .teleoperation import (
     TeleoperationSnapshot,
     websocket_teleoperation_owner,
 )
+from .teleoperation_observability import (
+    TeleoperationAuditEvent,
+    TeleoperationEventOutcome,
+    TeleoperationEventType,
+    TeleoperationMetricsSnapshot,
+    TeleoperationObservability,
+)
 from .task_composer import (
     ComposedAction,
     ComposedTask,
@@ -109,6 +116,11 @@ __all__ = [
     "TeleoperationCommandResult",
     "TeleoperationOwnerSnapshot",
     "TeleoperationSnapshot",
+    "TeleoperationAuditEvent",
+    "TeleoperationEventOutcome",
+    "TeleoperationEventType",
+    "TeleoperationMetricsSnapshot",
+    "TeleoperationObservability",
     "DATA_COLLECTION_TELEOPERATION_OWNER",
     "WEBSOCKET_TELEOPERATION_OWNER_PREFIX",
     "websocket_teleoperation_owner",

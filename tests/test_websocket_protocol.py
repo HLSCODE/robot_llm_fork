@@ -63,7 +63,18 @@ def _control_status_services() -> SimpleNamespace:
             "owners": [],
         }
     )
-    return SimpleNamespace(teleoperation=SimpleNamespace(snapshot=lambda: snapshot))
+    metrics = SimpleNamespace(
+        to_dict=lambda: {
+            "follow_commands_total": 7,
+            "observed_throughput_hz": 50.0,
+        }
+    )
+    return SimpleNamespace(
+        teleoperation=SimpleNamespace(
+            snapshot=lambda: snapshot,
+            metrics_snapshot=lambda: metrics,
+        )
+    )
 
 
 class WebSocketRequestLimiterTests(unittest.TestCase):
@@ -265,6 +276,11 @@ class WebSocketProtocolContractTests(unittest.TestCase):
         self.assertEqual(1, metrics["metrics"]["connections_active"])
         self.assertEqual(3, metrics["metrics"]["requests_total"])
         self.assertEqual(1, metrics["metrics"]["access_denied_total"])
+        self.assertEqual(7, metrics["teleoperation_metrics"]["follow_commands_total"])
+        self.assertEqual(
+            50.0,
+            metrics["teleoperation_metrics"]["observed_throughput_hz"],
+        )
 
     def test_rate_limit_response_keeps_request_correlation(self):
         server = RobotWebSocketServer(

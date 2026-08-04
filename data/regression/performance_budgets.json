@@ -16,6 +16,11 @@
       "samples": 5,
       "max_median_ms": 250.0
     },
+    "teleoperation_observability": {
+      "iterations": 10000,
+      "samples": 5,
+      "max_median_ms": 500.0
+    },
     "action_schema_snapshot": {
       "iterations": 250,
       "samples": 5,

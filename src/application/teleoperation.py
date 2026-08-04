@@ -19,6 +19,13 @@ from ..device_runtime import (
 )
 from ..device_runtime.errors import normalize_device_error
 from ..device_runtime.ids import ROBOT_SYSTEM
+from .teleoperation_observability import (
+    TeleoperationAuditEvent,
+    TeleoperationEventOutcome,
+    TeleoperationEventType,
+    TeleoperationMetricsSnapshot,
+    TeleoperationObservability,
+)
 
 
 DATA_COLLECTION_TELEOPERATION_OWNER = "data-collection"
@@ -136,10 +143,12 @@ class TeleoperationService:
         resources: ResourceArbiter,
         *,
         clock: Callable[[], float] = time.monotonic,
+        observability: TeleoperationObservability | None = None,
     ) -> None:
         self._runtime = runtime
         self._resources = resources
         self._clock = clock
+        self._observability = observability or TeleoperationObservability()
         self._lease: ResourceLease | None = None
         self._owners: dict[str, _OwnerSession] = {}
         self._lock = RLock()
@@ -158,6 +167,9 @@ class TeleoperationService:
                 )
             )
 
+    def metrics_snapshot(self) -> TeleoperationMetricsSnapshot:
+        return self._observability.snapshot()
+
     def start(
         self,
         owner_id: str,
@@ -165,34 +177,52 @@ class TeleoperationService:
     ) -> TeleoperationOwnerSnapshot:
         normalized_owner = _owner_id(owner_id)
         arm_ids = _arm_ids(arms)
-        with self._lock:
-            if self._lease is None:
-                lease = self._resources.acquire(
-                    "teleoperation",
-                    (ROBOT_SYSTEM,),
-                )
-                try:
-                    self._runtime.require(
-                        ROBOT_SYSTEM,
-                        RobotTeleoperation,
+        try:
+            with self._lock:
+                if self._lease is None:
+                    lease = self._resources.acquire(
+                        "teleoperation",
+                        (ROBOT_SYSTEM,),
                     )
-                except Exception as exc:
-                    lease.release()
-                    if isinstance(exc, DeviceOperationError):
-                        raise
-                    raise normalize_device_error(
-                        exc,
-                        device_id=ROBOT_SYSTEM,
-                        operation="teleoperation.start",
-                    ) from exc
-                self._lease = lease
-            session = self._owners.setdefault(
+                    try:
+                        self._runtime.require(
+                            ROBOT_SYSTEM,
+                            RobotTeleoperation,
+                        )
+                    except Exception as exc:
+                        lease.release()
+                        if isinstance(exc, DeviceOperationError):
+                            raise
+                        error = normalize_device_error(
+                            exc,
+                            device_id=ROBOT_SYSTEM,
+                            operation="teleoperation.start",
+                        )
+                        raise error from exc
+                    self._lease = lease
+                session = self._owners.setdefault(
+                    normalized_owner,
+                    _OwnerSession(started_at=self._clock()),
+                )
+                for arm in arm_ids:
+                    session.arms.setdefault(arm, _ArmSession())
+                snapshot = self._owner_snapshot(normalized_owner, session)
+        except Exception as exc:
+            self._record_event(
+                TeleoperationEventType.SESSION_STARTED,
+                TeleoperationEventOutcome.FAILED,
                 normalized_owner,
-                _OwnerSession(started_at=self._clock()),
+                arms=arm_ids,
+                error_code=_error_code(exc),
             )
-            for arm in arm_ids:
-                session.arms.setdefault(arm, _ArmSession())
-            return self._owner_snapshot(normalized_owner, session)
+            raise
+        self._record_event(
+            TeleoperationEventType.SESSION_STARTED,
+            TeleoperationEventOutcome.APPLIED,
+            normalized_owner,
+            arms=arm_ids,
+        )
+        return snapshot
 
     def stop(
         self,
@@ -203,45 +233,93 @@ class TeleoperationService:
         with self._lock:
             session = self._owners.get(normalized_owner)
             if session is None:
-                return None
-            stopped_arms = (
-                tuple(session.arms)
-                if arms is None
-                else _arm_ids(arms)
-            )
-            stopped = _OwnerSession(
-                started_at=session.started_at,
-                arms={
-                    arm: session.arms[arm]
-                    for arm in stopped_arms
-                    if arm in session.arms
-                },
-            )
-            for arm in stopped_arms:
-                session.arms.pop(arm, None)
-            if not session.arms:
-                self._owners.pop(normalized_owner, None)
-            lease = self._take_unused_lease_unlocked()
+                stopped = None
+                lease = None
+            else:
+                stopped_arms = (
+                    tuple(session.arms)
+                    if arms is None
+                    else _arm_ids(arms)
+                )
+                stopped = _OwnerSession(
+                    started_at=session.started_at,
+                    arms={
+                        arm: session.arms[arm]
+                        for arm in stopped_arms
+                        if arm in session.arms
+                    },
+                )
+                for arm in stopped_arms:
+                    session.arms.pop(arm, None)
+                if not session.arms:
+                    self._owners.pop(normalized_owner, None)
+                lease = self._take_unused_lease_unlocked()
         self._release_after_operations(lease)
-        if not stopped.arms:
+        if stopped is None:
+            self._record_event(
+                TeleoperationEventType.SESSION_STOPPED,
+                TeleoperationEventOutcome.SKIPPED,
+                normalized_owner,
+            )
             return None
-        return self._owner_snapshot(normalized_owner, stopped)
+        if not stopped.arms:
+            self._record_event(
+                TeleoperationEventType.SESSION_STOPPED,
+                TeleoperationEventOutcome.SKIPPED,
+                normalized_owner,
+            )
+            return None
+        snapshot = self._owner_snapshot(normalized_owner, stopped)
+        self._record_event(
+            TeleoperationEventType.SESSION_STOPPED,
+            TeleoperationEventOutcome.RELEASED,
+            normalized_owner,
+            arms=tuple(stopped.arms),
+        )
+        return snapshot
 
     def stop_all(self) -> None:
         with self._lock:
+            stopped_arms = tuple(
+                dict.fromkeys(
+                    arm
+                    for session in self._owners.values()
+                    for arm in session.arms
+                )
+            )
             self._owners.clear()
             lease = self._lease
             self._lease = None
         self._release_after_operations(lease)
+        self._record_event(
+            TeleoperationEventType.SESSION_STOPPED,
+            (
+                TeleoperationEventOutcome.RELEASED
+                if stopped_arms
+                else TeleoperationEventOutcome.SKIPPED
+            ),
+            "*",
+            arms=stopped_arms,
+        )
 
     def release_after_safety_stop(self) -> None:
         """Release all state without waiting on interrupted device I/O."""
         with self._lock:
+            had_active_state = bool(self._owners) or self._lease is not None
             self._owners.clear()
             lease = self._lease
             self._lease = None
         if lease is not None:
             lease.release()
+        self._record_event(
+            TeleoperationEventType.SAFETY_RELEASED,
+            (
+                TeleoperationEventOutcome.RELEASED
+                if had_active_state
+                else TeleoperationEventOutcome.SKIPPED
+            ),
+            "*",
+        )
 
     def follow(
         self,
@@ -254,16 +332,27 @@ class TeleoperationService:
     ) -> TeleoperationCommandResult:
         normalized_owner = _owner_id(owner_id)
         arm_id = _arm_id(arm)
-        with self._lock:
-            self._require_arm_unlocked(
+        started_at = self._clock()
+        try:
+            with self._lock:
+                self._require_arm_unlocked(
+                    normalized_owner,
+                    arm_id,
+                )
+                teleoperation = self._runtime.require(
+                    ROBOT_SYSTEM,
+                    RobotTeleoperation,
+                )
+                self._operation_lock.acquire()
+        except Exception as exc:
+            self._record_command_failure(
+                TeleoperationEventType.FOLLOW_COMMAND,
                 normalized_owner,
                 arm_id,
+                started_at,
+                exc,
             )
-            teleoperation = self._runtime.require(
-                ROBOT_SYSTEM,
-                RobotTeleoperation,
-            )
-            self._operation_lock.acquire()
+            raise
         try:
             teleoperation.follow_joints(
                 arm_id,
@@ -271,25 +360,49 @@ class TeleoperationService:
                 follow=follow,
                 trajectory_mode=trajectory_mode,
             )
-        except DeviceOperationError:
+        except DeviceOperationError as exc:
+            self._record_command_failure(
+                TeleoperationEventType.FOLLOW_COMMAND,
+                normalized_owner,
+                arm_id,
+                started_at,
+                exc,
+            )
             raise
         except Exception as exc:
-            raise normalize_device_error(
+            error = normalize_device_error(
                 exc,
                 device_id=ROBOT_SYSTEM,
                 operation="teleoperation.follow_joints",
-            ) from exc
+            )
+            self._record_command_failure(
+                TeleoperationEventType.FOLLOW_COMMAND,
+                normalized_owner,
+                arm_id,
+                started_at,
+                error,
+            )
+            raise error from exc
         finally:
             self._operation_lock.release()
         with self._lock:
             current = self._require_arm_unlocked(normalized_owner, arm_id)
             current.command_count += 1
             current.last_command_at = self._clock()
-            return TeleoperationCommandResult(
+            result = TeleoperationCommandResult(
                 owner_id=normalized_owner,
                 arm=arm_id,
                 command_count=current.command_count,
             )
+        self._record_event(
+            TeleoperationEventType.FOLLOW_COMMAND,
+            TeleoperationEventOutcome.APPLIED,
+            normalized_owner,
+            arms=(arm_id,),
+            command_count=result.command_count,
+            duration_seconds=self._clock() - started_at,
+        )
+        return result
 
     def set_gripper(
         self,
@@ -300,40 +413,91 @@ class TeleoperationService:
         normalized_owner = _owner_id(owner_id)
         arm_id = _arm_id(arm)
         normalized_position = int(position)
-        with self._lock:
-            arm_session = self._require_arm_unlocked(
+        started_at = self._clock()
+        duplicate_result: TeleoperationCommandResult | None = None
+        try:
+            with self._lock:
+                arm_session = self._require_arm_unlocked(
+                    normalized_owner,
+                    arm_id,
+                )
+                if arm_session.last_gripper_position == normalized_position:
+                    duplicate_result = TeleoperationCommandResult(
+                        owner_id=normalized_owner,
+                        arm=arm_id,
+                        command_count=arm_session.command_count,
+                        applied=False,
+                    )
+                    gripper = None
+                else:
+                    gripper = self._runtime.require(
+                        ROBOT_SYSTEM,
+                        GripperControl,
+                    )
+                    self._operation_lock.acquire()
+        except Exception as exc:
+            self._record_command_failure(
+                TeleoperationEventType.GRIPPER_COMMAND,
                 normalized_owner,
                 arm_id,
+                started_at,
+                exc,
             )
-            if arm_session.last_gripper_position == normalized_position:
-                return TeleoperationCommandResult(
-                    owner_id=normalized_owner,
-                    arm=arm_id,
-                    command_count=arm_session.command_count,
-                    applied=False,
-                )
-            gripper = self._runtime.require(ROBOT_SYSTEM, GripperControl)
-            self._operation_lock.acquire()
+            raise
+        if duplicate_result is not None:
+            self._record_event(
+                TeleoperationEventType.GRIPPER_COMMAND,
+                TeleoperationEventOutcome.SKIPPED,
+                normalized_owner,
+                arms=(arm_id,),
+                command_count=duplicate_result.command_count,
+            )
+            return duplicate_result
+        assert gripper is not None
         try:
             gripper.move_gripper(arm_id, normalized_position)
-        except DeviceOperationError:
+        except DeviceOperationError as exc:
+            self._record_command_failure(
+                TeleoperationEventType.GRIPPER_COMMAND,
+                normalized_owner,
+                arm_id,
+                started_at,
+                exc,
+            )
             raise
         except Exception as exc:
-            raise normalize_device_error(
+            error = normalize_device_error(
                 exc,
                 device_id=ROBOT_SYSTEM,
                 operation="teleoperation.move_gripper",
-            ) from exc
+            )
+            self._record_command_failure(
+                TeleoperationEventType.GRIPPER_COMMAND,
+                normalized_owner,
+                arm_id,
+                started_at,
+                error,
+            )
+            raise error from exc
         finally:
             self._operation_lock.release()
         with self._lock:
             current = self._require_arm_unlocked(normalized_owner, arm_id)
             current.last_gripper_position = normalized_position
-            return TeleoperationCommandResult(
+            result = TeleoperationCommandResult(
                 owner_id=normalized_owner,
                 arm=arm_id,
                 command_count=current.command_count,
             )
+        self._record_event(
+            TeleoperationEventType.GRIPPER_COMMAND,
+            TeleoperationEventOutcome.APPLIED,
+            normalized_owner,
+            arms=(arm_id,),
+            command_count=result.command_count,
+            duration_seconds=self._clock() - started_at,
+        )
+        return result
 
     def expire_stale_owners(
         self,
@@ -355,7 +519,54 @@ class TeleoperationService:
                 self._owners.pop(owner_id, None)
             lease = self._take_unused_lease_unlocked()
         self._release_after_operations(lease)
+        for owner_id in stale:
+            self._record_event(
+                TeleoperationEventType.WATCHDOG_EXPIRED,
+                TeleoperationEventOutcome.RELEASED,
+                owner_id,
+            )
         return stale
+
+    def _record_command_failure(
+        self,
+        event_type: TeleoperationEventType,
+        owner_id: str,
+        arm: ArmId,
+        started_at: float,
+        error: Exception,
+    ) -> None:
+        self._record_event(
+            event_type,
+            TeleoperationEventOutcome.FAILED,
+            owner_id,
+            arms=(arm,),
+            duration_seconds=self._clock() - started_at,
+            error_code=_error_code(error),
+        )
+
+    def _record_event(
+        self,
+        event_type: TeleoperationEventType,
+        outcome: TeleoperationEventOutcome,
+        owner_id: str,
+        *,
+        arms: tuple[ArmId, ...] = (),
+        command_count: int | None = None,
+        duration_seconds: float | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        self._observability.record(
+            TeleoperationAuditEvent(
+                event_type=event_type,
+                outcome=outcome,
+                recorded_at_seconds=self._clock(),
+                owner_id=owner_id,
+                arms=arms,
+                command_count=command_count,
+                duration_seconds=duration_seconds,
+                error_code=error_code,
+            )
+        )
 
     def _require_arm_unlocked(
         self,
@@ -443,3 +654,9 @@ def _last_activity(session: _OwnerSession) -> float:
         for arm in session.arms.values()
     )
     return min(arm_activity_times, default=session.started_at)
+
+
+def _error_code(error: Exception) -> str:
+    if isinstance(error, DeviceOperationError):
+        return error.category.value
+    return type(error).__name__

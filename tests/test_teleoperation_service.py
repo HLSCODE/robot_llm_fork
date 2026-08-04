@@ -7,6 +7,11 @@ from src.application import (
     TeleoperationService,
     websocket_teleoperation_owner,
 )
+from src.application.teleoperation_observability import (
+    TeleoperationEventOutcome,
+    TeleoperationEventType,
+    TeleoperationObservability,
+)
 from src.core.settings import ApplicationSettings
 from src.device_runtime import ArmId, ResourceArbiter
 from src.device_runtime.factory import create_device_runtime
@@ -29,10 +34,12 @@ class TeleoperationServiceTests(unittest.TestCase):
         )
         self.resources = ResourceArbiter()
         self.clock = _FakeClock()
+        self.audit_events = []
         self.service = TeleoperationService(
             self.runtime,
             self.resources,
             clock=self.clock,
+            observability=TeleoperationObservability(self.audit_events.append),
         )
 
     def tearDown(self) -> None:
@@ -146,6 +153,97 @@ class TeleoperationServiceTests(unittest.TestCase):
 
         self.assertEqual((owner_id,), expired)
         self.assertFalse(self.service.active)
+
+    def test_audit_sink_failure_does_not_change_control_result(self):
+        def failing_sink(_event):
+            raise OSError("audit storage unavailable")
+
+        service = TeleoperationService(
+            self.runtime,
+            self.resources,
+            clock=self.clock,
+            observability=TeleoperationObservability(failing_sink),
+        )
+        owner_id = websocket_teleoperation_owner("sink-failure")
+
+        with self.assertLogs("audit.teleoperation", level="ERROR"):
+            service.start(owner_id, ("left",))
+            result = service.follow(
+                owner_id,
+                "left",
+                [0] * 6,
+                follow=True,
+                trajectory_mode=0,
+            )
+            service.stop(owner_id)
+
+        self.assertEqual(1, result.command_count)
+        self.assertFalse(service.active)
+
+    def test_audit_and_metrics_cover_commands_skips_failures_and_watchdog(self):
+        owner_id = websocket_teleoperation_owner("audit-client")
+        self.service.start(owner_id, ("left",))
+        self.clock.now += 0.01
+        self.service.follow(
+            owner_id,
+            "left",
+            [0] * 6,
+            follow=True,
+            trajectory_mode=0,
+        )
+        self.clock.now += 0.02
+        self.service.set_gripper(owner_id, "left", 500)
+        self.service.set_gripper(owner_id, "left", 500)
+        self.clock.now += 0.03
+        self.service.follow(
+            owner_id,
+            "left",
+            [1] * 6,
+            follow=True,
+            trajectory_mode=0,
+        )
+        with self.assertRaisesRegex(RuntimeError, "does not control"):
+            self.service.follow(
+                owner_id,
+                "right",
+                [0] * 6,
+                follow=False,
+                trajectory_mode=0,
+            )
+        self.clock.now += 1.1
+        self.service.expire_stale_owners(
+            owner_prefix="websocket:",
+            timeout_seconds=1.0,
+        )
+
+        snapshot = self.service.metrics_snapshot()
+        self.assertEqual(1, snapshot.sessions_started_total)
+        self.assertEqual(2, snapshot.follow_commands_total)
+        self.assertEqual(1, snapshot.gripper_commands_total)
+        self.assertEqual(1, snapshot.commands_skipped_total)
+        self.assertEqual(1, snapshot.commands_failed_total)
+        self.assertEqual(1, snapshot.watchdog_expirations_total)
+        self.assertAlmostEqual(40.0, snapshot.observed_throughput_hz)
+        self.assertAlmostEqual(0.01, snapshot.command_interval_jitter_seconds_max)
+        self.assertEqual(
+            [
+                TeleoperationEventType.SESSION_STARTED,
+                TeleoperationEventType.FOLLOW_COMMAND,
+                TeleoperationEventType.GRIPPER_COMMAND,
+                TeleoperationEventType.GRIPPER_COMMAND,
+                TeleoperationEventType.FOLLOW_COMMAND,
+                TeleoperationEventType.FOLLOW_COMMAND,
+                TeleoperationEventType.WATCHDOG_EXPIRED,
+            ],
+            [event.event_type for event in self.audit_events],
+        )
+        self.assertEqual(
+            TeleoperationEventOutcome.FAILED,
+            self.audit_events[-2].outcome,
+        )
+        serialized = str([event.to_dict() for event in self.audit_events])
+        self.assertNotIn("joints", serialized)
+        self.assertNotIn("500", serialized)
 
 
 if __name__ == "__main__":

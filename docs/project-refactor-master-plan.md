@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-04
 >
-> 当前里程碑：M4 — 视觉服务、版本与产物生命周期已收敛
-> 计划进度：104/117（103 DONE + 1 DROPPED，88.9%）
+> 当前里程碑：M4 — 遥操作审计与软件性能基线已收敛
+> 计划进度：106/117（105 DONE + 1 DROPPED，90.6%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -552,8 +552,8 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | F-T-003 | P1 | DONE | TeleoperationService 是租约、owner、活动臂、指令计数、最后指令时间和夹爪去重状态的唯一所有者；WebSocket/DataCollection 使用独立 owner |
 | F-T-004 | P1 | DONE | WebSocket 已实现单控制者租约、续期心跳、超时监控和断线资源释放 |
 | F-T-005 | P1 | DONE | 已实现请求限频、并发上限、有界 WebSocket 入站队列和 TCP 背压；硬件调用移出事件循环，命令不静默丢弃 |
-| F-T-006 | P2 | TODO | 遥操作事件和错误统一审计 |
-| F-T-007 | P3 | TODO | 延迟、抖动和吞吐基准 |
+| F-T-006 | P2 | DONE | 应用层统一记录会话、指令、跳过、错误、watchdog 和安全释放事件；审计不包含关节值或夹爪位置，sink 故障不影响设备控制 |
+| F-T-007 | P3 | DONE | 应用层提供指令耗时、最大指令间隔、最大抖动和观测吞吐快照；无硬件性能预算纳入统一质量门禁，真实硬件停止时延仍由 F-T-002 验收 |
 
 ### 11.3 数据采集
 
@@ -998,6 +998,7 @@ M4 工程治理与清理
 | 2026-08-03 | M4 | D/G | GUI 通知、协作与关闭生命周期收敛 | D-011 TODO → DONE | 新增 typed GuiNotificationCenter；MainWindow 删除直接 QMessageBox 和散落日志出口；通知通过 QObject signal 回到 GUI 线程；AI Assistant 删除 MainWindow 反向引用并改用窄 Qt 信号；活动执行关闭时立即请求取消，相机/交互先非阻塞停止，事件循环退出后按有界预算等待 | 352 tests + 32 subtests，覆盖率 55.30%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-03 | M4 | D/G | GUI 稳定视图域拆分 | D-013/D-014 TODO → DONE | 提取 ActionLibraryView、WorkflowEditorView、DeviceStatusView、DeviceControlView；MainWindow 删除约 800 行控件构造与旧属性，改为连接参数化意图信号和调用渲染接口，不保留兼容别名；新增组件进入 Mypy | 352 tests + 32 subtests，覆盖率 55.34%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | F/G | 视觉服务与数据治理整批收口 | F-V-004/F-V-005/F-V-006/F-V-007 TODO → DONE | 新增 VisionService/typed result；模型、标定、工位 profile 严格版本化；调试产物按 run staging、manifest、原子发布和有界保留；simulation 注入确定性 fixture；删除旧重定位调试目录和 bool executor 双入口 | 359 tests + 32 subtests，覆盖率 55.99%；28 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
+| 2026-08-04 | M4 | F | 遥操作审计与软件性能基线 | F-T-006/F-T-007 TODO → DONE | 新增 typed TeleoperationObservability，统一会话、指令、跳过、错误、watchdog 和安全释放审计；敏感控制载荷不进入事件；聚合耗时、间隔、抖动和吞吐并通过 `server_metrics` 暴露；审计 sink 故障与控制结果隔离；新增确定性无硬件性能预算 | 361 tests + 32 subtests，覆盖率 56.32%；30 个 Mypy 文件、14 golden、6/6 性能预算和 wheel smoke 全部通过 |
 
 ## 22. 建议的首批实施顺序
 

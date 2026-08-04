@@ -14,8 +14,15 @@ from statistics import median
 from time import perf_counter
 from typing import Any
 
+from src.application.teleoperation_observability import (
+    TeleoperationAuditEvent,
+    TeleoperationEventOutcome,
+    TeleoperationEventType,
+    TeleoperationObservability,
+)
 from src.core.action_schema import get_action_schema, validate_action_parameters
 from src.core.models import ActionType
+from src.device_runtime import ArmId
 from src.device_runtime.resources import ResourceArbiter
 from src.llm.regression import run_regression_suite
 from src.robot_server.protocol import (
@@ -101,6 +108,10 @@ def default_benchmarks() -> dict[str, BenchmarkDefinition]:
             _benchmark_action_parameter_validation,
         ),
         BenchmarkDefinition("resource_lease_cycle", _benchmark_resource_lease_cycle),
+        BenchmarkDefinition(
+            "teleoperation_observability",
+            _benchmark_teleoperation_observability,
+        ),
         BenchmarkDefinition("action_schema_snapshot", _benchmark_action_schema_snapshot),
         BenchmarkDefinition("llm_golden_regression", _benchmark_llm_golden_regression),
     )
@@ -270,6 +281,32 @@ def _benchmark_resource_lease_cycle(iterations: int) -> None:
         lease.release()
     if arbiter.snapshot():
         raise RuntimeError("resource lease benchmark leaked a resource owner")
+
+
+def _benchmark_teleoperation_observability(iterations: int) -> None:
+    observability = TeleoperationObservability(lambda _event: None)
+    interval_seconds = 0.02
+    for index in range(iterations):
+        observability.record(
+            TeleoperationAuditEvent(
+                event_type=TeleoperationEventType.FOLLOW_COMMAND,
+                outcome=TeleoperationEventOutcome.APPLIED,
+                recorded_at_seconds=index * interval_seconds,
+                owner_id="performance",
+                arms=(ArmId.LEFT,),
+                command_count=index + 1,
+                duration_seconds=0.001,
+            )
+        )
+    snapshot = observability.snapshot()
+    if snapshot.follow_commands_total != iterations:
+        raise RuntimeError("teleoperation observability benchmark lost commands")
+    if iterations > 1 and not math.isclose(
+        snapshot.observed_throughput_hz,
+        50.0,
+        rel_tol=1e-9,
+    ):
+        raise RuntimeError("teleoperation observability benchmark measured bad throughput")
 
 
 def _benchmark_action_schema_snapshot(iterations: int) -> None:

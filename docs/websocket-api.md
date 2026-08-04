@@ -477,10 +477,12 @@ ws.onmessage = (event) => {
 `rate_limited` 和 `retry_after_seconds`；全服务并发达到上限时返回
 `server_busy`。客户端遇到这两类错误不得立即无界重试。
 
-已认证客户端可调用 `server_metrics` 读取进程生命周期内的聚合指标，包括当前/
-峰值/累计连接数、当前/峰值/累计请求数、请求耗时、非法请求、限流、繁忙、
-权限拒绝、内部错误、发送耗时、慢发送、发送失败和超时断连。指标不包含 token、
-请求 payload、客户端地址或其他高基数个人数据。
+已认证客户端可调用 `server_metrics` 读取进程生命周期内的聚合指标。`metrics`
+包含当前/峰值/累计连接数、当前/峰值/累计请求数、请求耗时、非法请求、限流、
+繁忙、权限拒绝、内部错误、发送耗时、慢发送、发送失败和超时断连；
+`teleoperation_metrics` 包含遥操作会话、已应用/跳过/失败指令、watchdog、安全
+释放、指令耗时、最大间隔、抖动和观测吞吐。指标不包含 token、请求 payload、
+关节/夹爪控制值、客户端地址或其他高基数个人数据。
 
 ---
 
@@ -492,7 +494,7 @@ ws.onmessage = (event) => {
 |---|---|---|
 | `authenticate` | 公开 | 使用 `WEBSOCKET_AUTH_TOKEN` 认证当前连接 |
 | `control_status` | 公开 | 查询当前连接认证状态、控制租约和应用层遥操作 owner/活动臂/指令计数快照 |
-| `server_metrics` | 已认证 | 查询 WebSocket API、连接和慢客户端聚合指标 |
+| `server_metrics` | 已认证 | 查询 WebSocket 与遥操作应用层聚合指标 |
 | `acquire_control` | 已认证 | 申请唯一控制权 |
 | `control_heartbeat` | 控制者 | 续期控制租约 |
 | `release_control` | 控制者 | 主动释放控制权及其会话资源 |
