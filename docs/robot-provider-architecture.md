@@ -1,7 +1,7 @@
 # 机械臂供应商适配架构
 
 > 状态：Active  
-> 最近更新：2026-07-29
+> 最近更新：2026-08-04
 
 ## 1. 目标
 
@@ -16,24 +16,60 @@ GUI / WebSocket / Vision / Data Collection
                     |
            Application / Execution
                     |
-      device_runtime contracts + models
+          devices contracts + models
                     |
      provider registry + typed settings
                     |
-          provider adapter (RealMan)
+       provider / adapter (RealMan)
                     |
           vendor driver / vendor SDK
 ```
 
 依赖规则：
 
-- 业务层只能依赖 `src.device_runtime` 导出的模型和 Protocol。
-- `rm_*`、`robot1_ctrl`、`robot2_ctrl` 只允许出现在 `src/arm_sdk/` 和 RealMan adapter 中。
+- 目录迁移完成后，业务层只能依赖 `src.devices` 导出的模型和 Protocol。
+- `rm_*`、`robot1_ctrl`、`robot2_ctrl` 只允许出现在
+  `src/devices/robots/realman/driver.py` 和 `vendor/` 中。
 - adapter 把厂商返回码统一转换为异常，把厂商状态统一转换为 `ArmState`。
-- `robot_providers.py` 是 Provider 名称、真实 capability 和创建函数的唯一注册点。
+- `devices/robots/provider.py` 是 Provider 名称、真实 capability 和创建函数的唯一注册点。
 - 型号、连接和厂商工作流配置先转换为强类型 settings，再创建厂商 driver。
 - 位姿单位固定为米和弧度，关节角固定为度，并体现在类型字段名中。
 - 机械臂实例只由 `DeviceRuntime` 创建、缓存和关闭。
+
+### 2.1 角色定义
+
+| 角色 | 职责 | 禁止承担 |
+|---|---|---|
+| Application Service | 用例、资源、安全和生命周期编排 | 厂商协议与 SDK 调用 |
+| Provider | 解析产品配置、声明能力、装配 Adapter/Driver | 业务动作流程 |
+| Adapter | 实现项目 capability，转换参数、状态和错误 | UI、网络协议和全局对象创建 |
+| Driver | 封装厂商连接和原生命令 | 应用权限、资源仲裁和业务状态 |
+| Transport | 串口/TCP 等通信和收发策略 | 设备业务语义 |
+
+不建立混放上述角色的 `robot_services` 或通用 `services` 目录。不同机械臂产品按
+垂直切片组织，产品内部再分 provider/adapter/driver。
+
+### 2.2 目标目录
+
+```text
+src/devices/robots/
+├── provider.py
+├── models.py
+├── realman/
+│   ├── provider.py
+│   ├── adapter.py
+│   ├── driver.py
+│   └── vendor/
+│       ├── rm_ctypes_wrap.py
+│       └── libs/
+└── <next-provider>/
+    ├── provider.py
+    ├── adapter.py
+    └── driver.py
+```
+
+该目录迁移采用直接切换：更新组合根、测试、打包和全部导入后删除
+`device_runtime/`、`arm_sdk/` 等旧位置，不提供转发模块或新旧双栈。
 
 ## 3. 能力模型
 
@@ -88,8 +124,8 @@ GUI / WebSocket / Vision / Data Collection
 
 1. 实现 `RobotSystem` 的核心 Protocol；只实现硬件真实支持的可选 Protocol。
 2. 在 provider adapter 内完成单位转换、错误码映射、并发锁和生命周期管理。
-3. 在 `device_runtime.robot_providers` 注册 Provider 名称、创建函数和实际
-   capability 集合；`device_runtime.factory` 不增加供应商分支。
+3. 在 `devices.robots.provider` 注册 Provider 名称、创建函数和实际
+   capability 集合；`devices.factory` 不增加供应商分支。
 4. 复用核心契约测试，至少覆盖双臂运动、状态读取、夹爪、关闭和结构化接口；
    再为厂商 adapter 增加参数、错误转换、停止和并发专项测试。
 5. 使用 simulation 回归业务流程，再进行真实硬件限速验收。
