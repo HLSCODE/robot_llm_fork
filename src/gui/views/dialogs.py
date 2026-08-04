@@ -25,13 +25,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ...core.action_schema import (
+from ...domain.action_schema import (
     ActionFieldSchema,
     ActionTypeSchema,
     get_action_schema,
     validate_action_parameters,
 )
-from ...core.models import ActionDefinition, ActionType
+from ...domain.models import ActionDefinition, ActionType
 
 
 class ActionPreviewDialog(QDialog):

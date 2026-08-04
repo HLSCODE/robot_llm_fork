@@ -3,8 +3,8 @@ from __future__ import annotations
 import unittest
 
 from src.application import create_application_services
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.settings import ApplicationSettings
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.configuration.settings import ApplicationSettings
 from src.devices import (
     ArmId,
     DeviceCapability,

@@ -52,6 +52,20 @@ LEGACY_PRESENTATION_MODULES = (
     "src/robot_server/metrics.py",
     "src/robot_server/protocol.py",
 )
+REMOVED_ARCHITECTURE_PATHS = (
+    "src/core",
+    "src/actions/Path",
+    "src/actions/move_baseclient.py",
+    "src/vision/pictures",
+    "src/widgets/frame_grabber.py",
+    "src/widgets/test_realsense_connection.py",
+)
+STABLE_LAYER_DEPENDENCIES = {
+    "src/domain": ("src.domain",),
+    "src/configuration": ("src.configuration",),
+    "src/persistence": ("src.persistence", "src.domain"),
+    "src/geometry": ("src.geometry", "src.domain", "src.configuration"),
+}
 LEGACY_HARDWARE_PATHS = (
     "src/arm_sdk",
     "src/base_move",
@@ -208,6 +222,36 @@ class DependencyBoundaryTests(unittest.TestCase):
         ]
 
         self.assertEqual([], remaining, "\n".join(remaining))
+
+    def test_removed_architecture_paths_do_not_return(self):
+        remaining = [
+            relative_path
+            for relative_path in REMOVED_ARCHITECTURE_PATHS
+            if (PROJECT_ROOT / relative_path).exists()
+        ]
+
+        self.assertEqual([], remaining, "\n".join(remaining))
+
+    def test_stable_layers_have_one_way_dependencies(self):
+        violations: list[str] = []
+        for relative_directory, allowed_prefixes in STABLE_LAYER_DEPENDENCIES.items():
+            for path in (PROJECT_ROOT / relative_directory).rglob("*.py"):
+                module_name = ".".join(
+                    path.relative_to(PROJECT_ROOT).with_suffix("").parts
+                )
+                package = module_name.rpartition(".")[0]
+                tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
+                for node in ast.walk(tree):
+                    for imported in self._imported_modules(node, package):
+                        if imported.startswith("src.") and not imported.startswith(
+                            allowed_prefixes
+                        ):
+                            violations.append(
+                                f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} "
+                                f"imports {imported}"
+                            )
+
+        self.assertEqual([], violations, "\n".join(violations))
 
     @staticmethod
     def _imported_modules(node: ast.AST, package: str) -> tuple[str, ...]:

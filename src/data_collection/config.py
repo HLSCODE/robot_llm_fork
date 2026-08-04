@@ -4,7 +4,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.settings import DataCollectionSettings
+from ..configuration.settings import DataCollectionSettings
 from ..devices import ArmId
 from .episode_writer import DataCollectionStoragePolicy
 from .schema import DataCollectionFormat

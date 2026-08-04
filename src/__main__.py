@@ -1,6 +1,6 @@
 """Run the application through ``python -m src``."""
 
-from .core.launcher import main
+from .bootstrap.launcher import main
 
 
 if __name__ == "__main__":

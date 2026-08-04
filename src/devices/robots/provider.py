@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ...core.settings import RobotSettings
+from ...configuration.settings import RobotSettings
 from ..runtime.contracts import RobotSystem
 from ..runtime.models import DeviceCapability
 

@@ -114,7 +114,7 @@ GUI/任务流
 
 ## 相关配置
 
-可在环境变量或 `src/core/config_loader.py` 中调整：
+可在环境变量或 `src/configuration/config_loader.py` 中调整：
 
 ```ini
 # 加粉装置串口和地址
@@ -213,7 +213,7 @@ python -m py_compile \
   src/devices/runtime/factory.py \
   src/gui/views/dialogs.py \
   src/robot_server/ws_server.py \
-  src/core/config_loader.py
+  src/configuration/config_loader.py
 ```
 
 ## 代码位置

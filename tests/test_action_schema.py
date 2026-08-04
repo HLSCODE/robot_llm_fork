@@ -4,12 +4,12 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from src.core.action_schema import (
+from src.domain.action_schema import (
     ActionParameterIssueCode,
     get_action_schema,
     validate_action_parameters,
 )
-from src.core.models import ActionType
+from src.domain.models import ActionType
 from src.robot_server.ws_server import RobotWebSocketServer
 
 
@@ -58,6 +58,24 @@ class ActionSchemaTests(unittest.TestCase):
                 ActionParameterIssueCode.OUT_OF_RANGE,
                 ActionParameterIssueCode.UNKNOWN_FIELD,
             },
+            {issue.code for issue in result.issues},
+        )
+
+    def test_removed_legacy_move_compensation_field_is_rejected(self):
+        result = validate_action_parameters(
+            ActionType.MOVE,
+            {
+                "目标": "机械臂",
+                "臂": "左",
+                "模式": "move_j",
+                "点位": "[0, 0, 0, 0, 0, 0]",
+                "定位补偿": {"enabled": True},
+            },
+        )
+
+        self.assertFalse(result.is_valid)
+        self.assertIn(
+            ActionParameterIssueCode.UNKNOWN_FIELD,
             {issue.code for issue in result.issues},
         )
 

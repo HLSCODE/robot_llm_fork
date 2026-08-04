@@ -27,7 +27,7 @@ import numpy as np
 from sklearn.mixture import GaussianMixture
 from ultralytics import YOLO, SAM
 
-from ..core.settings import VisionSettings
+from ..configuration.settings import VisionSettings
 from ..devices import (
     ArmId,
     CartesianPose,
@@ -43,9 +43,6 @@ from ..devices import (
 # ---------------------------------------------------------------
 # 路径与导入
 # ---------------------------------------------------------------
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_PICTURE_DIR_DEFAULT = os.path.join(_THIS_DIR, "pictures")
-
 from .interface import vertical_catch
 
 # ---------------------------------------------------------------
@@ -194,13 +191,15 @@ def run_pingzi_capture(
     camera: DepthCameraSource,
     arm: ArmId,
     settings: VisionSettings,
+    debug_directory: str,
+    save_debug_images: bool,
     width: int = 640,
     height: int = 480,
 ) -> bool:
     """
-    执行与 grab_pingzi.capture_and_move 相同的「瓶子/白桌」抓取流程。
+    执行瓶子检测、抓取和固定位置放置流程。
     """
-    from ..actions.grab_pingzi import capture_and_move
+    from .bottle_capture import capture_and_move
 
     return bool(
         capture_and_move(
@@ -208,6 +207,8 @@ def run_pingzi_capture(
             camera,
             arm,
             settings,
+            debug_directory,
+            save_debug_images,
             width,
             height,
         )
@@ -319,12 +320,14 @@ class VisionCaptureAction:
             return False
 
     def _execute_bottle(self) -> bool:
-        """与 grab_pingzi_baizhuo.py 一致：GUI 取帧 + 放置到固定点。"""
+        """Run the managed bottle capture and fixed-position placement pipeline."""
         ok = run_pingzi_capture(
             self.robot_system,
             self.camera,
             self.arm,
             self.settings,
+            self.debug_save_root,
+            self.save_debug_images,
             self.image_width,
             self.image_height,
         )

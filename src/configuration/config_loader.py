@@ -663,88 +663,52 @@ class _EnvironmentConfig:
             instance.VISION_CAMERA_NAME,
         )
         default_camera_matrix = "1361.8900146484375,0.0,930.7236938476562,0.0,1361.31640625,547.1578979492188,0.0,0.0,1.0"
-        legacy_camera_matrix = cls._parse_float_list(
+        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX = cls._parse_float_list(
             os.getenv(
-                "VISION_RELOCALIZATION_CAMERA_MATRIX",
+                "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX",
                 default_camera_matrix,
             )
         )
-        legacy_camera_resolution = cls._parse_float_list(
+        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX = cls._parse_float_list(
             os.getenv(
-                "VISION_RELOCALIZATION_CAMERA_MATRIX_RESOLUTION",
+                "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX",
+                default_camera_matrix,
+            )
+        )
+        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION = cls._parse_float_list(
+            os.getenv(
+                "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION",
                 "1920,1080",
             )
         )
-        legacy_dist_coeffs = cls._parse_float_list(
+        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION = cls._parse_float_list(
             os.getenv(
-                "VISION_RELOCALIZATION_DIST_COEFFS",
+                "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION",
+                "1920,1080",
+            )
+        )
+        instance.VISION_RELOCALIZATION_LEFT_DIST_COEFFS = cls._parse_float_list(
+            os.getenv(
+                "VISION_RELOCALIZATION_LEFT_DIST_COEFFS",
                 "0,0,0,0,0",
             )
         )
-        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX = (
-            cls._parse_float_list(
-                os.getenv(
-                    "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX",
-                    "",
-                )
+        instance.VISION_RELOCALIZATION_RIGHT_DIST_COEFFS = cls._parse_float_list(
+            os.getenv(
+                "VISION_RELOCALIZATION_RIGHT_DIST_COEFFS",
+                "0,0,0,0,0",
             )
-            or legacy_camera_matrix
-        )
-        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX = (
-            cls._parse_float_list(
-                os.getenv(
-                    "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX",
-                    "",
-                )
-            )
-            or legacy_camera_matrix
-        )
-        instance.VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION = (
-            cls._parse_float_list(
-                os.getenv(
-                    "VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION",
-                    "",
-                )
-            )
-            or legacy_camera_resolution
-        )
-        instance.VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION = (
-            cls._parse_float_list(
-                os.getenv(
-                    "VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION",
-                    "",
-                )
-            )
-            or legacy_camera_resolution
-        )
-        instance.VISION_RELOCALIZATION_LEFT_DIST_COEFFS = (
-            cls._parse_float_list(
-                os.getenv(
-                    "VISION_RELOCALIZATION_LEFT_DIST_COEFFS",
-                    "",
-                )
-            )
-            or legacy_dist_coeffs
-        )
-        instance.VISION_RELOCALIZATION_RIGHT_DIST_COEFFS = (
-            cls._parse_float_list(
-                os.getenv(
-                    "VISION_RELOCALIZATION_RIGHT_DIST_COEFFS",
-                    "",
-                )
-            )
-            or legacy_dist_coeffs
         )
         instance.VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH = float(
             os.getenv(
                 "VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH",
-                os.getenv("VISION_RELOCALIZATION_MARKER_WIDTH", "0.158"),
+                "0.158",
             )
         )
         instance.VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT = float(
             os.getenv(
                 "VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT",
-                os.getenv("VISION_RELOCALIZATION_MARKER_HEIGHT", "0.158"),
+                "0.158",
             )
         )
         instance.VISION_RELOCALIZATION_POSE_ROTATION_TYPE = os.getenv(

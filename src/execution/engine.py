@@ -3,8 +3,8 @@
 from collections.abc import Sequence
 import logging
 
-from ..core.execution_context import ExecutionContext
-from ..core.models import (
+from ..domain.execution_context import ExecutionContext
+from ..domain.models import (
     ActionType,
     LoopBlock,
     SequenceEntry,
@@ -12,7 +12,7 @@ from ..core.models import (
     SequenceItemStatus,
 )
 from ..devices import DeviceNotRegisteredError, DeviceRuntime
-from ..core.settings import (
+from ..configuration.settings import (
     DeviceSettings,
     ExecutionSettings,
     SecretSettings,

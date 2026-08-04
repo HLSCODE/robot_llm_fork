@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from pathlib import Path
 import time
 from typing import Callable
 
 import cv2
 import numpy as np
 
-from ..core.settings import VisionSettings
+from ..configuration.settings import VisionSettings
 from ..devices import (
     ArmId,
     CartesianPose,
@@ -16,15 +15,12 @@ from ..devices import (
     MotionOptions,
     RobotSystem,
 )
-from ..vision.capture import (
+from .capture import (
     load_sam_model,
     load_yolo_model,
     process_mask_with_gmm,
 )
-from ..vision.interface import vertical_catch
-
-
-PICTURE_DIR = Path(__file__).resolve().parents[1] / "vision" / "pictures"
+from .interface import vertical_catch
 
 
 def detect_target(
@@ -74,6 +70,8 @@ def capture_and_move(
     camera: DepthCameraSource,
     arm: ArmId,
     settings: VisionSettings,
+    debug_directory: str,
+    save_debug_images: bool,
     width: int = 640,
     height: int = 480,
 ) -> bool:
@@ -101,8 +99,8 @@ def capture_and_move(
             camera,
             settings.vision_camera_name or None,
         )
-        PICTURE_DIR.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(PICTURE_DIR / "original_image.jpg"), color_image)
+        if save_debug_images:
+            cv2.imwrite(f"{debug_directory}/original_image.jpg", color_image)
 
         mask, _bounding_box, detected = detect_target(
             color_image,
@@ -114,12 +112,11 @@ def capture_and_move(
             confidence_threshold=settings.vision_default_confidence,
         )
         if not detected:
-            cv2.imwrite(
-                str(PICTURE_DIR / "failed_detection.jpg"),
-                color_image,
-            )
+            if save_debug_images:
+                cv2.imwrite(f"{debug_directory}/failed_detection.jpg", color_image)
             raise RuntimeError("未检测到目标")
-        cv2.imwrite(str(PICTURE_DIR / "mask_result.jpg"), mask)
+        if save_debug_images:
+            cv2.imwrite(f"{debug_directory}/mask_result.jpg", mask)
 
         current_pose = robot_system.read_arm_state(arm).pose.to_list()
         above_object_pose, _, _ = vertical_catch(

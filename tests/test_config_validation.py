@@ -6,16 +6,16 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from src.core.config_loader import ConfigLoadError, load_application_settings
-from src.core.config_validation import (
+from src.configuration.config_loader import ConfigLoadError, load_application_settings
+from src.configuration.config_validation import (
     ConfigurationSeverity,
     StartupOptions,
     redact_config_mapping,
     validate_startup_configuration,
 )
-from src.core.data_paths import ApplicationDataPaths
-from src.core.launcher import main
-from src.core.settings import ApplicationSettings
+from src.configuration.data_paths import ApplicationDataPaths
+from src.bootstrap.launcher import main
+from src.configuration.settings import ApplicationSettings
 
 
 def _config(root: Path, **overrides):
@@ -287,13 +287,34 @@ class ConfigurationValidationTests(unittest.TestCase):
 
     def test_config_parse_error_does_not_echo_rejected_value(self) -> None:
         with patch(
-            "src.core.config_loader._EnvironmentConfig._load_unchecked",
+            "src.configuration.config_loader._EnvironmentConfig._load_unchecked",
             side_effect=ValueError("very-secret-invalid-value"),
         ):
             with self.assertRaises(ConfigLoadError) as error:
                 load_application_settings()
 
         self.assertNotIn("very-secret-invalid-value", str(error.exception))
+
+    def test_removed_single_camera_calibration_variables_are_ignored(self) -> None:
+        legacy_environment = {
+            "VISION_RELOCALIZATION_CAMERA_MATRIX": "1,0,0,0,1,0,0,0,1",
+            "VISION_RELOCALIZATION_CAMERA_MATRIX_RESOLUTION": "1,1",
+            "VISION_RELOCALIZATION_DIST_COEFFS": "1,1,1,1,1",
+            "VISION_RELOCALIZATION_MARKER_WIDTH": "9.9",
+            "VISION_RELOCALIZATION_MARKER_HEIGHT": "9.9",
+        }
+        with (
+            patch.dict("os.environ", legacy_environment, clear=True),
+            patch("src.configuration.config_loader.load_dotenv"),
+        ):
+            settings = load_application_settings().vision
+
+        self.assertNotEqual(
+            (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            settings.vision_relocalization_left_camera_matrix,
+        )
+        self.assertEqual(0.158, settings.vision_relocalization_default_marker_width)
+        self.assertEqual(0.158, settings.vision_relocalization_default_marker_height)
 
     def test_data_paths_follow_root_and_explicit_overrides(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -320,11 +341,11 @@ class ConfigurationValidationTests(unittest.TestCase):
             with (
                 patch("sys.argv", ["robot-llm", "--check-config"]),
                 patch(
-                    "src.core.launcher.load_application_settings",
+                    "src.bootstrap.launcher.load_application_settings",
                     return_value=config,
                 ),
-                patch("src.core.launcher.configure_logging"),
-                patch("src.core.launcher.run_gui") as run_gui,
+                patch("src.bootstrap.launcher.configure_logging"),
+                patch("src.bootstrap.launcher.run_gui") as run_gui,
             ):
                 exit_code = main()
 

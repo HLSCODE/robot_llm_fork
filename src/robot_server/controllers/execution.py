@@ -7,7 +7,7 @@ import logging
 import threading
 from typing import Any
 
-from ...core.models import (
+from ...domain.models import (
     ActionDefinition,
     LoopBlock,
     SequenceItem,

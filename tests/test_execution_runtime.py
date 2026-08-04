@@ -5,9 +5,9 @@ import logging
 import unittest
 
 from src.application import create_application_services
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.logging_config import LoggingContextFilter
-from src.core.settings import ApplicationSettings
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.observability.logging_config import LoggingContextFilter
+from src.configuration.settings import ApplicationSettings
 from src.devices import (
     DeviceCapability,
     DeviceRegistration,

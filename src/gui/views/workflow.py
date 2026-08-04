@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ...application import ApplicationServices
-from ...core.models import ActionDefinition, ActionType
+from ...domain.models import ActionDefinition, ActionType
 from ...devices import StopMode
 from ...widgets import ActionListWidget, ControlPanel, SequenceListWidget
 from ...widgets.ai_assistant import AIAssistantWidget

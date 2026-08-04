@@ -6,7 +6,7 @@ from threading import RLock
 from typing import TypeAlias
 from uuid import uuid4
 
-from ..core.models import (
+from ..domain.models import (
     ActionDefinition,
     SequenceItem,
     SequenceItemStatus,

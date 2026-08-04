@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 from src.application import CommandRuntime
-from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.execution import ExecutionSnapshot, ExecutionState
 from src.llm import LLMPlanResult
 from src.robot_server.ws_server import RobotWebSocketServer

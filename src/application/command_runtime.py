@@ -12,7 +12,7 @@ from threading import RLock
 from typing import Any
 from uuid import uuid4
 
-from ..core.models import ActionType, SequenceItem
+from ..domain.models import ActionType, SequenceItem
 from ..skill_system import SkillEngine
 from ..skill_system.models import SkillMatchResult, ValidationResult
 

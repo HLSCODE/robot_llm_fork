@@ -12,8 +12,8 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
-from .data_paths import PROJECT_ROOT
-from .settings import LoggingSettings
+from ..configuration.data_paths import PROJECT_ROOT
+from ..configuration.settings import LoggingSettings
 
 
 @dataclass(frozen=True, slots=True)

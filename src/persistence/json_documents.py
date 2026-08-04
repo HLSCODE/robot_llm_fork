@@ -1,4 +1,4 @@
-"""Versioned JSON collection documents with crash-safe replacement."""
+"""Versioned JSON documents with atomic crash-safe replacement."""
 
 from __future__ import annotations
 

@@ -99,7 +99,7 @@ def read_balance(
 
 
 if __name__ == "__main__":
-    from ..core.config_loader import load_application_settings
+    from ..configuration.config_loader import load_application_settings
 
     settings = load_application_settings()
     value = read_balance(

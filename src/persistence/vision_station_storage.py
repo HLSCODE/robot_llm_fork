@@ -1,9 +1,12 @@
+"""Versioned persistence for vision relocalization stations."""
+
 from __future__ import annotations
 
 import time
 from pathlib import Path
 from typing import Any, Protocol
 
+from ..domain.arm_names import normalize_arm_name
 from .json_documents import (
     CollectionDocumentSpec,
     JsonDocumentSchemaError,
@@ -26,15 +29,6 @@ class VisionConfiguration(Protocol):
 
     @property
     def calibration_version(self) -> str: ...
-
-
-def normalize_arm_name(arm: str | None) -> str:
-    text = str(arm or "").strip().lower()
-    if text in {"left", "l", "robot1", "r1", "1", "左", "左臂"}:
-        return "left"
-    if text in {"right", "r", "robot2", "r2", "2", "右", "右臂"}:
-        return "right"
-    return text or "left"
 
 
 def arm_display_name(arm: str | None) -> str:

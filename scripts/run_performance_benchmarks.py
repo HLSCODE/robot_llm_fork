@@ -20,8 +20,8 @@ from src.application.teleoperation_observability import (
     TeleoperationEventType,
     TeleoperationObservability,
 )
-from src.core.action_schema import get_action_schema, validate_action_parameters
-from src.core.models import ActionType
+from src.domain.action_schema import get_action_schema, validate_action_parameters
+from src.domain.models import ActionType
 from src.devices import ArmId
 from src.devices.runtime.resources import ResourceArbiter
 from src.llm.regression import run_regression_suite

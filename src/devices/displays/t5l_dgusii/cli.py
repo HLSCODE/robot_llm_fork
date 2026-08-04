@@ -92,7 +92,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _project_settings():
-    from ...core.config_loader import load_application_settings
+    from ....configuration.config_loader import load_application_settings
     from ..display import ExpressionDisplaySettings
 
     settings = load_application_settings()

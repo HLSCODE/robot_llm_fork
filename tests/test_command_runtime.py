@@ -13,7 +13,7 @@ from src.application import (
     PreviewVersionConflictError,
     RiskAcknowledgementRequiredError,
 )
-from src.core.models import ActionDefinition, ActionType, SequenceItem
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.execution import ExecutionSnapshot, ExecutionState
 from src.skill_system.models import ValidationResult
 

@@ -9,11 +9,11 @@ from types import MappingProxyType
 from typing import List, Dict, Any, Optional, Tuple
 from uuid import uuid4
 
-from ..core.action_schema import (
+from ..domain.action_schema import (
     get_action_fields,
     validate_action_parameters,
 )
-from ..core.models import SequenceItem, SequenceItemStatus, ActionDefinition, ActionType
+from ..domain.models import SequenceItem, SequenceItemStatus, ActionDefinition, ActionType
 from .models import (
     Skill,
     SkillMatchResult,

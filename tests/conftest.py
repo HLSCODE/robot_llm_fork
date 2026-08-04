@@ -9,7 +9,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from src.core.data_paths import ApplicationDataPaths
+from src.configuration.data_paths import ApplicationDataPaths
 
 
 @pytest.fixture(autouse=True)

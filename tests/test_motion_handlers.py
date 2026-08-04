@@ -3,9 +3,9 @@ from __future__ import annotations
 import unittest
 
 from src.application import create_application_services
-from src.core.execution_context import ExecutionContext
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.settings import ApplicationSettings, VisionSettings
+from src.domain.execution_context import ExecutionContext
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.configuration.settings import ApplicationSettings, VisionSettings
 from src.devices import (
     ArmId,
     CartesianPose,

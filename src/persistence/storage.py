@@ -11,7 +11,7 @@ from .json_documents import (
     migrate_collection_document,
     write_collection_document,
 )
-from .models import (
+from ..domain.models import (
     ActionDefinition,
     LoopBlock,
     SequenceEntry,

@@ -1,3 +1,5 @@
+"""Lifecycle host for optional services started with the application."""
+
 from __future__ import annotations
 
 import asyncio

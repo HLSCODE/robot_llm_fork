@@ -94,7 +94,7 @@ Qt signals；安全停止使用短生命周期 I/O 调度线程，避免阻塞�
 
 ### 2.7 SchemaActionForm
 
-`ActionConfigDialog` 从 `src/core/action_schema.py` 获取唯一 schema，并通用支持：
+`ActionConfigDialog` 从 `src/domain/action_schema.py` 获取唯一 schema，并通用支持：
 
 - `text`、`number`、`select`、`boolean`、`object` 字段；
 - action variant 动态切换；

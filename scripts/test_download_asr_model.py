@@ -20,7 +20,7 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-    from src.core.config_loader import load_application_settings
+    from src.configuration.config_loader import load_application_settings
     from src.voice_interaction.speech.asr import FunASRRecognizer
     from src.voice_interaction.speech.vad import FunASRVAD
 

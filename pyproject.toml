@@ -76,7 +76,7 @@ full = [
 ]
 
 [project.scripts]
-robot-llm = "src.core.launcher:main"
+robot-llm = "src.bootstrap.launcher:main"
 t5l-dgus = "src.devices.displays.t5l_dgusii.cli:main"
 robot-data-validate = "src.data_collection.validation:main"
 robot-llm-regression = "src.llm.regression:main"
@@ -131,7 +131,12 @@ include = [
     "scripts/validate_package.py",
     "src/actions/**/*.py",
     "src/application/**/*.py",
-    "src/core/**/*.py",
+    "src/bootstrap/**/*.py",
+    "src/configuration/**/*.py",
+    "src/domain/**/*.py",
+    "src/geometry/**/*.py",
+    "src/observability/**/*.py",
+    "src/persistence/**/*.py",
     "src/data_collection/**/*.py",
     "src/devices/**/*.py",
     "src/execution/**/*.py",
@@ -155,13 +160,13 @@ python_version = "3.12"
 files = [
     "scripts/run_performance_benchmarks.py",
     "src/agents/powder_dispense_agent.py",
-    "src/core/settings.py",
-    "src/core/json_documents.py",
-    "src/core/logging_config.py",
-    "src/core/data_paths.py",
-    "src/core/config_validation.py",
-    "src/core/storage.py",
-    "src/core/vision_station_storage.py",
+    "src/configuration/settings.py",
+    "src/persistence/json_documents.py",
+    "src/observability/logging_config.py",
+    "src/configuration/data_paths.py",
+    "src/configuration/config_validation.py",
+    "src/persistence/storage.py",
+    "src/persistence/vision_station_storage.py",
     "src/application/builtin_data.py",
     "src/application/task_composer.py",
     "src/application/teleoperation.py",

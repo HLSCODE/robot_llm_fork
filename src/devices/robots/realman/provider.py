@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ....core.settings import RobotSettings
+from ....configuration.settings import RobotSettings
 from ...runtime.arm_models import ArmId, CartesianPose, MotionOptions
 from ...runtime.contracts import RobotSystem
 from ...runtime.models import DeviceCapability, DeviceInitializationError

@@ -10,8 +10,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.application import create_application_services
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.settings import ApplicationSettings, RobotSettings
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.configuration.settings import ApplicationSettings, RobotSettings
 from src.devices import (
     ArmId,
     ArmTelemetryReader,

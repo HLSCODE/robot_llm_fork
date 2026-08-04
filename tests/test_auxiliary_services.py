@@ -7,15 +7,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.application import DataCollectionState
-from src.core.auxiliary_services import (
+from src.bootstrap.auxiliary_services import (
     AuxiliaryServiceHost,
     AuxiliaryServiceState,
 )
-from src.core.launcher import (
+from src.bootstrap.launcher import (
     _shutdown_application,
     build_auxiliary_service_host,
 )
-from src.core.settings import ApplicationSettings
+from src.configuration.settings import ApplicationSettings
 from src.robot_server.ws_server import RobotWebSocketServer
 
 
@@ -130,7 +130,7 @@ class AuxiliaryServiceHostTests(unittest.TestCase):
         )
 
         with self.assertLogs(
-            "src.core.auxiliary_services",
+            "src.bootstrap.auxiliary_services",
             level="WARNING",
         ):
             snapshots = {snapshot.name: snapshot for snapshot in host.start()}
@@ -343,7 +343,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
                 "src.robot_server.ws_server.RobotWebSocketServer",
                 return_value=_FakeAsyncService("websocket", []),
             ),
-            self.assertLogs("src.core.launcher", level="WARNING") as logs,
+            self.assertLogs("src.bootstrap.launcher", level="WARNING") as logs,
         ):
             build_auxiliary_service_host(
                 args,

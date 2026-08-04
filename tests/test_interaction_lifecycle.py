@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 
 from src.application import CommandRuntime
-from src.core.settings import LLMSettings, SecretSettings
+from src.configuration.settings import LLMSettings, SecretSettings
 from src.execution import ExecutionSnapshot, ExecutionState
 from src.llm.providers.openai_compatible import OpenAICompatibleClient
 from src.llm.registry import LLMRegistry

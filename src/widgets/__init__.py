@@ -1,9 +1,15 @@
-try:
-    from .widget_components import (
-        ActionListWidget,
-        SequenceListWidget,
-        ControlPanel,
-        LogWidget,
-    )
-except ImportError:
-    pass
+"""Reusable Qt widgets; available when the GUI optional extra is installed."""
+
+from .widget_components import (
+    ActionListWidget,
+    ControlPanel,
+    LogWidget,
+    SequenceListWidget,
+)
+
+__all__ = [
+    "ActionListWidget",
+    "ControlPanel",
+    "LogWidget",
+    "SequenceListWidget",
+]

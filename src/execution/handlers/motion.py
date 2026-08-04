@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from ...core.execution_context import ExecutionContext
-from ...core.move_compensation import resolve_robot_target_pose
-from ...core.settings import VisionSettings
+from ...domain.execution_context import ExecutionContext
+from ..target_pose import resolve_robot_target_pose
+from ...configuration.settings import VisionSettings
 from ...devices import (
     ArmId,
     ArmMotion,

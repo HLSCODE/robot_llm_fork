@@ -7,13 +7,13 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from ...core.execution_context import ExecutionContext, VisionRelocalizationState
-from ...core.pose_compensation import parse_pose
-from ...core.settings import VisionSettings
-from ...core.vision_station_storage import (
+from ...domain.arm_names import normalize_arm_name
+from ...domain.execution_context import ExecutionContext, VisionRelocalizationState
+from ...geometry.pose_compensation import parse_pose
+from ...configuration.settings import VisionSettings
+from ...persistence.vision_station_storage import (
     VisionStationStorage,
     arm_display_name,
-    normalize_arm_name,
 )
 from ...devices import (
     ArmId,

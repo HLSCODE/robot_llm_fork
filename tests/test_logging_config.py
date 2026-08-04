@@ -8,13 +8,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from src.core.logging_config import (
+from src.observability.logging_config import (
     JsonLogFormatter,
     LoggingContextFilter,
     configure_logging,
     log_context,
 )
-from src.core.settings import LoggingSettings
+from src.configuration.settings import LoggingSettings
 
 
 class LoggingConfigurationTests(unittest.TestCase):

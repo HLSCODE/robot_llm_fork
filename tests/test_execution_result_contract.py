@@ -9,7 +9,7 @@ from src.application import (
     DataCollectionSnapshot,
     DataCollectionState,
 )
-from src.core.models import (
+from src.domain.models import (
     ActionDefinition,
     ActionType,
     SequenceItem,

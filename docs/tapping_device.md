@@ -16,7 +16,7 @@
 
 ## 配置文件
 
-配置项在 `config.env` 或 `src/core/config_loader.py` 中设置：
+配置项在 `config.env` 或 `src/configuration/config_loader.py` 中设置：
 
 ```ini
 # 串口

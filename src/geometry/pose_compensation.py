@@ -6,6 +6,8 @@ import math
 import re
 from typing import Iterable
 
+from ..domain.arm_names import normalize_arm_name
+
 
 POSE_LINEAR_UNITS_PER_UDP_CM = 0.01  # UDP localization x/y are cm, robot pose x/y/z are m.
 POSE_LENGTH = 6
@@ -84,16 +86,6 @@ def get_arm_locator_to_base_cm(arm: str | None) -> dict:
     if arm_key == "left":
         return LEFT_ARM_LOCATOR_TO_BASE_CM
     return RIGHT_ARM_LOCATOR_TO_BASE_CM
-
-
-def normalize_arm_name(arm: str | None) -> str:
-    text = str(arm or "").strip().lower()
-    if text in {"left", "l", "left_arm", "robot1", "r1", "1", "\u5de6", "\u5de6\u81c2"}:
-        return "left"
-    if text in {"right", "r", "right_arm", "robot2", "r2", "2", "\u53f3", "\u53f3\u81c2"}:
-        return "right"
-    return "right"
-
 
 
 def corrected_arm_base_from_tcp_matrix(

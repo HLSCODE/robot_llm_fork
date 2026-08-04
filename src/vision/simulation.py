@@ -4,10 +4,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable
 
-from ..core.execution_context import ExecutionContext, VisionRelocalizationState
-from ..core.json_documents import write_json_atomic
-from ..core.settings import VisionSettings
-from ..core.vision_station_storage import VisionStationStorage, normalize_arm_name
+from ..domain.arm_names import normalize_arm_name
+from ..domain.execution_context import ExecutionContext, VisionRelocalizationState
+from ..persistence.json_documents import write_json_atomic
+from ..configuration.settings import VisionSettings
+from ..persistence.vision_station_storage import VisionStationStorage
 from ..devices import CameraSource, DepthCameraSource, RobotSystem
 from .models import VisionPipelineResult
 

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from functools import partial
 
-from ..core.data_paths import ApplicationDataPaths
-from ..core.settings import ApplicationSettings, DataCollectionSettings
-from ..core.storage import JsonCompositionRepository
+from ..configuration.data_paths import ApplicationDataPaths
+from ..configuration.settings import ApplicationSettings, DataCollectionSettings
+from ..persistence.storage import JsonCompositionRepository
 from ..devices import (
     ArmTelemetryReader,
     DepthCameraSource,
@@ -16,7 +16,7 @@ from ..execution.manager import ExecutionManager
 from ..llm import LLMRegistry
 from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
-from ..core.execution_context import ExecutionContext
+from ..domain.execution_context import ExecutionContext
 from ..vision.service import VisionService
 from ..vision.simulation import VisionPipelineFixture
 from .builtin_data import BuiltinDataInstaller

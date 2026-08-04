@@ -13,12 +13,12 @@ from src.application import (
     CompositionRevisionConflict,
     CompositionService,
 )
-from src.core.models import (
+from src.domain.models import (
     ActionDefinition,
     ActionType,
     SequenceItem,
 )
-from src.core.storage import JsonCompositionRepository
+from src.persistence.storage import JsonCompositionRepository
 from src.robot_server.ws_server import RobotWebSocketServer
 
 

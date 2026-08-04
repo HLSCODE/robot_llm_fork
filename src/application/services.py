@@ -26,7 +26,7 @@ from ..devices import (
     TrajectorySaveResult,
 )
 from ..devices.runtime.errors import normalize_device_error
-from ..core.settings import ApplicationSettings
+from ..configuration.settings import ApplicationSettings
 from ..devices.runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from ..execution import (
     ExecutionHandle,

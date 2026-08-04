@@ -116,7 +116,7 @@ from ..application import (
     WEBSOCKET_TELEOPERATION_OWNER_PREFIX,
     websocket_teleoperation_owner,
 )
-from ..core.logging_config import bind_log_context, reset_log_context
+from ..observability.logging_config import bind_log_context, reset_log_context
 from .security import (
     AuditSink,
     WebSocketAccessController,

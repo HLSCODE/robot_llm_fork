@@ -10,7 +10,7 @@
 import logging
 from typing import Union, Optional
 
-from ...core.settings import VisionSettings
+from ...configuration.settings import VisionSettings
 from .realsense_manager import RealSenseManager
 from .opencv_manager import OpenCVCameraManager
 

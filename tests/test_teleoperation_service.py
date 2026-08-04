@@ -12,7 +12,7 @@ from src.application.teleoperation_observability import (
     TeleoperationEventType,
     TeleoperationObservability,
 )
-from src.core.settings import ApplicationSettings
+from src.configuration.settings import ApplicationSettings
 from src.devices import ArmId, ResourceArbiter
 from src.devices.runtime.factory import create_device_runtime
 from src.devices.runtime.ids import ROBOT_SYSTEM

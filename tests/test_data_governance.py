@@ -6,13 +6,13 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from src.application.builtin_data import BuiltinDataInstaller
-from src.core.data_paths import ApplicationDataPaths
-from src.core.json_documents import (
+from src.configuration.data_paths import ApplicationDataPaths
+from src.persistence.json_documents import (
     JsonDocumentSchemaError,
     UnsupportedJsonDocumentVersion,
 )
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.storage import JsonCompositionRepository
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.persistence.storage import JsonCompositionRepository
 from src.skill_system.default_skills import get_default_skills
 from src.skill_system.skill_registry import SkillRegistry
 

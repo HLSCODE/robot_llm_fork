@@ -6,7 +6,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
 
-from ..core.settings import VisionSettings
+from ..configuration.settings import VisionSettings
 
 
 class VisionOperation(StrEnum):

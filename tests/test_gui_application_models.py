@@ -15,9 +15,9 @@ from src.application import (
     CompositionService,
     TaskComposerService,
 )
-from src.core.action_schema import get_action_schema
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.storage import JsonCompositionRepository
+from src.domain.action_schema import get_action_schema
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.persistence.storage import JsonCompositionRepository
 from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui.views.dialogs import SchemaActionForm

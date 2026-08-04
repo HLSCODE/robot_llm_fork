@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from src.core.settings import DataCollectionSettings
+from src.configuration.settings import DataCollectionSettings
 from src.data_collection.config import DataCollectionConfig
 from src.data_collection.episode_writer import (
     DataCollectionEpisodeWriter,

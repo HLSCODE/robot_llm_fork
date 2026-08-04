@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QSize, QMimeData
 from PyQt6.QtGui import QIcon, QColor, QDrag, QAction
 import json
 from uuid import uuid4
-from ..core.models import ActionDefinition, SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
+from ..domain.models import ActionDefinition, SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
 
 
 class ActionListWidget(QListWidget):
@@ -725,13 +725,12 @@ class SequenceListWidget(QTreeWidget):
         self._item_map.clear()
         self.clear()
 
-    # ────────────────── Backward-compatible flat-index API ──────────────────
-    # 这些方法模拟 QListWidget 的 API，以最小化 main_window.py 的改动
+    # ────────────────── Top-level entry operations ──────────────────
 
-    def count(self) -> int:
+    def entry_count(self) -> int:
         return self.topLevelItemCount()
 
-    def currentRow(self) -> int:
+    def current_entry_row(self) -> int:
         current = self.currentItem()
         if current is None:
             return -1
@@ -741,10 +740,7 @@ class SequenceListWidget(QTreeWidget):
             return self.indexOfTopLevelItem(parent)
         return self.indexOfTopLevelItem(current)
 
-    def item(self, index: int) -> QTreeWidgetItem:
-        return self.topLevelItem(index)
-
-    def takeItem(self, index: int) -> QTreeWidgetItem:
+    def take_entry(self, index: int) -> QTreeWidgetItem:
         item = self.takeTopLevelItem(index)
         if item is not None:
             entry = item.data(0, Qt.ItemDataRole.UserRole)
@@ -759,7 +755,7 @@ class SequenceListWidget(QTreeWidget):
                 self._unregister_item(entry)
         return item
 
-    def insertItem(self, index: int, tree_item: QTreeWidgetItem):
+    def insert_entry(self, index: int, tree_item: QTreeWidgetItem) -> None:
         self.insertTopLevelItem(index, tree_item)
         # 重新注册移动后带回的项
         entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
@@ -773,13 +769,13 @@ class SequenceListWidget(QTreeWidget):
         elif isinstance(entry, SequenceItem):
             self._register_item(tree_item, entry)
 
-    def setCurrentRow(self, index: int):
+    def set_current_entry_row(self, index: int) -> None:
         item = self.topLevelItem(index)
         if item:
             self.setCurrentItem(item)
 
-    def selectedIndexes(self):
-        """返回选中顶层项的索引列表（模拟 QListWidget API）"""
+    def selected_entry_indexes(self) -> list:
+        """Return model indexes for selected top-level entries."""
         indexes = []
         for i in range(self.topLevelItemCount()):
             if self.topLevelItem(i).isSelected():
@@ -787,8 +783,8 @@ class SequenceListWidget(QTreeWidget):
                 indexes.append(self.model().index(i, 0))
         return indexes
 
-    def scrollToItem(self, tree_item: QTreeWidgetItem):
-        """滚动到指定树节点"""
+    def scroll_to_entry(self, tree_item: QTreeWidgetItem) -> None:
+        """Scroll to a sequence tree entry."""
         if tree_item is not None:
             super().scrollToItem(tree_item)
 

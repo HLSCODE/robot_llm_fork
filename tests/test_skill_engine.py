@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from typing import cast
 
-from src.core.models import ActionType
+from src.domain.models import ActionType
 from src.skill_system import (
     Skill,
     SkillCategory,

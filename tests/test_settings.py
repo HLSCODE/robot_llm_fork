@@ -4,7 +4,7 @@ from dataclasses import FrozenInstanceError
 from types import SimpleNamespace
 import unittest
 
-from src.core.settings import (
+from src.configuration.settings import (
     ApplicationSettings,
     DataCollectionSettings,
     DeviceSettings,

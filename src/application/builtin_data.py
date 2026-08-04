@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..core.data_paths import ApplicationDataPaths
-from ..core.json_documents import write_collection_document
-from ..core.models import ActionDefinition, ActionType
-from ..core.storage import ACTION_LIBRARY_DOCUMENT
+from ..configuration.data_paths import ApplicationDataPaths
+from ..persistence.json_documents import write_collection_document
+from ..domain.models import ActionDefinition, ActionType
+from ..persistence.storage import ACTION_LIBRARY_DOCUMENT
 from ..skill_system.default_skills import get_default_skills
 from ..skill_system.skill_registry import SKILL_LIBRARY_DOCUMENT
 

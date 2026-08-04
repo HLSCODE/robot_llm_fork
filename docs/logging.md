@@ -5,7 +5,7 @@
 
 ## 1. 架构边界
 
-`src/core/logging_config.py` 是进程日志配置的唯一入口。组合根在配置加载后调用一次，业务模块
+`src/observability/logging_config.py` 是进程日志配置的唯一入口。组合根在配置加载后调用一次，业务模块
 只使用标准库 `logging.getLogger(__name__)`，不得自行创建文件 handler、决定日志目录或启动
 第二套日志系统。
 

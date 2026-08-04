@@ -3,14 +3,14 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
-from src.core.models import (
+from src.domain.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
     SequenceItem,
 )
-from src.core.execution_context import ExecutionContext
-from src.core.settings import (
+from src.domain.execution_context import ExecutionContext
+from src.configuration.settings import (
     DeviceSettings,
     ExecutionSettings,
     SecretSettings,

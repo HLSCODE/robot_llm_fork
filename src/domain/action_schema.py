@@ -162,7 +162,6 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         placeholder=("例如: [-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]"),
                     ),
                     "补偿": _field("object", "补偿配置"),
-                    "定位补偿": _field("object", "旧定位补偿配置"),
                 },
             ),
             "身体": _variant(

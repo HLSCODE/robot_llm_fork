@@ -9,7 +9,7 @@ import time
 from uuid import uuid4
 from types import TracebackType
 
-from ..core.json_documents import write_json_atomic
+from ..persistence.json_documents import write_json_atomic
 from .models import VisionArtifact, VisionConfigurationVersion, VisionOperation
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]

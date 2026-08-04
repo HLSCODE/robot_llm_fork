@@ -4,7 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ...core.settings import (
+from ...configuration.settings import (
     ApplicationSettings,
     DeviceSettings,
     RobotSettings,

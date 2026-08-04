@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
     QInputDialog,
-    QListWidget,
     QListWidgetItem,
     QMainWindow,
     QSplitter,
@@ -29,7 +28,7 @@ from ...application import (
     CompositionEvent,
     CompositionRevisionConflict,
 )
-from ...core.models import (
+from ...domain.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
@@ -43,7 +42,7 @@ from ...devices.runtime.ids import (
     MOBILE_BASE,
     ROBOT_SYSTEM,
 )
-from ...widgets import LogWidget
+from ...widgets import LogWidget, SequenceListWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceStatusView
 from ..views.dialogs import ActionConfigDialog
@@ -1707,7 +1706,7 @@ class MainWindow(QMainWindow):
             display_list.update_item_status(item)
             tree_item = display_list._find_item_by_entry(item)
             if tree_item is not None:
-                display_list.scrollToItem(tree_item)
+                display_list.scroll_to_entry(tree_item)
 
     def on_step_completed(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
@@ -1733,26 +1732,26 @@ class MainWindow(QMainWindow):
                 self.workflow_view.sequence_list._update_loop_display(tree_item, entry)
 
     def move_item_up(self):
-        current_row = self.workflow_view.sequence_list.currentRow()
+        current_row = self.workflow_view.sequence_list.current_entry_row()
         if current_row > 0:
-            item = self.workflow_view.sequence_list.takeItem(current_row)
-            self.workflow_view.sequence_list.insertItem(current_row - 1, item)
+            item = self.workflow_view.sequence_list.take_entry(current_row)
+            self.workflow_view.sequence_list.insert_entry(current_row - 1, item)
             self.refresh_sequence_numbers(selected_row=current_row - 1)
             self._publish_current_sequence()
 
     def move_item_down(self):
-        current_row = self.workflow_view.sequence_list.currentRow()
-        if current_row < self.workflow_view.sequence_list.count() - 1:
-            item = self.workflow_view.sequence_list.takeItem(current_row)
-            self.workflow_view.sequence_list.insertItem(current_row + 1, item)
+        current_row = self.workflow_view.sequence_list.current_entry_row()
+        if current_row < self.workflow_view.sequence_list.entry_count() - 1:
+            item = self.workflow_view.sequence_list.take_entry(current_row)
+            self.workflow_view.sequence_list.insert_entry(current_row + 1, item)
             self.refresh_sequence_numbers(selected_row=current_row + 1)
             self._publish_current_sequence()
 
     def delete_item(self):
-        current_row = self.workflow_view.sequence_list.currentRow()
+        current_row = self.workflow_view.sequence_list.current_entry_row()
         if current_row >= 0:
-            self.workflow_view.sequence_list.takeItem(current_row)
-            next_row = min(current_row, self.workflow_view.sequence_list.count() - 1)
+            self.workflow_view.sequence_list.take_entry(current_row)
+            next_row = min(current_row, self.workflow_view.sequence_list.entry_count() - 1)
             self.refresh_sequence_numbers(selected_row=next_row)
             self._publish_current_sequence()
 
@@ -1792,7 +1791,7 @@ class MainWindow(QMainWindow):
 
         # 从后往前移除（避免索引偏移）
         for row in reversed(rows):
-            self.workflow_view.sequence_list.takeItem(row)
+            self.workflow_view.sequence_list.take_entry(row)
 
         # 创建 LoopBlock 并插入
         loop = LoopBlock.from_sequence_items(selected_items, repeat_count)
@@ -1817,8 +1816,14 @@ class MainWindow(QMainWindow):
         )
         self._publish_current_sequence()
 
-    def _selected_contiguous_rows(self, list_widget: QListWidget, empty_message: str) -> list[int] | None:
-        rows = sorted(index.row() for index in list_widget.selectedIndexes())
+    def _selected_contiguous_rows(
+        self,
+        list_widget: SequenceListWidget,
+        empty_message: str,
+    ) -> list[int] | None:
+        rows = sorted(
+            index.row() for index in list_widget.selected_entry_indexes()
+        )
         if not rows:
             self._notifications.warning(empty_message)
             return None
@@ -1945,7 +1950,7 @@ class MainWindow(QMainWindow):
                     if isinstance(child_entry, SequenceItem):
                         self.workflow_view.sequence_list._update_item_display(child_tree, child_entry, j)
         if selected_row is not None and 0 <= selected_row < self.workflow_view.sequence_list.topLevelItemCount():
-            self.workflow_view.sequence_list.setCurrentRow(selected_row)
+            self.workflow_view.sequence_list.set_current_entry_row(selected_row)
 
     def test_camera(self):
         """

@@ -23,7 +23,7 @@ from ...transports import (
 )
 from ...transports.devices.electric_gripper import MotionStatus
 from ...transports.devices.stepper_motor import MotorStatus, MSeriesRegister
-from ....core.settings import DeviceSettings
+from ....configuration.settings import DeviceSettings
 
 logger = logging.getLogger(__name__)
 

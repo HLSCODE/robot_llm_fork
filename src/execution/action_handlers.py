@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Any, Protocol, TypeVar
 
-from ..core.models import ActionType
+from ..domain.models import ActionType
 from ..devices.runtime.errors import normalize_device_error
 from ..devices.runtime.models import DeviceErrorCategory
 from .action_control import (

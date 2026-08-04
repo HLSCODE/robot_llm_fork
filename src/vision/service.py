@@ -5,9 +5,9 @@ import time
 from types import MappingProxyType
 from typing import Protocol
 
-from ..core.execution_context import ExecutionContext
-from ..core.settings import VisionSettings
-from ..core.vision_station_storage import VisionStationStorage
+from ..domain.execution_context import ExecutionContext
+from ..configuration.settings import VisionSettings
+from ..persistence.vision_station_storage import VisionStationStorage
 from ..devices import CameraSource, DepthCameraSource, RobotSystem
 from .artifacts import VisionArtifactStore
 from .models import (

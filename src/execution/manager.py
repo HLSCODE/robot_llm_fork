@@ -9,7 +9,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from ..devices import ResourceArbiter, ResourceLease
-from ..core.logging_config import log_context
+from ..observability.logging_config import log_context
 from .action_control import ActionControlPolicy
 from .action_handlers import (
     ActionHandlerResult,

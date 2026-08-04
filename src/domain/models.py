@@ -1,3 +1,5 @@
+"""Application-independent action and sequence domain models."""
+
 from enum import Enum
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union

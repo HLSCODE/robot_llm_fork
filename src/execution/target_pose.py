@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from .execution_context import ExecutionContext
-from .pose_compensation import compensate_pose, parse_pose
-from .settings import VisionSettings
+from ..domain.execution_context import ExecutionContext
+from ..geometry.pose_compensation import compensate_pose, parse_pose
+from ..configuration.settings import VisionSettings
 
 
 LogFn = Callable[[str], None]
@@ -22,16 +22,6 @@ def _normalize_mode(mode: str | None) -> str:
     return text
 
 
-def _legacy_compensation_config(params: dict) -> dict:
-    legacy = params.get("定位补偿", {})
-    if legacy.get("enabled"):
-        return {
-            "mode": "udp",
-            "udp": legacy,
-        }
-    return {"mode": "none"}
-
-
 def resolve_robot_target_pose(
     params: dict,
     arm: str,
@@ -43,7 +33,7 @@ def resolve_robot_target_pose(
     """Resolve a robot move target after optional UDP or vision compensation."""
     log = log_fn or (lambda message: None)
     target_pose = parse_pose(params.get("点位", ""))
-    compensation = params.get("补偿") or _legacy_compensation_config(params)
+    compensation = params.get("补偿") or {"mode": "none"}
     mode = _normalize_mode(compensation.get("mode") or compensation.get("方式"))
 
     if mode == "none":

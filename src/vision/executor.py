@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ..core.settings import VisionSettings
+from ..configuration.settings import VisionSettings
 from .models import VisionPipelineResult
 
 # log_fn: str -> None

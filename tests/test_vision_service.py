@@ -9,11 +9,11 @@ import time
 import unittest
 
 from src.application import create_application_services
-from src.core.execution_context import ExecutionContext
-from src.core.json_documents import JsonDocumentSchemaError
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.settings import ApplicationSettings, VisionSettings
-from src.core.vision_station_storage import VisionStationStorage
+from src.domain.execution_context import ExecutionContext
+from src.persistence.json_documents import JsonDocumentSchemaError
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.configuration.settings import ApplicationSettings, VisionSettings
+from src.persistence.vision_station_storage import VisionStationStorage
 from src.execution import ExecutionState
 from src.vision.artifacts import VisionArtifactStore
 from src.vision.models import (

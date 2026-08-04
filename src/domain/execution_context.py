@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import time
 from typing import Any
 
-from .vision_station_storage import normalize_arm_name
+from .arm_names import normalize_arm_name
 
 
 @dataclass

@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from ..core.json_documents import (
+from ..persistence.json_documents import (
     CollectionDocumentSpec,
     JsonDocumentSchemaError,
     load_collection_document,

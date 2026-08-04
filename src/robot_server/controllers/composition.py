@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from uuid import uuid4
 
-from ...core.action_schema import get_action_schema
-from ...core.models import (
+from ...domain.action_schema import get_action_schema
+from ...domain.models import (
     ActionDefinition,
     ActionType,
     SequenceEntry,

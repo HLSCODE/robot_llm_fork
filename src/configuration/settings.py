@@ -1,4 +1,4 @@
-"""Immutable domain settings assembled at the process boundary."""
+"""Immutable validated settings assembled at the process boundary."""
 
 from __future__ import annotations
 

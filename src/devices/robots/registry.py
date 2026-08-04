@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from ...core.settings import RobotSettings
+from ...configuration.settings import RobotSettings
 from ..runtime.models import DeviceInitializationError
 from .provider import RobotProviderDefinition
 from .realman.provider import REALMAN_PROVIDER

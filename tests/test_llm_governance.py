@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from src.core.settings import LLMSettings, SecretSettings
+from src.configuration.settings import LLMSettings, SecretSettings
 from src.llm import (
     BaseLLMClient,
     LLMCapability,

@@ -16,7 +16,20 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 REQUIRED_WHEEL_MEMBERS = {
     "src/__init__.py",
     "src/__main__.py",
-    "src/core/launcher.py",
+    "src/bootstrap/launcher.py",
+    "src/configuration/settings.py",
+    "src/domain/models.py",
+    "src/persistence/storage.py",
+}
+FORBIDDEN_WHEEL_PREFIXES = (
+    "src/core/",
+    "src/actions/Path/",
+    "src/vision/pictures/",
+)
+FORBIDDEN_WHEEL_MEMBERS = {
+    "src/actions/move_baseclient.py",
+    "src/widgets/frame_grabber.py",
+    "src/widgets/test_realsense_connection.py",
 }
 
 
@@ -88,6 +101,17 @@ def _validate_wheel_contents(wheel: Path) -> None:
     if missing:
         raise RuntimeError(
             "wheel is missing required files: " + ", ".join(sorted(missing))
+        )
+    forbidden = FORBIDDEN_WHEEL_MEMBERS & members
+    forbidden.update(
+        member
+        for member in members
+        if member.startswith(FORBIDDEN_WHEEL_PREFIXES)
+    )
+    if forbidden:
+        raise RuntimeError(
+            "wheel contains removed historical files: "
+            + ", ".join(sorted(forbidden))
         )
 
 

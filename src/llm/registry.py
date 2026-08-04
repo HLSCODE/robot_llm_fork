@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from threading import RLock
 from typing import Any, Dict, Optional, Sequence
 
-from ..core.settings import LLMSettings, SecretSettings
+from ..configuration.settings import LLMSettings, SecretSettings
 from .base import BaseLLMClient
 from .metrics import LLMMetrics, LLMMetricsSnapshot
 from .providers.minicpm_realtime import MiniCPMRealtimeClient

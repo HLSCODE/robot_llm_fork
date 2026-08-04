@@ -6,9 +6,9 @@ import unittest
 from dataclasses import replace
 
 from src.application import create_application_services
-from src.core.execution_context import ExecutionContext
-from src.core.models import ActionDefinition, ActionType, SequenceItem
-from src.core.settings import (
+from src.domain.execution_context import ExecutionContext
+from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.configuration.settings import (
     ApplicationSettings,
     ExecutionSettings,
 )

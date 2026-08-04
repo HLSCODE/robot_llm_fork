@@ -10,7 +10,7 @@ from threading import RLock
 from typing import Protocol
 from uuid import uuid4
 
-from ..core.models import (
+from ..domain.models import (
     ActionDefinition,
     LoopBlock,
     SequenceEntry,

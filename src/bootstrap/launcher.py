@@ -10,14 +10,14 @@ from .auxiliary_services import (
     AuxiliaryServiceHost,
     AuxiliaryServiceSnapshot,
 )
-from .config_loader import ConfigLoadError, load_application_settings
-from .config_validation import (
+from ..configuration.config_loader import ConfigLoadError, load_application_settings
+from ..configuration.config_validation import (
     ConfigurationReport,
     StartupOptions,
     validate_startup_configuration,
 )
-from .logging_config import configure_logging
-from .settings import ApplicationSettings
+from ..observability.logging_config import configure_logging
+from ..configuration.settings import ApplicationSettings
 
 
 if TYPE_CHECKING:
