@@ -22,14 +22,14 @@ GUI / WebSocket / Vision / Data Collection
                     |
        provider / adapter (RealMan)
                     |
-          vendor driver / vendor SDK
+         driver / installed vendor SDK
 ```
 
 依赖规则：
 
 - 业务层只能依赖 `src.devices` 导出的模型和 Protocol。
 - `rm_*`、`robot1_ctrl`、`robot2_ctrl` 只允许出现在
-  `src/devices/robots/realman/driver.py` 和 `vendor/` 中；AST 边界测试禁止它们
+  `src/devices/robots/realman/driver.py` 中；AST 边界测试禁止它们
   重新进入 Adapter 或业务层。
 - adapter 把厂商返回码统一转换为异常，把厂商状态统一转换为 `ArmState`。
 - `devices/robots/provider.py` 只定义厂商无关的 Provider 类型；
@@ -60,10 +60,7 @@ src/devices/robots/
 ├── realman/
 │   ├── provider.py
 │   ├── adapter.py
-│   ├── driver.py
-│   └── vendor/
-│       ├── rm_ctypes_wrap.py
-│       └── libs/
+│   └── driver.py
 └── <next-provider>/
     ├── provider.py
     ├── adapter.py
@@ -73,6 +70,8 @@ src/devices/robots/
 该目录已完成直接切换：组合根、测试、打包和全部导入已更新，
 `device_runtime/`、`arm_sdk/` 等旧位置已经删除，不提供转发模块或新旧双栈。
 共享机械臂模型与 Protocol 位于 `src/devices/runtime/`。
+RealMan SDK、ctypes 绑定和平台原生库统一由 `robotic-arm` 可选依赖提供，项目不再
+保存或打包第二份厂商代码。
 
 ## 3. 能力模型
 

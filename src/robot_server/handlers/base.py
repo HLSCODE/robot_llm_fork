@@ -14,9 +14,6 @@ class WebSocketHandlerHost(Protocol):
     _port: int
     _ai_processing: bool
     _interaction_controller: Any
-    _llm_registry: Any
-    _llm_client: Any
-    _planner_client: Any
     _minicpm_cfg: Any
     _minicpm_sessions: dict[int, dict[str, Any]]
     _ai_execution_pending: bool

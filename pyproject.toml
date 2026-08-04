@@ -89,9 +89,6 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["src*"]
 
-[tool.setuptools.package-data]
-"src.devices.robots.realman.vendor" = ["libs/**/*.dll"]
-
 [[tool.uv.index]]
 name = "tuna"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -119,7 +116,6 @@ addopts = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["src/devices/robots/realman/vendor/rm_ctypes_wrap.py"]
 
 [tool.coverage.report]
 fail_under = 50
@@ -128,7 +124,6 @@ skip_covered = true
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-exclude = ["src/devices/robots/realman/vendor"]
 include = [
     "scripts/run_performance_benchmarks.py",
     "scripts/run_quality_checks.py",

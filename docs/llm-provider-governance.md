@@ -27,7 +27,8 @@ TaskRunner / Classifier / SkillPlanner / Vision / Repeat
               concrete provider clients
 ```
 
-- `LLMRegistry` 仍是 provider 实例和关闭生命周期的唯一所有者。
+- `ApplicationServices.llm` 是进程内唯一 `LLMRegistry`；Registry 是 provider
+  实例和关闭生命周期的唯一所有者。
 - `RoutedLLMClient` 是绑定 `TaskProfile` 的组合式代理，不拥有或关闭 provider。
 - `ProviderHealthTracker` 在 registry 内共享，因此不同 task 对同一 provider
   观察到一致的健康和熔断状态。
@@ -98,7 +99,7 @@ TaskRunner / Classifier / SkillPlanner / Vision / Repeat
 
 ## 5. 运行指标
 
-每个 `LLMRegistry` 持有一个线程安全、生命周期内累计的指标实例；由该 registry
+唯一 `LLMRegistry` 持有一个线程安全、生命周期内累计的指标实例；由该 registry
 创建的所有 task client 共用它。`RoutedLLMClient` 是逻辑调用的唯一采集点：
 
 - 调用总数及成功、失败、取消数，耗时总计、最大值、平均值和失败率；
@@ -111,8 +112,8 @@ TaskRunner / Classifier / SkillPlanner / Vision / Repeat
 前者用于业务 SLI，后者用于路由和熔断诊断。
 
 指标不保存 prompt、响应、消息、原始 usage 或其他请求载荷。`ai_status.metrics` 返回
-当前服务端 registry 快照；已认证客户端也可通过 `server_metrics.llm_metrics` 查询。
-尚未初始化服务端 LLM registry 时返回空对象。指标聚合开销进入版本化无硬件性能预算。
+当前应用级 registry 快照；已认证客户端也可通过 `server_metrics.llm_metrics` 查询。
+GUI、WebSocket 和 Voice 看到同一份进程级指标。指标聚合开销进入版本化无硬件性能预算。
 
 ## 6. 离线固定回归基线
 

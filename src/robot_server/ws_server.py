@@ -283,10 +283,7 @@ class RobotWebSocketServer:
         # AI 相关状态
         self._ai_processing = False
 
-        # LLM 客户端和技能引擎（延迟初始化，避免未安装 AI 依赖时报错）
-        self._llm_registry: Any = None
-        self._llm_client = None
-        self._planner_client = None
+        # WebSocket 只持有交互会话，LLM Provider 生命周期属于 ApplicationServices。
         self._interaction_controller: Any = None
 
         # 相机帧订阅：通过 subscribe_camera_frames action 注册
@@ -406,7 +403,7 @@ class RobotWebSocketServer:
         self._camera_frame_subs.clear()
         await self._cancel_background_tasks()
         self._device_handler._stop_camera_if_idle()
-        await self._interaction_handler._close_llm_clients()
+        self._interaction_handler._close_interaction_session()
         await self._teleoperation_handler.close_data_collection()
         self._clients.clear()
         self._client_ids.clear()
@@ -1258,11 +1255,7 @@ class RobotWebSocketServer:
                         self._services.teleoperation.metrics_snapshot().to_dict()
                     ),
                     "vision_metrics": self._services.vision.metrics_snapshot().to_dict(),
-                    "llm_metrics": (
-                        self._llm_registry.metrics_snapshot().to_dict()
-                        if self._llm_registry is not None
-                        else {}
-                    ),
+                    "llm_metrics": self._services.llm.metrics_snapshot().to_dict(),
                     "request_id": data["request_id"],
                 }
             )

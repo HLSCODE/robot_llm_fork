@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import logging
 import sys
 from typing import TYPE_CHECKING
@@ -170,6 +171,11 @@ def _shutdown_application(
         services.localization.close()
     except Exception:
         logger.exception("定位服务关闭失败")
+
+    try:
+        asyncio.run(services.llm.close())
+    except Exception:
+        logger.exception("LLM Registry 关闭失败")
 
     try:
         errors = services.devices.shutdown_all()

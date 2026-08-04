@@ -2506,7 +2506,7 @@ AI 执行流程结束示例：
 | `providers` | `array` | 当前 registry 已注册的 provider 名称 |
 | `loaded_providers` | `array` | 当前进程已经懒加载实例化的 provider 名称 |
 | `provider_health` | `object` | 各 provider 的运行时健康、成功/失败计数和熔断恢复等待；未加载 provider 为 `unknown` |
-| `metrics` | `object` | 当前 LLMRegistry 生命周期内的逻辑调用、延迟、fallback、token 和 provider 报告成本；registry 尚未初始化时为空对象 |
+| `metrics` | `object` | 当前应用级 LLMRegistry 生命周期内的逻辑调用、延迟、fallback、token 和 provider 报告成本；与 GUI、Voice、`server_metrics` 共享同一快照 |
 | `capabilities` | `array` | 聊天 provider 支持的能力 |
 | `chat_available` | `boolean` | 聊天 provider 是否可用 |
 | `chat_provider` | `string` | 当前聊天 profile 解析到的 provider |

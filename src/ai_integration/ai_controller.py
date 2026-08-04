@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
@@ -13,7 +12,6 @@ from ..application import (
     CommandRuntimeError,
     ExecutionControlAction,
 )
-from ..llm import LLMRegistry
 from .execution_bridge import ExecutionBridge
 
 logger = logging.getLogger(__name__)
@@ -38,12 +36,8 @@ class AIController(QObject):
         self._services = services
         self._commands = services.commands
         self._execution_bridge = execution_bridge
-        self._llm_registry = LLMRegistry.from_settings(
-            self._settings.llm,
-            self._settings.secrets,
-        )
+        self._llm_registry = services.llm
         self._status_client = None
-        self._closed = False
         execution_bridge.execution_completed.connect(
             self._on_execution_completed
         )
@@ -96,9 +90,6 @@ class AIController(QObject):
     def get_skill_list(self) -> list[dict[str, Any]]:
         return self._commands.list_skills()
 
-    def get_llm_registry(self) -> LLMRegistry:
-        return self._llm_registry
-
     def is_llm_available(self) -> bool:
         client = self._get_status_client()
         return client is not None and client.is_available()
@@ -123,17 +114,6 @@ class AIController(QObject):
             "dashscope": self._settings.secrets.dashscope_api_key,
         }
         return bool(keys.get(provider, ""))
-
-    async def close_async(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        await self._llm_registry.close()
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        asyncio.run(self.close_async())
 
     def _get_status_client(self):
         if self._status_client is None:

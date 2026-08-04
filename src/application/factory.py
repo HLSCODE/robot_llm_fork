@@ -13,6 +13,7 @@ from ..devices import (
 from ..devices.runtime.factory import create_device_runtime
 from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
+from ..llm import LLMRegistry
 from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
 from ..core.execution_context import ExecutionContext
@@ -89,6 +90,7 @@ def create_application_services(
         skill_engine=skill_engine,
         preview_ttl_s=settings.runtime.command_preview_ttl_seconds,
     )
+    llm = LLMRegistry.from_settings(settings.llm, settings.secrets)
     manual_control = ManualControlService(device_runtime, resources)
     camera_access = CameraAccessService(device_runtime, resources)
     teleoperation = TeleoperationService(device_runtime, resources)
@@ -138,6 +140,7 @@ def create_application_services(
         trajectory_teaching=trajectory_teaching,
         safety=safety,
         commands=commands,
+        llm=llm,
         device_runtime=device_runtime,
         resources=resources,
         simulation=simulation,

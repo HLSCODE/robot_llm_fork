@@ -59,6 +59,31 @@ LEGACY_HARDWARE_PATHS = (
 
 
 class DependencyBoundaryTests(unittest.TestCase):
+    def test_llm_registry_is_created_only_by_application_factory(self):
+        creation_sites: list[str] = []
+        for path in (PROJECT_ROOT / "src").rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                function = node.func
+                is_constructor = (
+                    isinstance(function, ast.Name)
+                    and function.id == "LLMRegistry"
+                )
+                is_factory = (
+                    isinstance(function, ast.Attribute)
+                    and function.attr == "from_settings"
+                    and isinstance(function.value, ast.Name)
+                    and function.value.id == "LLMRegistry"
+                )
+                if is_constructor or is_factory:
+                    creation_sites.append(
+                        path.relative_to(PROJECT_ROOT).as_posix()
+                    )
+
+        self.assertEqual(["src/application/factory.py"], creation_sites)
+
     def test_legacy_hardware_locations_are_removed(self):
         remaining = [
             relative_path

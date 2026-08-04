@@ -34,6 +34,7 @@ from ..execution import (
     ExecutionManager,
     ExecutionSnapshot,
 )
+from ..llm import LLMRegistry
 from .camera_access import CameraAccessService
 from ..vision.service import VisionService
 from .command_runtime import CommandRuntime
@@ -468,6 +469,7 @@ class ApplicationServices:
     trajectory_teaching: TrajectoryTeachingService
     safety: SafetyService
     commands: CommandRuntime
+    llm: LLMRegistry
     device_runtime: DeviceRuntime
     resources: ResourceArbiter
     simulation: bool

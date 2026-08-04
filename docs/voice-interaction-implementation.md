@@ -4,7 +4,7 @@
 
 项目已经将大模型调用收敛到 `src/llm/`：
 
-- `LLMRegistry` 负责按配置创建不同 provider。
+- `ApplicationServices.llm` 持有唯一 `LLMRegistry`，按配置懒加载不同 provider。
 - `TaskRunner` 负责普通对话。
 - `InstructionClassifier` 负责意图识别。
 - `SkillPlanner` 负责机器人技能规划。
@@ -350,8 +350,9 @@ WebSocket 使用独立会话历史，但与 GUI 复用相同的 CommandRuntime �
 - `LLM_REQUEST_TIMEOUT_S` 约束 provider 网络请求。
 - `INTERACTION_TURN_TIMEOUT_S` 约束分类、规划、聊天或视觉的一整轮交互。
 - `cancel_active_turn()` 使用事件循环线程安全取消当前 async task。
-- GUI 关闭和 WebSocket 附加服务停止时调用幂等 `LLMRegistry.close()`，关闭所有
-  已懒加载 provider。
+- GUI 与 WebSocket 停止时只取消各自活动交互会话，不关闭共享 provider。
+- GUI 事件循环和全部附加服务停止后，应用宿主调用幂等 `LLMRegistry.close()`，
+  统一关闭所有已懒加载 provider。
 
 ## 13. Vision 处理
 

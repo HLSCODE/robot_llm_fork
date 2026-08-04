@@ -167,7 +167,7 @@ class AIAssistantWidget(QWidget):
         settings = services.settings
         self._voice_config = settings.voice.as_runtime_mapping()
         self._voice_controller = VoiceInteractionController(
-            llm_registry=self._ai_controller.get_llm_registry(),
+            llm_registry=services.llm,
             command_runtime=services.commands,
             source="gui-ai",
             camera_provider=CamerasModuleProvider(
@@ -1069,5 +1069,4 @@ class AIAssistantWidget(QWidget):
                     "交互线程未在关闭期限内退出: %s",
                     thread.objectName() or type(thread).__name__,
                 )
-        self._ai_controller.close()
         self._shutdown_complete = True

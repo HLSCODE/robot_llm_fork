@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
@@ -75,6 +76,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.window.close()
         QApplication.processEvents()
         self.window.shutdown_after_event_loop()
+        asyncio.run(self.services.llm.close())
         self.services.localization.close()
         self.assertEqual({}, self.services.devices.shutdown_all())
 
@@ -98,6 +100,9 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertFalse(
             self.window.action_library_view.ai_assistant.simulation_checkbox.isEnabled()
         )
+        assistant = self.window.action_library_view.ai_assistant
+        self.assertIs(assistant._ai_controller._llm_registry, self.services.llm)
+        self.assertIs(assistant._voice_controller.llm_registry, self.services.llm)
         self.assertIsNotNone(self.window.workflow_view.sequence_list)
         self.assertIsNotNone(self.window.device_status_view)
         self.assertIsNotNone(self.window.device_control_view)

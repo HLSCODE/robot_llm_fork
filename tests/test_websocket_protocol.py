@@ -75,12 +75,14 @@ def _control_status_services() -> SimpleNamespace:
             "observed_processing_fps": 25.0,
         }
     )
+    llm_metrics = SimpleNamespace(to_dict=lambda: {})
     return SimpleNamespace(
         teleoperation=SimpleNamespace(
             snapshot=lambda: snapshot,
             metrics_snapshot=lambda: metrics,
         ),
         vision=SimpleNamespace(metrics_snapshot=lambda: vision_metrics),
+        llm=SimpleNamespace(metrics_snapshot=lambda: llm_metrics),
     )
 
 

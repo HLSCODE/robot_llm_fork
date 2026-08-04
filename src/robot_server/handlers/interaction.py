@@ -8,7 +8,6 @@ from ...llm import (
     LLMCapability,
     LLMContentPart,
     LLMMessage,
-    LLMRegistry,
     LLMStreamEvent,
 )
 from ...voice_interaction import (
@@ -227,6 +226,7 @@ class InteractionWebSocketHandler:
 
     async def _handle_ai_status(self, websocket, data: WebSocketRequest) -> None:
         """查询 AI/LLM 状态"""
+        registry = self._server._services.llm
         planner_client = self._get_planner_client()
         chat_client = self._get_chat_client()
         planner_available = planner_client is not None and planner_client.is_available()
@@ -239,11 +239,7 @@ class InteractionWebSocketHandler:
 
         try:
             settings = self._server._services.settings
-            provider = (
-                self._server._llm_registry.default_provider.upper()
-                if self._server._llm_registry
-                else settings.llm.llm_default_provider.upper()
-            )
+            provider = registry.default_provider.upper()
             provider_key = {
                 "openai": settings.secrets.openai_api_key,
                 "deepseek": settings.secrets.deepseek_api_key,
@@ -270,27 +266,11 @@ class InteractionWebSocketHandler:
                     "api_key_set": api_key_set,
                     "model": model_name,
                     "provider": provider,
-                    "default_provider": self._server._llm_registry.default_provider
-                    if self._server._llm_registry
-                    else "未配置",
-                    "providers": list(self._server._llm_registry.provider_names)
-                    if self._server._llm_registry
-                    else [],
-                    "loaded_providers": list(
-                        self._server._llm_registry.loaded_provider_names
-                    )
-                    if self._server._llm_registry
-                    else [],
-                    "provider_health": (
-                        self._server._llm_registry.get_provider_health()
-                        if self._server._llm_registry
-                        else {}
-                    ),
-                    "metrics": (
-                        self._server._llm_registry.metrics_snapshot().to_dict()
-                        if self._server._llm_registry
-                        else {}
-                    ),
+                    "default_provider": registry.default_provider,
+                    "providers": list(registry.provider_names),
+                    "loaded_providers": list(registry.loaded_provider_names),
+                    "provider_health": registry.get_provider_health(),
+                    "metrics": registry.metrics_snapshot().to_dict(),
                     "capabilities": capabilities,
                     "chat_available": chat_available,
                     "chat_provider": chat_client.get_provider_name()
@@ -368,19 +348,15 @@ class InteractionWebSocketHandler:
         成功: {"event": "chat_connected"}
         """
         provider = data.get("provider")
-        chat_client = None
-        if self._server._llm_registry is not None:
-            try:
-                chat_client = self._server._llm_registry.get_chat_client(provider)
-            except Exception as exc:
-                await websocket.send(
-                    self._server._json_msg(
-                        {"event": "error", "message": f"LLM provider 选择失败: {exc}"}
-                    )
+        try:
+            chat_client = self._server._services.llm.get_chat_client(provider)
+        except Exception as exc:
+            await websocket.send(
+                self._server._json_msg(
+                    {"event": "error", "message": f"LLM provider 选择失败: {exc}"}
                 )
-                return
-        else:
-            chat_client = self._server._llm_client
+            )
+            return
 
         if chat_client is None or not chat_client.is_available():
             await websocket.send(
@@ -441,19 +417,15 @@ class InteractionWebSocketHandler:
             return
 
         provider = data.get("provider") or session.get("provider")
-        chat_client = None
-        if self._server._llm_registry is not None:
-            try:
-                chat_client = self._server._llm_registry.get_chat_client(provider)
-            except Exception as exc:
-                await websocket.send(
-                    self._server._json_msg(
-                        {"event": "error", "message": f"LLM provider 选择失败: {exc}"}
-                    )
+        try:
+            chat_client = self._server._services.llm.get_chat_client(provider)
+        except Exception as exc:
+            await websocket.send(
+                self._server._json_msg(
+                    {"event": "error", "message": f"LLM provider 选择失败: {exc}"}
                 )
-                return
-        else:
-            chat_client = self._server._llm_client
+            )
+            return
 
         if chat_client is None or not chat_client.is_available():
             await websocket.send(
@@ -515,40 +487,28 @@ class InteractionWebSocketHandler:
                 )
             )
 
-    async def _close_llm_clients(self) -> None:
-        registry = self._server._llm_registry
+    def _close_interaction_session(self) -> None:
         controller = self._server._interaction_controller
-        self._server._llm_registry = None
         self._server._interaction_controller = None
-        self._server._llm_client = None
-        self._server._planner_client = None
-        if registry is None:
-            return
         if controller is not None:
             controller.cancel_active_turn()
-        await registry.close()
 
     def _init_ai(self) -> None:
         """初始化 LLM 客户端和技能引擎"""
         try:
-            settings = self._server._services.settings
-
-            # 初始化技能引擎
-            # 初始化 LLM 能力层
-            self._server._llm_registry = LLMRegistry.from_settings(
-                settings.llm,
-                settings.secrets,
-            )
+            services = self._server._services
+            settings = services.settings
+            registry = services.llm
             logger.info(
-                "LLMRegistry 就绪: default=%s, providers=%s",
-                self._server._llm_registry.default_provider,
-                self._server._llm_registry.describe_providers(),
+                "使用应用级 LLMRegistry: default=%s, providers=%s",
+                registry.default_provider,
+                registry.describe_providers(),
             )
 
             voice_config = settings.voice.as_runtime_mapping()
             self._server._interaction_controller = VoiceInteractionController(
-                llm_registry=self._server._llm_registry,
-                command_runtime=self._server._services.commands,
+                llm_registry=registry,
+                command_runtime=services.commands,
                 source="websocket-ai",
                 camera_provider=CamerasModuleProvider(
                     session_factory=self._camera_capture_session,
@@ -570,17 +530,13 @@ class InteractionWebSocketHandler:
             logger.warning("AI 组件初始化失败: %s", e)
 
     def _get_chat_client(self, provider: Optional[str] = None):
-        if self._server._llm_registry is not None:
-            return self._server._llm_registry.get_chat_client(provider)
-        return self._server._llm_client
+        return self._server._services.llm.get_chat_client(provider)
 
     def _camera_capture_session(self):
         return self._server._services.camera_access.open("websocket-voice-capture")
 
     def _get_planner_client(self, provider: Optional[str] = None):
-        if self._server._llm_registry is not None:
-            return self._server._llm_registry.get_planner_client(provider)
-        return self._server._planner_client
+        return self._server._services.llm.get_planner_client(provider)
 
     async def _run_interaction_text(
         self,
