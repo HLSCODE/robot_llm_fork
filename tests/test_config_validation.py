@@ -128,6 +128,24 @@ class ConfigurationValidationTests(unittest.TestCase):
             report.errors[0].field,
         )
 
+    def test_invalid_vision_versions_and_artifact_retention_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    VISION_SCHEMA_VERSION=0,
+                    VISION_MODEL_VERSION=" ",
+                    VISION_CALIBRATION_VERSION="",
+                    VISION_DEBUG_RETENTION_DAYS=0,
+                    VISION_DEBUG_MAX_RUNS=0,
+                ),
+                _options(),
+            )
+
+        self.assertEqual(
+            {"invalid_number", "invalid_vision_version"},
+            {issue.code for issue in report.errors},
+        )
     def test_non_loopback_binding_without_tls_is_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(

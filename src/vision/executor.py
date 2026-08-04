@@ -20,6 +20,7 @@ def execute_vision_capture(
     params: dict,
     settings: VisionSettings,
     log_fn: Callable[[str], None],
+    debug_directory: str,
 ) -> bool:
     """视觉抓取统一执行入口。
 
@@ -46,9 +47,7 @@ def execute_vision_capture(
     confidence = float(params.get("置信度", settings.vision_default_confidence))
     debug_images = bool(params.get("调试图片", True))
     move_velocity = int(params.get("移动速度", settings.vision_default_velocity))
-    gripper_length = float(
-        params.get("夹爪长度", settings.vision_default_gripper_length)
-    )
+    gripper_length = float(params.get("夹爪长度", settings.vision_default_gripper_length))
 
     log_fn(f"视觉抓取动作: 机械臂={target_robot}, 工作流={workflow}")
     log_fn(f"  置信度={confidence}, 调试图片={debug_images}")
@@ -71,6 +70,7 @@ def execute_vision_capture(
             workflow=workflow,
             raise_on_error=False,
             settings=settings,
+            debug_save_root=debug_directory,
         )
 
         if action.execute():

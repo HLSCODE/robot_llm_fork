@@ -35,6 +35,7 @@ from ..execution import (
     ExecutionSnapshot,
 )
 from .camera_access import CameraAccessService
+from ..vision.service import VisionService
 from .command_runtime import CommandRuntime
 from .composition import CompositionService
 from .safety import SafetyService
@@ -454,6 +455,7 @@ def _arm_id(arm: str | ArmId) -> ArmId:
 @dataclass(frozen=True, slots=True)
 class ApplicationServices:
     camera_access: CameraAccessService
+    vision: VisionService
     localization: LocalizationService
     composition: CompositionService
     task_composer: TaskComposerService

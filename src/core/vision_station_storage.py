@@ -1,11 +1,31 @@
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+from .json_documents import (
+    CollectionDocumentSpec,
+    JsonDocumentSchemaError,
+    load_collection_document,
+    write_collection_document,
+)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_STATION_DOCUMENT = CollectionDocumentSpec(
+    schema="robot-llm.vision-stations",
+    collection_key="profiles",
+    legacy_kind="list",
+)
+_PROFILE_VERSION = 1
+
+
+class VisionConfiguration(Protocol):
+    @property
+    def model_version(self) -> str: ...
+
+    @property
+    def calibration_version(self) -> str: ...
 
 
 def normalize_arm_name(arm: str | None) -> str:
@@ -28,11 +48,17 @@ def profile_key(station_id: str, arm: str | None) -> str:
 class VisionStationStorage:
     """Persistent teach profiles keyed by station id and arm."""
 
-    def __init__(self, stations_file: str | Path) -> None:
+    def __init__(
+        self,
+        stations_file: str | Path,
+        *,
+        configuration: VisionConfiguration,
+    ) -> None:
         path = Path(stations_file)
         if not path.is_absolute():
             path = _PROJECT_ROOT / path
         self._stations_file = path
+        self._configuration = configuration
 
     @property
     def stations_file(self) -> Path:
@@ -45,24 +71,33 @@ class VisionStationStorage:
         path = self._stations_file
         if not path.is_file():
             return []
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if isinstance(data, dict):
-            profiles = data.get("profiles", [])
-        else:
-            profiles = data
-        return [
-            self._normalize_profile(item)
-            for item in profiles
-            if isinstance(item, dict)
-        ]
+        loaded = load_collection_document(path, _STATION_DOCUMENT)
+        if loaded.requires_migration:
+            raise JsonDocumentSchemaError(
+                f"{path.name} uses an unversioned legacy vision-station schema"
+            )
+        profiles: list[dict[str, Any]] = []
+        for index, item in enumerate(loaded.collection):
+            if not isinstance(item, dict):
+                raise JsonDocumentSchemaError(
+                    f"vision station profile at index {index} must be an object"
+                )
+            for field in ("profile_version", "model_version", "calibration_version"):
+                if field not in item:
+                    raise JsonDocumentSchemaError(
+                        f"vision station profile at index {index} is missing {field}"
+                    )
+            profiles.append(self._normalize_profile(item))
+        return profiles
 
     def save_profiles(self, profiles: list[dict[str, Any]]) -> None:
         self.ensure_directories()
         normalized = [self._normalize_profile(item) for item in profiles]
-        payload = {"version": 1, "profiles": normalized}
-        with open(self._stations_file, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2, ensure_ascii=False)
+        write_collection_document(
+            self._stations_file,
+            _STATION_DOCUMENT,
+            normalized,
+        )
 
     def get_profile(
         self,
@@ -115,8 +150,7 @@ class VisionStationStorage:
             choices.append((station_id, label))
         return choices
 
-    @staticmethod
-    def _normalize_profile(profile: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
         station_id = str(profile.get("station_id") or profile.get("station_name") or "").strip()
         arm = normalize_arm_name(profile.get("arm"))
         station_name = str(profile.get("station_name") or station_id).strip()
@@ -124,6 +158,25 @@ class VisionStationStorage:
         normalized["station_id"] = station_id
         normalized["station_name"] = station_name
         normalized["arm"] = arm
+        profile_version = normalized.get("profile_version", _PROFILE_VERSION)
+        if profile_version != _PROFILE_VERSION:
+            raise JsonDocumentSchemaError(
+                f"vision station profile_version {profile_version!r} is unsupported"
+            )
+        normalized["profile_version"] = _PROFILE_VERSION
+        normalized.setdefault("model_version", self._configuration.model_version)
+        normalized.setdefault(
+            "calibration_version",
+            self._configuration.calibration_version,
+        )
+        if normalized["calibration_version"] != self._configuration.calibration_version:
+            raise JsonDocumentSchemaError(
+                "vision station calibration_version does not match active configuration"
+            )
+        if normalized["model_version"] != self._configuration.model_version:
+            raise JsonDocumentSchemaError(
+                "vision station model_version does not match active configuration"
+            )
         normalized.setdefault("camera_name", "")
         normalized.setdefault("photo_pose", [])
         marker = dict(normalized.get("marker") or {})

@@ -36,6 +36,7 @@ from src.execution.handlers import (
     VisionCaptureActionHandler,
     VisionRelocalizationActionHandler,
 )
+from src.vision.service import VisionService
 
 
 class _TrajectoryRobot:
@@ -291,6 +292,15 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
 class VisionActionHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.settings = ApplicationSettings.defaults()
+        self._vision_directory = TemporaryDirectory()
+        self.addCleanup(self._vision_directory.cleanup)
+        self.vision_settings = replace(
+            self.settings.vision,
+            vision_debug_save_dir=self._vision_directory.name,
+            vision_relocalization_stations_file=str(
+                Path(self._vision_directory.name) / "stations.json"
+            ),
+        )
         self.runtime = create_device_runtime(
             self.settings,
             simulation=True,
@@ -303,17 +313,25 @@ class VisionActionHandlerTests(unittest.TestCase):
     def test_capture_executor_receives_runtime_owned_devices(self):
         received: list[tuple[object, object, dict]] = []
 
-        def executor(robot, camera, parameters, settings, log) -> bool:
+        def executor(
+            robot,
+            camera,
+            parameters,
+            settings,
+            log,
+            _debug_directory,
+        ) -> bool:
             received.append((robot, camera, parameters))
-            self.assertIs(self.settings.vision, settings)
+            self.assertIs(self.vision_settings, settings)
             log("capture executor called")
             return True
 
-        handler = VisionCaptureActionHandler(
-            self.runtime,
-            self.settings.vision,
-            executor,
+        vision = VisionService(
+            self.vision_settings,
+            ExecutionContext(),
+            capture_pipeline=executor,
         )
+        handler = VisionCaptureActionHandler(self.runtime, vision)
 
         self.assertTrue(
             handler(
@@ -340,19 +358,21 @@ class VisionActionHandlerTests(unittest.TestCase):
             _parameters,
             execution_context,
             settings,
+            _station_storage,
+            _debug_directory,
             log,
         ) -> bool:
             received_contexts.append(execution_context)
-            self.assertIs(self.settings.vision, settings)
+            self.assertIs(self.vision_settings, settings)
             log("relocalization executor called")
             return True
 
-        handler = VisionRelocalizationActionHandler(
-            self.runtime,
+        vision = VisionService(
+            self.vision_settings,
             domain_context,
-            self.settings.vision,
-            executor,
+            relocalization_pipeline=executor,
         )
+        handler = VisionRelocalizationActionHandler(self.runtime, vision)
 
         self.assertTrue(
             handler(
@@ -376,15 +396,17 @@ class VisionActionHandlerTests(unittest.TestCase):
             _parameters,
             _settings,
             _log,
+            _debug_directory,
         ) -> bool:
             control.cancel()
             return True
 
-        handler = VisionCaptureActionHandler(
-            self.runtime,
-            self.settings.vision,
-            executor,
+        vision = VisionService(
+            self.vision_settings,
+            ExecutionContext(),
+            capture_pipeline=executor,
         )
+        handler = VisionCaptureActionHandler(self.runtime, vision)
 
         with self.assertRaises(ActionCancelledError):
             handler({}, context)

@@ -2,10 +2,10 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-08-03
+> 最近更新：2026-08-04
 >
-> 当前里程碑：M4 — GUI 稳定视图域已拆分
-> 计划进度：100/117（99 DONE + 1 DROPPED，85.5%）
+> 当前里程碑：M4 — 视觉服务、版本与产物生命周期已收敛
+> 计划进度：104/117（103 DONE + 1 DROPPED，88.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -22,6 +22,7 @@
 | E. LLM 能力层 | [LLM Provider 治理与规划回归](llm-provider-governance.md)、[LLM 重构集成说明](llm-refactor-integration.md) |
 | E. 语音交互 | [语音交互实现说明](voice-interaction-implementation.md) |
 | F. 遥操作 | [遥操作说明](teleop.md) |
+| F. 视觉与相机 | [视觉服务与数据治理架构](vision-architecture.md) |
 | F. 数据采集 | [数据采集说明](data-collection.md) |
 | F. 智能加粉 | [智能闭环加粉 Agent](powder_dispense_agent.md) |
 | D. GUI 应用架构 | [GUI 应用架构](gui-application-architecture.md) |
@@ -512,12 +513,13 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 ### 11.1 视觉与相机
 
-当前问题：
+当前状态与剩余问题：
 
-- 相机生命周期、全局单例和现有业务入口的资源所有权已收敛；
-  后续重点是视觉结果、标定、模型和工位数据治理。
-- 标定、工位和模型文件缺少统一版本元数据。
-- `core.move_compensation` 反向依赖 `gui.udp_receive`。
+- 相机、视觉执行和重定位状态均由组合根显式装配，handler 不再持有 bool executor。
+- 模型、标定和工位 profile 已具备严格版本语义；未版本化或版本不匹配的数据会失败。
+- 抓取与重定位调试产物使用同一运行会话、原子发布和有界保留策略。
+- simulation 使用确定性 fixture，不加载真实模型或访问硬件。
+- 尚未统一采集性能、帧率、延迟和模型质量指标。
 
 工作项：
 
@@ -526,10 +528,10 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | F-V-001 | P1 | DONE | 相机已接入 ResourceArbiter |
 | F-V-002 | P1 | DONE | 相机生命周期归 DeviceRuntime，短任务和长预览/采集均使用显式 CameraSession |
 | F-V-003 | P1 | DONE | UDP 定位由 ApplicationServices 持有的 LocalizationService 提供，core/执行/GUI 均使用显式注入，旧 GUI 全局接收器已删除 |
-| F-V-004 | P2 | TODO | 建立 VisionService 和 typed result |
-| F-V-005 | P2 | TODO | 模型、标定、工位配置版本化 |
-| F-V-006 | P2 | TODO | 统一调试图片和临时文件生命周期 |
-| F-V-007 | P2 | TODO | 视觉 pipeline 的 simulation/fixture |
+| F-V-004 | P2 | DONE | 建立组合根持有的 VisionService；capture/relocalization 统一返回包含稳定 code、operation、run_id 和 artifacts 的 typed result |
+| F-V-005 | P2 | DONE | 模型、标定和工位 profile 使用显式版本；工位 schema 原子写入并拒绝 legacy、缺失版本或活动配置不匹配的数据 |
+| F-V-006 | P2 | DONE | 抓取/重定位统一使用 scoped artifact run、失败 manifest、staging 原子发布、保留天数/最大运行数和残留清理策略 |
+| F-V-007 | P2 | DONE | simulation 组合根注入确定性 VisionPipelineFixture；无模型、无相机执行 capture/relocalization 并生成可审计 fixture 产物 |
 | F-V-008 | P3 | TODO | 性能、帧率、延迟和模型指标 |
 
 ### 11.2 遥操作
@@ -995,6 +997,7 @@ M4 工程治理与清理
 | 2026-08-03 | M4 | D/G | GUI 应用状态与 schema 表单收敛 | D-005/D-006/D-007/D-008、ER-018 TODO → DONE | TaskComposerService 独占组合草稿；Device/Execution ViewModel 从运行时快照派生状态；删除 MainWindow 平行布尔和 ExecutionBridge 控制双入口；1300 余行逐动作表单分支替换为唯一 schema 通用渲染与校验；新增边界进入 Mypy | 348 tests + 32 subtests，覆盖率 55.09%；21 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-03 | M4 | D/G | GUI 通知、协作与关闭生命周期收敛 | D-011 TODO → DONE | 新增 typed GuiNotificationCenter；MainWindow 删除直接 QMessageBox 和散落日志出口；通知通过 QObject signal 回到 GUI 线程；AI Assistant 删除 MainWindow 反向引用并改用窄 Qt 信号；活动执行关闭时立即请求取消，相机/交互先非阻塞停止，事件循环退出后按有界预算等待 | 352 tests + 32 subtests，覆盖率 55.30%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-03 | M4 | D/G | GUI 稳定视图域拆分 | D-013/D-014 TODO → DONE | 提取 ActionLibraryView、WorkflowEditorView、DeviceStatusView、DeviceControlView；MainWindow 删除约 800 行控件构造与旧属性，改为连接参数化意图信号和调用渲染接口，不保留兼容别名；新增组件进入 Mypy | 352 tests + 32 subtests，覆盖率 55.34%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
+| 2026-08-04 | M4 | F/G | 视觉服务与数据治理整批收口 | F-V-004/F-V-005/F-V-006/F-V-007 TODO → DONE | 新增 VisionService/typed result；模型、标定、工位 profile 严格版本化；调试产物按 run staging、manifest、原子发布和有界保留；simulation 注入确定性 fixture；删除旧重定位调试目录和 bool executor 双入口 | 359 tests + 32 subtests，覆盖率 55.99%；28 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 
 ## 22. 建议的首批实施顺序
 

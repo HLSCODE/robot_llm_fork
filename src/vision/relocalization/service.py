@@ -21,6 +21,7 @@ from ...device_runtime import (
     MotionMode,
     RobotSystem,
 )
+from ..models import vision_configuration
 from .geometry import compensate_taught_pose, compute_marker_in_base_from_image
 
 
@@ -172,11 +173,12 @@ def _debug_paths(
     station_id: str,
     arm: str,
     suffix: str,
+    debug_directory: str | Path,
 ) -> tuple[Path | None, Path | None]:
     cfg = settings.relocalization_config(arm)
     if not cfg.get("save_debug_images", True):
         return None, None
-    debug_dir = _project_path(cfg.get("debug_dir", "data/vision_stations/debug"))
+    debug_dir = _project_path(debug_directory)
     stamp = time.strftime("%Y%m%d_%H%M%S")
     base = debug_dir / f"{station_id}_{normalize_arm_name(arm)}_{suffix}_{stamp}"
     return base.with_suffix(".jpg"), Path(f"{base}_corners.jpg")
@@ -190,12 +192,19 @@ def capture_marker_pose(
     arm: str,
     camera_name: str,
     suffix: str,
+    debug_directory: str | Path,
     marker: dict | None = None,
     log_fn: LogFn | None = None,
 ) -> dict:
     log = log_fn or _default_log
     cfg = _config_for_marker(settings, arm, marker)
-    image_path, vis_path = _debug_paths(settings, station_id, arm, suffix)
+    image_path, vis_path = _debug_paths(
+        settings,
+        station_id,
+        arm,
+        suffix,
+        debug_directory,
+    )
 
     marker_size = cfg.get("marker", {})
     log(
@@ -233,11 +242,15 @@ def record_teach_profile(
     camera,
     settings: VisionSettings,
     params: dict,
+    station_storage: VisionStationStorage,
+    debug_directory: str | Path,
     log_fn: LogFn | None = None,
 ) -> dict:
     log = log_fn or _default_log
     raw_station_id = str(params.get("station_id") or params.get("工位ID") or "").strip()
-    station_name = str(params.get("station_name") or params.get("工位名称") or raw_station_id).strip()
+    station_name = str(
+        params.get("station_name") or params.get("工位名称") or raw_station_id
+    ).strip()
     if not station_name:
         raise ValueError("缺少工位名称")
     station_id = raw_station_id or station_name
@@ -267,6 +280,7 @@ def record_teach_profile(
         arm,
         camera_name,
         "teach",
+        debug_directory,
         marker_size,
         log,
     )
@@ -282,10 +296,7 @@ def record_teach_profile(
         "teach_image": marker["image_path"],
         "teach_visualization": marker["visualization_path"],
     }
-    storage = VisionStationStorage(
-        settings.vision_relocalization_stations_file
-    )
-    saved = storage.upsert_profile(profile)
+    saved = station_storage.upsert_profile(profile)
     log(f"已保存视觉示教基准: {station_name} / {arm_display_name(arm)}")
     return saved
 
@@ -296,6 +307,8 @@ def execute_vision_relocalization(
     params: dict,
     context: ExecutionContext,
     settings: VisionSettings,
+    station_storage: VisionStationStorage,
+    debug_directory: str | Path,
     log_fn: LogFn | None = None,
 ) -> bool:
     log = log_fn or _default_log
@@ -315,6 +328,8 @@ def execute_vision_relocalization(
             camera,
             settings,
             params,
+            station_storage,
+            debug_directory,
             log,
         )
         station_id = profile["station_id"]
@@ -331,10 +346,7 @@ def execute_vision_relocalization(
         )
         return True
     else:
-        storage = VisionStationStorage(
-            settings.vision_relocalization_stations_file
-        )
-        profile = storage.get_profile(station_id, arm)
+        profile = station_storage.get_profile(station_id, arm)
         if profile is None:
             raise RuntimeError(f"找不到视觉示教基准: 工位={station_id}, {arm_display_name(arm)}")
         camera_name = profile.get("camera_name") or _camera_name_for_arm(
@@ -349,8 +361,15 @@ def execute_vision_relocalization(
             )
         photo_pose = profile.get("photo_pose") or []
         if photo_pose:
-            log(f"移动到重定位拍照位: {profile.get('station_name', station_id)} / {arm_display_name(arm)}")
-            if not move_arm_to_pose(controller, arm, [float(v) for v in photo_pose], mode=params.get("move_mode", "move_j")):
+            log(
+                f"移动到重定位拍照位: {profile.get('station_name', station_id)} / {arm_display_name(arm)}"
+            )
+            if not move_arm_to_pose(
+                controller,
+                arm,
+                [float(v) for v in photo_pose],
+                mode=params.get("move_mode", "move_j"),
+            ):
                 raise RuntimeError("移动到重定位拍照位失败")
 
     marker = capture_marker_pose(
@@ -361,6 +380,7 @@ def execute_vision_relocalization(
         arm,
         camera_name,
         "run",
+        debug_directory,
         marker_size,
         log,
     )
@@ -394,7 +414,8 @@ def compensate_pose_with_context(
 ) -> list[float]:
     arm_key = normalize_arm_name(arm)
     storage = VisionStationStorage(
-        settings.vision_relocalization_stations_file
+        settings.vision_relocalization_stations_file,
+        configuration=vision_configuration(settings),
     )
     profile = storage.get_profile(station_id, arm_key)
     if profile is None:

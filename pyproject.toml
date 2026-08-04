@@ -160,6 +160,7 @@ files = [
     "src/core/data_paths.py",
     "src/core/config_validation.py",
     "src/core/storage.py",
+    "src/core/vision_station_storage.py",
     "src/application/builtin_data.py",
     "src/application/task_composer.py",
     "src/robot_server/protocol.py",
@@ -172,9 +173,14 @@ files = [
     "src/device_runtime/models.py",
     "src/execution/action_handlers.py",
     "src/execution/models.py",
+    "src/execution/handlers/vision.py",
     "src/gui/startup.py",
     "src/gui/notifications.py",
     "src/gui/view_models.py",
+    "src/vision/models.py",
+    "src/vision/artifacts.py",
+    "src/vision/service.py",
+    "src/vision/simulation.py",
 ]
 check_untyped_defs = true
 disallow_untyped_defs = true

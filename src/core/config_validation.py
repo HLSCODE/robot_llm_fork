@@ -187,6 +187,32 @@ def validate_startup_configuration(
         issues,
         "BALANCE_REQUEST_TIMEOUT_SECONDS",
     )
+    _positive_value(
+        settings.vision.vision_schema_version,
+        issues,
+        "VISION_SCHEMA_VERSION",
+    )
+    _positive_value(
+        settings.vision.vision_debug_retention_days,
+        issues,
+        "VISION_DEBUG_RETENTION_DAYS",
+    )
+    _positive_value(
+        settings.vision.vision_debug_max_runs,
+        issues,
+        "VISION_DEBUG_MAX_RUNS",
+    )
+    for version_field, version_value in (
+        ("VISION_MODEL_VERSION", settings.vision.vision_model_version),
+        ("VISION_CALIBRATION_VERSION", settings.vision.vision_calibration_version),
+    ):
+        if not version_value.strip():
+            _error(
+                issues,
+                "invalid_vision_version",
+                version_field,
+                "不能为空",
+            )
 
     return ConfigurationReport(tuple(issues))
 

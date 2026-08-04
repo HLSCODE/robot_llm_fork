@@ -15,6 +15,9 @@ from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
 from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
+from ..core.execution_context import ExecutionContext
+from ..vision.service import VisionService
+from ..vision.simulation import VisionPipelineFixture
 from .builtin_data import BuiltinDataInstaller
 from .command_runtime import CommandRuntime
 from .composition import CompositionService
@@ -53,6 +56,16 @@ def create_application_services(
     device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
     localization = LocalizationService()
+    execution_context = ExecutionContext()
+    vision_fixture = VisionPipelineFixture() if simulation else None
+    vision = VisionService(
+        settings.vision,
+        execution_context,
+        capture_pipeline=vision_fixture.capture if vision_fixture else None,
+        relocalization_pipeline=(
+            vision_fixture.relocalize if vision_fixture else None
+        ),
+    )
     engine = ActionEngine(
         device_runtime,
         settings.execution,
@@ -60,6 +73,8 @@ def create_application_services(
         settings.vision,
         settings.secrets,
         localization.latest,
+        execution_context,
+        vision,
     )
     manager = ExecutionManager(
         engine=engine,
@@ -110,6 +125,7 @@ def create_application_services(
     )
     return ApplicationServices(
         camera_access=camera_access,
+        vision=vision,
         localization=localization,
         composition=composition,
         task_composer=task_composer,

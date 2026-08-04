@@ -61,6 +61,7 @@ from .handlers import (
 )
 from .manager import EngineCallbacks
 from .models import EngineResult
+from ..vision.service import VisionService
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +82,12 @@ class ActionEngine:
         vision_settings: VisionSettings,
         secret_settings: SecretSettings,
         localization_reader,
+        execution_context: ExecutionContext,
+        vision_service: VisionService,
     ) -> None:
         self._device_runtime = device_runtime
-        self.execution_context = ExecutionContext()
+        self.execution_context = execution_context
+        self._vision_service = vision_service
         self._callbacks: EngineCallbacks | None = None
         self._default_action_timeout_seconds = execution_settings.execution_action_timeout_seconds
         if self._default_action_timeout_seconds <= 0:
@@ -187,7 +191,7 @@ class ActionEngine:
             ActionType.VISION_CAPTURE,
             VisionCaptureActionHandler(
                 self._device_runtime,
-                self._vision_settings,
+                self._vision_service,
             ),
             resolve_vision_capture_control_policy,
         )
@@ -195,8 +199,7 @@ class ActionEngine:
             ActionType.VISION_RELOCALIZE,
             VisionRelocalizationActionHandler(
                 self._device_runtime,
-                self.execution_context,
-                self._vision_settings,
+                self._vision_service,
             ),
             resolve_vision_relocalization_control_policy,
         )

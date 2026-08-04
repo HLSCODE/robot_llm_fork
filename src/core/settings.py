@@ -348,7 +348,12 @@ class VisionSettings:
     vision_camera_port: int = 12345
     yolo_model_path: str = "models/best.pt"
     sam_model_path: str = "models/sam2.1_l.pt"
+    vision_schema_version: int = 1
+    vision_model_version: str = "default-model-v1"
+    vision_calibration_version: str = "default-calibration-v1"
     vision_debug_save_dir: str = "pictures"
+    vision_debug_retention_days: int = 7
+    vision_debug_max_runs: int = 100
     balance_camera_index: int = 12
     balance_request_timeout_seconds: float = 30.0
     vveai_base_url: str = "https://api.vveai.com/v1"
@@ -398,7 +403,6 @@ class VisionSettings:
     vision_relocalization_mode: str = "planar"
     vision_relocalization_planar_constraint: str = "none"
     vision_relocalization_save_debug_images: bool = True
-    vision_relocalization_debug_dir: str = "data/vision_stations/debug"
     initial_pose: tuple[float, ...] = ()
     left_initial_pose: tuple[float, ...] = ()
     right_initial_pose: tuple[float, ...] = ()
@@ -482,7 +486,11 @@ class VisionSettings:
             "mode": self.vision_relocalization_mode,
             "planar_constraint": self.vision_relocalization_planar_constraint,
             "save_debug_images": self.vision_relocalization_save_debug_images,
-            "debug_dir": self.vision_relocalization_debug_dir,
+            "configuration": {
+                "schema_version": self.vision_schema_version,
+                "model_version": self.vision_model_version,
+                "calibration_version": self.vision_calibration_version,
+            },
         }
 
 

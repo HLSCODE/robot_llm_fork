@@ -9,6 +9,7 @@ from src.core.models import (
     LoopBlock,
     SequenceItem,
 )
+from src.core.execution_context import ExecutionContext
 from src.core.settings import (
     DeviceSettings,
     ExecutionSettings,
@@ -54,6 +55,27 @@ from src.execution.action_control import (
     validate_control_policy_routes,
 )
 from src.execution.engine import ActionEngine
+from src.vision.service import VisionService
+
+
+def _create_engine(
+    runtime: DeviceRuntime,
+    *,
+    vision_settings: VisionSettings | None = None,
+    secret_settings: SecretSettings | None = None,
+) -> ActionEngine:
+    vision = vision_settings or VisionSettings()
+    context = ExecutionContext()
+    return ActionEngine(
+        runtime,
+        ExecutionSettings(),
+        DeviceSettings(),
+        vision,
+        secret_settings or SecretSettings(),
+        lambda **_kwargs: None,
+        context,
+        VisionService(vision, context),
+    )
 
 
 class ActionControlPolicyTests(unittest.TestCase):
@@ -316,14 +338,7 @@ class ActionControlPolicyTests(unittest.TestCase):
             )
 
     def test_sequence_resources_are_exact_and_include_loop_children(self):
-        engine = ActionEngine(
-            DeviceRuntime(),
-            ExecutionSettings(),
-            DeviceSettings(),
-            VisionSettings(),
-            SecretSettings(),
-            lambda **_kwargs: None,
-        )
+        engine = _create_engine(DeviceRuntime())
         wait = SequenceItem.from_definition(ActionDefinition("wait", "wait", ActionType.WAIT, {}))
         vision = SequenceItem.from_definition(
             ActionDefinition(
@@ -345,18 +360,15 @@ class ActionControlPolicyTests(unittest.TestCase):
         )
 
     def test_balance_reader_receives_injected_settings(self):
-        engine = ActionEngine(
+        engine = _create_engine(
             DeviceRuntime(),
-            ExecutionSettings(),
-            DeviceSettings(),
-            VisionSettings(
+            vision_settings=VisionSettings(
                 balance_camera_index=7,
                 balance_request_timeout_seconds=12.5,
                 vveai_base_url="https://vision.example/v1/",
                 vveai_model="balance-model",
             ),
-            SecretSettings(vveai_api_key="vision-secret"),
-            lambda **_kwargs: None,
+            secret_settings=SecretSettings(vveai_api_key="vision-secret"),
         )
 
         with patch(
@@ -397,14 +409,7 @@ class ActionControlPreflightTests(unittest.TestCase):
                 close=lambda _device: None,
             )
         )
-        engine = ActionEngine(
-            runtime,
-            ExecutionSettings(),
-            DeviceSettings(),
-            VisionSettings(),
-            SecretSettings(),
-            lambda **_kwargs: None,
-        )
+        engine = _create_engine(runtime)
         item = SequenceItem.from_definition(
             ActionDefinition(
                 id="unsafe-move",

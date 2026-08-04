@@ -133,7 +133,12 @@ class _EnvironmentConfig:
     VISION_CAMERA_PORT: int = 12345
     YOLO_MODEL_PATH: str = "models/best.pt"
     SAM_MODEL_PATH: str = "models/sam2.1_l.pt"
+    VISION_SCHEMA_VERSION: int = 1
+    VISION_MODEL_VERSION: str = "default-model-v1"
+    VISION_CALIBRATION_VERSION: str = "default-calibration-v1"
     VISION_DEBUG_SAVE_DIR: str = "pictures"
+    VISION_DEBUG_RETENTION_DAYS: int = 7
+    VISION_DEBUG_MAX_RUNS: int = 100
     BALANCE_CAMERA_INDEX: int = 12
     BALANCE_REQUEST_TIMEOUT_SECONDS: float = 30.0
     VVEAI_API_KEY: str = ""
@@ -176,7 +181,6 @@ class _EnvironmentConfig:
     VISION_RELOCALIZATION_MODE: str = "planar"
     VISION_RELOCALIZATION_PLANAR_CONSTRAINT: str = "none"
     VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES: bool = True
-    VISION_RELOCALIZATION_DEBUG_DIR: str = "data/vision_stations/debug"
 
     # 机械臂配置
     ROBOT1_IP: str = "192.168.3.18"
@@ -584,7 +588,20 @@ class _EnvironmentConfig:
         instance.VISION_CAMERA_PORT = int(os.getenv("VISION_CAMERA_PORT", "12345"))
         instance.YOLO_MODEL_PATH = os.getenv("YOLO_MODEL_PATH", "models/best.pt")
         instance.SAM_MODEL_PATH = os.getenv("SAM_MODEL_PATH", "models/sam2.1_l.pt")
+        instance.VISION_SCHEMA_VERSION = int(os.getenv("VISION_SCHEMA_VERSION", "1"))
+        instance.VISION_MODEL_VERSION = os.getenv(
+            "VISION_MODEL_VERSION", "default-model-v1"
+        )
+        instance.VISION_CALIBRATION_VERSION = os.getenv(
+            "VISION_CALIBRATION_VERSION", "default-calibration-v1"
+        )
         instance.VISION_DEBUG_SAVE_DIR = os.getenv("VISION_DEBUG_SAVE_DIR", "pictures")
+        instance.VISION_DEBUG_RETENTION_DAYS = int(
+            os.getenv("VISION_DEBUG_RETENTION_DAYS", "7")
+        )
+        instance.VISION_DEBUG_MAX_RUNS = int(
+            os.getenv("VISION_DEBUG_MAX_RUNS", "100")
+        )
         instance.BALANCE_CAMERA_INDEX = int(os.getenv("BALANCE_CAMERA_INDEX", "12"))
         instance.BALANCE_REQUEST_TIMEOUT_SECONDS = float(
             os.getenv("BALANCE_REQUEST_TIMEOUT_SECONDS", "30")
@@ -752,10 +769,6 @@ class _EnvironmentConfig:
             "VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES",
             "true",
         ).lower() in ("true", "1", "yes")
-        instance.VISION_RELOCALIZATION_DEBUG_DIR = os.getenv(
-            "VISION_RELOCALIZATION_DEBUG_DIR",
-            "data/vision_stations/debug",
-        )
 
         # 机械臂配置
         instance.ROBOT_PROVIDER = (
