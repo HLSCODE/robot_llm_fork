@@ -227,6 +227,9 @@ class DeviceSettings:
     powder_dispense_medium_step: int = 8000
     powder_dispense_small_step: int = 2000
     powder_dispense_micro_step: int = 500
+    powder_dispense_large_step_threshold_mg: float = 25.0
+    powder_dispense_medium_step_threshold_mg: float = 10.0
+    powder_dispense_small_step_threshold_mg: float = 3.0
 
     def body_motor_config(self) -> dict[str, object]:
         return {
@@ -273,6 +276,15 @@ class DeviceSettings:
             "powder_medium_step": self.powder_dispense_medium_step,
             "powder_small_step": self.powder_dispense_small_step,
             "powder_micro_step": self.powder_dispense_micro_step,
+            "powder_large_step_threshold_mg": (
+                self.powder_dispense_large_step_threshold_mg
+            ),
+            "powder_medium_step_threshold_mg": (
+                self.powder_dispense_medium_step_threshold_mg
+            ),
+            "powder_small_step_threshold_mg": (
+                self.powder_dispense_small_step_threshold_mg
+            ),
         }
 
     def pwm_neck_config(self) -> dict[str, object]:

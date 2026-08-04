@@ -276,6 +276,9 @@ class _EnvironmentConfig:
     POWDER_DISPENSE_MEDIUM_STEP: int = 8000
     POWDER_DISPENSE_SMALL_STEP: int = 2000
     POWDER_DISPENSE_MICRO_STEP: int = 500
+    POWDER_DISPENSE_LARGE_STEP_THRESHOLD_MG: float = 25.0
+    POWDER_DISPENSE_MEDIUM_STEP_THRESHOLD_MG: float = 10.0
+    POWDER_DISPENSE_SMALL_STEP_THRESHOLD_MG: float = 3.0
 
     # PWM 颈部舵机配置
     PWM_NECK_SERIAL_PORT: str = "/dev/neck"
@@ -1006,6 +1009,15 @@ class _EnvironmentConfig:
         instance.POWDER_DISPENSE_MEDIUM_STEP = int(os.getenv("POWDER_DISPENSE_MEDIUM_STEP", "8000"))
         instance.POWDER_DISPENSE_SMALL_STEP = int(os.getenv("POWDER_DISPENSE_SMALL_STEP", "2000"))
         instance.POWDER_DISPENSE_MICRO_STEP = int(os.getenv("POWDER_DISPENSE_MICRO_STEP", "500"))
+        instance.POWDER_DISPENSE_LARGE_STEP_THRESHOLD_MG = float(
+            os.getenv("POWDER_DISPENSE_LARGE_STEP_THRESHOLD_MG", "25.0")
+        )
+        instance.POWDER_DISPENSE_MEDIUM_STEP_THRESHOLD_MG = float(
+            os.getenv("POWDER_DISPENSE_MEDIUM_STEP_THRESHOLD_MG", "10.0")
+        )
+        instance.POWDER_DISPENSE_SMALL_STEP_THRESHOLD_MG = float(
+            os.getenv("POWDER_DISPENSE_SMALL_STEP_THRESHOLD_MG", "3.0")
+        )
 
         # WebSocket 服务器配置
         instance.WEBSOCKET_ENABLED = os.getenv(

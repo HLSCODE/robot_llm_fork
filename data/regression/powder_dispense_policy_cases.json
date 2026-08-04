@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "name": "target_reached_on_last_allowed_round",
+      "target_mg": 100.0,
+      "tolerance_mg": 2.0,
+      "max_rounds": 1,
+      "readings_g": [1.0, 1.099],
+      "expected_outcome": "target_reached",
+      "expected_rotation_steps": [20000],
+      "expected_rounds": 1
+    },
+    {
+      "name": "over_target_on_last_allowed_round",
+      "target_mg": 100.0,
+      "tolerance_mg": 2.0,
+      "max_rounds": 1,
+      "readings_g": [1.0, 1.103],
+      "expected_outcome": "over_target",
+      "expected_rotation_steps": [20000],
+      "expected_rounds": 1
+    },
+    {
+      "name": "reading_drop_is_rejected",
+      "target_mg": 100.0,
+      "tolerance_mg": 1.0,
+      "max_rounds": 1,
+      "readings_g": [1.0, 0.98],
+      "expected_outcome": "reading_anomaly",
+      "expected_rotation_steps": [20000],
+      "expected_rounds": 1
+    },
+    {
+      "name": "maximum_rounds_is_not_success",
+      "target_mg": 100.0,
+      "tolerance_mg": 1.0,
+      "max_rounds": 1,
+      "readings_g": [1.0, 1.001],
+      "expected_outcome": "max_rounds_reached",
+      "expected_rotation_steps": [20000],
+      "expected_rounds": 1
+    },
+    {
+      "name": "large_medium_small_micro_progression",
+      "target_mg": 50.0,
+      "tolerance_mg": 0.1,
+      "max_rounds": 4,
+      "readings_g": [1.0, 1.03, 1.042, 1.048, 1.05],
+      "expected_outcome": "target_reached",
+      "expected_rotation_steps": [20000, 8000, 2000, 500],
+      "expected_rounds": 4
+    }
+  ]
+}

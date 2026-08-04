@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -32,6 +33,22 @@ class PowderRoundOutcome(str, Enum):
     TARGET_REACHED = "target_reached"
     OVER_TARGET = "over_target"
     READING_ANOMALY = "reading_anomaly"
+
+
+_TERMINAL_ROUND_OUTCOMES = {
+    PowderRoundOutcome.TARGET_REACHED: (
+        PowderDispenseOutcome.TARGET_REACHED,
+        "达到目标",
+    ),
+    PowderRoundOutcome.OVER_TARGET: (
+        PowderDispenseOutcome.OVER_TARGET,
+        "加粉超量",
+    ),
+    PowderRoundOutcome.READING_ANOMALY: (
+        PowderDispenseOutcome.READING_ANOMALY,
+        "读数异常下降",
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,9 +93,56 @@ class PowderDispenseConfig:
     medium_step: int = 8000
     small_step: int = 2000
     micro_step: int = 500
+    large_step_threshold_mg: float = 25.0
+    medium_step_threshold_mg: float = 10.0
+    small_step_threshold_mg: float = 3.0
     max_read_failures: int = 3
     read_retry_delay_seconds: float = 0.5
     max_drop_mg: float = 10.0
+
+    def __post_init__(self) -> None:
+        positive_values = {
+            "目标重量mg": self.target_mg,
+            "容差mg": self.tolerance_mg,
+            "最大轮次": self.max_rounds,
+            "大步步数": self.large_step,
+            "中步步数": self.medium_step,
+            "小步步数": self.small_step,
+            "微步步数": self.micro_step,
+            "最大读数失败次数": self.max_read_failures,
+            "最大允许下降mg": self.max_drop_mg,
+        }
+        for label, value in positive_values.items():
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{label}必须大于0")
+        if self.settle_seconds < 0:
+            raise ValueError("稳定等待秒数不能小于0")
+        if self.read_retry_delay_seconds < 0:
+            raise ValueError("读数重试等待秒数不能小于0")
+        if not (
+            math.isfinite(self.large_step_threshold_mg)
+            and math.isfinite(self.medium_step_threshold_mg)
+            and math.isfinite(self.small_step_threshold_mg)
+            and self.large_step_threshold_mg
+            > self.medium_step_threshold_mg
+            > self.small_step_threshold_mg
+            > 0
+        ):
+            raise ValueError("步数阈值必须满足 大步阈值 > 中步阈值 > 小步阈值 > 0")
+
+
+def choose_rotation_step(
+    remaining_mg: float,
+    config: PowderDispenseConfig,
+) -> int:
+    """Choose one configured rotation increment for the remaining powder mass."""
+    if remaining_mg > config.large_step_threshold_mg:
+        return config.large_step
+    if remaining_mg > config.medium_step_threshold_mg:
+        return config.medium_step
+    if remaining_mg > config.small_step_threshold_mg:
+        return config.small_step
+    return config.micro_step
 
 
 class PowderDispenseAgent:
@@ -102,15 +166,6 @@ class PowderDispenseAgent:
         self._audit_round = audit_round or (lambda _record: None)
 
     def run(self, config: PowderDispenseConfig) -> PowderDispenseResult:
-        if config.target_mg <= 0:
-            raise ValueError("目标重量mg必须大于0")
-        if config.tolerance_mg <= 0:
-            raise ValueError("容差mg必须大于0")
-        if config.max_rounds <= 0:
-            raise ValueError("最大轮次必须大于0")
-        if config.read_retry_delay_seconds < 0:
-            raise ValueError("读数重试等待秒数不能小于0")
-
         ctrl = self._controller
         initial_g = 0.0
         current_g = 0.0
@@ -165,7 +220,7 @@ class PowderDispenseAgent:
                         round_records,
                     )
 
-                step = self._choose_step(remaining_mg, config)
+                step = choose_rotation_step(remaining_mg, config)
                 self._log(
                     f"第{rounds}轮: 当前={current_g:.4f}g, "
                     f"已加={added_mg:.1f}mg, 剩余={remaining_mg:.1f}mg, 旋转={step}步"
@@ -195,14 +250,16 @@ class PowderDispenseAgent:
                 )
                 round_records.append(record)
                 self._audit_round(record)
-                if delta_mg < -config.max_drop_mg:
+                terminal = _TERMINAL_ROUND_OUTCOMES.get(outcome)
+                if terminal is not None:
+                    terminal_outcome, message = terminal
                     return self._result(
-                        PowderDispenseOutcome.READING_ANOMALY,
+                        terminal_outcome,
                         initial_g,
                         current_g,
                         config,
                         rounds,
-                        "读数异常下降",
+                        message,
                         round_records,
                     )
 
@@ -222,22 +279,17 @@ class PowderDispenseAgent:
         last_error: Exception | None = None
         for attempt in range(1, config.max_read_failures + 1):
             try:
-                return float(self._read_balance())
+                reading_g = float(self._read_balance())
+                if not math.isfinite(reading_g):
+                    raise ValueError("天平读数必须是有限数值")
+                return reading_g
             except Exception as exc:
                 last_error = exc
                 self._log(f"天平读数失败 ({attempt}/{config.max_read_failures}): {exc}")
-                self._sleep(config.read_retry_delay_seconds)
-        raise RuntimeError(f"连续读取天平失败: {last_error}")
-
-    @staticmethod
-    def _choose_step(remaining_mg: float, config: PowderDispenseConfig) -> int:
-        if remaining_mg > 25:
-            return config.large_step
-        if remaining_mg > 10:
-            return config.medium_step
-        if remaining_mg > 3:
-            return config.small_step
-        return config.micro_step
+                if attempt < config.max_read_failures:
+                    self._sleep(config.read_retry_delay_seconds)
+        assert last_error is not None
+        raise RuntimeError(f"连续读取天平失败: {last_error}") from last_error
 
     def _return_safe(self, ctrl: PowderController, config: PowderDispenseConfig) -> None:
         for label, action in (
@@ -303,6 +355,24 @@ def config_from_params(params: dict, tapping_config: dict | None = None) -> Powd
         medium_step=int(params.get("中步步数", cfg.get("powder_medium_step", 8000))),
         small_step=int(params.get("小步步数", cfg.get("powder_small_step", 2000))),
         micro_step=int(params.get("微步步数", cfg.get("powder_micro_step", 500))),
+        large_step_threshold_mg=float(
+            params.get(
+                "大步阈值mg",
+                cfg.get("powder_large_step_threshold_mg", 25.0),
+            )
+        ),
+        medium_step_threshold_mg=float(
+            params.get(
+                "中步阈值mg",
+                cfg.get("powder_medium_step_threshold_mg", 10.0),
+            )
+        ),
+        small_step_threshold_mg=float(
+            params.get(
+                "小步阈值mg",
+                cfg.get("powder_small_step_threshold_mg", 3.0),
+            )
+        ),
         read_retry_delay_seconds=float(
             params.get("读数重试等待秒数", 0.5)
         ),

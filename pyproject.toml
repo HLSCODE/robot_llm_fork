@@ -154,6 +154,7 @@ select = [
 python_version = "3.12"
 files = [
     "scripts/run_performance_benchmarks.py",
+    "src/agents/powder_dispense_agent.py",
     "src/core/settings.py",
     "src/core/json_documents.py",
     "src/core/logging_config.py",

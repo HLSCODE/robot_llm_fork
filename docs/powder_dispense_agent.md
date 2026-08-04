@@ -6,6 +6,21 @@
 
 当前实现保留原有 `"加粉装置"` 执行器作为手动调试动作，新增 `"智能加粉"` 执行器用于闭环控制。
 
+### 当前实现边界
+
+当前生产实现是一个**确定性规则闭环**，不是 LLM 多 Agent 系统：
+
+- `PowderDispenseAgent` 是规则策略和闭环状态的唯一所有者。
+- 天平读数、剩余量、阈值和旋转步数共同决定下一步，规则可离线复现。
+- 大模型只可以作为天平画面的读数适配器，不直接生成设备命令、修改阈值或决定终态。
+- `ExecutionManager`、资源租约、取消和 `DeviceRuntime` 继续负责执行与设备安全边界。
+
+`docs/项目综述.md` 中 RecipeArchitect、DispenseControl、QualityInspector 和
+ProcessOrchestrator 四 Agent 属于未立项概念方案，不代表当前代码，也不是当前
+重构目标。2026-08-04 评审决定本轮不立项：现阶段没有足够的多粉种数据、量化收益
+或可验证安全约束证明其优于规则策略，因此不增加 AgentManager、LLM 决策接口或
+兼容层。
+
 核心链路：
 
 ```text
@@ -35,6 +50,9 @@ GUI/任务流
 | `中步步数` | 8000 | 剩余量中等时的旋转步数 |
 | `小步步数` | 2000 | 接近目标时的旋转步数 |
 | `微步步数` | 500 | 非常接近目标时的旋转步数 |
+| `大步阈值mg` | 25 | 剩余量超过该值时使用大步 |
+| `中步阈值mg` | 10 | 剩余量超过该值时使用中步 |
+| `小步阈值mg` | 3 | 剩余量超过该值时使用小步，否则使用微步 |
 
 任务文件中的参数示例：
 
@@ -54,7 +72,10 @@ GUI/任务流
     "大步步数": 20000,
     "中步步数": 8000,
     "小步步数": 2000,
-    "微步步数": 500
+    "微步步数": 500,
+    "大步阈值mg": 25,
+    "中步阈值mg": 10,
+    "小步阈值mg": 3
   }
 }
 ```
@@ -79,7 +100,8 @@ GUI/任务流
 和轮次判定。`PowderDispenseResult.round_records` 保留完整记录，执行日志同时以
 稳定的 `key=value` 字段输出，便于追查阈值选择、异常读数和最终判定。
 
-当前步数策略按实测 `2000步≈2mg` 估算，即约 `1000步/mg`。默认规则为：
+当前默认步数策略按实测 `2000步≈2mg` 估算，即约 `1000步/mg`。步数与三个
+阈值均为显式配置；阈值必须满足 `大步 > 中步 > 小步 > 0`。默认规则为：
 
 | 剩余量 | 默认旋转步数 |
 |---:|---:|
@@ -113,6 +135,9 @@ POWDER_DISPENSE_LARGE_STEP=20000
 POWDER_DISPENSE_MEDIUM_STEP=8000
 POWDER_DISPENSE_SMALL_STEP=2000
 POWDER_DISPENSE_MICRO_STEP=500
+POWDER_DISPENSE_LARGE_STEP_THRESHOLD_MG=25
+POWDER_DISPENSE_MEDIUM_STEP_THRESHOLD_MG=10
+POWDER_DISPENSE_SMALL_STEP_THRESHOLD_MG=3
 ```
 
 视觉读数使用 `src/vision/balance_reader_simple.py`，需要配置：
@@ -162,6 +187,21 @@ BALANCE_REQUEST_TIMEOUT_SECONDS=30
 ```bash
 python -m unittest tests.test_powder_dispense_agent
 ```
+
+版本化离线策略案例位于
+`data/regression/powder_dispense_policy_cases.json`，由 pytest 统一质量门禁执行。
+案例覆盖最后一轮达标、最后一轮超量、异常下降、最大轮次失败，以及大/中/小/微
+步进的完整收敛过程。调整规则、阈值或终态语义时必须同步更新案例并说明理由。
+
+## 四 Agent 方案重开条件
+
+只有同时满足以下条件，才重新评审独立的多 Agent 项目：
+
+1. 已积累多粉种、目标量、环境和逐轮结果的版本化数据集。
+2. 已定义规则基线无法满足的量化目标，例如成功率、超调率、轮次或耗时。
+3. LLM/策略输出被限制为可校验的计划建议，硬件命令仍经过确定性安全策略。
+4. 建立离线回放、simulation、故障注入和真实硬件分阶段验收。
+5. 明确 token、延迟、模型不可用和输出漂移时的失败语义，禁止静默退回不同策略。
 
 语法检查：
 

@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-04
 >
-> 当前里程碑：M4 — 遥操作审计与软件性能基线已收敛
-> 计划进度：106/117（105 DONE + 1 DROPPED，90.6%）
+> 当前里程碑：M4 — 加粉规则策略与架构边界已收敛
+> 计划进度：109/117（107 DONE + 2 DROPPED，93.2%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -594,9 +594,9 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | F-P-001 | P0 | DONE | 达到最大轮次但未达到目标明确返回 `MAX_ROUNDS_REACHED` 失败终态，并映射稳定错误码 `target_not_reached` |
 | F-P-002 | P1 | DOING | 加粉流程已接入统一取消、结构化 handler result、可取消等待和安全回位；待真实硬件验收 |
 | F-P-003 | P1 | DONE | PowderDispenseResult 保留逐轮前后读数、剩余量、容差、旋转步数、增量和判定，执行日志输出结构化轮次审计 |
-| F-P-004 | P2 | TODO | 为规则策略建立离线回归测试 |
-| F-P-005 | P2 | TODO | 区分当前规则 Agent 与未来四 Agent 方案文档 |
-| F-P-006 | P3 | TODO | 评审是否立项 LLM 多 Agent 粉末流程 |
+| F-P-004 | P2 | DONE | 建立版本化无硬件策略案例，覆盖最终轮次达标/超量、异常下降、最大轮次失败及四级步进收敛；阈值改为显式配置并修复最终轮次终态误判 |
+| F-P-005 | P2 | DONE | 专项文档明确当前确定性规则闭环、LLM 仅作读数适配器，以及四 Agent 概念方案不代表当前实现 |
+| F-P-006 | P3 | DROPPED | 当前缺少多粉种数据、量化收益和可验证安全约束，本轮不立项且不预埋框架；满足明确数据、指标、安全和离线验收条件后作为独立项目重审 |
 
 ## 12. Track G：配置、数据、依赖、测试与交付工程
 
@@ -703,7 +703,7 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 | ADR-M-007 | Accepted | 配置模型 | 组合根一次解析环境，向业务层注入不可变领域 settings；敏感配置独立快照 |
 | ADR-M-008 | Accepted | 数据目录 | built-in catalog 与可配置 user data root 分离；只初始化缺失文件 |
 | ADR-M-009 | Accepted | GUI 状态管理 | application service + Qt adapter/view-model；业务状态不由 QWidget 持有 |
-| ADR-M-010 | Proposed | 四 Agent 粉末方案 | 作为独立立项，不纳入基础重构默认范围 |
+| ADR-M-010 | Rejected | 四 Agent 粉末方案 | 当前不立项、不预埋框架；满足版本化数据、量化收益、确定性安全边界和离线回放条件后作为独立项目重新评审 |
 
 ADR 状态：`Proposed`、`Accepted`、`Superseded`、`Rejected`。
 
@@ -914,7 +914,7 @@ M4 工程治理与清理
 - [ ] GUI 通用表单、动作持久化入口和 handler 参数模型完全由统一 schema 驱动。
 - [ ] 未知动作和非法参数在执行前拒绝。
 - [ ] 相机、视觉、标定和工位数据有清晰生命周期。
-- [ ] 数据采集和加粉流程有结构化状态与结果。
+- [x] 数据采集和加粉流程有结构化状态与结果。
 
 ### 工程质量
 
@@ -999,6 +999,7 @@ M4 工程治理与清理
 | 2026-08-03 | M4 | D/G | GUI 稳定视图域拆分 | D-013/D-014 TODO → DONE | 提取 ActionLibraryView、WorkflowEditorView、DeviceStatusView、DeviceControlView；MainWindow 删除约 800 行控件构造与旧属性，改为连接参数化意图信号和调用渲染接口，不保留兼容别名；新增组件进入 Mypy | 352 tests + 32 subtests，覆盖率 55.34%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | F/G | 视觉服务与数据治理整批收口 | F-V-004/F-V-005/F-V-006/F-V-007 TODO → DONE | 新增 VisionService/typed result；模型、标定、工位 profile 严格版本化；调试产物按 run staging、manifest、原子发布和有界保留；simulation 注入确定性 fixture；删除旧重定位调试目录和 bool executor 双入口 | 359 tests + 32 subtests，覆盖率 55.99%；28 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | F | 遥操作审计与软件性能基线 | F-T-006/F-T-007 TODO → DONE | 新增 typed TeleoperationObservability，统一会话、指令、跳过、错误、watchdog 和安全释放审计；敏感控制载荷不进入事件；聚合耗时、间隔、抖动和吞吐并通过 `server_metrics` 暴露；审计 sink 故障与控制结果隔离；新增确定性无硬件性能预算 | 361 tests + 32 subtests，覆盖率 56.32%；30 个 Mypy 文件、14 golden、6/6 性能预算和 wheel smoke 全部通过 |
+| 2026-08-04 | M4 | F | 加粉规则策略与架构边界收敛 | F-P-004/F-P-005 TODO → DONE；F-P-006 TODO → DROPPED | 新增版本化无硬件策略案例和显式四级阈值配置；修复最终允许轮次达标/超量被误判为最大轮次失败；校验有限数值与策略不变量，读数重试保留异常链且不做末次无效等待；文档明确当前确定性闭环和未立项四 Agent 概念方案，不预埋框架 | 366 tests + 43 subtests，覆盖率 56.42%；31 个 Mypy 文件、14 golden、6/6 性能预算和 wheel smoke 全部通过 |
 
 ## 22. 建议的首批实施顺序
 
