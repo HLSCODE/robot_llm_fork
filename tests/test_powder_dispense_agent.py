@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import unittest
 
-from src.agents.powder_dispense_agent import (
+from src.execution.workflows.powder_dispense import (
     PowderDispenseAgent,
     PowderDispenseConfig,
     PowderDispenseOutcome,

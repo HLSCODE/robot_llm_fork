@@ -16,7 +16,7 @@ from typing import Deque, Optional
 
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
-from ..voice_interaction.speech.output_gate import AudioOutputGate
+from ...voice_interaction.speech.output_gate import AudioOutputGate
 
 try:
     from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices

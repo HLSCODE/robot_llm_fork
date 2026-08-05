@@ -129,7 +129,7 @@ include = [
     "scripts/run_quality_checks.py",
     "scripts/validate_optional_extra.py",
     "scripts/validate_package.py",
-    "src/actions/**/*.py",
+    "src/execution/workflows/**/*.py",
     "src/application/**/*.py",
     "src/bootstrap/**/*.py",
     "src/configuration/**/*.py",
@@ -159,7 +159,7 @@ select = [
 python_version = "3.12"
 files = [
     "scripts/run_performance_benchmarks.py",
-    "src/agents/powder_dispense_agent.py",
+    "src/execution/workflows/powder_dispense.py",
     "src/configuration/settings.py",
     "src/persistence/json_documents.py",
     "src/observability/logging_config.py",

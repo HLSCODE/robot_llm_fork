@@ -19,18 +19,19 @@ REQUIRED_WHEEL_MEMBERS = {
     "src/bootstrap/launcher.py",
     "src/configuration/settings.py",
     "src/domain/models.py",
+    "src/execution/workflows/powder_dispense.py",
+    "src/gui/views/ai_assistant.py",
     "src/persistence/storage.py",
 }
 FORBIDDEN_WHEEL_PREFIXES = (
+    "src/actions/",
+    "src/agents/",
+    "src/ai_integration/",
     "src/core/",
-    "src/actions/Path/",
     "src/vision/pictures/",
+    "src/widgets/",
 )
-FORBIDDEN_WHEEL_MEMBERS = {
-    "src/actions/move_baseclient.py",
-    "src/widgets/frame_grabber.py",
-    "src/widgets/test_realsense_connection.py",
-}
+FORBIDDEN_WHEEL_MEMBERS: set[str] = set()
 
 
 def main(argv: list[str] | None = None) -> int:

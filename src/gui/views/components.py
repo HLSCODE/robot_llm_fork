@@ -1,11 +1,10 @@
-from PyQt6.QtWidgets import (QWidget, QListWidget, QListWidgetItem, QLabel,
+from PyQt6.QtWidgets import (QWidget, QListWidget, QListWidgetItem,
                             QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit,
-                            QTabWidget, QTreeWidget, QTreeWidgetItem, QMenu, QInputDialog)
+                            QTreeWidget, QTreeWidgetItem, QMenu, QInputDialog)
 from PyQt6.QtCore import Qt, pyqtSignal, QSize, QMimeData
-from PyQt6.QtGui import QIcon, QColor, QDrag, QAction
+from PyQt6.QtGui import QIcon, QColor, QDrag
 import json
-from uuid import uuid4
-from ..domain.models import ActionDefinition, SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
+from ...domain.models import ActionDefinition, SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
 
 
 class ActionListWidget(QListWidget):
@@ -779,7 +778,6 @@ class SequenceListWidget(QTreeWidget):
         indexes = []
         for i in range(self.topLevelItemCount()):
             if self.topLevelItem(i).isSelected():
-                from PyQt6.QtCore import QModelIndex
                 indexes.append(self.model().index(i, 0))
         return indexes
 

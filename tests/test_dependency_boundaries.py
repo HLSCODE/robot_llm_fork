@@ -8,13 +8,9 @@ import unittest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 APPLICATION_BOUNDARY_DIRECTORIES = (
-    "src/actions",
-    "src/agents",
     "src/application",
     "src/data_collection",
     "src/gui",
-    "src/widgets",
-    "src/ai_integration",
     "src/robot_server",
     "src/execution",
     "src/vision",
@@ -30,8 +26,6 @@ FORBIDDEN_DEPENDENCIES = (
 )
 PRESENTATION_DIRECTORIES = (
     "src/gui",
-    "src/widgets",
-    "src/ai_integration",
     "src/robot_server",
     "src/voice_interaction",
 )
@@ -43,7 +37,6 @@ LEGACY_PRESENTATION_MODULES = (
     "src/gui/notifications.py",
     "src/gui/startup.py",
     "src/gui/view_models.py",
-    "src/ai_integration/execution_bridge.py",
     "src/robot_server/handlers",
     "src/robot_server/access_control.py",
     "src/robot_server/request_limits.py",
@@ -53,13 +46,13 @@ LEGACY_PRESENTATION_MODULES = (
     "src/robot_server/protocol.py",
 )
 REMOVED_ARCHITECTURE_PATHS = (
+    "src/actions",
+    "src/agents",
+    "src/ai_integration",
     "src/core",
-    "src/actions/Path",
-    "src/actions/move_baseclient.py",
     "src/vision/balance_reader_simple.py",
     "src/vision/pictures",
-    "src/widgets/frame_grabber.py",
-    "src/widgets/test_realsense_connection.py",
+    "src/widgets",
 )
 STABLE_LAYER_DEPENDENCIES = {
     "src/domain": ("src.domain",),

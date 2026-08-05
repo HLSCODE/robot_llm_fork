@@ -18,7 +18,7 @@ from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.controllers.startup import GuiStartupLifecycle
 from src.gui.views import StartupProgressCard
-from src.widgets.ai_assistant import AIAssistantWidget
+from src.gui.views.ai_assistant import AIAssistantWidget
 
 
 def _wait_until(predicate, *, timeout_seconds: float = 2.0) -> bool:

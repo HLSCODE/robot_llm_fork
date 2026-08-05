@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ..application import (
+from ...application import (
     ApplicationServices,
     CommandRuntimeError,
     ExecutionControlAction,
 )
 
 if TYPE_CHECKING:
-    from ..gui.bridges.execution import ExecutionBridge
+    from ..bridges.execution import ExecutionBridge
 
 logger = logging.getLogger(__name__)
 

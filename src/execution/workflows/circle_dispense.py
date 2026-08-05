@@ -6,8 +6,8 @@ import time
 from contextlib import nullcontext
 from typing import Callable
 
-from ..geometry.pose_compensation import parse_pose
-from ..devices import (
+from ...geometry.pose_compensation import parse_pose
+from ...devices import (
     ArmId,
     ArmMotion,
     CartesianPose,

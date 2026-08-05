@@ -22,18 +22,18 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..ai_integration import AIController
-from ..application import ApplicationServices
-from ..gui.bridges.execution import ExecutionBridge
-from ..gui.views.dialogs import ActionPreviewDialog
-from ..voice_interaction import (
+from ..controllers.ai import AIController
+from ...application import ApplicationServices
+from ..bridges.execution import ExecutionBridge
+from .dialogs import ActionPreviewDialog
+from ...voice_interaction import (
     AudioOutputGate,
     CamerasModuleProvider,
     VoiceInteractionController,
     VoiceSessionState,
     WakeFeedback,
 )
-from .voice_audio_player import VoiceAudioPlayer
+from ..controllers.audio import VoiceAudioPlayer
 
 logger = logging.getLogger(__name__)
 

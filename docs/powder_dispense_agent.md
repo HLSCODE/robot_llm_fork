@@ -214,7 +214,7 @@ python -m pytest -q tests/test_balance_reader.py tests/test_powder_dispense_agen
 
 ```bash
 python -m py_compile \
-  src/agents/powder_dispense_agent.py \
+  src/execution/workflows/powder_dispense.py \
   src/devices/tapping_controller.py \
   src/execution/engine.py \
   src/devices/runtime/factory.py \
@@ -227,7 +227,7 @@ python -m py_compile \
 
 | 文件 | 作用 |
 |---|---|
-| `src/agents/powder_dispense_agent.py` | 智能闭环加粉核心逻辑 |
+| `src/execution/workflows/powder_dispense.py` | 智能闭环加粉核心逻辑 |
 | `src/devices/tools/powder_dispenser/driver.py` | 加粉装置底层控制 |
 | `src/devices/sensors/balance/provider.py` | 电子秤设备 Provider 与强类型读数 |
 | `src/application/balance.py` | 托管相机与统一 LLM 的应用层装配适配器 |

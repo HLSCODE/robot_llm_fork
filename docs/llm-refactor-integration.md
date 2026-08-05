@@ -26,7 +26,7 @@
 1. `src/llm/` 不负责前端 WebSocket 会话管理。
 2. `src/llm/` 不负责机器人动作执行、技能展开、状态广播。
 3. `src/llm/` 不直接依赖 `websocket` 客户端对象。
-4. `src/llm/` 不吞并 `skill_system`、`robot_server`、`ai_integration` 的业务职责。
+4. `src/llm/` 不吞并 `skill_system`、`robot_server`、`gui/controllers` 的业务职责。
 5. 本重构后 OpenAI-compatible 服务统一由 `OpenAICompatibleClient` 承载，不保留 provider 薄包装。
 
 ## 4. 新职责边界
@@ -63,16 +63,16 @@
 - 技能参数校验
 - 技能展开为动作序列
 
-### 4.4 `ai_integration`
+### 4.4 `gui/controllers/ai.py`
 
 负责 GUI 执行上下文：
 
-- 初始化并持有 `LLMRegistry`
-- 初始化并持有 `SkillEngine`
-- 保存 `voice_interaction` 生成的当前动作预览
+- 消费组合根提供的共享 `ApplicationServices`
+- 将 `CommandRuntime` 的预览确认和执行控制转换为 Qt 信号
 - 通过 `ExecutionBridge` 执行动作序列
 
-不再负责自然语言输入解析、意图识别或技能规划；这些统一收敛到 `voice_interaction`。
+不持有独立 `LLMRegistry`、`SkillEngine` 或预览缓存，也不负责自然语言输入解析、
+意图识别或技能规划；这些统一收敛到 `voice_interaction` 和 `CommandRuntime`。
 
 ### 4.5 `voice_interaction`
 
@@ -96,7 +96,7 @@ voice_interaction
     | uses
     |------------------------------|
     v                              v
-src/llm                       ai_integration
+src/llm                       gui/controllers/ai.py
     |                         |
     | LLMRegistry             | ExecutionBridge
     v

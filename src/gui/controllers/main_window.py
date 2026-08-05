@@ -43,7 +43,7 @@ from ...devices.runtime.ids import (
     PIPETTE,
     ROBOT_SYSTEM,
 )
-from ...widgets import LogWidget, SequenceListWidget
+from ..views.components import LogWidget, SequenceListWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceStatusView
 from ..views.dialogs import ActionConfigDialog

@@ -4,8 +4,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from ...actions.circle_dispense import execute_right_arm_circle_dispense
-from ...agents.powder_dispense_agent import (
+from ..workflows import execute_right_arm_circle_dispense
+from ..workflows.powder_dispense import (
     PowderDispenseAgent,
     PowderDispenseOutcome,
     config_from_params,

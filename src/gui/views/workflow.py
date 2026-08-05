@@ -20,8 +20,8 @@ from PyQt6.QtWidgets import (
 from ...application import ApplicationServices
 from ...domain.models import ActionDefinition, ActionType
 from ...devices import StopMode
-from ...widgets import ActionListWidget, ControlPanel, SequenceListWidget
-from ...widgets.ai_assistant import AIAssistantWidget
+from .ai_assistant import AIAssistantWidget
+from .components import ActionListWidget, ControlPanel, SequenceListWidget
 
 
 class TaskLibraryListWidget(QListWidget):

@@ -5,7 +5,7 @@
 > 最近更新：2026-08-05
 >
 > 当前里程碑：M5 — 第二轮目录职责、Provider 边界与真实硬件验收
-> 计划进度：118/131（116 DONE + 2 DROPPED，90.1%）
+> 计划进度：120/131（118 DONE + 2 DROPPED，91.6%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -141,13 +141,14 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - 未引用的底盘客户端、RealSense 调试 Widget、源码内轨迹/图片产物已删除；瓶子抓取
   从历史 action 迁入 vision，调试图片只写入 VisionArtifactStore 管理的运行目录。
 
-仍需继续收敛的重点：
+本轮已完成的重点：
 
-- 视觉天平读数仍直接创建 OpenCV 相机并调用独立 HTTP 模型接口，尚未进入
-  `CameraAccessService`、`LLMRegistry` 和 `DeviceRuntime` 的统一所有权边界。
-- `src/widgets/` 与 `src/ai_integration/` 实际均为 Qt 表现层，应收敛到 `src/gui/`；
-  `src/actions/` 与 `src/agents/` 当前仅承载执行 handler 的复合工作流，应收敛到
-  `src/execution/workflows/`。
+- 视觉天平已进入 `CameraAccessService`、`LLMRegistry` 和 `DeviceRuntime` 的统一所有权边界。
+- Qt 通用视图、AI Assistant、音频播放和 AI Controller 已分别进入
+  `src/gui/views/` 与 `src/gui/controllers/`；复合执行流程已进入
+  `src/execution/workflows/`，四个旧顶级目录直接删除且无兼容转发。
+
+仍需继续收敛的重点：
 - `src/devices/transports/devices/` 混入 ElectricGripper、StepperMotor 等语义设备；
   Transport 目录应只保留通信、协议和测试能力，设备客户端应回到所属设备包。
 - 相机仍使用条件工厂而非与机械臂一致的 Provider 注册表；移动底盘和显示屏的
@@ -822,8 +823,8 @@ src/
 | ID | 优先级 | 状态 | 内容 |
 |---|---:|---|---|
 | G-020 | P1 | DONE | 视觉天平已抽象为 `BalanceReader` 设备能力和强类型 `BalanceReading`；真实 Provider 复用 `CameraAccessService` 与唯一 `LLMRegistry`，simulation 使用确定性 fake，由 DeviceRuntime 管理生命周期；执行策略同时声明加粉装置和电子秤资源，旧动态导入、独立 OpenCV/HTTP 实现及 VVEAI 专用配置已删除，不保留兼容入口 |
-| G-021 | P2 | TODO | 将 `src/widgets/` 与 `src/ai_integration/` 整批迁入 `src/gui/views`、`src/gui/controllers`，更新导入和边界测试后直接删除旧顶级目录，不保留转发模块 |
-| G-022 | P2 | TODO | 将仅由 execution handler 消费的 `actions/circle_dispense.py` 与 `agents/powder_dispense_agent.py` 迁入 `execution/workflows/`；保持领域结果、取消和安全回位语义不变，删除空顶级目录 |
+| G-021 | P2 | DONE | Qt 通用组件和 AI Assistant 已迁入 `gui/views`，AI Controller 与音频播放生命周期进入 `gui/controllers`；生产代码、测试、Mypy、wheel 门禁和文档均直切新路径，`widgets` 与 `ai_integration` 顶级目录已删除，不保留转发模块 |
+| G-022 | P2 | DONE | 转圈注液与确定性闭环加粉已迁入 `execution/workflows`，handler 和专项测试直切新路径；动作参数、typed result、取消/暂停和安全回位语义保持不变，`actions` 与 `agents` 顶级目录已删除，不保留转发模块 |
 | G-023 | P2 | TODO | 清空 `devices/transports/devices/`：ElectricGripper、StepperMotor 迁入粉末装置所属包或经真实复用证明后的设备包；relay/tool-changer/pipette adapter 与各自 Driver 共置；Transport 只保留通信与协议 |
 | G-024 | P2 | TODO | 相机对齐机械臂 Provider/Registry 模式，RealSense 与 OpenCV 形成平行 Provider；未知 Provider 启动失败，不再隐式落入 RealSense；共享 camera capability contract 覆盖两种实现 |
 | G-025 | P2 | TODO | 为移动底盘建立当前 TCP 产品的明确 Provider/Adapter/Client 垂直切片，并统一显示屏 Provider 注册方式；没有第二实现前不创建空 Provider 框架或兼容开关 |
@@ -1193,15 +1194,15 @@ M5 模块目录与依赖边界治理
 | 2026-08-04 | M5 | G/F | core 职责拆分与历史路径清理 | G-018/G-019 TODO → DONE | 删除原 core 聚合目录并直切 bootstrap/configuration/domain/persistence/geometry/observability；抽取唯一机械臂名称规范化定义并建立稳定层单向依赖；删除未引用脚本、调试 Widget、源码内轨迹/图片、旧补偿字段和单相机环境变量；瓶子抓取迁入 vision 并只写受管调试目录；wheel 新增历史内容禁止清单 | Compile、Ruff、Mypy（39 files）、Pytest（380 passed + 43 subtests，58.87%）、LLM golden（14/14）、性能回归（7/7）、GUI/Server/Hardware extra 及 Wheel smoke 全通过 |
 | 2026-08-05 | M5 | B/D/F/G | 第二轮目录职责与 Provider 边界评审 | G-020～G-027 新增为 TODO | 确认 GUI、执行工作流、Transport 语义设备、视觉天平、相机/底盘/显示 Provider、视觉/定位边界和过期目录文档等剩余问题；同时明确 data_collection、composition 和两类 localization 的合理分层，不做机械合并 | 只读源码、调用点、依赖边界与专项文档评审；本次仅更新计划文档 |
 | 2026-08-05 | M5 | B/E/F/G | 视觉电子秤设备能力收敛 | G-020 TODO → DONE | 新增 BalanceReader/BalanceReading 与 balance 运行时资源；真实 Provider 组合受管相机会话和统一 LLM 视觉任务，模拟 Provider 可无硬件运行；智能加粉从 DeviceRuntime 获取双设备依赖；删除执行引擎动态导入、旧 OpenCV/HTTP 文件和 VVEAI 专用配置，不保留兼容入口 | Compile、Ruff、Mypy（42 files）、Pytest（392 passed + 43 subtests，59.08%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
+| 2026-08-05 | M5 | A/D/F/G | GUI 顶级目录与执行工作流收敛 | G-021/G-022 TODO → DONE | 通用 Qt 组件和 AI Assistant 迁入 gui/views，AI/音频控制进入 gui/controllers；转圈注液和闭环加粉迁入 execution/workflows；删除 widgets、ai_integration、actions、agents 四个顶级目录及全部旧导入，不保留转发；旧目录加入源码与 wheel 禁止清单 | Compile、Ruff、Mypy（42 files）、Pytest（392 passed + 43 subtests，59.07%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 
-1. **G-021/G-022**：整批收敛 GUI Qt 目录和 execution workflows，删除四个单一职责顶级目录，不保留导入兼容。
-2. **G-023**：清空 `devices/transports/devices`，按所属设备包共置 Driver/Adapter，增加 Transport 禁止语义设备边界测试。
-3. **G-024/G-025**：相机对齐机械臂 Provider Registry；随后明确当前底盘 TCP 产品和显示屏 Provider 垂直切片。
-4. **G-026/G-027**：拆分视觉/定位职责，修正 handler registry 命名和 README 旧目录说明。
-5. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-6. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-7. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+1. **G-023**：清空 `devices/transports/devices`，按所属设备包共置 Driver/Adapter，增加 Transport 禁止语义设备边界测试。
+2. **G-024/G-025**：相机对齐机械臂 Provider Registry；随后明确当前底盘 TCP 产品和显示屏 Provider 垂直切片。
+3. **G-026/G-027**：拆分视觉/定位职责，修正 handler registry 命名和 README 旧目录说明。
+4. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+5. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+6. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
-8. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+7. 完成 simulation smoke test 后执行逐设备真实硬件验收。
