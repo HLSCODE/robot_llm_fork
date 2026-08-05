@@ -16,7 +16,7 @@ from .profiles import (
 )
 from .repeat import REPEAT_PROFILE, RepeatTask
 from .runner import TaskRunner
-from .vision import VISION_FUSION_PROFILE, VisionFusionTask
+from .vision import BALANCE_READING_PROFILE, VISION_FUSION_PROFILE, VisionFusionTask
 
 __all__ = [
     "TaskProfile",
@@ -28,6 +28,7 @@ __all__ = [
     "ROBOT_PLANNER_PROFILE",
     "INSTRUCTION_CLASSIFIER_PROFILE",
     "VISION_FUSION_PROFILE",
+    "BALANCE_READING_PROFILE",
     "REPEAT_PROFILE",
     "TaskRunner",
     "SkillPlanner",

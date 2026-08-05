@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import patch
 
 from src.domain.models import (
     ActionDefinition,
@@ -13,7 +12,6 @@ from src.domain.execution_context import ExecutionContext
 from src.configuration.settings import (
     DeviceSettings,
     ExecutionSettings,
-    SecretSettings,
     VisionSettings,
 )
 from src.devices import (
@@ -23,6 +21,7 @@ from src.devices import (
     StopMode,
 )
 from src.devices.runtime.ids import (
+    BALANCE,
     BODY_AXIS,
     CAMERA,
     EXPRESSION_DISPLAY,
@@ -62,7 +61,6 @@ def _create_engine(
     runtime: DeviceRuntime,
     *,
     vision_settings: VisionSettings | None = None,
-    secret_settings: SecretSettings | None = None,
 ) -> ActionEngine:
     vision = vision_settings or VisionSettings()
     context = ExecutionContext()
@@ -71,7 +69,6 @@ def _create_engine(
         ExecutionSettings(),
         DeviceSettings(),
         vision,
-        secret_settings or SecretSettings(),
         lambda **_kwargs: None,
         context,
         VisionService(vision, context),
@@ -172,7 +169,7 @@ class ActionControlPolicyTests(unittest.TestCase):
                 resolve_manipulate_control_policy,
                 {"执行器": "智能加粉"},
                 ActionCancellationMode.AFTER_BLOCKING_CALL,
-                (POWDER_DISPENSER,),
+                (POWDER_DISPENSER, BALANCE),
                 "powder_dispense.run",
             ),
             (
@@ -358,33 +355,6 @@ class ActionControlPolicyTests(unittest.TestCase):
             (ROBOT_SYSTEM, CAMERA),
             engine.required_resources([wait, loop]),
         )
-
-    def test_balance_reader_receives_injected_settings(self):
-        engine = _create_engine(
-            DeviceRuntime(),
-            vision_settings=VisionSettings(
-                balance_camera_index=7,
-                balance_request_timeout_seconds=12.5,
-                vveai_base_url="https://vision.example/v1/",
-                vveai_model="balance-model",
-            ),
-            secret_settings=SecretSettings(vveai_api_key="vision-secret"),
-        )
-
-        with patch(
-            "src.vision.balance_reader_simple.read_balance",
-            return_value=1.25,
-        ) as read_balance:
-            self.assertEqual(1.25, engine._read_balance())
-
-        read_balance.assert_called_once_with(
-            camera_index=7,
-            api_key="vision-secret",
-            base_url="https://vision.example/v1/",
-            model="balance-model",
-            timeout_seconds=12.5,
-        )
-
 
 class ActionControlPreflightTests(unittest.TestCase):
     def test_engine_rejects_stop_capability_mismatch_before_device_init(self):

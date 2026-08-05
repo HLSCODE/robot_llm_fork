@@ -9,6 +9,7 @@ from .providers.openai_compatible import OpenAICompatibleClient
 from .registry import LLMRegistry
 from .routing import ProviderHealthSnapshot, ProviderHealthStatus
 from .tasks import (
+    BALANCE_READING_PROFILE,
     GENERAL_CHAT_PROFILE,
     INSTRUCTION_CLASSIFIER_PROFILE,
     REPEAT_PROFILE,
@@ -64,6 +65,7 @@ __all__ = [
     "ROBOT_PLANNER_PROFILE",
     "INSTRUCTION_CLASSIFIER_PROFILE",
     "VISION_FUSION_PROFILE",
+    "BALANCE_READING_PROFILE",
     "REPEAT_PROFILE",
     "OpenAICompatibleClient",
     "MiniCPMRealtimeClient",

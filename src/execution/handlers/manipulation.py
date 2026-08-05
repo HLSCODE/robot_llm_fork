@@ -13,6 +13,7 @@ from ...agents.powder_dispense_agent import (
 from ...devices import (
     ArmId,
     ArmMotion,
+    BalanceReader,
     DeviceRuntime,
     DigitalOutputs,
     ExpressionDisplay,
@@ -23,6 +24,7 @@ from ...devices import (
     ToolChanger,
 )
 from ...devices.runtime.ids import (
+    BALANCE,
     EXPRESSION_DISPLAY,
     NECK,
     PIPETTE,
@@ -42,7 +44,6 @@ from ..action_handlers import (
 )
 
 
-BalanceReader = Callable[[], float]
 TappingConfigProvider = Callable[[], Mapping[str, Any]]
 
 
@@ -932,12 +933,9 @@ class PowderDispenseActionHandler:
         self,
         device_runtime: DeviceRuntime,
         tapping_config_provider: TappingConfigProvider,
-        *,
-        read_balance: BalanceReader,
     ) -> None:
         self._device_runtime = device_runtime
         self._tapping_config_provider = tapping_config_provider
-        self._read_balance = read_balance
 
     def __call__(
         self,
@@ -969,19 +967,32 @@ class PowderDispenseActionHandler:
                 POWDER_DISPENSER,
                 PowderDispenser,
             )
-            balance_reader = self._read_balance
         except Exception as exc:
             return _failed_result(
                 context,
                 ActionResultCode.DEVICE_UNAVAILABLE,
-                f"智能加粉依赖不可用: {exc}",
+                f"智能加粉装置不可用: {exc}",
                 operation=self._OPERATION,
                 device_id=POWDER_DISPENSER,
                 error=exc,
             )
+        try:
+            balance_reader = self._device_runtime.require(
+                BALANCE,
+                BalanceReader,
+            )
+        except Exception as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.DEVICE_UNAVAILABLE,
+                f"电子秤读数设备不可用: {exc}",
+                operation=self._OPERATION,
+                device_id=BALANCE,
+                error=exc,
+            )
         agent = PowderDispenseAgent(
             controller,
-            balance_reader,
+            lambda: balance_reader.read_weight().weight_g,
             log=lambda message: context.log(message, "info"),
             should_stop=lambda: context.stop_requested,
             sleep=context.sleep,
@@ -1044,7 +1055,6 @@ def create_manipulation_handler(
     device_runtime: DeviceRuntime,
     options: ManipulationHandlerOptions,
     tapping_config_provider: TappingConfigProvider,
-    read_balance: BalanceReader,
 ) -> ManipulateActionHandler:
     expression_handler = ExpressionDisplayActionHandler(device_runtime)
     handlers: dict[str, ActionHandler] = {
@@ -1061,7 +1071,6 @@ def create_manipulation_handler(
         "智能加粉": PowderDispenseActionHandler(
             device_runtime,
             tapping_config_provider,
-            read_balance=read_balance,
         ),
         "加粉装置": TappingActionHandler(device_runtime),
     }

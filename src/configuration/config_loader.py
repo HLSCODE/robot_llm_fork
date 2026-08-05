@@ -139,11 +139,8 @@ class _EnvironmentConfig:
     VISION_DEBUG_SAVE_DIR: str = "pictures"
     VISION_DEBUG_RETENTION_DAYS: int = 7
     VISION_DEBUG_MAX_RUNS: int = 100
-    BALANCE_CAMERA_INDEX: int = 12
-    BALANCE_REQUEST_TIMEOUT_SECONDS: float = 30.0
-    VVEAI_API_KEY: str = ""
-    VVEAI_BASE_URL: str = "https://api.vveai.com/v1"
-    VVEAI_MODEL: str = "doubao-seed-1-8-251228"
+    BALANCE_CAMERA_NAME: str = ""
+    BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS: float = 2.0
 
     # 手眼标定参数
     VISION_ROTATION_MATRIX: list = None
@@ -606,18 +603,9 @@ class _EnvironmentConfig:
         instance.VISION_DEBUG_MAX_RUNS = int(
             os.getenv("VISION_DEBUG_MAX_RUNS", "100")
         )
-        instance.BALANCE_CAMERA_INDEX = int(os.getenv("BALANCE_CAMERA_INDEX", "12"))
-        instance.BALANCE_REQUEST_TIMEOUT_SECONDS = float(
-            os.getenv("BALANCE_REQUEST_TIMEOUT_SECONDS", "30")
-        )
-        instance.VVEAI_API_KEY = os.getenv("VVEAI_API_KEY", "")
-        instance.VVEAI_BASE_URL = os.getenv(
-            "VVEAI_BASE_URL",
-            "https://api.vveai.com/v1",
-        )
-        instance.VVEAI_MODEL = os.getenv(
-            "VVEAI_MODEL",
-            "doubao-seed-1-8-251228",
+        instance.BALANCE_CAMERA_NAME = os.getenv("BALANCE_CAMERA_NAME", "")
+        instance.BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS = float(
+            os.getenv("BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS", "2")
         )
 
         # 手眼标定参数

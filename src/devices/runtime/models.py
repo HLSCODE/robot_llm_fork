@@ -32,6 +32,7 @@ class DeviceCapability(str, Enum):
     PIPETTE = "pipette"
     POWDER_DISPENSER = "powder_dispenser"
     CAMERA = "camera"
+    BALANCE_READER = "balance_reader"
     EXPRESSION_DISPLAY = "expression_display"
     SAFE_STATE = "safe_state"
 

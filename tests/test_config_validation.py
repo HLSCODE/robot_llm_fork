@@ -255,18 +255,16 @@ class ConfigurationValidationTests(unittest.TestCase):
                     Path(temporary_directory),
                     DATA_COLLECTION_FPS=0,
                     DATA_COLLECTION_ARMS=("left", "left"),
-                    BALANCE_CAMERA_INDEX=-1,
-                    VVEAI_API_KEY="change-me",
+                    BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS=0,
                 ),
                 _options(websocket_enabled=False),
             )
 
         self.assertEqual(
             {
-                "BALANCE_CAMERA_INDEX",
+                "BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS",
                 "DATA_COLLECTION_ARMS",
                 "DATA_COLLECTION_FPS",
-                "VVEAI_API_KEY",
             },
             {issue.field for issue in report.errors},
         )

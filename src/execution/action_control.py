@@ -8,6 +8,7 @@ from typing import Any
 
 from ..devices import StopMode
 from ..devices.runtime.ids import (
+    BALANCE,
     BODY_AXIS,
     CAMERA,
     EXPRESSION_DISPLAY,
@@ -339,6 +340,7 @@ MANIPULATE_CONTROL_POLICIES: Mapping[
         "智能加粉": _blocking_policy(
             "powder_dispense.run",
             POWDER_DISPENSER,
+            BALANCE,
         ),
         "加粉装置": _blocking_policy(
             "powder_dispenser.execute",

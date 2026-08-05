@@ -28,7 +28,8 @@ GUI/任务流
   -> ARM_ACTION / 执行器=智能加粉
   -> ExecutionManager / PowderDispenseActionHandler
   -> PowderDispenseAgent
-  -> balance_reader_simple.read_balance()
+  -> DeviceRuntime / BalanceReader
+  -> CameraAccessService + LLMRegistry / balance_reading profile
   -> DeviceRuntime / PowderDispenser
   -> 加粉装置升降/旋转
 ```
@@ -140,18 +141,24 @@ POWDER_DISPENSE_MEDIUM_STEP_THRESHOLD_MG=10
 POWDER_DISPENSE_SMALL_STEP_THRESHOLD_MG=3
 ```
 
-视觉读数使用 `src/vision/balance_reader_simple.py`，需要配置：
+电子秤是 `DeviceRuntime` 中的正式设备能力。真实 Provider 通过
+`CameraAccessService` 独占获取受管相机画面，再通过唯一 `LLMRegistry` 的
+`balance_reading` 视觉任务识别数值；不再自行创建 OpenCV 摄像头或直连独立 HTTP API。
+
+相机与 LLM 使用项目现有统一配置，电子秤只增加以下选择和等待配置：
 
 ```ini
-VVEAI_API_KEY=你的key
-VVEAI_BASE_URL=https://api.vveai.com/v1
-VVEAI_MODEL=doubao-seed-1-8-251228
-BALANCE_CAMERA_INDEX=12
-BALANCE_REQUEST_TIMEOUT_SECONDS=30
+# 名称可匹配受管相机返回的 serial 或 name；留空取首个有效画面
+BALANCE_CAMERA_NAME=
+BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS=2
+
+# balance_reading 默认使用 dashscope 视觉模型
+DASHSCOPE_API_KEY=你的key
+DASHSCOPE_MODEL=qwen-vl-max
 ```
 
-这些值只在启动边界解析，执行运行时通过 `ApplicationSettings` 显式注入，
-视觉天平模块本身不读取环境变量。
+摄像头索引、尺寸和 Provider 继续由 `CAMERA_PROVIDER`、`WEBCAM_*` 或
+`REALSENSE_*` 配置。所有值只在启动边界解析；设备 Provider 本身不读取环境变量。
 
 ## 安全保护
 
@@ -176,7 +183,7 @@ BALANCE_REQUEST_TIMEOUT_SECONDS=30
 
 ```text
 1. 使用 test_devices.py 确认升降、旋转、夹爪方向和地址正确。
-2. 使用 `uv run python -m src.vision.balance_reader_simple`，确认天平读数稳定。
+2. 在 GUI 相机测试中确认 `BALANCE_CAMERA_NAME` 对应画面稳定，并用定向测试验证读数 Provider。
 3. 将智能加粉目标设为 10mg，观察每轮日志和实际加粉效果。
 4. 根据粉末流速调整 POWDER_DISPENSE_*_STEP。
 5. 再测试 100mg。
@@ -185,7 +192,7 @@ BALANCE_REQUEST_TIMEOUT_SECONDS=30
 运行无硬件单元测试：
 
 ```bash
-python -m unittest tests.test_powder_dispense_agent
+python -m pytest -q tests/test_balance_reader.py tests/test_powder_dispense_agent.py
 ```
 
 版本化离线策略案例位于
@@ -221,9 +228,10 @@ python -m py_compile \
 | 文件 | 作用 |
 |---|---|
 | `src/agents/powder_dispense_agent.py` | 智能闭环加粉核心逻辑 |
-| `src/devices/tapping_controller.py` | 加粉装置底层控制 |
-| `src/vision/balance_reader_simple.py` | 大模型视觉读取天平 |
+| `src/devices/tools/powder_dispenser/driver.py` | 加粉装置底层控制 |
+| `src/devices/sensors/balance/provider.py` | 电子秤设备 Provider 与强类型读数 |
+| `src/application/balance.py` | 托管相机与统一 LLM 的应用层装配适配器 |
 | `src/execution/handlers/manipulation.py` | 加粉 action handler 与统一结果映射 |
-| `src/devices/runtime/factory.py` | 加粉设备注册和生命周期 |
+| `src/devices/runtime/factory.py` | 加粉装置注册和生命周期 |
 | `src/gui/views/dialogs.py` | GUI 动作配置面板 |
 | `src/robot_server/ws_server.py` | WebSocket 动作 schema |

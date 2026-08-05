@@ -89,7 +89,6 @@ class ApplicationSettingsTests(unittest.TestCase):
                 OPENAI_API_KEY="openai-secret",
                 DEEPSEEK_API_KEY="deepseek-secret",
                 DASHSCOPE_API_KEY="dashscope-secret",
-                VVEAI_API_KEY="vision-secret",
             )
         )
 
@@ -98,10 +97,7 @@ class ApplicationSettingsTests(unittest.TestCase):
             "openai-secret",
             settings.secrets.openai_api_key,
         )
-        self.assertEqual(
-            "vision-secret",
-            settings.secrets.vveai_api_key,
-        )
+        self.assertFalse(hasattr(settings.secrets, "vveai_api_key"))
 
 
 if __name__ == "__main__":

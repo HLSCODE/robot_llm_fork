@@ -7,12 +7,14 @@ from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.configuration.settings import ApplicationSettings
 from src.devices import (
     ArmId,
+    BalanceReading,
     DeviceCapability,
     DeviceRegistration,
     DeviceRuntime,
     DeviceState,
 )
 from src.devices.runtime.ids import (
+    BALANCE,
     EXPRESSION_DISPLAY,
     NECK,
     PIPETTE,
@@ -210,6 +212,17 @@ class _PowderDispenser:
 
     def rotation_to_home(self, position: int) -> None:
         self.calls.append(("rotation_home", position))
+
+    def close(self) -> None:
+        return None
+
+
+class _BalanceReader:
+    def __init__(self, readings: tuple[float, ...]) -> None:
+        self._readings = iter(readings)
+
+    def read_weight(self) -> BalanceReading:
+        return BalanceReading(next(self._readings), 0.0, "test")
 
     def close(self) -> None:
         return None
@@ -486,6 +499,15 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
             DeviceCapability.POWDER_DISPENSER,
             powder,
         )
+        balance = _BalanceReader((1.0,))
+        runtime.register(
+            DeviceRegistration(
+                device_id=BALANCE,
+                capabilities=frozenset({DeviceCapability.BALANCE_READER}),
+                factory=lambda: balance,
+                close=lambda value: value.close(),
+            )
+        )
         context, _logs = _context(control)
         handler = PowderDispenseActionHandler(
             runtime,
@@ -494,7 +516,6 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
                 "lift_dispense_position": 2,
                 "rotation_home_position": 3,
             },
-            read_balance=lambda: 1.0,
         )
 
         with self.assertRaises(ActionCancelledError):
@@ -518,12 +539,19 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
             DeviceCapability.POWDER_DISPENSER,
             powder,
         )
-        readings = iter((1.0, 1.001))
+        balance = _BalanceReader((1.0, 1.001))
+        runtime.register(
+            DeviceRegistration(
+                device_id=BALANCE,
+                capabilities=frozenset({DeviceCapability.BALANCE_READER}),
+                factory=lambda: balance,
+                close=lambda value: value.close(),
+            )
+        )
         context, _logs = _context()
         handler = PowderDispenseActionHandler(
             runtime,
             lambda: {},
-            read_balance=lambda: next(readings),
         )
 
         result = handler(

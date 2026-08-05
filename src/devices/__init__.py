@@ -17,11 +17,13 @@ from .runtime.arm_models import (
     TrajectorySaveResult,
 )
 from .runtime.camera_models import DepthCameraFrame
+from .runtime.sensor_models import BalanceReading
 from .runtime.contracts import (
     ArmMotion,
     ArmStateReader,
     ArmTelemetryReader,
     BodyAxis,
+    BalanceReader,
     CameraSource,
     DepthCameraSource,
     DigitalOutputs,
@@ -65,6 +67,8 @@ __all__ = [
     "ArmTelemetry",
     "ArmTelemetryReader",
     "BodyAxis",
+    "BalanceReader",
+    "BalanceReading",
     "CameraSource",
     "CartesianPose",
     "DepthCameraFrame",

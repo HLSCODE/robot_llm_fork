@@ -170,22 +170,10 @@ def validate_startup_configuration(
                 "OPENAI_API_KEY",
                 "不能使用示例占位凭据",
             )
-    if is_placeholder_secret(settings.secrets.vveai_api_key):
-        _error(
-            issues,
-            "placeholder_secret",
-            "VVEAI_API_KEY",
-            "不能使用示例占位凭据",
-        )
-    _non_negative_value(
-        settings.vision.balance_camera_index,
-        issues,
-        "BALANCE_CAMERA_INDEX",
-    )
     _positive_value(
-        settings.vision.balance_request_timeout_seconds,
+        settings.vision.balance_camera_wait_timeout_seconds,
         issues,
-        "BALANCE_REQUEST_TIMEOUT_SECONDS",
+        "BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS",
     )
     _positive_value(
         settings.vision.vision_schema_version,

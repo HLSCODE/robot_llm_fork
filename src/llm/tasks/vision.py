@@ -41,6 +41,20 @@ VISION_FUSION_PROFILE = TaskProfile(
 """,
 )
 
+BALANCE_READING_PROFILE = TaskProfile(
+    name="balance_reading",
+    version="1.0.0",
+    temperature=0.0,
+    max_tokens=16,
+    default_provider="dashscope",
+    required_capabilities=(LLMCapability.CHAT, LLMCapability.VISION_CHAT),
+    response_mode="text",
+    enable_thinking=False,
+    system_prompt_template="""你是电子秤读数识别模块。
+
+只识别电子秤显示屏当前显示的数值。只输出一个十进制数字，可包含正负号和小数点；不要输出单位、解释、Markdown 或其他文字。无法确认时输出 ERROR。""",
+)
+
 
 class VisionFusionTask:
     """Fuse one or more camera images into a single observation."""

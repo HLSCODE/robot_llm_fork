@@ -16,6 +16,7 @@ from .arm_models import (
 )
 from .camera_models import DepthCameraFrame
 from .models import StopMode
+from .sensor_models import BalanceReading
 
 
 @runtime_checkable
@@ -210,6 +211,12 @@ class DepthCameraSource(CameraSource, Protocol):
         self,
         camera_name: str | None = None,
     ) -> DepthCameraFrame | None: ...
+
+
+@runtime_checkable
+class BalanceReader(Protocol):
+    def read_weight(self) -> BalanceReading: ...
+    def close(self) -> None: ...
 
 
 @runtime_checkable

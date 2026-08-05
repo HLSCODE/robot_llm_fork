@@ -56,6 +56,7 @@ REMOVED_ARCHITECTURE_PATHS = (
     "src/core",
     "src/actions/Path",
     "src/actions/move_baseclient.py",
+    "src/vision/balance_reader_simple.py",
     "src/vision/pictures",
     "src/widgets/frame_grabber.py",
     "src/widgets/test_realsense_connection.py",

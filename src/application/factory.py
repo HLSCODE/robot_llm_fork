@@ -16,6 +16,7 @@ from ..execution.manager import ExecutionManager
 from ..llm import LLMRegistry
 from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
+from .balance import register_balance_reader
 from ..domain.execution_context import ExecutionContext
 from ..vision.service import VisionService
 from ..vision.simulation import VisionPipelineFixture
@@ -56,6 +57,15 @@ def create_application_services(
     task_composer = TaskComposerService(composition)
     device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
+    llm = LLMRegistry.from_settings(settings.llm, settings.secrets)
+    camera_access = CameraAccessService(device_runtime, resources)
+    register_balance_reader(
+        device_runtime,
+        camera_access,
+        llm,
+        settings.vision,
+        simulation=simulation,
+    )
     localization = LocalizationService()
     execution_context = ExecutionContext()
     vision_fixture = VisionPipelineFixture() if simulation else None
@@ -72,7 +82,6 @@ def create_application_services(
         settings.execution,
         settings.devices,
         settings.vision,
-        settings.secrets,
         localization.latest,
         execution_context,
         vision,
@@ -90,9 +99,7 @@ def create_application_services(
         skill_engine=skill_engine,
         preview_ttl_s=settings.runtime.command_preview_ttl_seconds,
     )
-    llm = LLMRegistry.from_settings(settings.llm, settings.secrets)
     manual_control = ManualControlService(device_runtime, resources)
-    camera_access = CameraAccessService(device_runtime, resources)
     teleoperation = TeleoperationService(device_runtime, resources)
     robot_query = RobotQueryService(device_runtime)
     trajectory_teaching = TrajectoryTeachingService(

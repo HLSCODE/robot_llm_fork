@@ -15,7 +15,6 @@ from ..devices import DeviceNotRegisteredError, DeviceRuntime
 from ..configuration.settings import (
     DeviceSettings,
     ExecutionSettings,
-    SecretSettings,
     VisionSettings,
 )
 from .action_control import (
@@ -80,7 +79,6 @@ class ActionEngine:
         execution_settings: ExecutionSettings,
         device_settings: DeviceSettings,
         vision_settings: VisionSettings,
-        secret_settings: SecretSettings,
         localization_reader,
         execution_context: ExecutionContext,
         vision_service: VisionService,
@@ -114,7 +112,6 @@ class ActionEngine:
         )
         self._tapping_config_provider = device_settings.tapping_config
         self._vision_settings = vision_settings
-        self._secret_settings = secret_settings
         self._localization_reader = localization_reader
         self._handler_registry = self._create_handler_registry()
 
@@ -160,7 +157,6 @@ class ActionEngine:
             self._device_runtime,
             self._manipulation_handler_options,
             self._tapping_config_provider,
-            self._read_balance,
         )
         validate_control_policy_routes(
             "manipulation executors",
@@ -213,17 +209,6 @@ class ActionEngine:
         )
         registry.validate_complete()
         return registry
-
-    def _read_balance(self) -> float:
-        from ..vision.balance_reader_simple import read_balance
-
-        return read_balance(
-            camera_index=self._vision_settings.balance_camera_index,
-            api_key=self._secret_settings.vveai_api_key,
-            base_url=self._vision_settings.vveai_base_url,
-            model=self._vision_settings.vveai_model,
-            timeout_seconds=(self._vision_settings.balance_request_timeout_seconds),
-        )
 
     def run(
         self,

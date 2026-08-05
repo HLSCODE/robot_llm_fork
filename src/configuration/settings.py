@@ -80,7 +80,6 @@ class SecretSettings:
     dashscope_api_key: str = ""
     minicpm_ask_api_key: str = ""
     websocket_auth_token: str = ""
-    vveai_api_key: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,10 +366,8 @@ class VisionSettings:
     vision_debug_save_dir: str = "pictures"
     vision_debug_retention_days: int = 7
     vision_debug_max_runs: int = 100
-    balance_camera_index: int = 12
-    balance_request_timeout_seconds: float = 30.0
-    vveai_base_url: str = "https://api.vveai.com/v1"
-    vveai_model: str = "doubao-seed-1-8-251228"
+    balance_camera_name: str = ""
+    balance_camera_wait_timeout_seconds: float = 2.0
     vision_rotation_matrix: tuple[float, ...] = (
         0.00215684,
         0.97503835,
