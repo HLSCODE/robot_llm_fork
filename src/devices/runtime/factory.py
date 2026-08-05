@@ -7,9 +7,11 @@ from typing import Any
 from ...configuration.settings import (
     ApplicationSettings,
     DeviceSettings,
-    RobotSettings,
-    VisionSettings,
 )
+from ..cameras.registry import resolve_camera_provider
+from ..displays.display import ExpressionDisplay, ExpressionDisplaySettings
+from ..displays.registry import resolve_expression_display_provider
+from ..motion.mobile_base import TCP_MOBILE_BASE_PROVIDER
 from ..transports import SerialSettings, SerialTransport
 from ..tools.pipette import PipetteAdapter
 from ..tools.relay import RelayBankAdapter
@@ -152,6 +154,13 @@ def _register_real_devices(
     settings: ApplicationSettings,
 ) -> None:
     robot_provider = resolve_robot_provider(settings.robot)
+    camera_provider = resolve_camera_provider(settings.vision)
+    display_settings = ExpressionDisplaySettings.from_mapping(
+        settings.devices.expression_display_mapping(
+            Path(__file__).resolve().parents[3]
+        )
+    )
+    resolve_expression_display_provider(display_settings.provider)
     runtime.register(
         _registration(
             ROBOT_SYSTEM,
@@ -170,7 +179,7 @@ def _register_real_devices(
         _registration(
             MOBILE_BASE,
             {DeviceCapability.MOTION, DeviceCapability.MOBILE_BASE},
-            lambda: _mobile_base_factory(settings.robot),
+            lambda: TCP_MOBILE_BASE_PROVIDER.create(settings.robot),
         )
     )
     runtime.register(
@@ -217,8 +226,8 @@ def _register_real_devices(
     runtime.register(
         _registration(
             CAMERA,
-            {DeviceCapability.CAMERA},
-            lambda: _camera_factory(settings.vision),
+            set(camera_provider.capabilities),
+            lambda: camera_provider.create(settings.vision),
             lambda device: device.stop(),
         )
     )
@@ -226,7 +235,7 @@ def _register_real_devices(
         _registration(
             EXPRESSION_DISPLAY,
             {DeviceCapability.EXPRESSION_DISPLAY},
-            lambda: _expression_display_factory(settings.devices),
+            lambda: ExpressionDisplay(display_settings),
         )
     )
 
@@ -246,18 +255,6 @@ def _body_factory(settings: DeviceSettings) -> Any:
         ),
         slave_id=settings.body_slave_id,
     )
-
-
-def _mobile_base_factory(settings: RobotSettings) -> Any:
-    from ..motion.mobile_base.move_controller import RobotMoveController
-
-    controller = RobotMoveController(
-        server_host=settings.move_controller_host,
-        server_port=settings.move_controller_port,
-        client_bind_port=settings.move_controller_client_bind_port,
-    )
-    controller.connect()
-    return controller
 
 
 def _neck_factory(settings: DeviceSettings) -> Any:
@@ -340,27 +337,3 @@ def _powder_dispenser_factory(settings: DeviceSettings) -> Any:
     from ..tools.powder_dispenser.driver import TappingController
 
     return TappingController.from_settings(settings)
-
-
-def _camera_factory(settings: VisionSettings) -> Any:
-    from ..cameras.camera_factory import create_camera_manager
-
-    manager = create_camera_manager(settings)
-    if manager is None:
-        raise DeviceInitializationError("camera manager unavailable")
-    return manager
-
-
-def _expression_display_factory(settings: DeviceSettings) -> Any:
-    from ..displays.display import (
-        ExpressionDisplay,
-        ExpressionDisplaySettings,
-    )
-
-    return ExpressionDisplay(
-        ExpressionDisplaySettings.from_mapping(
-            settings.expression_display_mapping(
-                Path(__file__).resolve().parents[3]
-            )
-        )
-    )

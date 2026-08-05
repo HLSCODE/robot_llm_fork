@@ -112,7 +112,7 @@ class _EnvironmentConfig:
     DATA_COLLECTION_CALIBRATION_ID: str = ""
 
     # RealSense 相机配置
-    CAMERA_PROVIDER: str = "auto"
+    CAMERA_PROVIDER: str = "realsense"
     REALSENSE_DEVICE_SN: str = ""
     REALSENSE_DEVICE_NAMES: str = ""
     REALSENSE_COLOR_WIDTH: int = 640
@@ -563,7 +563,7 @@ class _EnvironmentConfig:
             "DATA_COLLECTION_CALIBRATION_ID",
             "",
         )
-        instance.CAMERA_PROVIDER = os.getenv("CAMERA_PROVIDER", "auto")
+        instance.CAMERA_PROVIDER = os.getenv("CAMERA_PROVIDER", "realsense")
         instance.REALSENSE_DEVICE_SN = os.getenv("REALSENSE_DEVICE_SN", "")
         instance.REALSENSE_DEVICE_NAMES = os.getenv("REALSENSE_DEVICE_NAMES", "")
         instance.REALSENSE_COLOR_WIDTH = int(os.getenv("REALSENSE_COLOR_WIDTH", "640"))

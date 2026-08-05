@@ -19,7 +19,7 @@ APPLICATION_BOUNDARY_DIRECTORIES = (
 FORBIDDEN_DEPENDENCIES = (
     "src.devices.robots.realman",
     "src.devices.motion",
-    "src.devices.cameras.camera_factory",
+    "src.devices.cameras",
     "src.devices.tools",
     "src.devices.displays",
     "src.devices.transports",
@@ -76,6 +76,9 @@ LEGACY_HARDWARE_PATHS = (
     "src/devices/pwm_neck.py",
     "src/devices/relay.py",
     "src/devices/tapping_controller.py",
+    "src/devices/cameras/camera_factory.py",
+    "src/devices/motion/mobile_base/move_controller.py",
+    "src/devices/motion/mobile_base/tcp_client.py",
 )
 
 

@@ -5,7 +5,7 @@
 > 最近更新：2026-08-05
 >
 > 当前里程碑：M5 — 第二轮目录职责、Provider 边界与真实硬件验收
-> 计划进度：121/131（119 DONE + 2 DROPPED，92.4%）
+> 计划进度：123/131（121 DONE + 2 DROPPED，93.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -830,8 +830,8 @@ src/
 | G-021 | P2 | DONE | Qt 通用组件和 AI Assistant 已迁入 `gui/views`，AI Controller 与音频播放生命周期进入 `gui/controllers`；生产代码、测试、Mypy、wheel 门禁和文档均直切新路径，`widgets` 与 `ai_integration` 顶级目录已删除，不保留转发模块 |
 | G-022 | P2 | DONE | 转圈注液与确定性闭环加粉已迁入 `execution/workflows`，handler 和专项测试直切新路径；动作参数、typed result、取消/暂停和安全回位语义保持不变，`actions` 与 `agents` 顶级目录已删除，不保留转发模块 |
 | G-023 | P2 | DONE | `devices/transports/devices` 已删除；ElectricGripper、StepperMotor 只有粉末装置调用方，因此直接迁入 `tools/powder_dispenser`；relay/tool-changer/pipette Adapter 分别与 Driver 共置；Transport 顶层不再导出语义设备，只保留通信、策略、协议、错误和测试 fake；源码与 wheel 边界禁止旧目录回归 |
-| G-024 | P2 | TODO | 相机对齐机械臂 Provider/Registry 模式，RealSense 与 OpenCV 形成平行 Provider；未知 Provider 启动失败，不再隐式落入 RealSense；共享 camera capability contract 覆盖两种实现 |
-| G-025 | P2 | TODO | 为移动底盘建立当前 TCP 产品的明确 Provider/Adapter/Client 垂直切片，并统一显示屏 Provider 注册方式；没有第二实现前不创建空 Provider 框架或兼容开关 |
+| G-024 | P2 | DONE | 相机已建立静态 Provider/Registry；RealSense 与 OpenCV 使用平行 Provider 并共享 `CameraSource`/camera capability，`CAMERA_PROVIDER` 只接受显式注册值，未知值在 DeviceRuntime 装配阶段失败；删除隐式 RealSense 回退、异常吞并和旧 `camera_factory.py`，不保留 `auto`/`webcam` 兼容值 |
+| G-025 | P2 | DONE | 移动底盘已按当前 TCP 产品拆为 Provider/Adapter/Client 纵向切片，Client 独占 socket/JSON 帧，Adapter 实现 `MobileBase`，Provider 只负责装配；显示屏以静态 ProviderDefinition/Registry 取代字符串动态导入；删除旧底盘 Controller/Client 路径且未建立无第二实现的底盘 Registry |
 | G-026 | P2 | TODO | 拆分视觉内部 pipeline/relocalization/artifacts/CLI 边界；将 UDP 定位 socket/线程移出 Application Service 到可注入 Provider，并用明确命名区分外部定位与视觉工位重定位 |
 | G-027 | P3 | TODO | 将 `execution/action_handlers.py` 按实际职责改名为 handler API/registry；更新 README 中已删除的 core、arm_sdk、base_move、cameras 等旧目录说明，并增加目录职责与禁止依赖检查 |
 
@@ -1200,13 +1200,13 @@ M5 模块目录与依赖边界治理
 | 2026-08-05 | M5 | B/E/F/G | 视觉电子秤设备能力收敛 | G-020 TODO → DONE | 新增 BalanceReader/BalanceReading 与 balance 运行时资源；真实 Provider 组合受管相机会话和统一 LLM 视觉任务，模拟 Provider 可无硬件运行；智能加粉从 DeviceRuntime 获取双设备依赖；删除执行引擎动态导入、旧 OpenCV/HTTP 文件和 VVEAI 专用配置，不保留兼容入口 | Compile、Ruff、Mypy（42 files）、Pytest（392 passed + 43 subtests，59.08%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-05 | M5 | A/D/F/G | GUI 顶级目录与执行工作流收敛 | G-021/G-022 TODO → DONE | 通用 Qt 组件和 AI Assistant 迁入 gui/views，AI/音频控制进入 gui/controllers；转圈注液和闭环加粉迁入 execution/workflows；删除 widgets、ai_integration、actions、agents 四个顶级目录及全部旧导入，不保留转发；旧目录加入源码与 wheel 禁止清单 | Compile、Ruff、Mypy（42 files）、Pytest（392 passed + 43 subtests，59.07%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-05 | M5 | B/G | Transport 语义设备与工具垂直切片收敛 | G-023 TODO → DONE | ElectricGripper/StepperMotor 迁入 powder_dispenser；Relay/ToolChanger/Pipette Adapter 与 Driver 共置；删除 tools/adapters.py 和 transports/devices，不保留转发；Transport 只导出通信/协议能力，并增加真实 Modbus 帧特征测试与旧目录/wheel 门禁 | Compile、Ruff、Mypy（42 files）、Pytest（395 passed + 43 subtests，59.53%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
+| 2026-08-05 | M5 | B/G | 相机、移动底盘与显示 Provider 边界收敛 | G-024/G-025 TODO → DONE | 相机建立 RealSense/OpenCV 静态 Provider Registry 和共享 capability，未知配置在组合根失败；移动底盘拆为单一 TCP Provider/Adapter/Client 产品切片；显示屏动态导入替换为静态 Provider 注册；删除 camera_factory、旧底盘 Controller/Client，不增加兼容值或空底盘 Registry | Compile、Ruff、Mypy（42 files）、Pytest（401 passed + 43 subtests，60.79%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 
-1. **G-024/G-025**：相机对齐机械臂 Provider Registry；随后明确当前底盘 TCP 产品和显示屏 Provider 垂直切片。
-2. **G-026/G-027**：拆分视觉/定位职责，修正 handler registry 命名和 README 旧目录说明。
-3. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-4. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+1. **G-026/G-027**：拆分视觉/定位职责，修正 handler registry 命名和 README 旧目录说明。
+2. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+3. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
-6. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+5. 完成 simulation smoke test 后执行逐设备真实硬件验收。

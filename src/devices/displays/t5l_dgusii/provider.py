@@ -3,6 +3,7 @@ from __future__ import annotations
 from threading import RLock
 
 from ..base import ExpressionSpec
+from ..provider import ExpressionDisplayProviderDefinition
 
 
 class T5LDgusiiExpressionDisplay:
@@ -140,3 +141,15 @@ class T5LDgusiiExpressionDisplay:
 
 def create_display(settings) -> T5LDgusiiExpressionDisplay:
     return T5LDgusiiExpressionDisplay(settings)
+
+
+T5L_DGUSII_DISPLAY_PROVIDER = ExpressionDisplayProviderDefinition(
+    name="t5l_dgusii",
+    create=create_display,
+)
+
+__all__ = [
+    "T5L_DGUSII_DISPLAY_PROVIDER",
+    "T5LDgusiiExpressionDisplay",
+    "create_display",
+]

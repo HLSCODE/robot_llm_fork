@@ -88,7 +88,7 @@
 |---|---|---|---|
 | `robot-system` | `RobotSystem` 核心能力及可选 teleop/trajectory/tool-rack 能力 | `ROBOT_PROVIDER=realman` adapter | 有 |
 | `body-axis` | `BodyAxis` | ModbusMotor | 有 |
-| `mobile-base` | `MobileBase` | RobotMoveController | 有 |
+| `mobile-base` | `MobileBase` | `TcpMobileBaseAdapter` | 有 |
 | `neck` | `NeckMotion` | PWMNeckController | 有 |
 | `relay-bank` | `DigitalOutputs` | RelayController adapter | 有 |
 | `tool-changer` | `ToolChanger` | Kuaihuanshou adapter | 有 |

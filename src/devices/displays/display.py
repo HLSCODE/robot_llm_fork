@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from .base import ExpressionDisplayBackend, ExpressionDisplayFactory, ExpressionSpec
+from .base import ExpressionDisplayBackend, ExpressionSpec
 
 
 class ExpressionDisplayUnavailable(RuntimeError):
@@ -22,10 +21,6 @@ DEFAULT_EXPRESSIONS: tuple[ExpressionSpec, ...] = (
 )
 
 PROVIDER_T5L_DGUSII = "t5l_dgusii"
-
-_PROVIDER_ENTRYPOINTS = {
-    PROVIDER_T5L_DGUSII: "src.devices.displays.t5l_dgusii.provider:create_display",
-}
 
 
 def _parse_bool(value: Any, *, default: bool = False) -> bool:
@@ -191,19 +186,8 @@ class ExpressionDisplay:
         self._backend.close()
 
 
-def _load_provider_factory(provider: str) -> ExpressionDisplayFactory:
-    entrypoint = _PROVIDER_ENTRYPOINTS.get(provider)
-    if entrypoint is None:
-        allowed = ", ".join(sorted(_PROVIDER_ENTRYPOINTS))
-        raise ExpressionDisplayUnavailable(
-            f"Unknown expression display provider: {provider}. Allowed providers: {allowed}"
-        )
-
-    module_name, factory_name = entrypoint.split(":", 1)
-    module = import_module(module_name)
-    return getattr(module, factory_name)
-
-
 def create_backend(settings: ExpressionDisplaySettings) -> ExpressionDisplayBackend:
-    factory = _load_provider_factory(settings.provider)
-    return factory(settings)
+    from .registry import resolve_expression_display_provider
+
+    provider = resolve_expression_display_provider(settings.provider)
+    return provider.create(settings)

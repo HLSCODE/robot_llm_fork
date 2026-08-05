@@ -339,7 +339,7 @@ class DeviceSettings:
 
 @dataclass(frozen=True, slots=True)
 class VisionSettings:
-    camera_provider: str = "auto"
+    camera_provider: str = "realsense"
     realsense_device_sn: str = ""
     realsense_device_names: str = ""
     realsense_color_width: int = 640
