@@ -2,10 +2,10 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-08-04
+> 最近更新：2026-08-05
 >
-> 当前里程碑：M5 — 软件架构重构项已收敛，进入供应商扩展与真实硬件验收
-> 计划进度：117/123（115 DONE + 2 DROPPED，95.1%）
+> 当前里程碑：M5 — 第二轮目录职责、Provider 边界与真实硬件验收
+> 计划进度：117/131（115 DONE + 2 DROPPED，89.3%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -143,6 +143,17 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 
 仍需继续收敛的重点：
 
+- 视觉天平读数仍直接创建 OpenCV 相机并调用独立 HTTP 模型接口，尚未进入
+  `CameraAccessService`、`LLMRegistry` 和 `DeviceRuntime` 的统一所有权边界。
+- `src/widgets/` 与 `src/ai_integration/` 实际均为 Qt 表现层，应收敛到 `src/gui/`；
+  `src/actions/` 与 `src/agents/` 当前仅承载执行 handler 的复合工作流，应收敛到
+  `src/execution/workflows/`。
+- `src/devices/transports/devices/` 混入 ElectricGripper、StepperMotor 等语义设备；
+  Transport 目录应只保留通信、协议和测试能力，设备客户端应回到所属设备包。
+- 相机仍使用条件工厂而非与机械臂一致的 Provider 注册表；移动底盘和显示屏的
+  Provider/Adapter/Driver 组织也尚未统一。
+- `vision` 同时混放 pipeline、专用几何、CLI、模型调用和产物治理；
+  `application/localization.py` 同时承担应用服务与 UDP socket/线程 Provider 职责。
 - `src/robot_server/ws_server.py` 的传输宿主继续按连接、投递和会话职责细分。
 - `src/gui/controllers/main_window.py` 的页面协调逻辑继续按稳定业务域下沉 controller。
 - `src/execution/engine.py`
@@ -251,7 +262,7 @@ Application Service + Port/Protocol + Provider/Adapter/Driver 的依赖方向。
 src/devices/
 ├── __init__.py                 # 对上层公开稳定的设备能力 API
 ├── runtime/                    # contracts、models、errors、生命周期、资源与 fake
-├── transports/                 # serial、TCP、CRC、Modbus RTU
+├── transports/                 # 仅包含 serial、TCP、CRC、Modbus RTU 与 transport fake
 ├── robots/
 │   ├── provider.py             # 厂商无关的 provider 定义
 │   ├── registry.py             # provider 注册、查找与失败策略
@@ -259,7 +270,8 @@ src/devices/
 │       ├── provider.py         # 配置解析与实例装配
 │       ├── adapter.py          # 项目 capability 到厂商 API 的转换
 │       └── driver.py           # 厂商连接和底层调用；SDK 来自安装依赖
-├── cameras/                    # camera factory、realsense、opencv
+├── cameras/                    # provider/registry、realsense、opencv
+├── sensors/                    # balance 等只读测量能力及其 Provider
 ├── motion/                     # mobile_base、body_axis、neck
 ├── tools/                      # relay、tool_changer、pipette、powder
 └── displays/                   # t5l_dgusii
@@ -269,9 +281,59 @@ src/devices/
 实现；Adapter 实现项目能力接口并转换模型/错误；Driver 封装厂商协议；Transport
 只处理通信。禁止建立混放协议、驱动和应用逻辑的万能 `services/` 目录。
 
+当前容易混淆但应保留的稳定目录职责如下：
+
+| 目录 | 唯一职责 | 禁止放入 |
+|---|---|---|
+| `skill_system/` | 技能模型、技能库、匹配、参数绑定与动作展开 | LLM Provider、硬件调用、执行线程 |
+| `data_collection/` | 示教采样、Episode 编码、schema、事务写入与离线校验 | WebSocket 会话、相机租约、遥操作所有权 |
+| `persistence/` | 通用 Repository、JSON 文档和原子文件读写 | 业务流程、Qt、设备 SDK |
+| `geometry/` | 跨领域可复用的纯位姿与坐标计算 | 相机 I/O、模型推理、工位会话 |
+| `observability/` | 通用日志、指标输出与上下文传播基础设施 | 具体业务指标模型和控制决策 |
+
+以下同名或近似职责属于合理分层，不做机械合并：
+
+- `application/data_collection.py` 编排采集会话、资源租约与状态；
+  `data_collection/` 负责采样和持久化实现。
+- `CompositionService` 持有已持久化动作、任务和共享序列；
+  `TaskComposerService` 持有尚未持久化的 GUI 组合草稿。
+- UDP 外部定位与视觉工位重定位不是同一能力；通过更明确的类型和模块命名消除
+  `Localization`/`Relocalization` 歧义，不合并状态所有权。
+
+第二轮目录目标：
+
+```text
+src/
+├── application/               # 所有入口可复用的用例服务
+├── execution/
+│   ├── handlers/              # 单动作 handler
+│   └── workflows/             # circle_dispense、powder_dispense 等复合执行流程
+├── devices/
+│   ├── runtime/
+│   ├── transports/            # 不允许出现语义设备
+│   ├── robots/
+│   ├── cameras/
+│   ├── sensors/
+│   ├── motion/
+│   ├── tools/
+│   └── displays/
+├── gui/
+│   ├── controllers/           # 包含 AI Qt controller
+│   ├── views/                 # 包含通用 widgets 与 AI Assistant
+│   ├── bridges/
+│   └── view_models/
+├── vision/                    # pipeline、relocalization、artifacts 的清晰子域
+├── skill_system/
+├── data_collection/
+├── persistence/
+├── geometry/
+└── observability/
+```
+
 迁移按领域整批直接切换导入和组合根，随后删除旧目录；不保留 import 转发、旧新
-目录双栈或兼容开关。表现层目标组织为 `presentation/gui` 与
-`presentation/websocket`，但只有在依赖先收敛到 Application Service 后才移动文件。
+目录双栈或兼容开关。当前不为目录整洁强制增加 `presentation/` 或
+`infrastructure/` 大目录；真正新增 HTTP 入口时，再评估将 WebSocket/HTTP 统一到
+`interfaces/`，避免提前增加无业务收益的层级。
 
 ## 5. 优先级定义
 
@@ -751,6 +813,32 @@ src/devices/
 | G-018 | P2 | DONE | 原 core 已拆分并删除：bootstrap、configuration、persistence、domain、geometry、observability 形成显式职责；domain/configuration/persistence/geometry 单向依赖由 AST 测试保护，launcher 与 console entry 已直切 |
 | G-019 | P2 | DONE | 删除无引用脚本、调试 Widget、源码内轨迹/图片和旧补偿/单相机环境变量；瓶子抓取迁入 vision 且调试产物进入受管目录；Mypy、AST 旧路径和 wheel 禁止内容门禁已扩展 |
 
+### 12.6 第二轮目录职责与 Provider 边界
+
+本轮审查确认：现有目录问题并非全部属于重复实现。处理时必须先判断状态所有者和
+变化原因，再选择移动、改名、拆分或保留。禁止只为缩短顶层目录列表建立
+`common`、`services`、`infrastructure` 等新的万能目录。
+
+| ID | 优先级 | 状态 | 内容 |
+|---|---:|---|---|
+| G-020 | P1 | TODO | 将视觉天平读数抽象为 `BalanceReader` 设备能力和强类型结果；Provider 复用 `CameraAccessService` 与 `LLMRegistry`，由 DeviceRuntime 管理状态和生命周期；删除执行引擎中的动态导入和独立 OpenCV/HTTP 双入口 |
+| G-021 | P2 | TODO | 将 `src/widgets/` 与 `src/ai_integration/` 整批迁入 `src/gui/views`、`src/gui/controllers`，更新导入和边界测试后直接删除旧顶级目录，不保留转发模块 |
+| G-022 | P2 | TODO | 将仅由 execution handler 消费的 `actions/circle_dispense.py` 与 `agents/powder_dispense_agent.py` 迁入 `execution/workflows/`；保持领域结果、取消和安全回位语义不变，删除空顶级目录 |
+| G-023 | P2 | TODO | 清空 `devices/transports/devices/`：ElectricGripper、StepperMotor 迁入粉末装置所属包或经真实复用证明后的设备包；relay/tool-changer/pipette adapter 与各自 Driver 共置；Transport 只保留通信与协议 |
+| G-024 | P2 | TODO | 相机对齐机械臂 Provider/Registry 模式，RealSense 与 OpenCV 形成平行 Provider；未知 Provider 启动失败，不再隐式落入 RealSense；共享 camera capability contract 覆盖两种实现 |
+| G-025 | P2 | TODO | 为移动底盘建立当前 TCP 产品的明确 Provider/Adapter/Client 垂直切片，并统一显示屏 Provider 注册方式；没有第二实现前不创建空 Provider 框架或兼容开关 |
+| G-026 | P2 | TODO | 拆分视觉内部 pipeline/relocalization/artifacts/CLI 边界；将 UDP 定位 socket/线程移出 Application Service 到可注入 Provider，并用明确命名区分外部定位与视觉工位重定位 |
+| G-027 | P3 | TODO | 将 `execution/action_handlers.py` 按实际职责改名为 handler API/registry；更新 README 中已删除的 core、arm_sdk、base_move、cameras 等旧目录说明，并增加目录职责与禁止依赖检查 |
+
+完成标准：
+
+- 顶层 `widgets/`、`ai_integration/`、`actions/`、`agents/` 已删除且无 import 转发。
+- `devices/transports/` 不包含 ElectricGripper、StepperMotor 或其他语义设备。
+- 天平读数不直接创建相机、不绕过 LLMRegistry，也不由 ActionEngine 装配具体实现。
+- 相机未知 Provider 显式失败；RealSense/OpenCV 通过同一 capability contract。
+- Application Service 不直接创建定位 socket；外部定位与视觉重定位名称和状态所有权清晰。
+- AST 边界测试、Mypy、simulation、完整质量门禁和 wheel smoke 全部通过。
+
 ## 13. 跨 Track 关键决策
 
 以下决策需要在 M0/M1 期间确认：
@@ -879,6 +967,11 @@ M5 模块目录与依赖边界治理
 - 表现层不再直接读取或控制 DeviceRuntime，只依赖 Application Service 和 DTO。
 - GUI、WebSocket 与 Voice 共用应用级唯一 LLMRegistry 生命周期。
 - 原 `core` 已拆分并删除，启动、配置、持久化、领域模型、几何和日志各有唯一目录。
+- GUI Qt 组件只存在于 `src/gui/`；复合执行流程只存在于
+  `src/execution/workflows/`，不再使用单模块顶级 `widgets/actions/agents` 目录。
+- Transport 目录只处理通信；天平、相机、底盘和显示屏的产品变化点通过明确
+  capability 与 Provider/Adapter/Driver 边界隔离。
+- 视觉 pipeline、UDP 外部定位和视觉工位重定位具有互不混淆的模块与状态所有者。
 - AST 依赖边界、Mypy、simulation、完整质量门禁和 wheel smoke 全部通过。
 
 ## 15. 质量门禁
@@ -974,6 +1067,8 @@ M5 模块目录与依赖边界治理
 | 相机/串口资源泄漏 | P1 | 后续任务不可用 | DeviceRuntime、session、finally/shutdown |
 | 文档目标与当前实现混淆 | P2 | 错误决策 | 文档分类、状态和 superseded 标记 |
 | 重构范围过大 | P2 | 长期分支、难以合并 | 按能力域拆分，每个域直接切换并删除旧实现 |
+| 按目录形状机械合并不同状态所有者 | P2 | 产生万能模块、循环依赖和隐式共享状态 | 先确认唯一所有者与变化原因；合理分层只改名或补文档，不强制合并 |
+| 语义设备继续藏在 Transport/视觉工具模块 | P1 | 绕过资源、生命周期和错误治理 | 设备 capability + Provider 注册；AST 禁止上层直接创建具体相机、socket 和硬件客户端 |
 
 ## 19. 项目级完成定义
 
@@ -984,8 +1079,11 @@ M5 模块目录与依赖边界治理
 - [ ] GUI、WebSocket、voice 和 AI 不直接操作具体动作实现。
 - [ ] ExecutionManager 是唯一序列执行所有者。
 - [ ] DeviceRuntime 是唯一硬件生命周期所有者。
+- [ ] 天平、相机等设备型能力不绕过 DeviceRuntime、资源租约和共享 Provider。
 - [x] teleop、sequence、测试和直接控制服从资源仲裁。
 - [x] runtime/domain/configuration/persistence/geometry 不反向依赖 GUI 或 WebSocket。
+- [ ] GUI Qt 代码已收敛到 `src/gui/`，执行复合工作流已收敛到
+  `src/execution/workflows/`，Transport 不包含语义设备。
 
 ### 安全与协议
 
@@ -1015,6 +1113,7 @@ M5 模块目录与依赖边界治理
 - [x] 文件日志结构化、按日轮转并可通过 request_id/run_id 关联请求和执行。
 - [x] 无 I/O 关键热路径具有版本化性能预算和跨平台回归门禁。
 - [ ] legacy 执行实现和过期文档已清理。
+- [ ] README、目录职责表和实际源码结构一致，旧目录不会通过打包或导入重新出现。
 
 ## 20. 进度维护规则
 
@@ -1092,11 +1191,17 @@ M5 模块目录与依赖边界治理
 | 2026-08-04 | M5 | E/G | LLM Registry 唯一生命周期与冗余 SDK 清理 | G-017 TODO → DONE | 组合根唯一创建 LLMRegistry 并由 ApplicationServices 持有；GUI、WebSocket、Voice 共享同一实例，附加服务停止不再关闭 Provider，应用宿主在会话结束后统一关闭；删除未引用的 RealMan vendor 绑定/DLL、打包和质量配置，SDK 只来自 `robotic-arm` 依赖；新增唯一创建点、共享实例和关闭顺序测试 | Compile、Ruff、Mypy（39 files）、Pytest（374 passed + 43 subtests，56.70%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-04 | M5 | D/C/G | GUI 与 WebSocket 表现层目录及设备边界收敛 | G-016 TODO → DONE | GUI 直切 controllers/bridges/view_models/views，WebSocket 直切 controllers/protocol/security/metrics；删除全部旧平铺模块和导入路径；ApplicationServices 删除 DeviceRuntime 字段，相机状态和设备就绪查询提升为应用服务契约；AIController 对 Qt Bridge 改为构造注入和仅类型依赖；新增旧路径与运行时泄漏边界测试 | Compile、Ruff、Mypy（39 files）、Pytest（376 passed + 43 subtests，56.81%）、LLM golden（14/14）、性能回归（7/7）、GUI/Server extra 及 Wheel smoke 全通过 |
 | 2026-08-04 | M5 | G/F | core 职责拆分与历史路径清理 | G-018/G-019 TODO → DONE | 删除原 core 聚合目录并直切 bootstrap/configuration/domain/persistence/geometry/observability；抽取唯一机械臂名称规范化定义并建立稳定层单向依赖；删除未引用脚本、调试 Widget、源码内轨迹/图片、旧补偿字段和单相机环境变量；瓶子抓取迁入 vision 并只写受管调试目录；wheel 新增历史内容禁止清单 | Compile、Ruff、Mypy（39 files）、Pytest（380 passed + 43 subtests，58.87%）、LLM golden（14/14）、性能回归（7/7）、GUI/Server/Hardware extra 及 Wheel smoke 全通过 |
+| 2026-08-05 | M5 | B/D/F/G | 第二轮目录职责与 Provider 边界评审 | G-020～G-027 新增为 TODO | 确认 GUI、执行工作流、Transport 语义设备、视觉天平、相机/底盘/显示 Provider、视觉/定位边界和过期目录文档等剩余问题；同时明确 data_collection、composition 和两类 localization 的合理分层，不做机械合并 | 只读源码、调用点、依赖边界与专项文档评审；本次仅更新计划文档 |
 
 ## 22. 建议的首批实施顺序
 
-1. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-2. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-3. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
+1. **G-020**：先将视觉天平收敛为统一设备能力，消除直接相机和独立模型 HTTP 双入口。
+2. **G-021/G-022**：整批收敛 GUI Qt 目录和 execution workflows，删除四个单一职责顶级目录，不保留导入兼容。
+3. **G-023**：清空 `devices/transports/devices`，按所属设备包共置 Driver/Adapter，增加 Transport 禁止语义设备边界测试。
+4. **G-024/G-025**：相机对齐机械臂 Provider Registry；随后明确当前底盘 TCP 产品和显示屏 Provider 垂直切片。
+5. **G-026/G-027**：拆分视觉/定位职责，修正 handler registry 命名和 README 旧目录说明。
+6. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+7. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+8. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
    验收，并在真实双臂硬件上测量采样偏差分布。
-4. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+9. 完成 simulation smoke test 后执行逐设备真实硬件验收。
