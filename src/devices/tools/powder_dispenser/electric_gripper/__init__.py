@@ -1,4 +1,4 @@
-"""Electric gripper exports."""
+"""Electric gripper used by the powder dispenser assembly."""
 
 from .client import ElectricGripper
 from .registers import (

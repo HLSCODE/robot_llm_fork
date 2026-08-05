@@ -28,6 +28,7 @@ FORBIDDEN_WHEEL_PREFIXES = (
     "src/agents/",
     "src/ai_integration/",
     "src/core/",
+    "src/devices/transports/devices/",
     "src/vision/pictures/",
     "src/widgets/",
 )

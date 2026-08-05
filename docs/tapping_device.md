@@ -37,10 +37,12 @@ TAPPING_ROTATION_ADDRESS=6
 ### 直接使用 TappingController
 
 ```python
-from src.devices.tapping_controller import TappingController
+from src.configuration.settings import DeviceSettings
+from src.devices.tools.powder_dispenser import TappingController
 
-# 从全局配置创建
-ctrl = TappingController.from_config()
+# 调试代码显式传入不可变配置；正式应用由 DeviceRuntime 统一创建和关闭
+settings = DeviceSettings(tapping_serial_port="/dev/ttyACM0")
+ctrl = TappingController.from_settings(settings)
 try:
     # 使能两个电机
     ctrl.enable_all()
@@ -131,20 +133,19 @@ finally:
 
 ```
 ExecutionManager / ActionEngine
-  └── _execute_manipulate()
-        └── elif executor == '加粉装置'
-              └── _execute_tapping()
-                    └── DeviceRuntime.require(PowderDispenser)
-                          └── TappingController.from_config()
-                          ├── SerialTransport (共享串口)
-                          ├── ElectricGripper  (夹爪)
-                          └── StepperBus
-                                ├── StepperMotor(地址7, 升降)
-                                └── StepperMotor(地址6, 旋转)
+  └── PowderDispenseActionHandler / TappingActionHandler
+        └── DeviceRuntime.require(PowderDispenser)
+              └── TappingController.from_settings()
+                    ├── SerialTransport (共享串口)
+                    ├── ElectricGripper  (夹爪)
+                    └── StepperBus
+                          ├── StepperMotor(地址7, 升降)
+                          └── StepperMotor(地址6, 旋转)
 ```
 
-- `tapping_controller.py` 封装设备协议，供 `PowderDispenser` 能力使用
-- `ActionEngine` 只依赖设备能力接口
+- `src/devices/tools/powder_dispenser/` 共置聚合 Driver、夹爪和步进电机协议客户端
+- `src/devices/transports/` 只保留串口 Transport、Modbus RTU/CRC 协议和测试 fake
+- execution handler 只依赖 `PowderDispenser` 能力接口
 - 串口实例由 `DeviceRuntime` 创建一次并在应用关闭时统一释放
 
 ---

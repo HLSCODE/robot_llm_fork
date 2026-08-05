@@ -50,6 +50,8 @@ REMOVED_ARCHITECTURE_PATHS = (
     "src/agents",
     "src/ai_integration",
     "src/core",
+    "src/devices/tools/adapters.py",
+    "src/devices/transports/devices",
     "src/vision/balance_reader_simple.py",
     "src/vision/pictures",
     "src/widgets",
@@ -78,6 +80,20 @@ LEGACY_HARDWARE_PATHS = (
 
 
 class DependencyBoundaryTests(unittest.TestCase):
+    def test_transport_package_does_not_export_semantic_devices(self):
+        from src.devices import transports
+
+        semantic_exports = {
+            "ElectricGripper",
+            "StepperBus",
+            "StepperMotor",
+        }
+        remaining = sorted(
+            name for name in semantic_exports if hasattr(transports, name)
+        )
+
+        self.assertEqual([], remaining)
+
     def test_llm_registry_is_created_only_by_application_factory(self):
         creation_sites: list[str] = []
         for path in (PROJECT_ROOT / "src").rglob("*.py"):

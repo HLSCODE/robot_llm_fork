@@ -16,14 +16,10 @@ import logging
 import time
 from dataclasses import dataclass
 
-from ...transports import (
-    SerialTransport,
-    StepperBus,
-    ElectricGripper,
-)
-from ...transports.devices.electric_gripper import MotionStatus
-from ...transports.devices.stepper_motor import MotorStatus, MSeriesRegister
+from ...transports import SerialTransport
 from ....configuration.settings import DeviceSettings
+from .electric_gripper import ElectricGripper, MotionStatus
+from .stepper_motor import MSeriesRegister, MotorStatus, StepperBus
 
 logger = logging.getLogger(__name__)
 

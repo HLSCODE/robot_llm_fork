@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from ...core.strategies import ModbusRTUStrategy
-from ...core.transport import SerialTransport, Transport
-from ...protocols.modbus_rtu import ModbusRTUProtocol
+from ....transports.core.strategies import ModbusRTUStrategy
+from ....transports.core.transport import SerialTransport, Transport
+from ....transports.protocols.modbus_rtu import ModbusRTUProtocol
 from .registers import DEFAULT_GRIPPER_ADDRESS, GripperRegister, MotionStatus, clamp_percent
 
 

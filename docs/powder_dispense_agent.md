@@ -215,7 +215,7 @@ python -m pytest -q tests/test_balance_reader.py tests/test_powder_dispense_agen
 ```bash
 python -m py_compile \
   src/execution/workflows/powder_dispense.py \
-  src/devices/tapping_controller.py \
+  src/devices/tools/powder_dispenser/driver.py \
   src/execution/engine.py \
   src/devices/runtime/factory.py \
   src/gui/views/dialogs.py \

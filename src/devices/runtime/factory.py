@@ -11,11 +11,9 @@ from ...configuration.settings import (
     VisionSettings,
 )
 from ..transports import SerialSettings, SerialTransport
-from ..tools.adapters import (
-    PipetteAdapter,
-    RelayBankAdapter,
-    ToolChangerAdapter,
-)
+from ..tools.pipette import PipetteAdapter
+from ..tools.relay import RelayBankAdapter
+from ..tools.tool_changer import ToolChangerAdapter
 from .fakes import (
     SimulatedBodyAxis,
     SimulatedCamera,

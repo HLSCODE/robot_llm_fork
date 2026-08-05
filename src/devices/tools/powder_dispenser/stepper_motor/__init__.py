@@ -1,4 +1,4 @@
-"""Stepper motor exports."""
+"""Stepper motors used by the powder dispenser assembly."""
 
 from .client import StepperBus, StepperMotor
 from .registers import (

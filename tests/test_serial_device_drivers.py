@@ -2,15 +2,51 @@ from __future__ import annotations
 
 import unittest
 
-from src.devices.transports import ProtocolError
+from src.devices.transports import ModbusRTUProtocol, ProtocolError
 from src.devices.transports.testing import FakeTransport
 from src.devices.tools.pipette.driver import ADP
+from src.devices.tools.powder_dispenser.electric_gripper import (
+    ElectricGripper,
+    GripperRegister,
+)
+from src.devices.tools.powder_dispenser.stepper_motor import (
+    MSeriesRegister,
+    StepperBus,
+)
 from src.devices.tools.relay.driver import RelayController
 from src.devices.tools.tool_changer.driver import Kuaihuanshou
 from src.devices.motion.neck.pwm import NeckController, ServoAxis
 
 
 class SerialDeviceDriverTests(unittest.TestCase):
+    def test_powder_gripper_clamps_target_and_uses_shared_modbus_transport(self):
+        protocol = ModbusRTUProtocol()
+        expected_frame = protocol.build_write_register(
+            9,
+            GripperRegister.TARGET_POS,
+            100,
+        )
+        transport = FakeTransport((expected_frame,))
+        gripper = ElectricGripper(transport, address=9)
+
+        gripper.move_to(150)
+
+        self.assertEqual(expected_frame, transport.calls[0].payload)
+
+    def test_powder_stepper_stop_preserves_address_and_register(self):
+        protocol = ModbusRTUProtocol()
+        expected_frame = protocol.build_write_register(
+            7,
+            MSeriesRegister.EMERGENCY_STOP,
+            1,
+        )
+        transport = FakeTransport((expected_frame,))
+        motor = StepperBus(transport).motor(7)
+
+        motor.stop()
+
+        self.assertEqual(expected_frame, transport.calls[0].payload)
+
     def test_relay_uses_injected_transport_and_rejects_unknown_channel(self):
         transport = FakeTransport((b"",))
         relay = RelayController(transport)

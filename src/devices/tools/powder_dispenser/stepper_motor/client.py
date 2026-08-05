@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from ...core.strategies import ModbusRTUStrategy
-from ...core.transport import SerialTransport, Transport
-from ...protocols.modbus_rtu import ModbusRTUProtocol
+from ....transports.core.strategies import ModbusRTUStrategy
+from ....transports.core.transport import SerialTransport, Transport
+from ....transports.protocols.modbus_rtu import ModbusRTUProtocol
 from .registers import (
     DEFAULT_STEPPER_SERIES_BY_ADDRESS,
     MSeriesRegister,
