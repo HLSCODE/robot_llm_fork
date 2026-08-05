@@ -12,6 +12,7 @@ from src.bootstrap.auxiliary_services import (
     AuxiliaryServiceState,
 )
 from src.bootstrap.launcher import (
+    _shutdown_gui_runtime,
     _shutdown_application,
     build_auxiliary_service_host,
 )
@@ -232,6 +233,100 @@ class WebSocketServiceLifecycleTests(unittest.TestCase):
 
 
 class ApplicationHostCompositionTests(unittest.TestCase):
+    def test_deleted_qt_thread_does_not_skip_application_shutdown(self):
+        calls: list[str] = []
+
+        class DeletedQtThread:
+            def isRunning(self):
+                raise RuntimeError("wrapped C/C++ object has been deleted")
+
+            def quit(self):
+                raise AssertionError("deleted thread must not be stopped again")
+
+            def wait(self, _milliseconds):
+                raise AssertionError("deleted thread must not be awaited again")
+
+        class FakeWindow:
+            def shutdown_after_event_loop(self):
+                calls.append("window")
+
+        class FakeHost:
+            def stop(self):
+                calls.append("auxiliary")
+                return ()
+
+        class FakeLocalization:
+            def close(self):
+                calls.append("localization")
+
+        class FakeLLM:
+            async def close(self):
+                calls.append("llm")
+
+        class FakeDevices:
+            def shutdown_all(self):
+                calls.append("devices")
+                return {}
+
+        _shutdown_gui_runtime(
+            auxiliary_startup_thread=DeletedQtThread(),
+            window=FakeWindow(),
+            auxiliary_host=FakeHost(),
+            services=SimpleNamespace(
+                localization=FakeLocalization(),
+                llm=FakeLLM(),
+                devices=FakeDevices(),
+            ),
+        )
+
+        self.assertEqual(
+            ["window", "auxiliary", "localization", "llm", "devices"],
+            calls,
+        )
+
+    def test_window_cleanup_failure_does_not_skip_application_shutdown(self):
+        calls: list[str] = []
+
+        class FailingWindow:
+            def shutdown_after_event_loop(self):
+                calls.append("window")
+                raise RuntimeError("window cleanup failed")
+
+        class FakeHost:
+            def stop(self):
+                calls.append("auxiliary")
+                return ()
+
+        class FakeLocalization:
+            def close(self):
+                calls.append("localization")
+
+        class FakeLLM:
+            async def close(self):
+                calls.append("llm")
+
+        class FakeDevices:
+            def shutdown_all(self):
+                calls.append("devices")
+                return {}
+
+        with self.assertLogs("src.bootstrap.launcher", level="ERROR"):
+            _shutdown_gui_runtime(
+                auxiliary_startup_thread=None,
+                window=FailingWindow(),
+                auxiliary_host=FakeHost(),
+                services=SimpleNamespace(
+                    localization=FakeLocalization(),
+                    llm=FakeLLM(),
+                    devices=FakeDevices(),
+                ),
+            )
+
+        self.assertEqual(
+            ["window", "auxiliary", "localization", "llm", "devices"],
+            calls,
+        )
+
     def test_disabled_websocket_does_not_register_a_service(self):
         args = SimpleNamespace(
             disable_websocket=False,
@@ -296,6 +391,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
         )
         config = SimpleNamespace(
             WEBSOCKET_ENABLED=True,
+            WEBSOCKET_SECURITY_ENABLED=False,
             WEBSOCKET_HOST="0.0.0.0",
             WEBSOCKET_PORT=8765,
             WEBSOCKET_AUTH_TOKEN="test-token",
@@ -316,6 +412,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
 
         self.assertEqual("0.0.0.0", server_type.call_args.kwargs["host"])
         self.assertEqual(8765, server_type.call_args.kwargs["port"])
+        self.assertFalse(server_type.call_args.kwargs["security_enabled"])
         self.assertEqual(
             0.5,
             server_type.call_args.kwargs["slow_send_threshold_seconds"],
@@ -330,6 +427,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
         )
         config = SimpleNamespace(
             WEBSOCKET_ENABLED=True,
+            WEBSOCKET_SECURITY_ENABLED=True,
             WEBSOCKET_HOST="127.0.0.1",
             WEBSOCKET_PORT=8765,
             WEBSOCKET_AUTH_TOKEN="",

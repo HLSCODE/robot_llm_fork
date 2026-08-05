@@ -40,6 +40,7 @@ from ...devices import StopMode
 from ...devices.runtime.ids import (
     BODY_AXIS,
     MOBILE_BASE,
+    PIPETTE,
     ROBOT_SYSTEM,
 )
 from ...widgets import LogWidget, SequenceListWidget
@@ -47,12 +48,20 @@ from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceStatusView
 from ..views.dialogs import ActionConfigDialog
 from ..bridges.notifications import GuiNotificationCenter
-from .startup import GuiStartupLifecycle, GuiStartupState
+from .startup import (
+    GuiHardwareStartupWorker,
+    GuiStartupLifecycle,
+    GuiStartupState,
+    HardwareStartupStepResult,
+)
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import ActionLibraryView, WorkflowEditorView
 
 
 class MainWindow(QMainWindow):
+    startup_progress_changed = pyqtSignal(int, str, str)
+    startup_finished = pyqtSignal(bool, str)
+
     def __init__(self, services: ApplicationServices):
         super().__init__()
         self._services = services
@@ -75,6 +84,8 @@ class MainWindow(QMainWindow):
         self.pose_timer = None
         self._startup_lifecycle = GuiStartupLifecycle()
         self._speech_startup_wait_timer = None
+        self._hardware_startup_thread = None
+        self._hardware_startup_worker = None
 
         self.init_ui()
         self._notifications = GuiNotificationCenter(
@@ -119,7 +130,7 @@ class MainWindow(QMainWindow):
         ai_assistant = self.action_library_view.ai_assistant
         if ai_assistant is not None:
             ai_assistant.speech_runtime_startup_finished.connect(
-                self.initialize_startup_hardware
+                self._on_speech_runtime_startup_finished
             )
             ai_assistant.welcome_task_execution_requested.connect(
                 self.execute_wake_welcome_task
@@ -134,7 +145,7 @@ class MainWindow(QMainWindow):
             ai_assistant.execution_completed.connect(
                 self.on_execution_completed
             )
-        self.start_startup_initialization()
+        QTimer.singleShot(0, self.start_startup_initialization)
 
     @property
     def startup_state(self) -> GuiStartupState:
@@ -144,6 +155,12 @@ class MainWindow(QMainWindow):
         """启动 GUI 显示前的必要初始化流程。"""
         if not self._startup_lifecycle.begin():
             return
+
+        self.startup_progress_changed.emit(
+            24,
+            "正在准备语音与设备运行时...",
+            "启动任务将在后台执行，主界面完成前保持隐藏",
+        )
 
         try:
             speech_start_requested = False
@@ -157,6 +174,11 @@ class MainWindow(QMainWindow):
             raise
 
         if not speech_start_requested:
+            self.startup_progress_changed.emit(
+                36,
+                "语音输入未启用，开始初始化设备...",
+                "VOICE_INPUT_ENABLED=false",
+            )
             self.initialize_startup_hardware()
             return
         if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
@@ -172,32 +194,126 @@ class MainWindow(QMainWindow):
             self._on_speech_startup_wait_timeout
         )
         self._speech_startup_wait_timer.start(int(timeout_s * 1000))
+        self.startup_progress_changed.emit(
+            32,
+            "正在加载 ASR / KWS 模型...",
+            f"最多优先等待 {timeout_s:g} 秒，超时后语音继续后台加载",
+        )
 
-    def initialize_startup_hardware(self, speech_ready: bool = False):
-        """初始化启动阶段硬件；若启用 ASR/KWS，则在语音 runtime 之后执行。"""
+    def _on_speech_runtime_startup_finished(self, speech_ready: bool) -> None:
+        if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
+            return
+        self.startup_progress_changed.emit(
+            48,
+            "语音监听已就绪" if speech_ready else "语音初始化不可用",
+            "继续初始化设备" if speech_ready else "语音失败不阻止设备控制界面启动",
+        )
+        self.initialize_startup_hardware(speech_ready)
+
+    def initialize_startup_hardware(self, _speech_ready: bool = False):
+        """Start hardware initialization without blocking the GUI thread."""
         if not self._startup_lifecycle.begin_hardware_initialization():
             return
         if self._speech_startup_wait_timer is not None:
             self._speech_startup_wait_timer.stop()
             self._speech_startup_wait_timer = None
 
-        try:
-            self.initialize_robots()
-            if self.settings.devices.body_di_pan:
-                self.initialize_move_controller()
-            self.initialize_body()
-            self.initialize_pipette_on_startup()
-        except Exception:
-            self._startup_lifecycle.mark_failed()
-            raise
-        self._startup_lifecycle.mark_ready()
+        thread = QThread(self)
+        thread.setObjectName("GuiHardwareStartupThread")
+        worker = GuiHardwareStartupWorker(
+            self._services,
+            initialize_mobile_base=self.settings.devices.body_di_pan,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.step_started.connect(self._on_hardware_startup_step_started)
+        worker.step_completed.connect(self._on_hardware_startup_step_completed)
+        worker.completed.connect(self._on_hardware_startup_completed)
+        worker.completed.connect(worker.deleteLater)
+        worker.completed.connect(
+            thread.quit,
+            Qt.ConnectionType.DirectConnection,
+        )
+        thread.finished.connect(self._on_hardware_startup_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._hardware_startup_thread = thread
+        self._hardware_startup_worker = worker
+        thread.start()
 
     def _on_speech_startup_wait_timeout(self):
         """Continue hardware startup if ASR/KWS first-load is still downloading."""
         if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
             return
         self.action_library_view.ai_assistant.notify_speech_startup_wait_timeout()
+        self.startup_progress_changed.emit(
+            44,
+            "语音模型继续后台加载，开始初始化设备...",
+            "语音就绪后会自动开始监听，不阻塞设备初始化",
+        )
         self.initialize_startup_hardware(False)
+
+    def _on_hardware_startup_step_started(self, device_id: str) -> None:
+        progress = {
+            ROBOT_SYSTEM: (54, "正在连接机械臂..."),
+            MOBILE_BASE: (66, "正在连接移动底盘..."),
+            BODY_AXIS: (76, "正在初始化身体控制器..."),
+            PIPETTE: (88, "正在初始化移液枪..."),
+        }
+        percent, message = progress.get(device_id, (60, "正在初始化设备..."))
+        self.startup_progress_changed.emit(percent, message, device_id)
+
+    def _on_hardware_startup_step_completed(
+        self,
+        result: HardwareStartupStepResult,
+    ) -> None:
+        progress = {
+            ROBOT_SYSTEM: 64,
+            MOBILE_BASE: 74,
+            BODY_AXIS: 86,
+            PIPETTE: 94,
+        }
+        state = "完成" if result.succeeded else "不可用，稍后可在主界面重试"
+        self.startup_progress_changed.emit(
+            progress.get(result.device_id, 90),
+            f"{self._startup_device_name(result.device_id)}{state}",
+            result.error or result.device_id,
+        )
+
+    def _on_hardware_startup_completed(
+        self,
+        results: tuple[HardwareStartupStepResult, ...],
+    ) -> None:
+        if self.startup_state is GuiStartupState.CLOSED:
+            return
+        self._render_device_state()
+        failures = tuple(result for result in results if not result.succeeded)
+        for result in failures:
+            self._notifications.warning(
+                f"{self._startup_device_name(result.device_id)}初始化失败：{result.error}",
+                modal=False,
+            )
+        self._startup_lifecycle.mark_ready()
+        if self.pose_timer is not None and not self.pose_timer.isActive():
+            self.pose_timer.start()
+        if failures:
+            message = f"初始化完成，{len(failures)} 个设备暂不可用"
+        else:
+            message = "所有必要组件初始化完成"
+        self.startup_progress_changed.emit(96, message, "正在启动附加服务...")
+        self.startup_finished.emit(True, message)
+
+    def _on_hardware_startup_thread_finished(self) -> None:
+        self._hardware_startup_thread = None
+        self._hardware_startup_worker = None
+
+    @staticmethod
+    def _startup_device_name(device_id: str) -> str:
+        return {
+            ROBOT_SYSTEM: "机械臂",
+            MOBILE_BASE: "移动底盘",
+            BODY_AXIS: "身体控制器",
+            PIPETTE: "移液枪",
+        }.get(device_id, device_id)
 
     def init_ui(self):
         self.setWindowTitle("机器人动作编排器")
@@ -245,7 +361,6 @@ class MainWindow(QMainWindow):
         self.pose_timer = QTimer(self)
         self.pose_timer.setInterval(1000)
         self.pose_timer.timeout.connect(self.refresh_arm_poses)
-        self.pose_timer.start()
 
     def _connect_view_signals(self) -> None:
         library = self.action_library_view
@@ -2079,6 +2194,8 @@ class MainWindow(QMainWindow):
         camera_thread = getattr(self, "_camera_test_thread", None)
         if camera_thread is not None and camera_thread.isRunning():
             camera_thread.requestInterruption()
+        if self._hardware_startup_worker is not None:
+            self._hardware_startup_worker.request_stop()
         self.action_library_view.ai_assistant.prepare_shutdown()
         self._composition_bridge.close()
         self._startup_lifecycle.close()
@@ -2086,6 +2203,16 @@ class MainWindow(QMainWindow):
 
     def shutdown_after_event_loop(self) -> None:
         """Finish bounded worker cleanup after the visible GUI has closed."""
+        hardware_thread = self._hardware_startup_thread
+        if hardware_thread is not None and hardware_thread.isRunning():
+            if self._hardware_startup_worker is not None:
+                self._hardware_startup_worker.request_stop()
+            hardware_thread.quit()
+            if not hardware_thread.wait(10_000):
+                self._notifications.warning(
+                    "设备初始化线程未在 10 秒内退出，设备关闭流程将等待资源释放",
+                    modal=False,
+                )
         camera_thread = getattr(self, "_camera_test_thread", None)
         if camera_thread is not None and camera_thread.isRunning():
             camera_thread.requestInterruption()

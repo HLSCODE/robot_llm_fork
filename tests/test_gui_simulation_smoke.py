@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
+from threading import Event
 from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 
 from src.application import create_application_services
@@ -15,6 +17,7 @@ from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.controllers.startup import GuiStartupLifecycle
+from src.gui.views import StartupProgressCard
 from src.widgets.ai_assistant import AIAssistantWidget
 
 
@@ -67,7 +70,11 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         )
         self.window = MainWindow(self.services)
         self.window.show()
-        QApplication.processEvents()
+        self.assertTrue(
+            _wait_until(
+                lambda: self.window.startup_state is GuiStartupState.READY
+            )
+        )
 
     def tearDown(self) -> None:
         if self.services.execution.snapshot().active:
@@ -283,17 +290,59 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 return_value=True,
             ):
                 window = MainWindow(services)
-
-            self.assertEqual(
-                GuiStartupState.WAITING_FOR_SPEECH,
-                window.startup_state,
-            )
-
-            window.action_library_view.ai_assistant.speech_runtime_startup_finished.emit(True)
-            self.assertTrue(
-                _wait_until(
-                    lambda: window.startup_state is GuiStartupState.READY
+                self.assertTrue(
+                    _wait_until(
+                        lambda: window.startup_state
+                        is GuiStartupState.WAITING_FOR_SPEECH
+                    )
                 )
+                window.action_library_view.ai_assistant.speech_runtime_startup_finished.emit(
+                    True
+                )
+                self.assertTrue(
+                    _wait_until(
+                        lambda: window.startup_state is GuiStartupState.READY
+                    )
+                )
+        finally:
+            if window is not None:
+                window.close()
+                QApplication.processEvents()
+                window.shutdown_after_event_loop()
+            services.localization.close()
+            self.assertEqual({}, services.devices.shutdown_all())
+
+    def test_speech_wait_timeout_starts_hardware_and_reports_progress(self) -> None:
+        settings = ApplicationSettings.defaults()
+        settings = replace(
+            settings,
+            voice=replace(
+                settings.voice,
+                voice_input_enabled=True,
+                voice_speech_startup_wait_timeout_s=0.02,
+            ),
+        )
+        services = create_application_services(settings, simulation=True)
+        window = None
+        progress_messages: list[str] = []
+        try:
+            with patch.object(
+                AIAssistantWidget,
+                "start_voice_speech_runtime_if_configured",
+                return_value=True,
+            ):
+                window = MainWindow(services)
+                window.startup_progress_changed.connect(
+                    lambda _percent, message, _detail: progress_messages.append(message)
+                )
+
+                self.assertTrue(
+                    _wait_until(
+                        lambda: window.startup_state is GuiStartupState.READY
+                    )
+                )
+            self.assertTrue(
+                any("后台加载" in message for message in progress_messages)
             )
         finally:
             if window is not None:
@@ -302,6 +351,83 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 window.shutdown_after_event_loop()
             services.localization.close()
             self.assertEqual({}, services.devices.shutdown_all())
+
+    def test_hardware_initialization_after_speech_does_not_block_gui(self) -> None:
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
+        window = None
+        initialization_started = Event()
+        release_initialization = Event()
+        gui_heartbeat = Event()
+        original_initialize = services.devices.initialize
+
+        def blocking_initialize(device_id: str):
+            if device_id == ROBOT_SYSTEM:
+                initialization_started.set()
+                release_initialization.wait(timeout=1.0)
+            return original_initialize(device_id)
+
+        try:
+            with (
+                patch.object(
+                    AIAssistantWidget,
+                    "start_voice_speech_runtime_if_configured",
+                    return_value=True,
+                ),
+                patch.object(
+                    services.devices,
+                    "initialize",
+                    side_effect=blocking_initialize,
+                ),
+            ):
+                window = MainWindow(services)
+                self.assertTrue(
+                    _wait_until(
+                        lambda: window.startup_state
+                        is GuiStartupState.WAITING_FOR_SPEECH
+                    )
+                )
+                window.action_library_view.ai_assistant.speech_runtime_startup_finished.emit(
+                    True
+                )
+                self.assertTrue(_wait_until(initialization_started.is_set))
+                QTimer.singleShot(10, gui_heartbeat.set)
+                self.assertTrue(
+                    _wait_until(gui_heartbeat.is_set, timeout_seconds=0.2)
+                )
+                release_initialization.set()
+                self.assertTrue(
+                    _wait_until(
+                        lambda: window.startup_state is GuiStartupState.READY
+                    )
+                )
+        finally:
+            release_initialization.set()
+            if window is not None:
+                window.close()
+                QApplication.processEvents()
+                window.shutdown_after_event_loop()
+            services.localization.close()
+            self.assertEqual({}, services.devices.shutdown_all())
+
+
+class StartupProgressCardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.application = QApplication.instance() or QApplication([])
+
+    def test_progress_is_monotonic_and_failure_exposes_exit_action(self) -> None:
+        card = StartupProgressCard()
+        card.set_progress(40, "正在初始化机械臂...", "robot-system")
+        card.set_progress(20, "迟到的旧进度", "ignored")
+
+        self.assertEqual(40, card.progress_bar.value())
+        self.assertEqual("40%", card.percent_label.text())
+        card.mark_failed("测试失败")
+        self.assertFalse(card.exit_button.isHidden())
+        card.close()
 
 
 if __name__ == "__main__":

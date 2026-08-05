@@ -54,6 +54,7 @@ class DataCollectionSettings:
 @dataclass(frozen=True, slots=True)
 class ServerSettings:
     websocket_enabled: bool = True
+    websocket_security_enabled: bool = False
     websocket_host: str = "127.0.0.1"
     websocket_port: int = 8765
     websocket_control_lease_seconds: float = 30.0

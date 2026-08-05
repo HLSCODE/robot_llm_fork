@@ -2,6 +2,7 @@
 
 from .device import DeviceControlView, DeviceStatusView
 from .dialogs import ActionConfigDialog, ActionPreviewDialog, SchemaActionForm
+from .startup import StartupProgressCard
 from .workflow import ActionLibraryView, WorkflowEditorView
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "DeviceControlView",
     "DeviceStatusView",
     "SchemaActionForm",
+    "StartupProgressCard",
     "WorkflowEditorView",
 ]

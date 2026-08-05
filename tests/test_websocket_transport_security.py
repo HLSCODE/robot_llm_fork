@@ -73,6 +73,20 @@ class WebSocketTransportSecurityTests(unittest.TestCase):
         )
         self.assertEqual("ws://127.0.0.1:8765/", server.endpoint)
 
+    def test_security_switch_allows_plain_remote_binding(self):
+        server = RobotWebSocketServer(
+            services=object(),
+            host="0.0.0.0",
+            security_enabled=False,
+        )
+
+        self.assertEqual("ws://0.0.0.0:8765/", server.endpoint)
+        client_id = "insecure-client"
+        server._access.register(client_id, "remote")
+        lease = server._access.acquire_control(client_id)
+        self.assertEqual(client_id, lease.owner_client_id)
+        self.assertEqual("security-disabled", lease.principal)
+
 
 if __name__ == "__main__":
     unittest.main()

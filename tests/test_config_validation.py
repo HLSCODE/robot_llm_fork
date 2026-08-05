@@ -27,6 +27,7 @@ def _config(root: Path, **overrides):
         "LOG_LEVEL": "INFO",
         "LLM_DEFAULT_PROVIDER": "minicpm",
         "OPENAI_API_KEY": "",
+        "WEBSOCKET_SECURITY_ENABLED": True,
         "WEBSOCKET_AUTH_TOKEN": "",
         "WEBSOCKET_CONTROL_LEASE_SECONDS": 30.0,
         "WEBSOCKET_SEND_TIMEOUT_SECONDS": 2.0,
@@ -164,6 +165,22 @@ class ConfigurationValidationTests(unittest.TestCase):
             {issue.code for issue in report.errors},
         )
         self.assertEqual((), report.warnings)
+
+    def test_remote_binding_is_allowed_when_websocket_security_is_disabled(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    WEBSOCKET_SECURITY_ENABLED=False,
+                ),
+                _options(websocket_host="0.0.0.0"),
+            )
+
+        self.assertEqual((), report.errors)
+        self.assertEqual(
+            {"websocket_security_disabled"},
+            {issue.code for issue in report.warnings},
+        )
 
     def test_loopback_reverse_proxy_requires_auth_and_origins(self) -> None:
         with TemporaryDirectory() as temporary_directory:

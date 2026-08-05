@@ -34,7 +34,8 @@
 
 主连接地址：
 
-- `ws://{host}:{port}/`
+- 安全关闭或安全开启但未配置服务端证书：`ws://{host}:{port}/`
+- 安全开启并配置服务端证书：`wss://{host}:{port}/`
 
 默认监听配置：
 
@@ -156,6 +157,7 @@ uv run robot-llm --simulation
 SIMULATION_MODE=false
 
 WEBSOCKET_ENABLED=true
+WEBSOCKET_SECURITY_ENABLED=false
 WEBSOCKET_HOST=127.0.0.1
 WEBSOCKET_PORT=8765
 WEBSOCKET_AUTH_TOKEN=
@@ -198,13 +200,14 @@ MINICPM_ASK_MODEL=qwen-turbo
 |---|---|---|
 | `SIMULATION_MODE` | 是否模拟模式 | `true` 时不连接真实硬件 |
 | `WEBSOCKET_ENABLED` | 是否随 GUI 启动 WebSocket | 默认 `true` |
-| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `127.0.0.1`；非 loopback 监听必须由服务端直接提供 TLS |
+| `WEBSOCKET_SECURITY_ENABLED` | 是否启用 WebSocket 安全策略 | 默认 `false`；详见 2.6 节 |
+| `WEBSOCKET_HOST` | WebSocket 监听地址 | 默认 `127.0.0.1`；局域网监听通常配置为 `0.0.0.0` |
 | `WEBSOCKET_PORT` | WebSocket 监听端口 | 默认 `8765` |
-| `WEBSOCKET_AUTH_TOKEN` | 写操作共享认证密钥 | 留空时服务保持可读，但所有写操作均被拒绝；远程/TLS/代理部署时必填 |
-| `WEBSOCKET_ALLOWED_ORIGINS` | 浏览器 Origin 白名单 | 逗号分隔、精确匹配；远程/TLS/代理部署时必填；不发送 Origin 的非浏览器客户端不受影响 |
-| `WEBSOCKET_TLS_CERTIFICATE_PATH` | 服务端 TLS 证书链 | 与私钥同时配置后直接提供 `wss://` |
-| `WEBSOCKET_TLS_PRIVATE_KEY_PATH` | 服务端 TLS 私钥 | 不得提交私钥文件；与证书同时配置 |
-| `WEBSOCKET_REVERSE_PROXY_MODE` | 同机可信反向代理模式 | 启用后必须绑定 loopback，由代理终止 TLS；不能同时启用服务端 TLS |
+| `WEBSOCKET_AUTH_TOKEN` | 写操作共享认证密钥 | 仅安全策略开启时生效；安全开启但留空时写操作被拒绝 |
+| `WEBSOCKET_ALLOWED_ORIGINS` | 浏览器 Origin 白名单 | 仅安全策略开启时生效；逗号分隔并精确匹配 |
+| `WEBSOCKET_TLS_CERTIFICATE_PATH` | 服务端 TLS 证书链 | 仅安全策略开启时生效；与私钥同时配置后直接提供 `wss://` |
+| `WEBSOCKET_TLS_PRIVATE_KEY_PATH` | 服务端 TLS 私钥 | 仅安全策略开启时生效；不得提交私钥文件 |
+| `WEBSOCKET_REVERSE_PROXY_MODE` | 同机可信反向代理模式 | 仅安全策略开启时生效；后端必须绑定 loopback，不能同时启用服务端 TLS |
 | `WEBSOCKET_CONTROL_LEASE_SECONDS` | 单一控制客户端租约时长 | 默认 30 秒；控制指令或心跳会续期 |
 | `WEBSOCKET_MAX_MESSAGE_SIZE_BYTES` | 单条入站消息上限 | 默认 1048576 字节；超限连接由 WebSocket 层以 1009 关闭 |
 | `WEBSOCKET_MAX_REQUESTS_PER_SECOND` | 每客户端每秒请求上限 | 默认 120，包含高频遥操作余量 |
@@ -232,15 +235,67 @@ MINICPM_ASK_MODEL=qwen-turbo
 | `MINICPM_ASK_BASE_URL` | 指令分类模型 Base URL | 留空时回退到 `OPENAI_BASE_URL` |
 | `MINICPM_ASK_MODEL` | 指令分类模型名 | 如 `qwen-turbo` |
 
-### 2.6 TLS 与可信反向代理部署
+### 2.6 安全模式与部署方式
 
-服务只支持两种远程部署方式，配置不完整时启动直接失败：
+#### 2.6.1 安全策略关闭
+
+本机或受信任局域网联调可以使用：
+
+```env
+WEBSOCKET_ENABLED=true
+WEBSOCKET_SECURITY_ENABLED=false
+WEBSOCKET_HOST=0.0.0.0
+WEBSOCKET_PORT=8765
+```
+
+此时服务：
+
+- 允许远程客户端通过 `ws://host:port/` 连接。
+- 不要求 TLS、认证 Token 或 Origin 白名单。
+- 忽略 `WEBSOCKET_AUTH_TOKEN`、`WEBSOCKET_ALLOWED_ORIGINS`、TLS 路径和
+  `WEBSOCKET_REVERSE_PROXY_MODE`。
+- 连接注册后自动成为已认证会话，principal 为 `security-disabled`。
+- 仍然强制执行单客户端控制租约；控制类 action 必须先调用
+  `acquire_control`，不能绕过硬件控制仲裁。
+
+`0.0.0.0` 只用于服务端监听，客户端不能把它当作目标地址；同一局域网客户端应
+连接运行主机的实际 IP，例如 `ws://192.168.1.20:8765/`。
+
+启动时会记录 `websocket_security_disabled` 警告，但不会中止。该模式下网络流量
+和控制数据均为明文，任何能访问端口的客户端都可申请控制权，因此只应部署在
+受信任且有网络隔离的环境中。
+
+#### 2.6.2 安全策略开启
+
+生产或不可信网络环境使用：
+
+```env
+WEBSOCKET_SECURITY_ENABLED=true
+```
+
+开启后恢复 TLS、Token 和 Origin 校验。远程部署支持两种方式，配置不完整时
+启动直接失败：
 
 1. 服务端直接 TLS：监听远程地址，同时配置认证密钥、Origin 白名单、证书链和
    私钥，客户端连接 `wss://host:port/`。
 2. 同机可信反向代理：服务保持 `127.0.0.1`/`::1`，设置
    `WEBSOCKET_REVERSE_PROXY_MODE=true`，由 Nginx/Caddy 等同机代理提供
    `wss://`。代理必须保留 `Origin` 和 WebSocket Upgrade 头。
+
+服务端直接 TLS 的关键配置示例：
+
+```env
+WEBSOCKET_SECURITY_ENABLED=true
+WEBSOCKET_HOST=0.0.0.0
+WEBSOCKET_AUTH_TOKEN=<强随机密钥>
+WEBSOCKET_ALLOWED_ORIGINS=https://robot.example
+WEBSOCKET_TLS_CERTIFICATE_PATH=/path/to/server.crt
+WEBSOCKET_TLS_PRIVATE_KEY_PATH=/path/to/server.key
+WEBSOCKET_REVERSE_PROXY_MODE=false
+```
+
+仅绑定 loopback 时可以继续使用 `ws://` 且不配置 TLS；但若需要调用非公开接口，
+仍必须配置 Token 并先认证。Token 留空时服务只开放公开查询。
 
 代理模式不读取 `X-Forwarded-For`、`X-Forwarded-Proto` 等转发头参与认证或授权，
 可信边界由 loopback socket、WebSocket token 和 Origin 白名单共同构成。禁止把
@@ -259,7 +314,7 @@ location /robot/ws {
 }
 ```
 
-部署验收必须确认：
+安全策略开启时，部署验收必须确认：
 
 - 白名单内 Origin 可以完成握手，非白名单浏览器 Origin 被握手层拒绝。
 - 未认证连接不能读取 `server_metrics`，也不能取得控制权。
@@ -303,15 +358,19 @@ ws.onerror = (err) => {
   "api_version": "2.0",
   "api_version_required": true,
   "client_id": "6cbd...",
-  "authentication_configured": true,
+  "authentication_configured": false,
   "control_lease_seconds": 30.0
 }
 ```
 
+`authentication_configured` 表示是否配置了 Token 认证，不等同于当前连接的
+`authenticated` 状态。安全策略关闭时该字段为 `false`，但连接已自动认证；客户端
+可发送 `control_status` 查询当前连接的 `authenticated` 和 principal。
+
 ### 3.2 写操作认证与控制权
 
-公开查询不要求认证。执行、设备、编排、AI 规划、遥操作和数据采集等写操作
-必须依次完成认证和控制权申请：
+安全策略开启时，公开查询不要求认证；执行、设备、编排、AI 规划、遥操作和
+数据采集等写操作必须依次完成认证和控制权申请：
 
 ```json
 {"api_version": "2.0", "action": "authenticate", "token": "<运行时注入的密钥>", "request_id": "auth-1"}
@@ -321,6 +380,15 @@ ws.onerror = (err) => {
 认证成功返回 `authenticated`，取得控制权返回 `control_acquired`。同一时刻只有
 一个客户端能够持有控制权；另一个客户端申请时收到
 `access_denied / control_busy`，不会抢占现有控制者。
+
+安全策略关闭时不需要发送 `authenticate`，可直接申请控制权：
+
+```json
+{"api_version": "2.0", "action": "acquire_control", "request_id": "control-1"}
+```
+
+此时“仅需认证”的 action 可直接调用，“认证并持有控制权”的 action 仍需先成功
+取得控制租约。
 
 控制客户端应在租约过期前发送心跳：
 
@@ -347,9 +415,10 @@ ws.onerror = (err) => {
 | 仅需认证 | `server_metrics`、相机帧订阅、LLM 聊天会话 |
 | 认证并持有控制权 | 其余执行、设备、编排、AI 规划、遥操作和数据采集 action |
 
-`WEBSOCKET_AUTH_TOKEN` 未配置时，`authenticate` 返回
-`authentication_not_configured`，所有非公开操作保持锁定。密钥不会写入安全
-审计，但在远程 `ws://` 连接中仍会以明文传输，因此远程部署必须使用 `wss://`。
+权限表描述的是路由所需的逻辑访问级别。安全策略关闭时连接会自动满足“已认证”
+级别，但不会自动获得控制权。安全策略开启且 `WEBSOCKET_AUTH_TOKEN` 未配置时，
+`authenticate` 返回 `authentication_not_configured`，所有非公开操作保持锁定。
+密钥不会写入安全审计；安全模式下远程部署应使用 `wss://`，避免密钥明文传输。
 
 ### 3.3 请求消息格式
 
@@ -477,7 +546,8 @@ ws.onmessage = (event) => {
 `rate_limited` 和 `retry_after_seconds`；全服务并发达到上限时返回
 `server_busy`。客户端遇到这两类错误不得立即无界重试。
 
-已认证客户端可调用 `server_metrics` 读取进程生命周期内的聚合指标。`metrics`
+已认证客户端可调用 `server_metrics` 读取进程生命周期内的聚合指标；安全策略
+关闭时连接自动满足该权限。`metrics`
 包含当前/峰值/累计连接数、当前/峰值/累计请求数、请求耗时、非法请求、限流、
 繁忙、权限拒绝、内部错误、发送耗时、慢发送、发送失败和超时断连；
 `teleoperation_metrics` 包含遥操作会话、已应用/跳过/失败指令、watchdog、安全
@@ -495,7 +565,7 @@ ws.onmessage = (event) => {
 
 | action | 权限 | 含义 |
 |---|---|---|
-| `authenticate` | 公开 | 使用 `WEBSOCKET_AUTH_TOKEN` 认证当前连接 |
+| `authenticate` | 公开 | 安全开启时使用 `WEBSOCKET_AUTH_TOKEN` 认证；安全关闭时无需调用 |
 | `control_status` | 公开 | 查询当前连接认证状态、控制租约和应用层遥操作 owner/活动臂/指令计数快照 |
 | `server_metrics` | 已认证 | 查询 WebSocket、遥操作、视觉和服务端 LLM 聚合指标 |
 | `acquire_control` | 已认证 | 申请唯一控制权 |
@@ -589,8 +659,8 @@ ws.onmessage = (event) => {
 | event | 含义 |
 |---|---|
 | `error` | 统一请求错误；包含稳定 `code`、`message`、`request_id` 和 `action` |
-| `access_denied` | 认证失败、未持有控制权、租约过期或控制权冲突 |
-| `authenticated` | 当前连接认证成功 |
+| `access_denied` | 认证失败、未持有控制权、租约过期或控制权冲突；安全关闭时不会出现认证失败 |
+| `authenticated` | 当前连接认证成功；安全关闭时连接自动认证，通常不会请求此事件 |
 | `control_acquired` | 当前连接取得控制权 |
 | `control_heartbeat` | 控制租约续期成功 |
 | `control_released` | 控制权因主动释放、超时、断线或发送失败而释放 |
@@ -3173,10 +3243,10 @@ function handleChatData(data) {
 }
 ```
 
-常见权限错误码为 `authentication_not_configured`、
-`invalid_credentials`、`authentication_required`、`control_required`、
-`control_busy` 和 `control_lease_expired`。前端不得在日志或错误上报中附带
-认证 token。
+安全策略开启时，常见权限错误码为 `authentication_not_configured`、
+`invalid_credentials` 和 `authentication_required`。两种安全模式都可能返回
+`control_required`、`control_busy` 和 `control_lease_expired`。前端不得在日志或
+错误上报中附带认证 token。
 
 前端建议：
 
@@ -3557,7 +3627,6 @@ joints: [j1, j2, j3, j4, j5, j6]
   "event": "teleop_error",
   "message": "部分臂执行失败: ['左']"
 }
-```
 ```
 
 ```json

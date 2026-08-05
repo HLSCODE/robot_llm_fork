@@ -23,6 +23,7 @@ class ApplicationSettingsTests(unittest.TestCase):
         settings = ApplicationSettings.from_config(
             SimpleNamespace(
                 WEBSOCKET_PORT=9000,
+                WEBSOCKET_SECURITY_ENABLED=True,
                 ROBOT_PROVIDER="future-arm",
                 RELAY_SERIAL_PORT="COM8",
                 VISION_DEFAULT_CONFIDENCE=0.81,
@@ -47,6 +48,7 @@ class ApplicationSettingsTests(unittest.TestCase):
             DataCollectionSettings,
         )
         self.assertEqual(9000, settings.server.websocket_port)
+        self.assertTrue(settings.server.websocket_security_enabled)
         self.assertEqual("future-arm", settings.robot.robot_provider)
         self.assertEqual("COM8", settings.devices.relay_serial_port)
         self.assertEqual(0.81, settings.vision.vision_default_confidence)

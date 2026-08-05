@@ -140,12 +140,14 @@ class WebSocketAccessController:
         self,
         auth_token: str,
         *,
+        security_enabled: bool = True,
         control_lease_seconds: float,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if control_lease_seconds <= 0:
             raise ValueError("control_lease_seconds must be positive")
-        self._auth_token = auth_token
+        self._security_enabled = bool(security_enabled)
+        self._auth_token = auth_token if self._security_enabled else ""
         self._control_lease_seconds = float(control_lease_seconds)
         self._clock = clock
         self._sessions: dict[str, _ClientSession] = {}
@@ -154,7 +156,7 @@ class WebSocketAccessController:
 
     @property
     def authentication_configured(self) -> bool:
-        return bool(self._auth_token)
+        return self._security_enabled and bool(self._auth_token)
 
     @property
     def control_lease_seconds(self) -> float:
@@ -166,10 +168,14 @@ class WebSocketAccessController:
         with self._lock:
             if client_id in self._sessions:
                 raise ValueError(f"duplicate client_id: {client_id}")
-            self._sessions[client_id] = _ClientSession(
+            session = _ClientSession(
                 client_id=client_id,
                 remote_address=remote_address,
             )
+            if not self._security_enabled:
+                session.authenticated = True
+                session.principal = "security-disabled"
+            self._sessions[client_id] = session
 
     def unregister(self, client_id: str) -> bool:
         with self._lock:
@@ -194,6 +200,8 @@ class WebSocketAccessController:
     ) -> ClientSessionSnapshot:
         with self._lock:
             session = self._require_session_unlocked(client_id)
+            if not self._security_enabled:
+                return session.snapshot()
             if not self._auth_token:
                 raise WebSocketAccessError(
                     "authentication_not_configured",

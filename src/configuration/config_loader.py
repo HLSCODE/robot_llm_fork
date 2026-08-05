@@ -296,6 +296,7 @@ class _EnvironmentConfig:
 
     # WebSocket 服务器配置
     WEBSOCKET_ENABLED: bool = True
+    WEBSOCKET_SECURITY_ENABLED: bool = False
     WEBSOCKET_HOST: str = "127.0.0.1"
     WEBSOCKET_PORT: int = 8765
     WEBSOCKET_AUTH_TOKEN: str = ""
@@ -987,6 +988,10 @@ class _EnvironmentConfig:
         instance.WEBSOCKET_ENABLED = os.getenv(
             "WEBSOCKET_ENABLED",
             "true",
+        ).lower() in ("true", "1", "yes")
+        instance.WEBSOCKET_SECURITY_ENABLED = os.getenv(
+            "WEBSOCKET_SECURITY_ENABLED",
+            "false",
         ).lower() in ("true", "1", "yes")
         instance.WEBSOCKET_HOST = os.getenv(
             "WEBSOCKET_HOST",

@@ -4,7 +4,7 @@ import argparse
 import asyncio
 import logging
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from .auxiliary_services import (
     AuxiliaryServiceHost,
@@ -27,6 +27,18 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _QtThreadHandle(Protocol):
+    def isRunning(self) -> bool: ...
+
+    def quit(self) -> None: ...
+
+    def wait(self, milliseconds: int) -> bool: ...
+
+
+class _GuiShutdownHandle(Protocol):
+    def shutdown_after_event_loop(self) -> None: ...
+
+
 def build_auxiliary_service_host(
     args: argparse.Namespace,
     settings: ApplicationSettings,
@@ -38,8 +50,13 @@ def build_auxiliary_service_host(
     if options.websocket_enabled:
         from ..robot_server.ws_server import RobotWebSocketServer
 
+        security_enabled = settings.server.websocket_security_enabled
         auth_token = settings.secrets.websocket_auth_token
-        if not auth_token:
+        if not security_enabled:
+            logger.warning(
+                "WEBSOCKET_SECURITY_ENABLED=false；WebSocket TLS、认证和 Origin 限制已关闭"
+            )
+        elif not auth_token:
             logger.warning(
                 "未配置 WEBSOCKET_AUTH_TOKEN；WebSocket 仅提供公开只读接口，所有写操作均会被拒绝"
             )
@@ -48,6 +65,7 @@ def build_auxiliary_service_host(
                 services=services,
                 host=options.websocket_host,
                 port=options.websocket_port,
+                security_enabled=security_enabled,
                 auth_token=auth_token,
                 control_lease_seconds=(settings.server.websocket_control_lease_seconds),
                 max_message_size_bytes=(settings.server.websocket_max_message_size_bytes),
@@ -94,35 +112,165 @@ def resolve_startup_options(
 
 def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     """Run the GUI and optional network services in one process."""
+    from PyQt6.QtCore import QThread, QTimer, Qt
     from PyQt6.QtWidgets import QApplication
 
     from ..application import create_application_services
     from ..gui.controllers.main_window import MainWindow
+    from ..gui.controllers.startup import GuiAuxiliaryServiceStartupWorker
+    from ..gui.views import StartupProgressCard
 
-    services = create_application_services(
-        settings,
-        simulation=args.simulation,
-    )
-    auxiliary_host = build_auxiliary_service_host(
-        args,
-        settings,
-        services,
-    )
+    app = QApplication([sys.argv[0]])
+    app.setStyle("Fusion")
+    startup_card = StartupProgressCard()
+    startup_card.exit_requested.connect(app.quit)
+    startup_card.show()
+    app.processEvents()
+
+    services = None
+    auxiliary_host = None
+    auxiliary_startup_thread = None
+    auxiliary_startup_worker = None
     window = None
     try:
-        app = QApplication([sys.argv[0]])
-        app.setStyle("Fusion")
+        startup_card.set_progress(
+            8,
+            "正在创建应用服务...",
+            "加载配置、动作库、技能库与统一执行运行时",
+        )
+        services = create_application_services(
+            settings,
+            simulation=args.simulation,
+        )
+        startup_card.set_progress(
+            16,
+            "应用服务已就绪",
+            "正在创建主界面与后台初始化任务",
+        )
+        auxiliary_host = build_auxiliary_service_host(
+            args,
+            settings,
+            services,
+        )
         window = MainWindow(services)
-        window.show()
-        _start_auxiliary_services(auxiliary_host)
+        window.startup_progress_changed.connect(startup_card.set_progress)
+
+        def reveal_main_window(message: str) -> None:
+            startup_card.set_progress(100, message, "正在打开控制界面...")
+
+            def reveal() -> None:
+                if window is None:
+                    return
+                window.show()
+                window.raise_()
+                window.activateWindow()
+                startup_card.close()
+
+            QTimer.singleShot(180, reveal)
+
+        def start_auxiliary_services(success: bool, message: str) -> None:
+            nonlocal auxiliary_startup_thread, auxiliary_startup_worker
+            if not success:
+                startup_card.mark_failed(message)
+                return
+            if auxiliary_host is None:
+                reveal_main_window(message)
+                return
+
+            startup_card.set_progress(
+                97,
+                "正在启动附加服务...",
+                "WebSocket 等可选服务与 GUI 共用应用运行时",
+            )
+            thread = QThread(app)
+            thread.setObjectName("GuiAuxiliaryServiceStartupThread")
+            worker = GuiAuxiliaryServiceStartupWorker(auxiliary_host.start)
+            worker.moveToThread(thread)
+
+            def services_started(snapshots: object) -> None:
+                for snapshot in snapshots:
+                    _log_service_snapshot(snapshot)
+                reveal_main_window(message)
+
+            def services_failed(error: str) -> None:
+                logger.error("附加服务宿主启动失败；GUI 将继续运行: %s", error)
+                reveal_main_window(f"{message}，附加服务不可用")
+
+            def auxiliary_thread_finished() -> None:
+                nonlocal auxiliary_startup_thread, auxiliary_startup_worker
+                auxiliary_startup_thread = None
+                auxiliary_startup_worker = None
+
+            thread.started.connect(worker.run)
+            worker.completed.connect(services_started)
+            worker.failed.connect(services_failed)
+            worker.completed.connect(worker.deleteLater)
+            worker.failed.connect(worker.deleteLater)
+            worker.completed.connect(
+                thread.quit,
+                Qt.ConnectionType.DirectConnection,
+            )
+            worker.failed.connect(
+                thread.quit,
+                Qt.ConnectionType.DirectConnection,
+            )
+            thread.finished.connect(auxiliary_thread_finished)
+            thread.finished.connect(thread.deleteLater)
+            auxiliary_startup_thread = thread
+            auxiliary_startup_worker = worker
+            thread.start()
+
+        window.startup_finished.connect(start_auxiliary_services)
+        return app.exec()
+    except Exception as exc:
+        logger.exception("GUI 初始化失败")
+        startup_card.mark_failed(f"启动失败：{exc}")
         return app.exec()
     finally:
-        if window is not None:
-            try:
-                window.shutdown_after_event_loop()
-            except Exception:
-                logger.exception("GUI 后台资源关闭失败")
+        _shutdown_gui_runtime(
+            auxiliary_startup_thread=auxiliary_startup_thread,
+            window=window,
+            auxiliary_host=auxiliary_host,
+            services=services,
+        )
+
+
+def _shutdown_gui_runtime(
+    *,
+    auxiliary_startup_thread: _QtThreadHandle | None,
+    window: _GuiShutdownHandle | None,
+    auxiliary_host: AuxiliaryServiceHost | None,
+    services: "ApplicationServices | None",
+) -> None:
+    """Release independently owned GUI resources even if one cleanup step fails."""
+    try:
+        _stop_auxiliary_startup_thread(auxiliary_startup_thread)
+    except Exception:
+        logger.exception("附加服务启动线程关闭失败")
+
+    if window is not None:
+        try:
+            window.shutdown_after_event_loop()
+        except Exception:
+            logger.exception("GUI 后台资源关闭失败")
+
+    if auxiliary_host is not None and services is not None:
         _shutdown_application(auxiliary_host, services)
+
+
+def _stop_auxiliary_startup_thread(thread: _QtThreadHandle | None) -> None:
+    if thread is None:
+        return
+    try:
+        is_running = thread.isRunning()
+    except RuntimeError:
+        logger.debug("附加服务启动线程的 Qt 对象已释放")
+        return
+    if not is_running:
+        return
+    thread.quit()
+    if not thread.wait(10_000):
+        logger.warning("附加服务启动线程未在 10 秒内退出")
 
 
 def _start_auxiliary_services(host: AuxiliaryServiceHost) -> None:

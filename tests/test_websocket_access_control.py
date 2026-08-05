@@ -153,6 +153,22 @@ class WebSocketAccessControllerTests(unittest.TestCase):
             raised.exception.code,
         )
 
+    def test_security_disabled_auto_authenticates_registered_clients(self):
+        access = WebSocketAccessController(
+            "",
+            security_enabled=False,
+            control_lease_seconds=30,
+        )
+        access.register("client", "remote")
+
+        session = access.session("client")
+        self.assertTrue(session.authenticated)
+        self.assertEqual("security-disabled", session.principal)
+        self.assertEqual(
+            "client",
+            access.acquire_control("client").owner_client_id,
+        )
+
 
 class WebSocketRequestContextTests(unittest.TestCase):
     def test_specialized_errors_are_normalized_at_protocol_boundary(self):

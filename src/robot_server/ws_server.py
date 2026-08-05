@@ -205,6 +205,7 @@ class RobotWebSocketServer:
         host: str = "127.0.0.1",
         port: int = 8765,
         *,
+        security_enabled: bool = True,
         auth_token: str = "",
         control_lease_seconds: float = 30.0,
         max_message_size_bytes: int = 1_048_576,
@@ -244,12 +245,21 @@ class RobotWebSocketServer:
         self._max_message_size_bytes = max_message_size_bytes
         self._max_queued_messages = max_queued_messages
         self._send_timeout_seconds = send_timeout_seconds
-        self._allowed_origins = normalize_allowed_origins(allowed_origins)
-        self._ssl_context = create_server_ssl_context(
-            tls_certificate_path,
-            tls_private_key_path,
+        self._security_enabled = bool(security_enabled)
+        self._allowed_origins = (
+            normalize_allowed_origins(allowed_origins)
+            if self._security_enabled
+            else ()
         )
-        self._reverse_proxy_mode = bool(reverse_proxy_mode)
+        self._ssl_context = (
+            create_server_ssl_context(
+                tls_certificate_path,
+                tls_private_key_path,
+            )
+            if self._security_enabled
+            else None
+        )
+        self._reverse_proxy_mode = bool(reverse_proxy_mode) if self._security_enabled else False
         self._validate_transport_boundary(auth_token)
         self._teleoperation_command_timeout_seconds = teleoperation_command_timeout_seconds
         self._server: Any = None
@@ -260,6 +270,7 @@ class RobotWebSocketServer:
         self._client_ids: dict[Any, str] = {}
         self._access = WebSocketAccessController(
             auth_token,
+            security_enabled=self._security_enabled,
             control_lease_seconds=control_lease_seconds,
         )
         self._audit_sink = audit_sink or log_websocket_audit_event
@@ -314,6 +325,8 @@ class RobotWebSocketServer:
         return f"{scheme}://{self._host}:{self._port}/"
 
     def _validate_transport_boundary(self, auth_token: str) -> None:
+        if not self._security_enabled:
+            return
         is_loopback = self._host.lower() in {
             "127.0.0.1",
             "::1",
@@ -366,8 +379,9 @@ class RobotWebSocketServer:
             name="WebSocketControlLeaseMonitor",
         )
         logger.info(
-            "WebSocket 服务已启动: %s, write_auth_configured=%s",
+            "WebSocket 服务已启动: %s, security_enabled=%s, write_auth_configured=%s",
             self.endpoint,
+            self._security_enabled,
             self._access.authentication_configured,
         )
 

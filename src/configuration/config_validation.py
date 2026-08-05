@@ -463,6 +463,16 @@ def _validate_websocket(
     ):
         _positive_value(value, issues, field)
 
+    if not settings.websocket_security_enabled:
+        if not is_loopback_host(options.websocket_host):
+            _warning(
+                issues,
+                "websocket_security_disabled",
+                "WEBSOCKET_SECURITY_ENABLED",
+                "远程 WebSocket 未启用 TLS、认证和 Origin 限制",
+            )
+        return
+
     auth_token = auth_token.strip()
     if auth_token and is_placeholder_secret(auth_token):
         _error(
