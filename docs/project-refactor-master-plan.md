@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-06
 >
-> 当前里程碑：M5 — 第二轮目录职责、Provider 边界与真实硬件验收
-> 计划进度：127/132（125 DONE + 2 DROPPED，96.2%）
+> 当前里程碑：M6 — GUI 工作流画布、触控交互与表现层收敛
+> 计划进度：127/139（125 DONE + 2 DROPPED，91.4%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -25,7 +25,7 @@
 | F. 视觉与相机 | [视觉服务与数据治理架构](vision-architecture.md) |
 | F. 数据采集 | [数据采集说明](data-collection.md) |
 | F. 智能加粉 | [智能闭环加粉 Agent](powder_dispense_agent.md) |
-| D. GUI 应用架构 | [GUI 应用架构](gui-application-architecture.md) |
+| D. GUI 应用架构 | [GUI 应用架构](gui-application-architecture.md)、[GUI 工作流画布重构计划](gui-refactor-plan.md) |
 | G. 工程与数据治理 | [工程质量门禁](quality-gates.md)、[依赖、配置与用户数据治理](data-config-governance.md) |
 
 本计划覆盖的是当前仓库可确认的问题。后续发现的新问题应进入对应 Track 的 backlog，不能因为没有列在首版文档中而被忽略。
@@ -536,6 +536,10 @@ src/
   Qt 事件循环退出后执行，再由应用宿主统一关闭附加服务和设备。
 - 动作库/任务库、序列/任务组合器、设备状态/位姿和手动控制已拆成四个稳定视图组件；
   `MainWindow` 只组合组件、连接意图信号并调用渲染接口，不保留旧控件属性别名。
+- 新一轮 GUI 评审确认：列表式编排区域仍需升级为受约束的工作流画布；原 GUI 草案中
+  新建 `WorkflowExecutor`/节点 Handler、首版移除循环及 Qt/领域模型混合等方案已废止，
+  统一改为复用 `CompositionService`、规范 `SequenceEntry`、`ExecutionBridge`、
+  `ExecutionManager` 和唯一 `ActionHandlerRegistry`。
 
 ### 9.2 目标
 
@@ -564,6 +568,13 @@ src/
 | D-012 | P3 | DONE | Windows/Linux offscreen GUI smoke 构造真实 MainWindow + simulation services，覆盖启动、暂停、恢复、取消、日志终态和资源清理 |
 | D-013 | P2 | DONE | 提取 `ActionLibraryView` 与 `WorkflowEditorView`，统一动作库、任务库、序列和任务组合器的构造、意图信号及执行控件渲染接口 |
 | D-014 | P2 | DONE | 提取 `DeviceStatusView` 与 `DeviceControlView`，统一设备状态、位姿、定位和手动控制视图；组件不持有设备或应用服务 |
+| D-015 | P0 | TODO | 冻结 GUI 功能等价清单与架构 ADR，明确受约束画布、Loop 表现、单一执行入口、安全停止语义和直接切换门槛 |
+| D-016 | P1 | TODO | 建立纯 Python WorkflowDocument、Schema 版本、草稿恢复和一次性前向迁移；复用 ActionDefinition/SequenceItem/LoopBlock，并由 CompositionService 独占持久化 |
+| D-017 | P1 | TODO | 实现结构 Validator、执行 Preflight 与 WorkflowCompiler，将合法文档编译为 SequenceEntry，并建立 UUID 到执行节点的稳定映射；禁止新增执行器和动作 Handler |
+| D-018 | P1 | TODO | 实现受约束 QGraphics 工作流画布、Loop 容器、自动布局、“+”插入、拖动排序、参数抽屉、Undo/Redo 及鼠标/键盘/触控完整路径 |
+| D-019 | P1 | TODO | 接入任务组合、AI/语音预览、轨迹、相机、日志、设备状态和三类停止控制，并继续将 MainWindow 收敛为窗口壳、页面 Controller 与稳定视图组件 |
+| D-020 | P2 | TODO | 建立 GUI 设计令牌、系统 Palette/高 DPI、图标许可证、可访问性、100/500 节点性能预算和 Qt offscreen 回归矩阵 |
+| D-021 | P1 | TODO | 在功能等价、数据迁移、性能与安全验收通过后一次切换到新编辑器，删除旧列表编辑器和旧路径，不保留双写、双运行或兼容层 |
 
 ### 9.4 完成标准
 
@@ -572,6 +583,10 @@ src/
 - 新动作不需要在多个 GUI 映射表重复登记。
 - UI 主线程不执行阻塞操作。
 - 启动、执行和关闭均有明确状态和错误反馈。
+- WorkflowDocument、Qt Bridge/Scene 与运行时状态边界清晰，GUI 不定义平行动作模型。
+- 工作流只经 Compiler 转为规范 SequenceEntry，再提交唯一 ExecutionManager。
+- Loop、任务组合、AI 导入及三类停止控制在新编辑器中无功能回退。
+- 新编辑器满足目标分辨率、DPI、纯触控、可访问性和性能预算，切换后旧编辑器已删除。
 
 ## 10. Track E：LLM、语音交互与技能系统
 
@@ -865,6 +880,7 @@ src/
 | ADR-M-011 | Accepted | 目录架构 | 使用按领域组织的模块化单体；硬件统一进入 `src/devices/`，不按全局 models/controllers/services 技术目录横向堆积 |
 | ADR-M-012 | Accepted | MVC 适用范围 | MVC/MVVM 只用于 GUI、WebSocket/HTTP 表现层；执行与硬件采用 Application Service + Ports/Adapters |
 | ADR-M-013 | Accepted | 硬件实现角色 | Service 编排用例，Provider 创建产品，Adapter 实现能力，Driver 封装厂商协议，Transport 负责通信；禁止用 `XxxService` 混称底层驱动 |
+| ADR-M-014 | Proposed | GUI 工作流画布边界 | 使用受约束画布和纯 WorkflowDocument；复用 CompositionService、SequenceEntry、ExecutionManager 与 ActionHandlerRegistry，不新增 GUI 执行器、Handler 或持久化仓库 |
 
 ADR 状态：`Proposed`、`Accepted`、`Superseded`、`Rejected`。
 
@@ -915,6 +931,15 @@ M5 模块目录与依赖边界治理
   ├─ application-owned LLM lifecycle
   ├─ core responsibility split
   └─ legacy/import-boundary removal
+       |
+       v
+M6 GUI 工作流画布与表现层收敛
+  ├─ feature-parity baseline and ADR
+  ├─ workflow document/validator/compiler
+  ├─ constrained touch canvas and loop container
+  ├─ MainWindow shell/page decomposition
+  ├─ accessibility/performance/offscreen gates
+  └─ one-time cutover and old-editor removal
 ```
 
 ### 14.1 M0：安全与工程基线
@@ -980,6 +1005,17 @@ M5 模块目录与依赖边界治理
   capability 与 Provider/Adapter/Driver 边界隔离。
 - 视觉 pipeline、UDP 外部定位和视觉工位重定位具有互不混淆的模块与状态所有者。
 - AST 依赖边界、Mypy、simulation、完整质量门禁和 wheel smoke 全部通过。
+
+### 14.7 M6：GUI 工作流画布与表现层收敛
+
+完成条件：
+
+- 受约束画布保持动作、Loop、任务组合、AI/语音预览、轨迹、设备状态和执行控制功能等价。
+- WorkflowDocument 是纯编辑模型，并经 Validator/Preflight/Compiler 转换为规范 SequenceEntry。
+- GUI 只通过现有 ExecutionBridge 提交唯一 ExecutionManager，仓库中不存在平行执行器、Handler 或持久化入口。
+- MainWindow 只承担窗口壳、导航和顶层 Qt 生命周期，页面行为由 Controller/Application Service 协调。
+- 鼠标、键盘、纯触控、高 DPI、可访问性、100/500 节点性能和 Qt offscreen 回归通过。
+- 数据备份和一次性前向迁移通过后直接切换，旧列表编辑器与旧路径已经删除。
 
 ## 15. 质量门禁
 
@@ -1206,11 +1242,15 @@ M5 模块目录与依赖边界治理
 | 2026-08-06 | M5 | A/F/G | 视觉、外部定位与 Handler API 边界收敛 | G-026/G-027 TODO → DONE | 视觉抓取算法迁入 pipelines，离线 CLI 与工位重定位算法分离；UDP 外部定位改为可注入 Provider，simulation 不创建网络资源，Application Service 只保留读取策略；action_handlers 拆为 handler API/Registry/core handlers；README、配置和旧路径门禁同步更新，不保留转发模块 | Compile、Ruff、Mypy（47 files）、Pytest（406 passed + 43 subtests，60.91%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-06 | M5 | A/G | ExecutionManager 并发状态机与类型边界收口 | A-006 DOING → DONE | 修复 STARTING 阶段取消后 worker 回写 RUNNING 的状态回退；终态后抑制迟到生命周期事件；worker 可注入并覆盖并发 submit、启动前取消、取消/完成竞态、启动失败和租约释放；Mypy 扩展为整包检查 `src/execution` | Compile、Ruff、Mypy（61 files）、Pytest（410 passed + 43 subtests，61.00%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-06 | M5 | D/G | GUI Qt binding 许可证风险收敛 | G-028 → DONE | 删除旧 Qt binding、Qt6/SIP 依赖和全部导入，生产与测试代码直切 PySide6 原生 Signal/Slot；修复普通 Python 回调在 worker 线程注册 reveal timer 导致初始化卡片停在 100% 的问题，结果改由 GUI 线程 QObject receiver 处理；GUI/full extra、uv lock、可选依赖 smoke、README 和项目说明同步更新；新增旧 binding 和启动过渡回归门禁，不保留适配或兼容层 | Compile、Ruff、Mypy（61 files）、Pytest（412 passed + 43 subtests，61.03%）、LLM golden（14/14）、性能回归（7/7）、GUI extra 及 Wheel smoke 全通过 |
+| 2026-08-06 | M6 | D | GUI 工作流画布方案修订与立项 | D-015～D-021 新增为 TODO | 修订 GUI 专项计划：废止平行 WorkflowExecutor/节点 Handler 和首版移除 Loop 的方案；确立纯编辑模型、CompositionService 唯一持久化、Validator/Preflight/Compiler、ExecutionManager 唯一执行链、受约束触控画布、三类停止、安全验收及一次切换路线 | 文档评审；本次仅更新计划文档，未执行代码变更 |
 
 ## 22. 建议的首批实施顺序
 
-1. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-2. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-3. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native`
-   验收，并在真实双臂硬件上测量采样偏差分布。
-4. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+1. **D-015/D-016**：先冻结功能等价清单和架构 ADR，再建立纯 WorkflowDocument、Schema 版本、草稿恢复及通过 CompositionService 的迁移/持久化边界。
+2. **D-017**：完成 Validator、Preflight、Compiler 和 UUID 事件映射，使用契约测试证明没有新增执行器、Handler 注册表或设备调用入口。
+3. **D-018/D-019**：先做现有任务与 Loop 的只读画布和执行状态映射，再整批完成编辑、触控、任务组合、AI/语音、日志、设备状态、安全控制及 MainWindow 收敛。
+4. **D-020/D-021**：完成设计令牌、DPI/可访问性、100/500 节点性能、offscreen 回归和数据备份迁移后，一次切换并删除旧列表编辑器。
+5. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+6. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+7. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+8. 完成 simulation smoke test 后执行逐设备真实硬件验收。
