@@ -1,7 +1,8 @@
 """Synchronous action engine used exclusively by ExecutionManager."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import logging
+from typing import Any
 
 from ..domain.execution_context import ExecutionContext
 from ..domain.models import (
@@ -79,7 +80,7 @@ class ActionEngine:
         execution_settings: ExecutionSettings,
         device_settings: DeviceSettings,
         vision_settings: VisionSettings,
-        external_localization_reader,
+        external_localization_reader: Callable[..., dict[str, Any] | None],
         execution_context: ExecutionContext,
         vision_service: VisionService,
     ) -> None:
@@ -268,8 +269,8 @@ class ActionEngine:
                     if result.successful:
                         item.status = SequenceItemStatus.SUCCESS
                         self._on_step_completed(index, item)
-                    elif control.cancel_requested:
-                        item.status = SequenceItemStatus.PENDING
+                    elif self._cancel_requested(control):
+                        self._reset_cancelled_item(item)
                         return EngineResult(success=False, cancelled=True)
                     else:
                         item.status = SequenceItemStatus.FAILED
@@ -370,6 +371,16 @@ class ActionEngine:
 
     def _on_log(self, message: str, level: str = "info") -> None:
         self._required_callbacks().on_log(message, level)
+
+    @staticmethod
+    def _reset_cancelled_item(item: SequenceItem) -> None:
+        item.status = SequenceItemStatus.PENDING
+
+    @staticmethod
+    def _cancel_requested(control: ExecutionControl) -> bool:
+        # The value may change while a handler runs in another thread. Keeping
+        # the second read behind a method prevents stale flow narrowing.
+        return control.cancel_requested
 
     # ------------------------------------------------------------------
     # 动作分发（与 execution.py 逻辑一致）

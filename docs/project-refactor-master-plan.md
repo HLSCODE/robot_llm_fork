@@ -2,10 +2,10 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-08-05
+> 最近更新：2026-08-06
 >
 > 当前里程碑：M5 — 第二轮目录职责、Provider 边界与真实硬件验收
-> 计划进度：125/131（123 DONE + 2 DROPPED，95.4%）
+> 计划进度：126/131（124 DONE + 2 DROPPED，96.2%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -372,7 +372,7 @@ src/
 | A-003 | P0 | DONE | 修复 stop 后立即 disconnect 设备的竞态 |
 | A-004 | P0 | DROPPED | 不保留旧执行链路；改为新 runtime 单元和边界测试 |
 | A-005 | P1 | DONE | 实现 execution models/events/handle |
-| A-006 | P1 | DOING | 实现唯一 ExecutionManager；待硬件验收和更多竞态测试 |
+| A-006 | P1 | DONE | 唯一 ExecutionManager 已落地；并发 submit、启动前取消、取消/完成竞态、worker 启动失败及资源释放均有确定性回归测试；硬件停止时延由 B-007/ER-006/ER-011 独立验收 |
 | A-007 | P1 | DONE | 唯一注册表、全部具体动作 handler 和结构化 ActionHandlerResult 已落地 |
 | A-008 | P1 | DONE | WebSocket 已迁移；路由、全部 action 最小合法请求、payload 边界、错误码和响应 DTO contract test 已进入 pytest |
 | A-009 | P1 | DONE | GUI 手工与 AI 共用唯一 ApplicationServices/ExecutionRuntime；offscreen smoke 覆盖真实窗口装配及执行控制 |
@@ -781,10 +781,10 @@ src/
 
 当前问题：
 
-- pytest 已建立 44% 全源码覆盖率门禁；Windows/Linux 质量矩阵和 GUI/Server/Hardware
+- pytest 已建立 50% 全源码覆盖率门禁；Windows/Linux 质量矩阵和 GUI/Server/Hardware
   可选依赖隔离矩阵已建立。
-- Ruff 已覆盖收敛主线模块，供应商 SDK、旧设备/视觉/语音模块和联调脚本的历史问题仍需分批清零后纳入。
-- Mypy 已覆盖协议与核心运行时模型，应用服务和其他领域模块仍需逐步扩展。
+- Ruff 已覆盖全部 `src`、测试和受管脚本；供应商 SDK 与硬件联调脚本按隔离门禁管理。
+- Mypy 已覆盖 61 个核心文件，并整包覆盖 `src/execution`；GUI、语音、部分设备驱动和视觉算法等动态边界仍需逐步扩展。
 - `test_devices.py` 等主要是硬件联调脚本。
 - 大量硬件代码难以在无设备环境导入和测试。
 
@@ -1082,28 +1082,28 @@ M5 模块目录与依赖边界治理
 
 ### 架构
 
-- [ ] GUI、WebSocket、voice 和 AI 不直接操作具体动作实现。
-- [ ] ExecutionManager 是唯一序列执行所有者。
-- [ ] DeviceRuntime 是唯一硬件生命周期所有者。
-- [ ] 天平、相机等设备型能力不绕过 DeviceRuntime、资源租约和共享 Provider。
+- [x] GUI、WebSocket、voice 和 AI 不直接操作具体动作实现。
+- [x] ExecutionManager 是唯一序列执行所有者。
+- [x] DeviceRuntime 是唯一硬件生命周期所有者。
+- [x] 天平、相机等设备型能力不绕过 DeviceRuntime、资源租约和共享 Provider。
 - [x] teleop、sequence、测试和直接控制服从资源仲裁。
 - [x] runtime/domain/configuration/persistence/geometry 不反向依赖 GUI 或 WebSocket。
-- [ ] GUI Qt 代码已收敛到 `src/gui/`，执行复合工作流已收敛到
+- [x] GUI Qt 代码已收敛到 `src/gui/`，执行复合工作流已收敛到
   `src/execution/workflows/`，Transport 不包含语义设备。
 
 ### 安全与协议
 
 - [x] cancel、quick-stop、emergency-stop 语义和能力明确。
-- [ ] WebSocket 写操作有认证、权限和审计。
-- [ ] 多客户端有控制权和冲突策略。
-- [ ] 请求、执行、设备错误可通过 ID 关联。
+- [x] WebSocket 写操作有认证、权限和审计。
+- [x] 多客户端有控制权和冲突策略。
+- [x] 请求、执行、设备错误可通过 ID 关联。
 
 ### 领域能力
 
 - [x] WebSocket action schema 和 Skill 参数展开使用统一 schema。
-- [ ] GUI 通用表单、动作持久化入口和 handler 参数模型完全由统一 schema 驱动。
-- [ ] 未知动作和非法参数在执行前拒绝。
-- [ ] 相机、视觉、标定和工位数据有清晰生命周期。
+- [x] GUI 通用表单、动作持久化入口和 handler 参数模型完全由统一 schema 驱动。
+- [x] 未知动作和非法参数在执行前拒绝。
+- [x] 相机、视觉、标定和工位数据有清晰生命周期。
 - [x] 数据采集和加粉流程有结构化状态与结果。
 
 ### 工程质量
@@ -1118,8 +1118,8 @@ M5 模块目录与依赖边界治理
 - [x] 内置动作和技能可重复交付且不覆盖用户数据。
 - [x] 文件日志结构化、按日轮转并可通过 request_id/run_id 关联请求和执行。
 - [x] 无 I/O 关键热路径具有版本化性能预算和跨平台回归门禁。
-- [ ] legacy 执行实现和过期文档已清理。
-- [ ] README、目录职责表和实际源码结构一致，旧目录不会通过打包或导入重新出现。
+- [x] legacy 执行实现和过期文档已清理。
+- [x] README、目录职责表和实际源码结构一致，旧目录不会通过打包或导入重新出现。
 
 ## 20. 进度维护规则
 
@@ -1203,6 +1203,7 @@ M5 模块目录与依赖边界治理
 | 2026-08-05 | M5 | B/G | Transport 语义设备与工具垂直切片收敛 | G-023 TODO → DONE | ElectricGripper/StepperMotor 迁入 powder_dispenser；Relay/ToolChanger/Pipette Adapter 与 Driver 共置；删除 tools/adapters.py 和 transports/devices，不保留转发；Transport 只导出通信/协议能力，并增加真实 Modbus 帧特征测试与旧目录/wheel 门禁 | Compile、Ruff、Mypy（42 files）、Pytest（395 passed + 43 subtests，59.53%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-05 | M5 | B/G | 相机、移动底盘与显示 Provider 边界收敛 | G-024/G-025 TODO → DONE | 相机建立 RealSense/OpenCV 静态 Provider Registry 和共享 capability，未知配置在组合根失败；移动底盘拆为单一 TCP Provider/Adapter/Client 产品切片；显示屏动态导入替换为静态 Provider 注册；删除 camera_factory、旧底盘 Controller/Client，不增加兼容值或空底盘 Registry | Compile、Ruff、Mypy（42 files）、Pytest（401 passed + 43 subtests，60.79%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-06 | M5 | A/F/G | 视觉、外部定位与 Handler API 边界收敛 | G-026/G-027 TODO → DONE | 视觉抓取算法迁入 pipelines，离线 CLI 与工位重定位算法分离；UDP 外部定位改为可注入 Provider，simulation 不创建网络资源，Application Service 只保留读取策略；action_handlers 拆为 handler API/Registry/core handlers；README、配置和旧路径门禁同步更新，不保留转发模块 | Compile、Ruff、Mypy（47 files）、Pytest（406 passed + 43 subtests，60.91%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
+| 2026-08-06 | M5 | A/G | ExecutionManager 并发状态机与类型边界收口 | A-006 DOING → DONE | 修复 STARTING 阶段取消后 worker 回写 RUNNING 的状态回退；终态后抑制迟到生命周期事件；worker 可注入并覆盖并发 submit、启动前取消、取消/完成竞态、启动失败和租约释放；Mypy 扩展为整包检查 `src/execution` | Compile、Ruff、Mypy（61 files）、Pytest（410 passed + 43 subtests，61.00%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 

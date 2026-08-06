@@ -4,7 +4,7 @@ import math
 import threading
 import time
 from contextlib import nullcontext
-from typing import Callable
+from typing import Any, Callable, TypedDict
 
 from ...geometry.pose_compensation import parse_pose
 from ...devices import (
@@ -17,18 +17,25 @@ from ...devices import (
 )
 
 
-LogFn = Callable[[str, str], None]
 StateFn = Callable[[], bool]
+LogFn = Callable[[str, str], None]
 
 
-def _to_float(params: dict, key: str, default: float) -> float:
+class _ConcurrentResults(TypedDict):
+    motion: bool
+    dispense: bool
+    motion_error: str
+    dispense_error: str
+
+
+def _to_float(params: dict[str, Any], key: str, default: Any) -> float:
     value = params.get(key, default)
     if value is None or value == "":
         return float(default)
     return float(value)
 
 
-def _to_bool(value, default: bool = False) -> bool:
+def _to_bool(value: Any, default: bool = False) -> bool:
     if value is None or value == "":
         return default
     if isinstance(value, str):
@@ -46,7 +53,7 @@ def execute_right_arm_circle_dispense(
     *,
     robot_motion: ArmMotion,
     pipette: Pipette,
-    params: dict,
+    params: dict[str, Any],
     log: LogFn,
     stop_requested: StateFn | None = None,
     paused: StateFn | None = None,
@@ -108,11 +115,12 @@ def execute_right_arm_circle_dispense(
             f"center=({cx:.4f}, {cy:.4f}, {z:.4f}), "
             f"R={radius * 1000:.1f}mm, volume={volume:.1f}ul, "
             f"speed={dispense_speed:.1f}ul/s, duration={duration:.2f}s, "
-            f"segments={total_segments}, blend={blend_radius}, continuous={continuous_motion}"
+            f"segments={total_segments}, blend={blend_radius}, continuous={continuous_motion}",
+            "info",
         )
 
         start_pose = circle_pose(0)
-        log("移动到圆周起点...")
+        log("移动到圆周起点...", "info")
         robot_motion.move_to_pose(
             ArmId.RIGHT,
             CartesianPose.from_iterable(start_pose),
@@ -121,14 +129,14 @@ def execute_right_arm_circle_dispense(
         )
 
         with nullcontext(pipette) as adp:
-            log(f"设置吐液速度: {dispense_speed:.1f}ul/s")
+            log(f"设置吐液速度: {dispense_speed:.1f}ul/s", "info")
             if not adp.set_dispense_speed(int(round(dispense_speed))):
                 log("设置吐液速度失败", "error")
                 return False
 
             start_signal = threading.Event()
             started_at = [0.0]
-            results = {
+            results: _ConcurrentResults = {
                 "motion": False,
                 "dispense": False,
                 "motion_error": "",
@@ -138,7 +146,7 @@ def execute_right_arm_circle_dispense(
             def run_dispense() -> None:
                 try:
                     start_signal.wait()
-                    log(f"开始吐液: {volume:.1f}ul")
+                    log(f"开始吐液: {volume:.1f}ul", "info")
                     if adp.dispense(int(round(volume))):
                         results["dispense"] = True
                     else:
@@ -191,7 +199,7 @@ def execute_right_arm_circle_dispense(
             motion_thread.start()
             dispense_thread.start()
 
-            log("同步启动右臂转圈与吐液...")
+            log("同步启动右臂转圈与吐液...", "info")
             started_at[0] = time.monotonic()
             start_signal.set()
 
@@ -208,7 +216,7 @@ def execute_right_arm_circle_dispense(
             extra_wait = duration - (time.monotonic() - started_at[0])
             if extra_wait > 0:
                 time.sleep(extra_wait)
-        log("右臂转圈注液完成")
+        log("右臂转圈注液完成", "info")
         return True
     except Exception as exc:
         log(f"右臂转圈注液执行异常: {exc}", "error")

@@ -159,7 +159,7 @@ select = [
 python_version = "3.12"
 files = [
     "scripts/run_performance_benchmarks.py",
-    "src/execution/workflows/powder_dispense.py",
+    "src/execution",
     "src/configuration/settings.py",
     "src/persistence/json_documents.py",
     "src/observability/logging_config.py",
@@ -189,14 +189,10 @@ files = [
     "src/devices/robots/registry.py",
     "src/devices/robots/realman/adapter.py",
     "src/devices/robots/realman/provider.py",
-    "src/execution/handler_api.py",
-    "src/execution/handler_registry.py",
     "src/application/external_localization.py",
     "src/localization/models.py",
     "src/localization/provider.py",
     "src/localization/udp.py",
-    "src/execution/models.py",
-    "src/execution/handlers/vision.py",
     "src/gui/controllers/startup.py",
     "src/gui/bridges/notifications.py",
     "src/gui/view_models/models.py",

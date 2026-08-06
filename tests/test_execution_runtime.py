@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from threading import Event
+from threading import Barrier, Event, Lock, Thread
 import logging
 import unittest
 
@@ -27,6 +27,7 @@ from src.execution import (
     ExecutionEventType,
     ExecutionManager,
     ExecutionState,
+    ExecutionStateError,
 )
 from src.execution.action_control import resolve_wait_control_policy
 
@@ -79,6 +80,44 @@ class _BlockingEngine:
                 return EngineResult(success=False, cancelled=True)
         callbacks.on_step_completed(0, sequence[0])
         return EngineResult(success=True)
+
+
+class _ManualWorker:
+    """Deterministic worker that starts only when the test invokes run()."""
+
+    def __init__(self, target) -> None:
+        self._target = target
+        self._started = False
+        self._alive = False
+
+    def start(self) -> None:
+        self._started = True
+        self._alive = True
+
+    def is_alive(self) -> bool:
+        return self._alive
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
+
+    def run(self) -> None:
+        if not self._started:
+            raise RuntimeError("manual worker has not been started")
+        try:
+            self._target()
+        finally:
+            self._alive = False
+
+
+class _FailingWorker:
+    def start(self) -> None:
+        raise RuntimeError("worker start rejected")
+
+    def is_alive(self) -> bool:
+        return False
+
+    def join(self, timeout: float | None = None) -> None:
+        del timeout
 
 
 class DeviceRuntimeTests(unittest.TestCase):
@@ -291,6 +330,146 @@ class ExecutionManagerTests(unittest.TestCase):
         handle.cancel()
         final = handle.wait(1)
         self.assertEqual(ExecutionState.CANCELLED, final.state)
+        self.assertIsNone(self.resources.owner_of("robot"))
+
+    def test_cancel_before_worker_runs_never_regresses_to_running(self):
+        workers: list[_ManualWorker] = []
+
+        def create_worker(target, _name: str) -> _ManualWorker:
+            worker = _ManualWorker(target)
+            workers.append(worker)
+            return worker
+
+        manager = ExecutionManager(
+            engine=self.engine,
+            resource_arbiter=self.resources,
+            execution_resources=lambda _sequence: ("robot",),
+            worker_factory=create_worker,
+        )
+        events = []
+        handle = manager.submit(["step"], origin="test", listener=events.append)
+
+        handle.cancel()
+        self.assertEqual(ExecutionState.CANCELLING, handle.snapshot().state)
+        workers[0].run()
+
+        self.assertEqual(ExecutionState.CANCELLED, handle.snapshot().state)
+        self.assertFalse(self.engine.started.is_set())
+        self.assertIsNone(self.resources.owner_of("robot"))
+        self.assertEqual(
+            [
+                ExecutionEventType.ACCEPTED,
+                ExecutionEventType.CANCELLING,
+                ExecutionEventType.CANCELLED,
+            ],
+            [event.event_type for event in events],
+        )
+
+    def test_worker_start_failure_is_terminal_and_releases_resources(self):
+        events = []
+        manager = ExecutionManager(
+            engine=self.engine,
+            resource_arbiter=self.resources,
+            execution_resources=lambda _sequence: ("robot",),
+            worker_factory=lambda _target, _name: _FailingWorker(),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "worker start rejected"):
+            manager.submit(["step"], origin="test", listener=events.append)
+
+        snapshot = manager.snapshot()
+        self.assertEqual(ExecutionState.FAILED, snapshot.state)
+        self.assertEqual("internal_error", snapshot.error_code)
+        self.assertEqual("execution.worker.start", snapshot.error_operation)
+        self.assertIsNone(self.resources.owner_of("robot"))
+        self.assertEqual(
+            [ExecutionEventType.ACCEPTED, ExecutionEventType.FAILED],
+            [event.event_type for event in events],
+        )
+
+    def test_concurrent_submissions_accept_exactly_one_run(self):
+        contender_count = 8
+        barrier = Barrier(contender_count)
+        result_lock = Lock()
+        handles = []
+        rejections: list[ExecutionAlreadyRunningError] = []
+
+        def submit() -> None:
+            barrier.wait()
+            try:
+                handle = self.manager.submit(["step"], origin="race")
+            except ExecutionAlreadyRunningError as exc:
+                with result_lock:
+                    rejections.append(exc)
+            else:
+                with result_lock:
+                    handles.append(handle)
+
+        contenders = [Thread(target=submit) for _ in range(contender_count)]
+        for contender in contenders:
+            contender.start()
+        for contender in contenders:
+            contender.join(timeout=1)
+
+        self.assertEqual(1, len(handles))
+        self.assertEqual(contender_count - 1, len(rejections))
+        handles[0].cancel()
+        self.assertEqual(ExecutionState.CANCELLED, handles[0].wait(1).state)
+        self.assertIsNone(self.resources.owner_of("robot"))
+
+    def test_cancel_completion_race_emits_one_terminal_event_last(self):
+        events = []
+        event_lock = Lock()
+
+        def listener(event) -> None:
+            with event_lock:
+                events.append(event)
+
+        handle = self.manager.submit(
+            ["step"],
+            origin="race",
+            listener=listener,
+        )
+        self.assertTrue(self.engine.started.wait(1))
+        barrier = Barrier(2)
+        cancel_errors = []
+
+        def cancel() -> None:
+            barrier.wait()
+            try:
+                handle.cancel()
+            except ExecutionStateError as exc:
+                cancel_errors.append(exc)
+
+        def complete() -> None:
+            barrier.wait()
+            self.engine.release.set()
+
+        cancel_thread = Thread(target=cancel)
+        complete_thread = Thread(target=complete)
+        cancel_thread.start()
+        complete_thread.start()
+        cancel_thread.join(timeout=1)
+        complete_thread.join(timeout=1)
+        final = handle.wait(1)
+
+        self.assertIn(
+            final.state,
+            {ExecutionState.SUCCEEDED, ExecutionState.CANCELLED},
+        )
+        self.assertLessEqual(len(cancel_errors), 1)
+        terminal_events = [
+            event
+            for event in events
+            if event.event_type
+            in {
+                ExecutionEventType.SUCCEEDED,
+                ExecutionEventType.FAILED,
+                ExecutionEventType.CANCELLED,
+            }
+        ]
+        self.assertEqual(1, len(terminal_events))
+        self.assertIs(terminal_events[0], events[-1])
         self.assertIsNone(self.resources.owner_of("robot"))
 
     def test_worker_logs_are_correlated_with_run_id(self):

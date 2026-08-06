@@ -19,6 +19,7 @@ from ...devices.runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
 from ..handler_api import (
     ActionCancelledError,
     ActionExecutionContext,
+    ActionHandler,
     ActionHandlerResult,
     ActionParameters,
     ActionResultCode,
@@ -55,7 +56,7 @@ class MoveActionHandler:
         robot_handler: RobotMoveActionHandler,
         body_handler: BodyMoveActionHandler,
     ) -> None:
-        self._target_handlers = {
+        self._target_handlers: dict[str, ActionHandler] = {
             "机械臂": robot_handler,
             "身体": body_handler,
         }

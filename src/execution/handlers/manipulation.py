@@ -1077,7 +1077,7 @@ def create_manipulation_handler(
     return ManipulateActionHandler(handlers)
 
 
-def _positive_int(value: object, label: str) -> int:
+def _positive_int(value: Any, label: str) -> int:
     normalized = int(value)
     if normalized <= 0:
         raise ValueError(f"{label}必须大于0")
@@ -1085,7 +1085,7 @@ def _positive_int(value: object, label: str) -> int:
 
 
 def _bounded_int(
-    value: object,
+    value: Any,
     label: str,
     minimum: int,
     maximum: int,

@@ -29,6 +29,15 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 ExecutionListener = Callable[[ExecutionEvent], None]
+_EVENT_STATES = {
+    ExecutionEventType.STARTED: ExecutionState.RUNNING,
+    ExecutionEventType.PAUSED: ExecutionState.PAUSED,
+    ExecutionEventType.RESUMED: ExecutionState.RUNNING,
+    ExecutionEventType.CANCELLING: ExecutionState.CANCELLING,
+    ExecutionEventType.SUCCEEDED: ExecutionState.SUCCEEDED,
+    ExecutionEventType.FAILED: ExecutionState.FAILED,
+    ExecutionEventType.CANCELLED: ExecutionState.CANCELLED,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +56,22 @@ class ExecutionEngine(Protocol):
         control: ExecutionControl,
         callbacks: EngineCallbacks,
     ) -> EngineResult: ...
+
+
+class ExecutionWorker(Protocol):
+    def start(self) -> None: ...
+    def is_alive(self) -> bool: ...
+    def join(self, timeout: float | None = None) -> None: ...
+
+
+ExecutionWorkerFactory = Callable[[Callable[[], None], str], ExecutionWorker]
+
+
+def _create_execution_worker(
+    target: Callable[[], None],
+    name: str,
+) -> ExecutionWorker:
+    return Thread(target=target, daemon=True, name=name)
 
 
 class ExecutionHandle:
@@ -81,6 +106,8 @@ class ExecutionManager:
             [Sequence[Any]],
             tuple[str, ...],
         ],
+        *,
+        worker_factory: ExecutionWorkerFactory = _create_execution_worker,
     ) -> None:
         self._engine = engine
         self._resource_arbiter = resource_arbiter
@@ -98,7 +125,8 @@ class ExecutionManager:
         self._started_at: float | None = None
         self._finished_at: float | None = None
         self._control: ExecutionControl | None = None
-        self._thread: Thread | None = None
+        self._worker_factory = worker_factory
+        self._thread: ExecutionWorker | None = None
         self._listener: ExecutionListener | None = None
 
     def submit(
@@ -144,11 +172,15 @@ class ExecutionManager:
             self._finished_at = None
             self._control = control
             self._listener = listener
-            self._thread = Thread(
-                target=self._run,
-                args=(run_id, tuple(sequence), control, lease),
-                daemon=True,
-                name=f"ExecutionManager-{run_id[:8]}",
+            frozen_sequence = tuple(sequence)
+            self._thread = self._worker_factory(
+                lambda: self._run(
+                    run_id,
+                    frozen_sequence,
+                    control,
+                    lease,
+                ),
+                f"ExecutionManager-{run_id[:8]}",
             )
             thread = self._thread
 
@@ -164,6 +196,16 @@ class ExecutionManager:
                 self._error_code = ActionResultCode.INTERNAL_ERROR.value
                 self._error_operation = "execution.worker.start"
                 self._finished_at = time.time()
+            self._emit(
+                run_id,
+                ExecutionEventType.FAILED,
+                message=self._error,
+                level="error",
+                data={
+                    "code": ActionResultCode.INTERNAL_ERROR.value,
+                    "operation": "execution.worker.start",
+                },
+            )
             raise
         return ExecutionHandle(run_id, self)
 
@@ -196,6 +238,8 @@ class ExecutionManager:
     def cancel(self, run_id: str | None = None) -> None:
         with self._lock:
             self._assert_current_run(run_id)
+            if self._state is ExecutionState.CANCELLING:
+                return
             if not self._snapshot_unlocked().active:
                 raise ExecutionStateError("there is no active execution")
             control = self._required_control()
@@ -238,15 +282,17 @@ class ExecutionManager:
         control: ExecutionControl,
         lease: ResourceLease | None,
     ) -> None:
-        logger.info("Execution started: origin=%s", self._origin)
         with self._lock:
-            if self._run_id != run_id:
-                if lease is not None:
-                    lease.release()
-                return
-            self._state = ExecutionState.RUNNING
-            self._started_at = time.time()
-        self._emit(run_id, ExecutionEventType.STARTED)
+            is_current_run = self._run_id == run_id
+            cancelled_before_start = control.cancel_requested
+            if is_current_run:
+                if not cancelled_before_start:
+                    self._state = ExecutionState.RUNNING
+                self._started_at = time.time()
+        if not is_current_run:
+            if lease is not None:
+                lease.release()
+            return
 
         callbacks = EngineCallbacks(
             on_step_started=lambda index, item, policy: self._emit(
@@ -280,27 +326,29 @@ class ExecutionManager:
                     "total_iterations": total,
                 },
             ),
-            on_log=lambda message, level="info": self._emit(
-                run_id,
-                ExecutionEventType.LOG,
-                message=message,
-                level=level,
-            ),
+            on_log=self._create_log_callback(run_id),
         )
 
-        try:
-            result = self._engine.run(sequence, control, callbacks)
-        except Exception as exc:
-            logger.exception("Unhandled execution engine error: run_id=%s", run_id)
-            result = EngineResult(
-                success=False,
-                error=str(exc),
-                error_code=ActionResultCode.INTERNAL_ERROR.value,
-                error_operation="execution.engine.run",
-            )
-        finally:
-            if lease is not None:
-                lease.release()
+        if cancelled_before_start:
+            result = EngineResult(success=False, cancelled=True)
+        else:
+            logger.info("Execution started: origin=%s", self._origin)
+            self._emit(run_id, ExecutionEventType.STARTED)
+            try:
+                result = self._engine.run(sequence, control, callbacks)
+            except Exception as exc:
+                logger.exception(
+                    "Unhandled execution engine error: run_id=%s",
+                    run_id,
+                )
+                result = EngineResult(
+                    success=False,
+                    error=str(exc),
+                    error_code=ActionResultCode.INTERNAL_ERROR.value,
+                    error_operation="execution.engine.run",
+                )
+        if lease is not None:
+            lease.release()
 
         if result.cancelled or control.cancel_requested:
             final_state = ExecutionState.CANCELLED
@@ -337,6 +385,17 @@ class ExecutionManager:
         )
         logger.info("Execution finished: state=%s", final_state.value)
 
+    def _create_log_callback(self, run_id: str) -> Callable[[str, str], None]:
+        def on_log(message: str, level: str = "info") -> None:
+            self._emit(
+                run_id,
+                ExecutionEventType.LOG,
+                message=message,
+                level=level,
+            )
+
+        return on_log
+
     def _emit(
         self,
         run_id: str,
@@ -350,6 +409,9 @@ class ExecutionManager:
     ) -> None:
         with self._lock:
             if self._run_id != run_id:
+                return
+            expected_state = _EVENT_STATES.get(event_type)
+            if expected_state is not None and self._state is not expected_state:
                 return
             listener = self._listener
             origin = self._origin
