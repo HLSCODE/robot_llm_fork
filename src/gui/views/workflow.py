@@ -21,14 +21,13 @@ from ...application import ApplicationServices
 from ...domain.models import (
     ActionDefinition,
     ActionType,
-    LoopBlock,
-    SequenceItem,
 )
 from ...devices import StopMode
 from .ai_assistant import AIAssistantWidget
 from .action_list import ActionListWidget
 from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
+from ..theme import set_theme_role
 
 
 class TaskLibraryListWidget(QListWidget):
@@ -72,16 +71,6 @@ class TaskComposerListWidget(QListWidget):
         self.setFlow(QListWidget.Flow.LeftToRight)
         self.setSpacing(12)
         self.setIconSize(QSize(130, 88))
-        self.setStyleSheet("""
-            QListWidget { background-color: #f8fafc; border: 2px dashed #cbd5e1;
-                border-radius: 12px; padding: 4px; }
-            QListWidget::item { border: 2px solid transparent; border-radius: 10px;
-                padding: 1px; font-size: 11px; font-weight: bold; background: transparent; }
-            QListWidget::item:hover { border-color: #93c5fd;
-                background: rgba(59, 130, 246, 0.06); }
-            QListWidget::item:selected { border: 2px solid #3b82f6;
-                background: rgba(59, 130, 246, 0.10); }
-        """)
 
     def startDrag(self, supported_actions: Qt.DropAction) -> None:  # noqa: N802
         del supported_actions
@@ -219,10 +208,7 @@ class ActionLibraryView(QWidget):
             buttons.addWidget(button)
         self.camera_test_button = QPushButton("📷 测试相机")
         self.camera_test_button.setMinimumHeight(32)
-        self.camera_test_button.setStyleSheet(
-            "QPushButton { background: #10b981; color: #fff; font-weight: 700; border: none; "
-            "border-radius: 6px; padding: 6px 12px; } QPushButton:hover { background: #059669; }"
-        )
+        set_theme_role(self.camera_test_button, "success")
         self.camera_test_button.clicked.connect(lambda: self.camera_test_requested.emit())
         buttons.addWidget(self.camera_test_button)
         layout.addLayout(buttons)
@@ -258,6 +244,7 @@ class WorkflowEditorView(QWidget):
     composer_execute_requested = Signal()
     composer_save_requested = Signal()
     insert_action_at_requested = Signal(int)
+    insert_action_in_loop_requested = Signal(str, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -275,19 +262,16 @@ class WorkflowEditorView(QWidget):
         self.sequence_list = WorkflowCanvasWidget()
         self.sequence_list.setMinimumHeight(140)
         action_layout.addWidget(self.sequence_list, stretch=2)
-        self.parameter_panel = NodeParameterPanel()
-        self.parameter_panel.edit_requested.connect(self.edit_requested)
-        self.parameter_panel.unwrap_requested.connect(
-            self.sequence_list.unwrap_selected_loop
-        )
-        self.sequence_list.selection_summary_changed.connect(
-            self.parameter_panel.render_entry
-        )
         self.sequence_list.edit_requested.connect(self.edit_requested)
         self.sequence_list.insert_action_requested.connect(
-            self.insert_action_at_requested
+            self.insert_action_at_requested.emit
         )
-        action_layout.addWidget(self.parameter_panel)
+        self.sequence_list.insert_loop_action_requested.connect(
+            self.insert_action_in_loop_requested.emit
+        )
+        self.sequence_list.wrap_selection_requested.connect(
+            self.repeat_requested.emit
+        )
         self.control_panel = ControlPanel()
         self._connect_control_panel()
         action_layout.addWidget(self.control_panel)
@@ -341,7 +325,9 @@ class WorkflowEditorView(QWidget):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
         title = QLabel("组合计划")
-        title.setStyleSheet("font-size: 12px; font-weight: 700; color: #334155;")
+        title_font = title.font()
+        title_font.setBold(True)
+        title.setFont(title_font)
         self.task_composer_list = TaskComposerListWidget()
         self.task_composer_list.setMinimumHeight(140)
         layout.addWidget(title)
@@ -374,9 +360,9 @@ class WorkflowEditorView(QWidget):
             ),
             32,
         )
-        execute[0].setStyleSheet(self._colored_button("#22c55e", "#16a34a", 14))
+        set_theme_role(execute[0], "success")
         self.composer_pause_button = execute[1]
-        self.composer_pause_button.setStyleSheet(self._colored_button("#f59e0b", "#d97706", 14))
+        set_theme_role(self.composer_pause_button, "warning")
         stop_save = self._add_button_row(
             layout,
             (
@@ -388,8 +374,8 @@ class WorkflowEditorView(QWidget):
         self.composer_stop_button = stop_save[0]
         self.composer_stop_button.setAccessibleName("停止任务")
         self.composer_stop_button.setToolTip("请求当前任务在可中断点停止；不会触发设备硬件急停")
-        self.composer_stop_button.setStyleSheet(self._colored_button("#ef4444", "#dc2626", 14))
-        stop_save[1].setStyleSheet(self._colored_button("#3b82f6", "#2563eb"))
+        set_theme_role(self.composer_stop_button, "danger")
+        set_theme_role(stop_save[1], "primary")
         page_layout.addWidget(panel, stretch=1)
         return page
 
@@ -411,14 +397,6 @@ class WorkflowEditorView(QWidget):
         layout.addLayout(row)
         return buttons
 
-    @staticmethod
-    def _colored_button(color: str, hover: str, font_size: int | None = None) -> str:
-        size = f" font-size: {font_size}px;" if font_size else ""
-        return (
-            f"QPushButton {{ background: {color}; color: #fff; font-weight: 700; border: none; "
-            f"border-radius: 6px;{size} }} QPushButton:hover {{ background: {hover}; }}"
-        )
-
     def render_execution_controls(self, text: str, can_toggle: bool, can_cancel: bool) -> None:
         self.control_panel.pause_btn.setText(text)
         self.control_panel.pause_btn.setEnabled(can_toggle)
@@ -426,61 +404,3 @@ class WorkflowEditorView(QWidget):
         self.composer_pause_button.setText(text)
         self.composer_pause_button.setEnabled(can_toggle)
         self.composer_stop_button.setEnabled(can_cancel)
-
-
-class NodeParameterPanel(QGroupBox):
-    """Compact touch-friendly parameter summary for the selected node."""
-
-    edit_requested = Signal()
-    unwrap_requested = Signal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__("节点参数", parent)
-        self.setVisible(False)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(8)
-        self.summary = QLabel()
-        self.summary.setWordWrap(True)
-        self.summary.setTextInteractionFlags(
-            Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-        layout.addWidget(self.summary, stretch=1)
-        self.edit_button = QPushButton("编辑参数")
-        self.edit_button.setMinimumSize(96, 44)
-        self.edit_button.clicked.connect(self.edit_requested)
-        layout.addWidget(self.edit_button)
-        self.unwrap_button = QPushButton("展开循环")
-        self.unwrap_button.setMinimumSize(96, 44)
-        self.unwrap_button.clicked.connect(self.unwrap_requested)
-        self.unwrap_button.setVisible(False)
-        layout.addWidget(self.unwrap_button)
-
-    def render_entry(self, entry: object | None) -> None:
-        if entry is None:
-            self.setVisible(False)
-            return
-        if isinstance(entry, SequenceItem):
-            parameters = "，".join(
-                f"{name}={value}"
-                for name, value in entry.definition.parameters.items()
-            )
-            self.summary.setText(
-                f"{entry.definition.name}\n{parameters or '无参数'}"
-            )
-            self.edit_button.setVisible(True)
-            self.edit_button.setText("编辑参数")
-            self.unwrap_button.setVisible(False)
-            self.setVisible(True)
-            return
-        if isinstance(entry, LoopBlock):
-            self.summary.setText(
-                f"循环 ×{entry.repeat_count} · "
-                f"{len(entry.items)} 个动作 · {entry.total_steps} 步"
-            )
-            self.edit_button.setText("修改次数")
-            self.edit_button.setVisible(True)
-            self.unwrap_button.setVisible(True)
-            self.setVisible(True)
-            return
-        self.setVisible(False)

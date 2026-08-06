@@ -117,6 +117,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
 
     from ..application import create_application_services
     from ..gui.controllers.main_window import MainWindow
+    from ..gui.theme import ThemeController, ThemeMode
     from ..gui.controllers.startup import (
         GuiAuxiliaryServiceStartupWorker,
         GuiAuxiliaryStartupResultReceiver,
@@ -125,6 +126,10 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
 
     app = QApplication([sys.argv[0]])
     app.setStyle("Fusion")
+    theme_controller = ThemeController(
+        app,
+        ThemeMode.parse(settings.gui.theme),
+    )
     startup_card = StartupProgressCard()
     startup_card.exit_requested.connect(app.quit)
     startup_card.show()
@@ -156,7 +161,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             settings,
             services,
         )
-        window = MainWindow(services)
+        window = MainWindow(services, theme_controller)
         window.startup_progress_changed.connect(startup_card.set_progress)
 
         def reveal_main_window(message: str) -> None:

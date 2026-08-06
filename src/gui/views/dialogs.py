@@ -32,6 +32,7 @@ from ...domain.action_schema import (
     validate_action_parameters,
 )
 from ...domain.models import ActionDefinition, ActionType
+from ..theme import set_theme_role
 
 
 class ActionPreviewDialog(QDialog):
@@ -64,10 +65,7 @@ class ActionPreviewDialog(QDialog):
         layout = QVBoxLayout(self)
         header = QLabel(f"{icon} {skill_name}\n{self._skill_info.get('description', '')}")
         header.setWordWrap(True)
-        header.setStyleSheet(
-            "background:#f8fafc;border:1px solid #e2e8f0;"
-            "border-radius:10px;padding:12px;font-weight:700"
-        )
+        header.setObjectName("aiStatusCard")
         layout.addWidget(header)
 
         self.step_list = QListWidget()
@@ -93,7 +91,7 @@ class ActionPreviewDialog(QDialog):
                 + ", ".join(self._risk.get("reasons") or [])
             )
             warning.setWordWrap(True)
-            warning.setStyleSheet("color:#b91c1c;font-weight:700")
+            set_theme_role(warning, "danger")
             layout.addWidget(warning)
             self._risk_checkbox = QCheckBox(
                 "我已核对动作、参数和现场环境，并确认执行"
@@ -104,6 +102,7 @@ class ActionPreviewDialog(QDialog):
         cancel = QPushButton("取消")
         cancel.clicked.connect(self.reject)
         confirm = QPushButton("✅ 确认执行")
+        set_theme_role(confirm, "success")
         confirm.clicked.connect(self.accept_and_emit)
         buttons.addWidget(cancel)
         buttons.addStretch()
@@ -176,7 +175,7 @@ class SchemaActionForm(QWidget):
         if note:
             note_label = QLabel(note)
             note_label.setWordWrap(True)
-            note_label.setStyleSheet("color:#64748b")
+            set_theme_role(note_label, "muted")
             layout.addWidget(note_label)
 
         self._render_fields()

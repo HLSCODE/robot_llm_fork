@@ -70,6 +70,7 @@ Copy-Item config.env.example config.env
 
 ```env
 SIMULATION_MODE=false
+GUI_THEME=system  # system / light / dark
 
 WEBSOCKET_ENABLED=true
 WEBSOCKET_HOST=127.0.0.1

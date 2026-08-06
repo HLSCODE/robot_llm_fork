@@ -19,6 +19,11 @@ class RuntimeSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class GuiSettings:
+    theme: str = "system"
+
+
+@dataclass(frozen=True, slots=True)
 class LoggingSettings:
     level: str = "INFO"
     directory: str = "logs"
@@ -620,6 +625,7 @@ class VoiceSettings:
 @dataclass(frozen=True, slots=True)
 class ApplicationSettings:
     runtime: RuntimeSettings
+    gui: GuiSettings
     logging: LoggingSettings
     data: DataSettings
     data_collection: DataCollectionSettings
@@ -638,6 +644,7 @@ class ApplicationSettings:
         """Freeze the environment loader output into domain snapshots."""
         return cls(
             runtime=_snapshot(RuntimeSettings, config),
+            gui=_snapshot(GuiSettings, config, source_names={"theme": "GUI_THEME"}),
             logging=_snapshot(
                 LoggingSettings,
                 config,
@@ -668,6 +675,7 @@ class ApplicationSettings:
     def defaults(cls) -> ApplicationSettings:
         return cls(
             runtime=RuntimeSettings(),
+            gui=GuiSettings(),
             logging=LoggingSettings(),
             data=DataSettings(),
             data_collection=DataCollectionSettings(),

@@ -19,6 +19,7 @@ from .settings import (
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
+_GUI_THEMES = frozenset({"system", "light", "dark"})
 _PLACEHOLDER_SECRETS = frozenset(
     {
         "change-me",
@@ -107,6 +108,13 @@ def validate_startup_configuration(
         issues,
         "LOG_RETENTION_DAYS",
     )
+    if settings.gui.theme not in _GUI_THEMES:
+        _error(
+            issues,
+            "invalid_gui_theme",
+            "GUI_THEME",
+            f"必须是 {', '.join(sorted(_GUI_THEMES))} 之一",
+        )
 
     _validate_data_paths(settings, issues)
     _validate_data_collection(settings.data_collection, issues)

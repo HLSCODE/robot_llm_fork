@@ -571,9 +571,9 @@ src/
 | D-015 | P0 | DONE | 冻结 GUI 功能等价清单与架构 ADR，明确受约束画布、Loop 表现、单一执行入口、安全停止语义和直接切换门槛 |
 | D-016 | P1 | DONE | 建立纯 Python WorkflowDocument、Schema 版本、草稿恢复和 revision 冲突保护；复用 ActionDefinition/SequenceItem/LoopBlock，并由 CompositionService 独占版本化 `.workflow` 持久化，现有 `.task` 格式不变 |
 | D-017 | P1 | DONE | 实现结构 Validator、执行 Preflight 与 WorkflowCompiler，将合法文档编译为 SequenceEntry，并建立展开步骤索引/Loop UUID 到节点的稳定映射；应用组合根持有唯一实例，未新增执行器和动作 Handler |
-| D-018 | P1 | DONE | 实现受约束 QGraphics 工作流画布、Loop 容器、自动布局、“+”插入、拖动排序、参数摘要面板、Undo/Redo、鼠标/键盘/触控导航及执行期编辑锁定 |
+| D-018 | P1 | DONE | 实现受约束 QGraphics 工作流画布、Loop 容器、自动布局、“+”插入、带阈值拖动排序及显式上移/下移、按需参数编辑、Undo/Redo、鼠标/键盘/触控导航及执行期编辑锁定 |
 | D-019 | P1 | DONE | 任务组合、AI/语音预览、轨迹、相机、日志、设备状态和三类停止控制继续复用现有服务；当前序列统一经 Compiler/Preflight/ExecutionBridge 执行，MainWindow 已删除 QTreeWidgetItem 和画布私有绘制/映射依赖 |
-| D-020 | P2 | DONE | 画布视觉/交互令牌集中定义，中性颜色跟随系统 Palette，字体继承应用字体并支持高 DPI；关键按钮使用 44 px 触控目标和 accessibleName/Description；建立浅色/深色、360×640/720×1280/1280×720 offscreen 矩阵及 100/500 节点版本化性能预算；视觉资产许可证清单已记录 |
+| D-020 | P2 | DONE | GUI 视觉/交互令牌集中定义，提供 `system/light/dark` 三种应用级统一主题和“视图 → 主题”即时切换；中性颜色、字体、画布、表单、菜单、状态和禁用态共享单一 Palette/QSS，支持高 DPI；关键按钮使用 44 px 触控目标和 accessibleName/Description；建立浅色/深色、360×640/720×1280/1280×720 offscreen 矩阵及 100/500 节点版本化性能预算；视觉资产许可证清单已记录 |
 | D-021 | P1 | DONE | 新画布已作为唯一编辑器运行；原 QTreeWidget SequenceListWidget 与 components 聚合模块直接删除，动作库、控制面板、日志拆为单责视图文件；现有 `.task` 无 GUI 私有格式而无需迁移，`.workflow` 的版本化迁移/备份由 D-016 负责；不保留双写、双运行、转发或兼容层 |
 
 ### 9.4 完成标准
@@ -1246,6 +1246,11 @@ M6 GUI 工作流画布与表现层收敛
 | 2026-08-06 | M6 | D/A/G | GUI 工作流模型、持久化与编译边界落地 | D-015/D-016/D-017 TODO → DONE；ADR-M-014 Proposed → Accepted | 新增纯 WorkflowDocument 与版本化序列化；CompositionService 独占 `.workflow` 原子保存、revision 冲突和崩溃草稿；Validator 区分结构错误，Compiler 输出规范 SequenceEntry 及步骤/Loop 节点映射，Preflight 无副作用检查运行占用、策略和设备就绪；组合根持有唯一 Compiler/Preflight，未新增执行器或 Handler | Compile、Ruff、Mypy（68 files）、Pytest（423 passed + 43 subtests，61.52%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-06 | M6 | D/A/G | 受约束工作流画布与现有功能等价接入 | D-018/D-019 TODO → DONE | 新增轻量 QGraphics 自绘画布、Start/End 表现节点、Loop 容器、自动布局、“+”插入、动作拖放/双击、拖动排序、多选、Undo/Redo、参数摘要、循环次数/展开、缩放和触控滚动；执行期禁用编辑；GUI 当前序列经 Compiler/Preflight 提交原 ExecutionBridge，AI 直接执行事件补建同一节点映射；MainWindow 删除全部旧树图元私有访问，任务组合、日志、设备状态和三类停止控制保持原服务边界 | Compile、Ruff、Mypy（75 files）、Pytest（428 passed + 43 subtests，61.42%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-06 | M6 | D/G | GUI 视觉性能门禁与旧编辑器一次切换 | D-020/D-021 TODO → DONE | 集中画布 Palette/字体/间距/触控/状态色令牌，增加主题变化刷新、可访问说明和大场景最小更新；新增浅/深主题及三档窗口 offscreen 回归、100/500 节点性能预算和视觉资产许可证清单；删除近千行 components 聚合文件及 SequenceListWidget，动作库、控制面板、日志拆为单责组件，不保留旧路径或兼容层 | Compile、Ruff、Mypy（78 files）、Pytest（432 passed + 43 subtests，62.48%）、LLM golden（14/14）、性能回归（9/9；100 节点 9.77 ms/150 ms，500 节点 46.17 ms/750 ms）及 Wheel smoke 全通过 |
+| 2026-08-06 | M6 | D/G | GUI 应用级统一主题 | D-020 能力增强 | 新增唯一 ThemeController 和 `system/light/dark` 三套模式；启动配置、系统颜色变化和“视图 → 主题”即时切换统一驱动应用 Palette/QSS；迁移 AI、设备、工作流、对话框、启动卡片和语义按钮的局部浅色覆盖，删除 MainWindow 旧全局浅色样式事实源；配置与模板增加 `GUI_THEME` 严格校验 | Compile、Ruff、Mypy（79 files）、Pytest（438 passed + 43 subtests，62.69%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；浅色/深色真实 MainWindow offscreen 截图复核通过 |
+| 2026-08-06 | M6 | D/G | GUI 画布交互复核与循环可视化增强 | D-018/D-020 能力增强 | 修复节点间“+”未接受 press 导致真实点击无效的问题，并让循环头、子动作间和循环末尾插入点执行真实插入命令；Loop 改为展开子动作、循环完成节点及双侧回路；动作库开合箭头移入左侧分隔边缘，保留记忆宽度和 220 ms 动画；画布统一为左键选择/双击编辑、Shift 多选、右键上下文菜单、Ctrl+左键平移、普通滚轮滚动及 Ctrl+滚轮缩放，并补充 Ctrl+A、Esc、Ctrl+0、Delete 和撤销/重做快捷键；执行期隐藏循环插入点 | Compile、Ruff、Mypy（80 files）、Pytest（448 passed + 43 subtests，63.01%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；真实 Qt 点击链路和主窗口离屏布局复核通过 |
+| 2026-08-06 | M6 | D/G | GUI 多选稳定性、抽屉命中区与动作分类选择 | D-018/D-020 能力增强 | 节点单击不再误触发拖动完成和 Scene 重建，Shift 多选保持图元身份、坐标、SceneRect 与滚动位置稳定；抽屉边缘默认收敛为细线，悬停时整条高度显示高亮箭头并可点击；“+”动作选择改为类型与分类内动作双栏结构，复用唯一类型标签并隐藏空分类 | Compile、Ruff、Mypy（81 files）、Pytest（449 passed + 43 subtests，63.07%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；默认/悬停抽屉状态和分类选择器深色离屏复核通过 |
+| 2026-08-06 | M6 | D/G | GUI 选择状态单一化与可拖动抽屉分隔条 | D-018/D-020 能力增强 | 删除节点自定义选择与 QGraphicsItem 默认选择/移动并行处理，普通左键只做单选，Shift+左键只做集合切换，节点排序统一走显式命令；抽屉分隔条默认实际占用 4 px、悬停实际扩为 28 px，整条支持单击开合和水平拖动实时调整宽度，并记忆拖动结果 | Compile、Ruff、Mypy（81 files）、Pytest（450 passed + 43 subtests，63.18%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；4 px/28 px 主窗口离屏布局和拖动回归通过 |
+| 2026-08-06 | M6 | D/G | GUI 节点拖动排序与参数按需展示 | D-018 能力增强 | 在单一自定义选择状态机上增加 8 px 阈值纵向拖动，松开后按落点提交一次可撤销排序并自动吸附；Shift 多选不进入拖动，单击不重建场景；删除常驻节点参数摘要面板，参数编辑统一由双击、右键或修改命令按需打开 | Compile、Ruff、Mypy（81 files）、Pytest（451 passed + 43 subtests，63.12%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 

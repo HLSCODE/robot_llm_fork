@@ -97,39 +97,39 @@ class StartupProgressCard(QWidget):
                 background: transparent;
             }
             QFrame#startupCard {
-                background: #111827;
-                border: 1px solid #1f2937;
+                background: palette(base);
+                border: 1px solid palette(mid);
                 border-radius: 16px;
             }
             QLabel#startupTitle {
-                color: #f8fafc;
+                color: palette(text);
                 font-size: 25px;
                 font-weight: 700;
             }
             QLabel#startupSubtitle {
-                color: #94a3b8;
+                color: palette(placeholder-text);
                 font-size: 13px;
             }
             QProgressBar#startupProgressBar {
-                background: #334155;
+                background: palette(mid);
                 border: none;
                 border-radius: 4px;
             }
             QProgressBar#startupProgressBar::chunk {
-                background: #34d399;
+                background: palette(highlight);
                 border-radius: 4px;
             }
             QLabel#startupStatus {
-                color: #dbeafe;
+                color: palette(highlight);
                 font-size: 13px;
             }
             QLabel#startupPercent {
-                color: #bfdbfe;
+                color: palette(highlight);
                 font-size: 13px;
                 font-weight: 600;
             }
             QLabel#startupDetail {
-                color: #64748b;
+                color: palette(placeholder-text);
                 font-size: 12px;
             }
             QPushButton#startupExitButton {
@@ -172,4 +172,3 @@ class StartupProgressCard(QWidget):
         self.detail_label.setText(message)
         self.detail_label.setStyleSheet("color: #fca5a5;")
         self.exit_button.show()
-

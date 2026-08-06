@@ -7,6 +7,8 @@ from collections.abc import Callable
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
+from ..theme import set_theme_role
+
 
 class ControlPanel(QWidget):
     start_clicked = Signal()
@@ -61,6 +63,8 @@ class ControlPanel(QWidget):
         save_row.setSpacing(4)
         self.save_btn = self._button("💾 保存序列", self.save_clicked.emit)
         self.load_btn = self._button("📂 载入序列", self.load_clicked.emit)
+        set_theme_role(self.save_btn, "primary")
+        set_theme_role(self.load_btn, "primary")
         save_row.addWidget(self.save_btn)
         save_row.addWidget(self.load_btn)
         layout.addLayout(save_row)
@@ -69,6 +73,8 @@ class ControlPanel(QWidget):
         execution_row.setSpacing(4)
         self.start_btn = self._button("▶ 开始执行", self.start_clicked.emit)
         self.pause_btn = self._button("⏸ 暂停", self.pause_clicked.emit)
+        set_theme_role(self.start_btn, "success")
+        set_theme_role(self.pause_btn, "warning")
         execution_row.addWidget(self.start_btn)
         execution_row.addWidget(self.pause_btn)
         layout.addLayout(execution_row)
@@ -78,6 +84,7 @@ class ControlPanel(QWidget):
         self.stop_btn.setToolTip(
             "请求当前任务在可中断点停止；不会触发设备硬件急停"
         )
+        set_theme_role(self.stop_btn, "danger")
         layout.addWidget(self.stop_btn)
 
         safety_row = QHBoxLayout()
@@ -89,6 +96,7 @@ class ControlPanel(QWidget):
         self.quick_stop_btn.setToolTip(
             "向已支持的运动设备发送软件快停；不能替代物理急停"
         )
+        set_theme_role(self.quick_stop_btn, "warning")
         self.emergency_stop_btn = self._button(
             "🛑 设备急停",
             self.emergency_stop_clicked.emit,
@@ -96,6 +104,7 @@ class ControlPanel(QWidget):
         self.emergency_stop_btn.setToolTip(
             "向已支持的运动设备发送软件急停；不能替代物理急停回路"
         )
+        set_theme_role(self.emergency_stop_btn, "dangerStrong")
         safety_row.addWidget(self.quick_stop_btn)
         safety_row.addWidget(self.emergency_stop_btn)
         layout.addLayout(safety_row)

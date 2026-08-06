@@ -6,7 +6,7 @@ from typing import List
 from uuid import uuid4
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QColor, QIcon
+from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -48,6 +48,8 @@ from ..views.log_widget import LogWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceStatusView
 from ..views.dialogs import ActionConfigDialog
+from ..views.action_list import ACTION_TYPE_LABELS
+from ..views.action_picker import ActionPickerDialog
 from ..bridges.notifications import GuiNotificationCenter
 from .startup import (
     GuiHardwareStartupWorker,
@@ -57,15 +59,23 @@ from .startup import (
 )
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import ActionLibraryView, WorkflowEditorView
+from ..views.animated_drawer import AnimatedSplitterDrawer, DrawerHandleButton
+from ..theme import ThemeController, ThemeMode
 
 
 class MainWindow(QMainWindow):
     startup_progress_changed = Signal(int, str, str)
     startup_finished = Signal(bool, str)
 
-    def __init__(self, services: ApplicationServices):
+    def __init__(
+        self,
+        services: ApplicationServices,
+        theme_controller: ThemeController,
+    ) -> None:
         super().__init__()
         self._services = services
+        self._theme_controller = theme_controller
+        self._theme_controller.setParent(self)
         self._execution_bridge = ExecutionBridge(services)
         self._device_view_model = DeviceViewModel(services.devices)
         self._execution_view_model = ExecutionViewModel(services.execution)
@@ -321,9 +331,6 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(540, 800)
         self.resize(540, 960)
 
-        # ── 全局 Modern Light 样式表 ──
-        self.setStyleSheet(self._make_global_stylesheet())
-
         self.create_menu()
 
         central_widget = QWidget()
@@ -337,6 +344,7 @@ class MainWindow(QMainWindow):
 
         # 底部：横向 Splitter，左=动作库，右=序列+控制+日志
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setObjectName("workspaceSplitter")
 
         self.action_library_view = ActionLibraryView(self._services)
         self.workflow_view = WorkflowEditorView()
@@ -354,8 +362,19 @@ class MainWindow(QMainWindow):
 
         splitter.addWidget(self.action_library_view)
         splitter.addWidget(right_panel)
+        self.action_library_toggle = DrawerHandleButton()
+        drawer_handle = splitter.handle(1)
+        drawer_handle_layout = QVBoxLayout(drawer_handle)
+        drawer_handle_layout.setContentsMargins(0, 0, 0, 0)
+        drawer_handle_layout.addWidget(self.action_library_toggle)
+        splitter.setCollapsible(0, True)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
+        splitter.setSizes((280, 560))
+        self._action_library_drawer = AnimatedSplitterDrawer(
+            splitter,
+            self.action_library_toggle,
+        )
 
         layout.addWidget(splitter, stretch=1)
 
@@ -399,6 +418,9 @@ class MainWindow(QMainWindow):
         workflow.insert_action_at_requested.connect(
             self._choose_action_for_insertion
         )
+        workflow.insert_action_in_loop_requested.connect(
+            self._choose_action_for_loop_insertion
+        )
         workflow.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
         workflow.task_composer_list.action_dropped.connect(self._add_action_to_composer)
         workflow.task_composer_list.order_changed.connect(self._move_composed_task_rows)
@@ -433,156 +455,38 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-    @staticmethod
-    def _make_global_stylesheet() -> str:
-        return """
-        /* ═══════════════════════════════════════════════════
-           Global Design System — Light Modern Theme
-           ═══════════════════════════════════════════════════ */
-        QMainWindow { background: #f1f5f9; }
-        QWidget { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 13px; color: #1e293b; }
-
-        /* ── Buttons ── */
-        QPushButton {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 5px 12px;
-            color: #1e293b;
-            font-weight: 500;
-            min-height: 26px;
+        view_menu = menubar.addMenu("视图")
+        theme_menu = view_menu.addMenu("主题")
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        for label, mode in (
+            ("跟随系统", ThemeMode.SYSTEM),
+            ("浅色", ThemeMode.LIGHT),
+            ("深色", ThemeMode.DARK),
+        ):
+            action = QAction(label, self)
+            action.setCheckable(True)
+            action.setData(mode.value)
+            action.setChecked(mode is self._theme_controller.mode)
+            action.triggered.connect(
+                lambda _checked=False, selected=mode: (
+                    self._theme_controller.set_mode(selected)
+                )
+            )
+            theme_group.addAction(action)
+            theme_menu.addAction(action)
+        self._theme_actions = {
+            ThemeMode(action.data()): action
+            for action in theme_group.actions()
         }
-        QPushButton:hover  { background: #f8fafc; border-color: #94a3b8; }
-        QPushButton:pressed { background: #f1f5f9; }
-        QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
+        self._theme_controller.mode_changed.connect(
+            self._sync_theme_menu,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
-        /* ── Tabs ── */
-        QTabWidget::pane {
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            background: #ffffff;
-            top: -1px;
-        }
-        QTabBar::tab {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-bottom: none;
-            border-radius: 6px 6px 0 0;
-            padding: 6px 14px;
-            color: #64748b;
-            font-weight: 500;
-        }
-        QTabBar::tab:selected {
-            background: #ffffff;
-            color: #3b82f6;
-            font-weight: 700;
-            border-bottom: 2px solid #3b82f6;
-        }
-        QTabBar::tab:hover:!selected { background: #eff6ff; color: #3b82f6; }
-
-        /* ── GroupBox ── */
-        QGroupBox {
-            font-weight: 700;
-            color: #334155;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            margin-top: 14px;
-            padding: 14px 8px 8px;
-            background: #ffffff;
-        }
-        QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #3b82f6; }
-
-        /* ── Inputs ── */
-        QLineEdit, QSpinBox, QDoubleSpinBox {
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 5px 8px;
-            background: #ffffff;
-            color: #1e293b;
-        }
-        QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color: #3b82f6; }
-        QComboBox {
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 5px 8px;
-            background: #ffffff;
-            color: #1e293b;
-        }
-        QComboBox:hover { border-color: #3b82f6; }
-        QComboBox::drop-down { border: none; width: 24px; }
-        QComboBox QAbstractItemView {
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            background: #ffffff;
-            selection-background-color: #eff6ff;
-            selection-color: #1e293b;
-        }
-
-        /* ── Lists ── */
-        QListWidget {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            outline: none;
-        }
-        QListWidget::item { padding: 6px 10px; border-radius: 4px; }
-        QListWidget::item:hover { background: #f8fafc; }
-        QListWidget::item:selected { background: #eff6ff; color: #1e293b; border: 1px solid #bfdbfe; }
-
-        /* ── Frames ── */
-        QFrame[frameShape="6"] {
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            background: #ffffff;
-        }
-
-        /* ── CheckBox ── */
-        QCheckBox { spacing: 6px; color: #334155; }
-        QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #cbd5e1; background: #ffffff; }
-        QCheckBox::indicator:checked { background: #3b82f6; border-color: #3b82f6; }
-
-        /* ── ScrollBar ── */
-        QScrollBar:vertical { width: 6px; background: transparent; }
-        QScrollBar::handle:vertical { background: #cbd5e1; border-radius: 3px; min-height: 20px; }
-        QScrollBar::handle:vertical:hover { background: #94a3b8; }
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-        QScrollBar:horizontal { height: 6px; background: transparent; }
-        QScrollBar::handle:horizontal { background: #cbd5e1; border-radius: 3px; min-width: 20px; }
-        QScrollBar::handle:horizontal:hover { background: #94a3b8; }
-        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-
-        /* ── Splitter ── */
-        QSplitter::handle { width: 3px; background: #e2e8f0; }
-        QSplitter::handle:hover { background: #3b82f6; }
-
-        /* ── Menu ── */
-        QMenuBar { background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 2px; }
-        QMenuBar::item { padding: 4px 10px; border-radius: 4px; }
-        QMenuBar::item:selected { background: #eff6ff; }
-        QMenu { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 4px; }
-        QMenu::item { padding: 6px 28px 6px 12px; border-radius: 4px; }
-        QMenu::item:selected { background: #eff6ff; color: #1e293b; }
-
-        /* ── TextEdit ── */
-        QTextEdit {
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            background: #ffffff;
-            color: #1e293b;
-            font-family: "Cascadia Code", "Consolas", "SF Mono", monospace;
-            font-size: 12px;
-        }
-
-        /* ── Tooltips ── */
-        QToolTip {
-            background: #1e293b;
-            color: #f1f5f9;
-            border: none;
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 12px;
-        }
-        """
+    def _sync_theme_menu(self, mode: object) -> None:
+        if isinstance(mode, ThemeMode):
+            self._theme_actions[mode].setChecked(True)
 
     def _set_relay_state(self, channel: int, turn_on: bool):
         action_text = "打开" if turn_on else "关闭"
@@ -1218,31 +1122,31 @@ class MainWindow(QMainWindow):
         self.workflow_view.sequence_list.insert_action(action, insert_at)
 
     def _choose_action_for_insertion(self, index: int) -> None:
-        actions = [
-            action
-            for action_group in self.actions.values()
-            for action in action_group
-        ]
-        if not actions:
+        action = self._choose_action("插入动作")
+        if action is not None:
+            self.workflow_view.sequence_list.insert_action(action, index)
+
+    def _choose_action_for_loop_insertion(
+        self,
+        loop_uuid: str,
+        child_index: int,
+    ) -> None:
+        action = self._choose_action("向循环插入动作")
+        if action is not None:
+            self.workflow_view.sequence_list.insert_action_into_loop(
+                loop_uuid,
+                child_index,
+                action,
+            )
+
+    def _choose_action(self, title: str) -> ActionDefinition | None:
+        if not any(self.actions.values()):
             self._notifications.warning("动作库为空，请先创建动作")
-            return
-        labels = [
-            f"{action.name} · {action.type.value}"
-            for action in actions
-        ]
-        selected, accepted = QInputDialog.getItem(
-            self,
-            "插入动作",
-            "选择动作:",
-            labels,
-            0,
-            False,
-        )
-        if not accepted:
-            return
-        self.workflow_view.sequence_list.insert_action(
-            actions[labels.index(selected)],
-            index,
+            return None
+        return ActionPickerDialog.choose(
+            self.actions,
+            title=title,
+            parent=self,
         )
 
     def _refresh_execute_merged_list(self):
@@ -1522,18 +1426,6 @@ class MainWindow(QMainWindow):
         ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),
     }
 
-    _TYPE_LABELS = {
-        ActionType.MOVE: "机械臂移动",
-        ActionType.BASE_MOVE: "底盘移动",
-        ActionType.MANIPULATE: "执行器",
-        ActionType.WAIT: "等待",
-        ActionType.INSPECT: "检测",
-        ActionType.CHANGE_GUN: "换枪",
-        ActionType.VISION_CAPTURE: "视觉抓取",
-        ActionType.VISION_RELOCALIZE: "视觉重定位",
-        ActionType.TRAJECTORY: "轨迹",
-    }
-
     def _create_task_card_icon(self, task_name: str, step_count: int, title: str | None = None):
         from PySide6.QtCore import QRectF
         from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
@@ -1649,7 +1541,7 @@ class MainWindow(QMainWindow):
         font.setBold(False)
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255, 200))
-        type_label = self._TYPE_LABELS.get(action.type, action.type.value)
+        type_label = ACTION_TYPE_LABELS.get(action.type, action.type.value)
         painter.drawText(QRectF(8, 50, width - 16, 16), Qt.AlignmentFlag.AlignLeft, type_label)
 
         # 底部状态条

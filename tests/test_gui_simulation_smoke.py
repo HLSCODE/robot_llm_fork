@@ -8,6 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QPalette
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
 from src.application import create_application_services
@@ -17,8 +19,10 @@ from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.controllers.startup import GuiStartupLifecycle
+from src.gui.theme import ThemeController, ThemeMode
 from src.gui.views import StartupProgressCard
 from src.gui.views.ai_assistant import AIAssistantWidget
+from src.gui.views.workflow_canvas.items import InsertionItem
 
 
 def _wait_until(predicate, *, timeout_seconds: float = 2.0) -> bool:
@@ -68,7 +72,10 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
-        self.window = MainWindow(self.services)
+        self.window = MainWindow(
+            self.services,
+            ThemeController(self.application, ThemeMode.SYSTEM),
+        )
         self.window.show()
         self.assertTrue(
             _wait_until(
@@ -80,6 +87,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         if self.services.execution.snapshot().active:
             self.services.execution.cancel()
             self.services.execution.wait(timeout=1)
+        self.window._theme_controller.set_mode(ThemeMode.SYSTEM)
         self.window.close()
         QApplication.processEvents()
         self.window.shutdown_after_event_loop()
@@ -118,6 +126,62 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             "gripper_open_btn",
         ):
             self.assertFalse(hasattr(self.window, removed_alias))
+
+    def test_canvas_plus_click_opens_picker_and_inserts_selected_action(self) -> None:
+        action = ActionDefinition(
+            id="plus-click-action",
+            name="加号插入测试",
+            type=ActionType.WAIT,
+            parameters={"wait_seconds": 1.0},
+        )
+        self.window.actions[ActionType.WAIT] = [action]
+        canvas = self.window.workflow_view.sequence_list
+        canvas.render_entries(())
+        QApplication.processEvents()
+        insertion = next(
+            item
+            for item in canvas.scene.items()
+            if isinstance(item, InsertionItem)
+        )
+        position = canvas.view.mapFromScene(
+            insertion.sceneBoundingRect().center()
+        )
+
+        with patch.object(
+            self.window,
+            "_choose_action",
+            return_value=action,
+        ):
+            QTest.mouseClick(
+                canvas.view.viewport(),
+                Qt.MouseButton.LeftButton,
+                pos=position,
+            )
+            QApplication.processEvents()
+
+        self.assertEqual(1, canvas.entry_count())
+        inserted = canvas.get_entries()[0]
+        self.assertIsInstance(inserted, SequenceItem)
+        assert isinstance(inserted, SequenceItem)
+        self.assertEqual("plus-click-action", inserted.definition.id)
+
+    def test_drawer_toggle_is_attached_to_the_left_splitter_handle(self) -> None:
+        toggle = self.window.action_library_toggle
+
+        self.assertEqual("QSplitterHandle", toggle.parentWidget().metaObject().className())
+        self.assertFalse(toggle.icon().isNull())
+        self.assertEqual("收起动作库", toggle.accessibleName())
+
+    def test_theme_menu_switches_the_single_application_theme(self) -> None:
+        self.window._theme_actions[ThemeMode.DARK].trigger()
+        QApplication.processEvents()
+
+        self.assertIs(ThemeMode.DARK, self.window._theme_controller.mode)
+        self.assertTrue(self.window._theme_actions[ThemeMode.DARK].isChecked())
+        self.assertEqual(
+            QColor("#0f172a"),
+            QApplication.palette().color(QPalette.ColorRole.Window),
+        )
 
         self.window.close()
         QApplication.processEvents()
@@ -289,7 +353,10 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 "start_voice_speech_runtime_if_configured",
                 return_value=True,
             ):
-                window = MainWindow(services)
+                window = MainWindow(
+                    services,
+                    ThemeController(self.application, ThemeMode.SYSTEM),
+                )
                 self.assertTrue(
                     _wait_until(
                         lambda: window.startup_state
@@ -331,7 +398,10 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 "start_voice_speech_runtime_if_configured",
                 return_value=True,
             ):
-                window = MainWindow(services)
+                window = MainWindow(
+                    services,
+                    ThemeController(self.application, ThemeMode.SYSTEM),
+                )
                 window.startup_progress_changed.connect(
                     lambda _percent, message, _detail: progress_messages.append(message)
                 )
@@ -382,7 +452,10 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                     side_effect=blocking_initialize,
                 ),
             ):
-                window = MainWindow(services)
+                window = MainWindow(
+                    services,
+                    ThemeController(self.application, ThemeMode.SYSTEM),
+                )
                 self.assertTrue(
                     _wait_until(
                         lambda: window.startup_state

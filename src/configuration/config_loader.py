@@ -92,6 +92,7 @@ class _EnvironmentConfig:
     LOG_DIRECTORY: str = "logs"
     LOG_RETENTION_DAYS: int = 14
     SIMULATION_MODE: bool = False
+    GUI_THEME: str = "system"
     ROBOT_DATA_DIR: str = "data"
     ACTIONS_LIBRARY_PATH: str = ""
     TASKS_DIRECTORY: str = ""
@@ -568,6 +569,7 @@ class _EnvironmentConfig:
             "DATA_COLLECTION_CALIBRATION_ID",
             "",
         )
+        instance.GUI_THEME = os.getenv("GUI_THEME", "system").strip().lower()
         instance.EXTERNAL_LOCALIZATION_HOST = os.getenv(
             "EXTERNAL_LOCALIZATION_HOST",
             "0.0.0.0",

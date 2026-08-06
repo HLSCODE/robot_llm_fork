@@ -11,6 +11,19 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QWidget
 from ...domain.models import ActionDefinition, ActionType
 
 
+ACTION_TYPE_LABELS = {
+    ActionType.MOVE: "机械臂移动",
+    ActionType.BASE_MOVE: "底盘移动",
+    ActionType.MANIPULATE: "执行器",
+    ActionType.WAIT: "等待",
+    ActionType.INSPECT: "检测",
+    ActionType.CHANGE_GUN: "换枪",
+    ActionType.VISION_CAPTURE: "视觉抓取",
+    ActionType.VISION_RELOCALIZE: "视觉重定位",
+    ActionType.TRAJECTORY: "轨迹",
+}
+
+
 class ActionListWidget(QListWidget):
     action_selected = Signal(ActionDefinition)
 

@@ -8,7 +8,7 @@ from time import monotonic
 from typing import Any, Dict
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QColor, QTextCursor
+from PySide6.QtGui import QColor, QPalette, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
@@ -34,6 +34,7 @@ from ...voice_interaction import (
     WakeFeedback,
 )
 from ..controllers.audio import VoiceAudioPlayer
+from ..theme import set_theme_role
 
 logger = logging.getLogger(__name__)
 
@@ -228,18 +229,15 @@ class AIAssistantWidget(QWidget):
 
         # ── Status bar ──
         status_widget = QWidget()
-        status_widget.setStyleSheet("""
-            QWidget { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 10px; }
-        """)
+        status_widget.setObjectName("aiStatusCard")
         status_layout = QHBoxLayout(status_widget)
         status_layout.setContentsMargins(8, 2, 8, 2)
 
         self.status_label = QLabel("⚡ 状态: 就绪")
-        self.status_label.setStyleSheet("font-size: 12px; font-weight: 600; color: #334155; border: none; background: transparent;")
         status_layout.addWidget(self.status_label)
 
         self.model_label = QLabel("模型: —")
-        self.model_label.setStyleSheet("font-size: 11px; color: #64748b; border: none; background: transparent;")
+        set_theme_role(self.model_label, "muted")
         status_layout.addWidget(self.model_label)
 
         status_layout.addStretch()
@@ -247,7 +245,6 @@ class AIAssistantWidget(QWidget):
         self.simulation_checkbox = QCheckBox("模拟模式")
         self.simulation_checkbox.setChecked(self._services.simulation)
         self.simulation_checkbox.setEnabled(False)
-        self.simulation_checkbox.setStyleSheet("border: none; background: transparent;")
         status_layout.addWidget(self.simulation_checkbox)
 
         layout.addWidget(status_widget)
@@ -260,44 +257,32 @@ class AIAssistantWidget(QWidget):
 
         self.voice_wake_button = QPushButton("唤醒")
         self.voice_wake_button.setMinimumHeight(30)
-        self.voice_wake_button.setStyleSheet("""
-            QPushButton { background: #0f766e; color: #fff; font-weight: 700; border: none; border-radius: 7px; }
-            QPushButton:hover { background: #0d9488; }
-        """)
+        set_theme_role(self.voice_wake_button, "success")
         self.voice_wake_button.clicked.connect(self._on_voice_wake_clicked)
         voice_layout.addWidget(self.voice_wake_button)
         self.voice_wake_button.setVisible(False)
 
         self.voice_sleep_button = QPushButton("结束语音会话")
         self.voice_sleep_button.setMinimumHeight(30)
-        self.voice_sleep_button.setStyleSheet("""
-            QPushButton { background: #ffffff; color: #475569; border: 1px solid #cbd5e1; border-radius: 7px; }
-            QPushButton:hover { background: #f8fafc; border-color: #64748b; }
-            QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
-        """)
         self.voice_sleep_button.clicked.connect(self._on_voice_sleep_clicked)
         voice_layout.addWidget(self.voice_sleep_button)
 
         self.voice_listen_button = QPushButton("启动监听")
         self.voice_listen_button.setMinimumHeight(30)
-        self.voice_listen_button.setStyleSheet("""
-            QPushButton { background: #ffffff; color: #0369a1; border: 1px solid #7dd3fc; border-radius: 7px; font-weight: 600; }
-            QPushButton:hover { background: #f0f9ff; border-color: #0284c7; }
-            QPushButton:disabled { color: #94a3b8; border-color: #e2e8f0; background: #f8fafc; }
-        """)
+        set_theme_role(self.voice_listen_button, "primary")
         self.voice_listen_button.clicked.connect(self._on_voice_listen_clicked)
         voice_layout.addWidget(self.voice_listen_button)
 
         self.voice_state_label = QLabel("Session: 未唤醒")
-        self.voice_state_label.setStyleSheet("font-size: 11px; color: #475569; border: none;")
+        set_theme_role(self.voice_state_label, "muted")
         voice_layout.addWidget(self.voice_state_label)
 
         self.voice_asr_label = QLabel("监听: 未启动")
-        self.voice_asr_label.setStyleSheet("font-size: 11px; color: #64748b; border: none;")
+        set_theme_role(self.voice_asr_label, "muted")
         voice_layout.addWidget(self.voice_asr_label)
 
         self.voice_intent_label = QLabel("意图: —")
-        self.voice_intent_label.setStyleSheet("font-size: 11px; color: #475569; border: none;")
+        set_theme_role(self.voice_intent_label, "muted")
         voice_layout.addWidget(self.voice_intent_label, stretch=1)
 
         self.voice_group.setVisible(self._voice_input_enabled)
@@ -307,16 +292,6 @@ class AIAssistantWidget(QWidget):
         self.chat_history = QTextEdit()
         self.chat_history.setReadOnly(True)
         self.chat_history.setMaximumHeight(220)
-        self.chat_history.setStyleSheet("""
-            QTextEdit {
-                background: #f8fafc;
-                border: 1px solid #e2e8f0;
-                border-radius: 10px;
-                padding: 10px;
-                font-size: 12px;
-                font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
-            }
-        """)
         self.chat_history.setPlaceholderText(
             "你好！我是 AI 动作助手。\n\n"
             "可以直接聊天、询问视觉信息，或输入要执行的动作，例如：\n"
@@ -333,16 +308,6 @@ class AIAssistantWidget(QWidget):
 
         self.skill_list = QListWidget()
         self.skill_list.setMaximumHeight(90)
-        self.skill_list.setStyleSheet("""
-            QListWidget {
-                background: #f8fafc;
-                border: 1px solid #e2e8f0;
-                border-radius: 6px;
-                font-size: 11px;
-            }
-            QListWidget::item { padding: 4px 8px; }
-            QListWidget::item:hover { background: #eff6ff; }
-        """)
         skills_layout.addWidget(self.skill_list)
         self._refresh_skill_list()
 
@@ -355,28 +320,13 @@ class AIAssistantWidget(QWidget):
         self.input_field = QLineEdit()
         self.input_field.setPlaceholderText("输入消息、问题或机器人指令，按 Enter 发送...")
         self.input_field.setMinimumHeight(34)
-        self.input_field.setStyleSheet("""
-            QLineEdit {
-                border: 1px solid #e2e8f0;
-                border-radius: 8px;
-                padding: 6px 12px;
-                font-size: 13px;
-                background: #ffffff;
-            }
-            QLineEdit:focus { border-color: #3b82f6; background: #ffffff; }
-        """)
         self.input_field.returnPressed.connect(self._on_send_clicked)
         input_layout.addWidget(self.input_field, stretch=1)
 
         self.send_button = QPushButton("➤ 发送")
         self.send_button.setMinimumWidth(80)
         self.send_button.setMinimumHeight(34)
-        self.send_button.setStyleSheet("""
-            QPushButton { background: #3b82f6; color: #fff; font-weight: 700; border: none; border-radius: 8px; font-size: 13px; }
-            QPushButton:hover { background: #2563eb; }
-            QPushButton:pressed { background: #1d4ed8; }
-            QPushButton:disabled { background: #94a3b8; }
-        """)
+        set_theme_role(self.send_button, "primary")
         self.send_button.clicked.connect(self._on_send_clicked)
         input_layout.addWidget(self.send_button)
 
@@ -389,34 +339,20 @@ class AIAssistantWidget(QWidget):
         self.execute_button = QPushButton("✅ 执行")
         self.execute_button.setEnabled(False)
         self.execute_button.setMinimumHeight(34)
-        self.execute_button.setStyleSheet("""
-            QPushButton { background: #22c55e; color: #fff; font-weight: 700; border: none; border-radius: 8px; font-size: 13px; }
-            QPushButton:hover { background: #16a34a; }
-            QPushButton:pressed { background: #15803d; }
-            QPushButton:disabled { background: #cbd5e1; color: #94a3b8; }
-        """)
+        set_theme_role(self.execute_button, "success")
         self.execute_button.clicked.connect(self._on_execute_clicked)
         action_layout.addWidget(self.execute_button)
 
         self.preview_button = QPushButton("🔍 预览详情")
         self.preview_button.setEnabled(False)
         self.preview_button.setMinimumHeight(34)
-        self.preview_button.setStyleSheet("""
-            QPushButton { background: #ffffff; border: 1px solid #e2e8f0; color: #334155; font-weight: 500; border-radius: 8px; }
-            QPushButton:hover { background: #f8fafc; border-color: #3b82f6; color: #3b82f6; }
-            QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
-        """)
         self.preview_button.clicked.connect(self._on_preview_clicked)
         action_layout.addWidget(self.preview_button)
 
         self.cancel_button = QPushButton("✕ 取消")
         self.cancel_button.setEnabled(False)
         self.cancel_button.setMinimumHeight(34)
-        self.cancel_button.setStyleSheet("""
-            QPushButton { background: #ffffff; border: 1px solid #e2e8f0; color: #ef4444; font-weight: 500; border-radius: 8px; }
-            QPushButton:hover { background: #fef2f2; border-color: #ef4444; }
-            QPushButton:disabled { background: #f8fafc; color: #94a3b8; border-color: #e2e8f0; }
-        """)
+        set_theme_role(self.cancel_button, "danger")
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
         action_layout.addWidget(self.cancel_button)
 
@@ -464,18 +400,26 @@ class AIAssistantWidget(QWidget):
         """添加用户消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.chat_history.setTextColor(QColor("#3b82f6"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Highlight)
+        )
         cursor.insertText(f"\n👤 {text}\n\n")
-        self.chat_history.setTextColor(QColor("#1e293b"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Text)
+        )
         self.chat_history.ensureCursorVisible()
 
     def _add_bot_message(self, text: str):
         """添加机器人消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.chat_history.setTextColor(QColor("#334155"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Text)
+        )
         cursor.insertText(f"\n🤖 {text}\n")
-        self.chat_history.setTextColor(QColor("#1e293b"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Text)
+        )
         self.chat_history.ensureCursorVisible()
 
     def _add_system_message(self, text: str):
@@ -484,7 +428,9 @@ class AIAssistantWidget(QWidget):
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self.chat_history.setTextColor(QColor("#d97706"))
         cursor.insertText(f"⚡ {text}\n\n")
-        self.chat_history.setTextColor(QColor("#1e293b"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Text)
+        )
         self.chat_history.ensureCursorVisible()
 
         self.chat_history.ensureCursorVisible()
@@ -493,15 +439,15 @@ class AIAssistantWidget(QWidget):
         """更新状态显示"""
         if not self._ai_controller.is_api_key_set():
             self.model_label.setText("模型: 未配置 🔴")
-            self.model_label.setStyleSheet("font-size: 11px; color: #ef4444; font-weight: 600; border: none; background: transparent;")
+            set_theme_role(self.model_label, "danger")
         elif self._ai_controller.is_llm_available():
             provider = self._ai_controller.get_model_provider()
             model_name = self._ai_controller.get_llm_model_name()
             self.model_label.setText(f"模型: {provider} {model_name} 🟢")
-            self.model_label.setStyleSheet("font-size: 11px; color: #16a34a; font-weight: 600; border: none; background: transparent;")
+            set_theme_role(self.model_label, "success")
         else:
             self.model_label.setText("模型: 连接失败 🔴")
-            self.model_label.setStyleSheet("font-size: 11px; color: #ef4444; font-weight: 600; border: none; background: transparent;")
+            set_theme_role(self.model_label, "danger")
 
     def _set_input_enabled(self, enabled: bool):
         """设置输入控件的启用状态"""
@@ -524,9 +470,9 @@ class AIAssistantWidget(QWidget):
         self.voice_state_label.setText(f"Session: {state_text}")
         session_active = state != VoiceSessionState.SLEEPING
         if not session_active:
-            self.voice_state_label.setStyleSheet("font-size: 11px; color: #64748b; border: none;")
+            set_theme_role(self.voice_state_label, "muted")
         else:
-            self.voice_state_label.setStyleSheet("font-size: 11px; color: #0f766e; font-weight: 700; border: none;")
+            set_theme_role(self.voice_state_label, "success")
         self.voice_sleep_button.setEnabled(session_active)
         self._update_speech_runtime_controls()
 
@@ -542,20 +488,20 @@ class AIAssistantWidget(QWidget):
             self.voice_listen_button.setText("加载中")
             self.voice_listen_button.setEnabled(False)
             self.voice_asr_label.setText("监听: 加载中")
-            self.voice_asr_label.setStyleSheet("font-size: 11px; color: #0369a1; font-weight: 700; border: none;")
+            set_theme_role(self.voice_asr_label, "warning")
             return
 
         if self._speech_runtime_active:
             self.voice_listen_button.setText("停止监听")
             self.voice_listen_button.setEnabled(True)
             self.voice_asr_label.setText("监听: 运行中")
-            self.voice_asr_label.setStyleSheet("font-size: 11px; color: #0f766e; font-weight: 700; border: none;")
+            set_theme_role(self.voice_asr_label, "success")
             return
 
         self.voice_listen_button.setText("启动监听")
         self.voice_listen_button.setEnabled(True)
         self.voice_asr_label.setText("监听: 待启动")
-        self.voice_asr_label.setStyleSheet("font-size: 11px; color: #0369a1; border: none;")
+        set_theme_role(self.voice_asr_label, "muted")
 
     def _check_voice_session_timeout(self):
         if not self._voice_input_enabled:
@@ -573,12 +519,16 @@ class AIAssistantWidget(QWidget):
             return
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.chat_history.setTextColor(QColor("#334155"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Text)
+        )
         if not self._voice_streaming_reply:
             cursor.insertText("\n🤖 ")
             self._voice_streaming_reply = True
         cursor.insertText(text)
-        self.chat_history.setTextColor(QColor("#1e293b"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Text)
+        )
         self.chat_history.ensureCursorVisible()
 
     def _finish_bot_delta(self):
@@ -1023,9 +973,13 @@ class AIAssistantWidget(QWidget):
         # 在对话历史中显示执行日志
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.chat_history.setTextColor(QColor("#888"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.PlaceholderText)
+        )
         cursor.insertText(f"  {message}\n")
-        self.chat_history.setTextColor(QColor("#333"))
+        self.chat_history.setTextColor(
+            self.palette().color(QPalette.ColorRole.Text)
+        )
 
     def _reset_ui(self):
         """重置UI状态"""

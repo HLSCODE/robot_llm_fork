@@ -8,6 +8,7 @@ from src.configuration.settings import (
     ApplicationSettings,
     DataCollectionSettings,
     DeviceSettings,
+    GuiSettings,
     LLMSettings,
     LoggingSettings,
     RobotSettings,
@@ -32,6 +33,7 @@ class ApplicationSettingsTests(unittest.TestCase):
                 VOICE_INPUT_ENABLED=True,
                 DATA_COLLECTION_FPS=15,
                 DATA_COLLECTION_ARMS=("right",),
+                GUI_THEME="dark",
             )
         )
 
@@ -41,6 +43,7 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertIsInstance(settings.vision, VisionSettings)
         self.assertIsInstance(settings.llm, LLMSettings)
         self.assertIsInstance(settings.logging, LoggingSettings)
+        self.assertIsInstance(settings.gui, GuiSettings)
         self.assertIsInstance(settings.secrets, SecretSettings)
         self.assertIsInstance(settings.voice, VoiceSettings)
         self.assertIsInstance(
@@ -57,6 +60,7 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertTrue(settings.voice.voice_input_enabled)
         self.assertEqual(15, settings.data_collection.fps)
         self.assertEqual(("right",), settings.data_collection.arm_ids)
+        self.assertEqual("dark", settings.gui.theme)
 
     def test_logging_settings_use_explicit_environment_names(self) -> None:
         settings = ApplicationSettings.from_config(

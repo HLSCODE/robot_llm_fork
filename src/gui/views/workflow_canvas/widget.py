@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Callable, Sequence
 
-from PySide6.QtCore import QEvent, Signal
-from PySide6.QtGui import QColor, QPainterPath, QPen, QUndoCommand, QUndoStack
+from PySide6.QtCore import QEvent, QPoint, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QPainterPath, QPen, QUndoCommand, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsPathItem,
     QGraphicsScene,
     QHBoxLayout,
+    QMenu,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -32,7 +33,7 @@ from .items import InsertionItem, StartEndItem, WorkflowNodeItem
 from .tokens import (
     CANVAS_MARGIN,
     NODE_GAP,
-    NODE_WIDTH,
+    LOOP_NODE_WIDTH,
     TOOLBAR_SPACING,
     TOUCH_TARGET_SIZE,
     canvas_colors,
@@ -70,7 +71,8 @@ class WorkflowCanvasWidget(QWidget):
     sequence_changed = Signal()
     edit_requested = Signal()
     insert_action_requested = Signal(int)
-    selection_summary_changed = Signal(object)
+    insert_loop_action_requested = Signal(str, int)
+    wrap_selection_requested = Signal()
     can_undo_changed = Signal(bool)
     can_redo_changed = Signal(bool)
 
@@ -114,6 +116,14 @@ class WorkflowCanvasWidget(QWidget):
         self.view.delete_requested.connect(self.delete_selected)
         self.view.undo_requested.connect(self.undo)
         self.view.redo_requested.connect(self.redo)
+        self.view.select_all_requested.connect(self._select_all_nodes)
+        self.view.clear_selection_requested.connect(self.scene.clearSelection)
+        self.view.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.view.customContextMenuRequested.connect(
+            self._show_context_menu
+        )
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self._undo_stack.canUndoChanged.connect(self.can_undo_changed)
         self._undo_stack.canRedoChanged.connect(self.can_redo_changed)
@@ -184,6 +194,27 @@ class WorkflowCanvasWidget(QWidget):
         item = SequenceItem.from_definition(action)
         updated.insert(insertion_index, item)
         self._push(updated, "插入动作", (item.uuid,))
+
+    def insert_action_into_loop(
+        self,
+        loop_uuid: str,
+        child_index: int,
+        action: ActionDefinition,
+    ) -> bool:
+        """Insert an action at an explicit position inside a loop block."""
+        updated = list(_clone_entries(self._entries))
+        for entry in updated:
+            if not isinstance(entry, LoopBlock) or entry.uuid != loop_uuid:
+                continue
+            insertion_index = _require_insert_index(
+                child_index,
+                len(entry.items),
+            )
+            item = SequenceItem.from_definition(action)
+            entry.items.insert(insertion_index, item)
+            self._push(updated, "向循环插入动作", (loop_uuid,))
+            return True
+        return False
 
     def move_selected(self, offset: int) -> bool:
         current = self.current_entry_row()
@@ -475,7 +506,7 @@ class WorkflowCanvasWidget(QWidget):
         self.scene.blockSignals(True)
         self.scene.clear()
         self._node_items.clear()
-        center_x = NODE_WIDTH / 2.0
+        center_x = LOOP_NODE_WIDTH / 2.0
         y = CANVAS_MARGIN
         start = StartEndItem("开始", QColor("#16a34a"))
         start.setPos(center_x - 60.0, y)
@@ -487,19 +518,24 @@ class WorkflowCanvasWidget(QWidget):
             if self._editing_enabled:
                 insertion = InsertionItem(index)
                 insertion.setPos(center_x - 22.0, y - 22.0)
-                insertion.insert_requested.connect(self.insert_action_requested)
+                insertion.insert_requested.connect(
+                    self.insert_action_requested.emit
+                )
                 self.scene.addItem(insertion)
             node_y = y + NODE_GAP / 2.0
-            node = WorkflowNodeItem(entry.uuid, _clone_canvas_entry(entry))
-            node.setFlag(
-                node.GraphicsItemFlag.ItemIsMovable,
-                self._editing_enabled,
+            node = WorkflowNodeItem(
+                entry.uuid,
+                _clone_canvas_entry(entry),
+                editing_enabled=self._editing_enabled,
             )
-            node.setPos(0.0, node_y)
+            node.setPos(center_x - node.node_width / 2.0, node_y)
             node.setSelected(entry.uuid in selected_node_ids)
-            node.move_requested.connect(self._on_node_moved)
             node.focused.connect(self._on_node_focused)
             node.edit_requested.connect(self._on_node_edit_requested)
+            node.move_requested.connect(self._on_node_moved)
+            node.loop_insert_requested.connect(
+                self.insert_loop_action_requested.emit
+            )
             self.scene.addItem(node)
             self._node_items[entry.uuid] = node
             self._add_edge(previous_bottom, node_y)
@@ -509,7 +545,9 @@ class WorkflowCanvasWidget(QWidget):
         if self._editing_enabled:
             insertion = InsertionItem(len(self._entries))
             insertion.setPos(center_x - 22.0, y - 22.0)
-            insertion.insert_requested.connect(self.insert_action_requested)
+            insertion.insert_requested.connect(
+                self.insert_action_requested.emit
+            )
             self.scene.addItem(insertion)
         end_y = y + NODE_GAP / 2.0
         end = StartEndItem("结束", QColor("#64748b"))
@@ -523,17 +561,19 @@ class WorkflowCanvasWidget(QWidget):
             CANVAS_MARGIN,
         )
         self.scene.setSceneRect(bounds)
+        self.view.setSceneRect(bounds)
         self.scene.blockSignals(False)
         self._on_selection_changed()
 
     def _add_edge(self, source_y: float, target_y: float) -> None:
-        center_x = NODE_WIDTH / 2.0
+        center_x = LOOP_NODE_WIDTH / 2.0
         path = QPainterPath()
         path.moveTo(center_x, source_y)
         midpoint = (source_y + target_y) / 2.0
         path.cubicTo(center_x, midpoint, center_x, midpoint, center_x, target_y)
         edge = QGraphicsPathItem(path)
         edge.setPen(QPen(canvas_colors().edge, 2.0))
+        edge.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         edge.setZValue(-10.0)
         self.scene.addItem(edge)
 
@@ -563,39 +603,106 @@ class WorkflowCanvasWidget(QWidget):
                 return index
         return self.entry_count()
 
-    def _on_node_moved(self, node_id: str, scene_y: float) -> None:
-        if not self._editing_enabled:
-            self._rebuild_scene(selected_node_ids=(node_id,))
-            return
-        source = next(
-            index
-            for index, entry in enumerate(self._entries)
-            if entry.uuid == node_id
+    def _on_node_moved(self, node_id: str, target_center_y: float) -> None:
+        source_index = next(
+            (
+                index
+                for index, entry in enumerate(self._entries)
+                if entry.uuid == node_id
+            ),
+            None,
         )
-        target = self._insertion_index(scene_y)
-        if target > source:
-            target -= 1
-        target = max(0, min(target, self.entry_count() - 1))
-        if source == target:
+        if source_index is None:
+            return
+        target_index = sum(
+            target_center_y
+            > self._node_items[entry.uuid].scenePos().y()
+            + self._node_items[entry.uuid].node_height / 2.0
+            for entry in self._entries
+            if entry.uuid != node_id
+        )
+        if target_index == source_index:
             self._rebuild_scene(selected_node_ids=(node_id,))
             return
         updated = list(_clone_entries(self._entries))
-        entry = updated.pop(source)
-        updated.insert(target, entry)
+        moved = updated.pop(source_index)
+        updated.insert(target_index, moved)
         self._push(updated, "拖动排序", (node_id,))
 
-    def _on_node_focused(self, node_id: str, item_uuid: str) -> None:
+    def _on_node_focused(
+        self,
+        node_id: str,
+        item_uuid: str,
+        additive: bool,
+    ) -> None:
         self._current_item_uuid = item_uuid
         item = self._node_items.get(node_id)
-        if item is not None and not item.isSelected():
+        if item is None:
+            return
+        if additive:
+            item.setSelected(not item.isSelected())
+        else:
             self.scene.clearSelection()
             item.setSelected(True)
-        self._emit_selection_summary()
 
     def _on_node_edit_requested(self, node_id: str, item_uuid: str) -> None:
-        self._on_node_focused(node_id, item_uuid)
-        if self.current_sequence_item() is not None:
-            self.edit_requested.emit()
+        self._on_node_focused(node_id, item_uuid, False)
+        self.edit_requested.emit()
+
+    def _select_all_nodes(self) -> None:
+        if not self._editing_enabled:
+            return
+        for item in self._node_items.values():
+            item.setSelected(True)
+
+    def _show_context_menu(self, view_position: QPoint) -> None:
+        if not self._editing_enabled:
+            return
+        pointed_item = self.view.itemAt(view_position)
+        if isinstance(pointed_item, WorkflowNodeItem):
+            if not pointed_item.isSelected():
+                self.scene.clearSelection()
+                pointed_item.setSelected(True)
+            local_position = pointed_item.mapFromScene(
+                self.view.mapToScene(view_position)
+            )
+            self._current_item_uuid = pointed_item.item_uuid_at(
+                local_position.y()
+            )
+        menu = self._create_context_menu()
+        if menu is None:
+            return
+        menu.exec(self.view.viewport().mapToGlobal(view_position))
+
+    def _create_context_menu(self) -> QMenu | None:
+        selected_rows = self.selected_entry_rows()
+        if not selected_rows:
+            return None
+        menu = QMenu(self.view)
+        if len(selected_rows) == 1:
+            self._add_menu_action(menu, "编辑参数", self.edit_requested.emit)
+            self._add_menu_action(menu, "上移", lambda: self.move_selected(-1))
+            self._add_menu_action(menu, "下移", lambda: self.move_selected(1))
+            if isinstance(self._entries[selected_rows[0]], LoopBlock):
+                self._add_menu_action(menu, "展开循环", self.unwrap_selected_loop)
+        self._add_menu_action(
+            menu,
+            "创建循环",
+            self.wrap_selection_requested.emit,
+        )
+        menu.addSeparator()
+        self._add_menu_action(menu, "删除所选", self.delete_selected)
+        return menu
+
+    @staticmethod
+    def _add_menu_action(
+        menu: QMenu,
+        text: str,
+        callback: Callable[[], object],
+    ) -> None:
+        action = QAction(text, menu)
+        action.triggered.connect(callback)
+        menu.addAction(action)
 
     def _on_selection_changed(self) -> None:
         selected = self.scene.selectedItems()
@@ -608,20 +715,6 @@ class WorkflowCanvasWidget(QWidget):
                 self._current_item_uuid = node.entry.uuid
         else:
             self._current_item_uuid = ""
-        self._emit_selection_summary()
-
-    def _emit_selection_summary(self) -> None:
-        selected = self.current_sequence_item()
-        if selected is not None:
-            self.selection_summary_changed.emit(selected)
-            return
-        current_row = self.current_entry_row()
-        entry = (
-            _clone_canvas_entry(self._entries[current_row])
-            if 0 <= current_row < self.entry_count()
-            else None
-        )
-        self.selection_summary_changed.emit(entry)
 
 
 def _clone_entries(

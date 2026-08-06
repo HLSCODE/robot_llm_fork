@@ -110,6 +110,16 @@ class ConfigurationValidationTests(unittest.TestCase):
             {issue.code for issue in report.errors},
         )
 
+    def test_unknown_gui_theme_is_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(Path(temporary_directory), GUI_THEME="midnight"),
+                _options(),
+            )
+
+        self.assertEqual("invalid_gui_theme", report.errors[0].code)
+        self.assertEqual("GUI_THEME", report.errors[0].field)
+
     def test_non_positive_voice_startup_wait_is_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(
