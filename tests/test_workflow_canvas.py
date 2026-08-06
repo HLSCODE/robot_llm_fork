@@ -5,7 +5,7 @@ import unittest
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QPalette, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QGraphicsProxyWidget
+from PySide6.QtWidgets import QApplication, QFrame, QGraphicsProxyWidget
 
 from src.application import WorkflowCompiler
 from src.domain.models import (
@@ -35,6 +35,9 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.canvas.close()
         self.canvas.deleteLater()
         QApplication.processEvents()
+
+    def test_canvas_view_uses_background_separation_without_outer_frame(self) -> None:
+        self.assertEqual(QFrame.Shape.NoFrame, self.canvas.view.frameShape())
 
     def test_insert_move_and_undo_redo_publish_canonical_entries(self) -> None:
         changes = []

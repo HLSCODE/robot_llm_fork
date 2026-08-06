@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtGui import QPalette
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
 
 from src.gui.view_models.models import DeviceViewState
 from src.gui.icons import IconName
@@ -15,6 +16,7 @@ from src.gui.workbench_layout import (
 )
 from src.gui.views.workbench import WorkbenchPage, WorkbenchView
 from src.gui.views.workbench.shell import (
+    ACTIVITY_TOOLTIP_DELAY_MS,
     BOTTOM_PANEL_MINIMUM_HEIGHT,
     SIDE_BAR_MINIMUM_WIDTH,
     SPLITTER_HIT_WIDTH,
@@ -76,6 +78,36 @@ class WorkbenchViewTests(unittest.TestCase):
             self.workbench.side_splitter.sizes()[0],
             SIDE_BAR_MINIMUM_WIDTH,
         )
+
+    def test_activity_hover_uses_compact_custom_tooltip(self) -> None:
+        button = self.workbench.activity_bar.buttons["resources"]
+        tooltip = self.workbench.activity_bar.findChild(
+            QLabel,
+            "activityToolTip",
+        )
+        assert tooltip is not None
+
+        QApplication.sendEvent(button, QEvent(QEvent.Type.Enter))
+        QTest.qWait(ACTIVITY_TOOLTIP_DELAY_MS + 30)
+        QApplication.processEvents()
+
+        self.assertTrue(tooltip.isVisible())
+        self.assertEqual("资源", tooltip.text())
+        self.assertLessEqual(tooltip.height(), 36)
+        self.assertLessEqual(tooltip.width(), 96)
+        self.assertEqual("", button.toolTip())
+        rendered = tooltip.grab().toImage()
+        background = rendered.pixelColor(
+            tooltip.width() - 5,
+            tooltip.height() // 2,
+        )
+        expected = tooltip.palette().color(QPalette.ColorRole.ToolTipBase)
+        self.assertEqual(255, background.alpha())
+        self.assertEqual(expected.name(), background.name())
+
+        QApplication.sendEvent(button, QEvent(QEvent.Type.Leave))
+        QApplication.processEvents()
+        self.assertFalse(tooltip.isVisible())
 
     def test_status_buttons_switch_and_toggle_the_resizable_bottom_panel(self) -> None:
         device_button = self.workbench.status_bar.buttons["devices"]

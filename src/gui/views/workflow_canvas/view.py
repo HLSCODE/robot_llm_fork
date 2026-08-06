@@ -17,6 +17,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QGestureEvent,
+    QFrame,
     QGraphicsView,
     QScroller,
     QWidget,
@@ -36,6 +37,7 @@ class WorkflowCanvasView(QGraphicsView):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self.setAcceptDrops(True)
         self.setRenderHints(
             self.renderHints()

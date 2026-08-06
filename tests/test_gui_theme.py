@@ -39,9 +39,45 @@ class GuiThemeTests(unittest.TestCase):
             QColor(DARK_COLORS.text),
             QApplication.palette().color(QPalette.ColorRole.Text),
         )
+        self.assertEqual(
+            QColor(DARK_COLORS.tooltip),
+            QApplication.palette().color(QPalette.ColorRole.ToolTipBase),
+        )
         self.assertIn(
             'QPushButton[themeRole="danger"]',
             self.application.styleSheet(),
+        )
+
+    def test_tooltips_are_compact_rounded_and_follow_each_theme(self) -> None:
+        controller = ThemeController(self.application, ThemeMode.LIGHT)
+        light_stylesheet = self.application.styleSheet()
+
+        self.assertEqual(
+            QColor(LIGHT_COLORS.tooltip),
+            QApplication.palette().color(QPalette.ColorRole.ToolTipBase),
+        )
+        self.assertIn("QToolTip {", light_stylesheet)
+        self.assertNotIn("QLabel#activityToolTip", light_stylesheet)
+        self.assertIn("border-radius: 6px; padding: 3px 7px", light_stylesheet)
+        self.assertIn(f"background: {LIGHT_COLORS.tooltip}", light_stylesheet)
+
+        controller.set_mode(ThemeMode.DARK)
+        dark_stylesheet = self.application.styleSheet()
+        self.assertIn(f"background: {DARK_COLORS.tooltip}", dark_stylesheet)
+        self.assertIn(f"color: {DARK_COLORS.tooltip_text}", dark_stylesheet)
+
+    def test_surface_hierarchy_avoids_repeated_decorative_borders(self) -> None:
+        ThemeController(self.application, ThemeMode.DARK)
+        stylesheet = self.application.styleSheet()
+
+        self.assertIn("QTabWidget::pane { border: none", stylesheet)
+        self.assertIn('QFrame[frameShape="6"] { border: none', stylesheet)
+        self.assertIn("QFrame#workbenchActivityBar {", stylesheet)
+        self.assertNotIn("border-right", stylesheet)
+        self.assertNotIn(
+            "QListWidget::item:selected { background: #1e3a5f; "
+            "color: #f1f5f9; border:",
+            stylesheet,
         )
 
     def test_mode_change_is_emitted_only_for_an_actual_change(self) -> None:

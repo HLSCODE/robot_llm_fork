@@ -36,6 +36,12 @@
 > 与 Status Bar 按 Palette 和 1x/2x/3x 渲染；主要命令区已删除 Emoji 装饰。
 > Side Bar/Bottom Panel 的页面、可见性和尺寸使用 schema v1 QSettings 偏好持久化，
 > 损坏值和已删除页面会自动恢复默认，“视图”菜单提供显式恢复入口。
+>
+> M7 视觉复核：Activity Bar 使用 350 ms 延迟的紧凑自绘 Tooltip，圆角、前景、
+> 背景和弱边框均跟随浅色/深色 Palette；全局视觉从“容器描边”改为“背景层级”，
+> 已删除普通按钮、Tab Pane/Tab、GroupBox、列表选中项、StyledPanel、菜单栏、
+> Activity Bar 和画布外框的重复线条。仅输入焦点、可拖动分隔、工作流节点边界及
+> 安全/状态语义保留必要描边。
 
 ## 1. 结论
 

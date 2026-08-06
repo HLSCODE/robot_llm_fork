@@ -63,8 +63,8 @@ LIGHT_COLORS = ThemeColors(
     warning="#d97706",
     danger="#dc2626",
     danger_strong="#991b1b",
-    tooltip="#1e293b",
-    tooltip_text="#f8fafc",
+    tooltip="#ffffff",
+    tooltip_text="#334155",
 )
 
 DARK_COLORS = ThemeColors(
@@ -84,8 +84,8 @@ DARK_COLORS = ThemeColors(
     warning="#fbbf24",
     danger="#f87171",
     danger_strong="#ef4444",
-    tooltip="#e2e8f0",
-    tooltip_text="#0f172a",
+    tooltip="#1e293b",
+    tooltip_text="#e2e8f0",
 )
 
 
@@ -175,44 +175,45 @@ def build_stylesheet(colors: ThemeColors) -> str:
 QWidget {{ color: {colors.text}; }}
 QMainWindow, QDialog {{ background: {colors.window}; }}
 QPushButton {{
-    background: {colors.surface}; border: 1px solid {colors.border};
+    background: {colors.surface_subtle}; border: 1px solid transparent;
     border-radius: 6px; padding: 5px 12px; color: {colors.text};
     font-weight: 500;
 }}
-QPushButton:hover {{ background: {colors.surface_subtle}; border-color: {colors.border_strong}; }}
+QPushButton:hover {{ background: {colors.selection}; }}
 QPushButton:pressed {{ background: {colors.selection}; }}
 QPushButton:disabled {{
     background: {colors.disabled_surface}; color: {colors.disabled_text};
-    border-color: {colors.border};
+    border-color: transparent;
 }}
-QPushButton[themeRole="primary"] {{ background: {colors.accent}; color: {colors.surface}; border-color: {colors.accent}; }}
+QPushButton[themeRole="primary"] {{ background: {colors.accent}; color: {colors.surface}; border-color: transparent; }}
 QPushButton[themeRole="primary"]:hover {{ background: {colors.accent_hover}; }}
-QPushButton[themeRole="success"] {{ background: {colors.success}; color: #ffffff; border-color: {colors.success}; }}
-QPushButton[themeRole="warning"] {{ background: {colors.warning}; color: #111827; border-color: {colors.warning}; }}
-QPushButton[themeRole="danger"] {{ background: {colors.danger}; color: #ffffff; border-color: {colors.danger}; }}
-QPushButton[themeRole="dangerStrong"] {{ background: {colors.danger_strong}; color: #ffffff; border-color: {colors.danger_strong}; }}
+QPushButton[themeRole="success"] {{ background: {colors.success}; color: #ffffff; border-color: transparent; }}
+QPushButton[themeRole="warning"] {{ background: {colors.warning}; color: #111827; border-color: transparent; }}
+QPushButton[themeRole="danger"] {{ background: {colors.danger}; color: #ffffff; border-color: transparent; }}
+QPushButton[themeRole="dangerStrong"] {{ background: {colors.danger_strong}; color: #ffffff; border-color: transparent; }}
 QPushButton[themeRole]:disabled {{
     background: {colors.disabled_surface}; color: {colors.disabled_text};
-    border-color: {colors.border};
+    border-color: transparent;
 }}
 QLabel[themeRole="muted"] {{ color: {colors.text_muted}; }}
 QLabel[themeRole="success"] {{ color: {colors.success}; font-weight: 700; }}
 QLabel[themeRole="warning"] {{ color: {colors.warning}; font-weight: 700; }}
 QLabel[themeRole="danger"] {{ color: {colors.danger}; font-weight: 700; }}
-QTabWidget::pane {{ border: 1px solid {colors.border}; border-radius: 8px; background: {colors.surface}; top: -1px; }}
-QTabBar::tab {{ background: {colors.surface_subtle}; border: 1px solid {colors.border}; border-bottom: none; border-radius: 6px 6px 0 0; padding: 6px 14px; color: {colors.text_muted}; }}
-QTabBar::tab:selected {{ background: {colors.surface}; color: {colors.accent}; font-weight: 700; border-bottom: 2px solid {colors.accent}; }}
+QTabWidget::pane {{ border: none; background: {colors.surface}; }}
+QTabBar::tab {{ background: transparent; border: none; border-radius: 6px; padding: 6px 14px; color: {colors.text_muted}; }}
+QTabBar::tab:selected {{ background: {colors.selection}; color: {colors.accent}; font-weight: 700; }}
 QTabBar::tab:hover:!selected {{ background: {colors.selection}; color: {colors.accent}; }}
-QGroupBox {{ font-weight: 700; border: 1px solid {colors.border}; border-radius: 8px; margin-top: 14px; padding: 14px 8px 8px; background: {colors.surface}; }}
+QGroupBox {{ font-weight: 700; border: none; margin-top: 14px; padding: 14px 8px 8px; background: {colors.surface}; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {colors.accent}; }}
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit, QListWidget {{ background: {colors.surface}; color: {colors.text}; border: 1px solid {colors.border}; border-radius: 6px; }}
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {colors.surface_subtle}; color: {colors.text}; border: 1px solid transparent; border-radius: 6px; }}
+QTextEdit, QListWidget {{ background: {colors.surface}; color: {colors.text}; border: none; border-radius: 6px; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ padding: 5px 8px; }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:hover {{ border-color: {colors.accent}; }}
 QComboBox QAbstractItemView {{ background: {colors.surface}; color: {colors.text}; selection-background-color: {colors.selection}; selection-color: {colors.text}; }}
 QListWidget::item {{ padding: 6px 10px; border-radius: 4px; }}
 QListWidget::item:hover {{ background: {colors.surface_subtle}; }}
-QListWidget::item:selected {{ background: {colors.selection}; color: {colors.text}; border: 1px solid {colors.accent}; }}
-QFrame[frameShape="6"] {{ border: 1px solid {colors.border}; border-radius: 8px; background: {colors.surface}; }}
+QListWidget::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
+QFrame[frameShape="6"] {{ border: none; background: {colors.surface}; }}
 QCheckBox {{ spacing: 6px; color: {colors.text}; }}
 QScrollBar:vertical {{ width: 8px; background: transparent; }}
 QScrollBar::handle:vertical {{ background: {colors.border_strong}; border-radius: 4px; min-height: 20px; }}
@@ -223,11 +224,11 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 QSplitter::handle {{ background: {colors.border}; }}
 QSplitter::handle:hover {{ background: {colors.accent}; }}
 QSplitter#workbenchSideSplitter::handle, QSplitter#workbenchBottomSplitter::handle {{ background: transparent; }}
-QFrame#workbenchActivityBar {{ background: {colors.surface_subtle}; border-right: 1px solid {colors.border}; }}
+QFrame#workbenchActivityBar {{ background: {colors.surface_subtle}; border: none; }}
 QStackedWidget#workbenchSideBar, QStackedWidget#workbenchBottomPanel {{ background: {colors.surface}; }}
 QToolButton#activityButton {{ background: transparent; border: none; border-radius: 6px; color: {colors.text_muted}; font-size: 22px; }}
 QToolButton#activityButton:hover {{ background: {colors.selection}; color: {colors.text}; }}
-QToolButton#activityButton:checked {{ background: {colors.selection}; color: {colors.accent}; border-left: 3px solid {colors.accent}; }}
+QToolButton#activityButton:checked {{ background: {colors.selection}; color: {colors.accent}; }}
 QFrame#workbenchStatusBar {{ background: {colors.accent}; border: none; color: #ffffff; }}
 QFrame#workbenchStatusBar QLabel {{ color: #ffffff; }}
 QFrame#workbenchStatusBar QLabel[themeRole="success"] {{ color: #ffffff; }}
@@ -235,11 +236,11 @@ QFrame#workbenchStatusBar QLabel[themeRole="danger"] {{ color: #ffffff; font-wei
 QToolButton#statusPanelButton {{ background: transparent; border: none; border-radius: 4px; color: #ffffff; padding: 3px 8px; }}
 QToolButton#statusPanelButton:hover, QToolButton#statusPanelButton:checked {{ background: rgba(255, 255, 255, 38); }}
 QMenuBar, QMenu {{ background: {colors.surface}; color: {colors.text}; }}
-QMenuBar {{ border-bottom: 1px solid {colors.border}; padding: 2px; }}
+QMenuBar {{ border: none; padding: 2px; }}
 QMenuBar::item, QMenu::item {{ padding: 6px 12px; border-radius: 4px; }}
 QMenuBar::item:selected, QMenu::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
-QToolTip {{ background: {colors.tooltip}; color: {colors.tooltip_text}; border: 1px solid {colors.border_strong}; padding: 6px 10px; }}
-QWidget#aiStatusCard {{ background: {colors.surface_subtle}; border: 1px solid {colors.border}; border-radius: 8px; }}
+QToolTip {{ background: {colors.tooltip}; color: {colors.tooltip_text}; border: 1px solid {colors.border}; border-radius: 6px; padding: 3px 7px; font-size: 12px; }}
+QWidget#aiStatusCard {{ background: {colors.surface_subtle}; border: none; border-radius: 8px; }}
 QWidget#startupProgressWindow {{ background: transparent; }}
 QFrame#startupCard {{ background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 16px; }}
 QLabel#startupTitle {{ color: {colors.text}; font-size: 25px; font-weight: 700; }}
