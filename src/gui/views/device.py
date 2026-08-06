@@ -17,17 +17,13 @@ from PySide6.QtWidgets import (
 from ..view_models.models import DeviceViewState
 
 
-class DeviceStatusView(QWidget):
-    refresh_requested = Signal()
-    copy_pose_requested = Signal(str)
-
+class DeviceHealthView(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.addWidget(self._create_status_panel())
-        layout.addWidget(self._create_pose_panel())
+        layout.addStretch(1)
 
     def _create_status_panel(self) -> QWidget:
         panel = QFrame()
@@ -73,6 +69,31 @@ class DeviceStatusView(QWidget):
         layout.addWidget(text)
         layout.addStretch()
         return widget, indicator, text
+
+    def render_state(self, state: DeviceViewState) -> None:
+        readiness = {
+            "robot1": state.robot_ready,
+            "robot2": state.robot_ready,
+            "body": state.body_ready,
+            "pipette": state.pipette_ready,
+        }
+        for key, ready in readiness.items():
+            indicator, label = self._statuses[key]
+            color = "#22c55e" if ready else "#ef4444"
+            indicator.setStyleSheet(f"background-color: {color}; border-radius: 8px;")
+            label.setText("已连接" if ready else "未连接")
+
+
+class DevicePoseView(QWidget):
+    refresh_requested = Signal()
+    copy_pose_requested = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self._create_pose_panel())
+        layout.addStretch(1)
 
     def _create_pose_panel(self) -> QWidget:
         panel = QFrame()
@@ -133,19 +154,6 @@ class DeviceStatusView(QWidget):
         row.addWidget(value, stretch=1)
         parent.addLayout(row)
         return value
-
-    def render_state(self, state: DeviceViewState) -> None:
-        readiness = {
-            "robot1": state.robot_ready,
-            "robot2": state.robot_ready,
-            "body": state.body_ready,
-            "pipette": state.pipette_ready,
-        }
-        for key, ready in readiness.items():
-            indicator, label = self._statuses[key]
-            color = "#22c55e" if ready else "#ef4444"
-            indicator.setStyleSheet(f"background-color: {color}; border-radius: 8px;")
-            label.setText("已连接" if ready else "未连接")
 
     def render_pose(self, robot_name: str, text: str) -> None:
         self._pose_labels[robot_name].setText(text)

@@ -1,6 +1,6 @@
 """Passive Qt views and dialogs."""
 
-from .device import DeviceControlView, DeviceStatusView
+from .device import DeviceControlView, DeviceHealthView, DevicePoseView
 from .action_picker import ActionPickerDialog
 from .dialogs import ActionConfigDialog, ActionPreviewDialog, SchemaActionForm
 from .startup import StartupProgressCard
@@ -13,7 +13,8 @@ __all__ = [
     "ActionPickerDialog",
     "ActionPreviewDialog",
     "DeviceControlView",
-    "DeviceStatusView",
+    "DeviceHealthView",
+    "DevicePoseView",
     "SchemaActionForm",
     "StartupProgressCard",
     "WorkflowEditorView",

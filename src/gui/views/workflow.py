@@ -231,9 +231,6 @@ class WorkflowEditorView(QWidget):
     edit_requested = Signal()
     repeat_requested = Signal()
     delete_requested = Signal()
-    clear_requested = Signal()
-    save_requested = Signal()
-    load_requested = Signal()
     composer_remove_requested = Signal()
     composer_move_up_requested = Signal()
     composer_move_down_requested = Signal()
@@ -291,9 +288,6 @@ class WorkflowEditorView(QWidget):
             (controls.edit_clicked, self.edit_requested),
             (controls.repeat_clicked, self.repeat_requested),
             (controls.delete_clicked, self.delete_requested),
-            (controls.clear_clicked, self.clear_requested),
-            (controls.save_clicked, self.save_requested),
-            (controls.load_clicked, self.load_requested),
         ):
             source.connect(target.emit)
         controls.quick_stop_clicked.connect(lambda: self.safety_stop_requested.emit(StopMode.QUICK))

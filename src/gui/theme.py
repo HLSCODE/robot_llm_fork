@@ -222,8 +222,18 @@ QScrollBar::handle:horizontal {{ background: {colors.border_strong}; border-radi
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
 QSplitter::handle {{ background: {colors.border}; }}
 QSplitter::handle:hover {{ background: {colors.accent}; }}
-QSplitter#workspaceSplitter::handle {{ background: transparent; }}
-QSplitter#workspaceSplitter::handle:hover {{ background: transparent; }}
+QSplitter#workbenchSideSplitter::handle, QSplitter#workbenchBottomSplitter::handle {{ background: transparent; }}
+QFrame#workbenchActivityBar {{ background: {colors.surface_subtle}; border-right: 1px solid {colors.border}; }}
+QStackedWidget#workbenchSideBar, QStackedWidget#workbenchBottomPanel {{ background: {colors.surface}; }}
+QToolButton#activityButton {{ background: transparent; border: none; border-radius: 6px; color: {colors.text_muted}; font-size: 22px; }}
+QToolButton#activityButton:hover {{ background: {colors.selection}; color: {colors.text}; }}
+QToolButton#activityButton:checked {{ background: {colors.selection}; color: {colors.accent}; border-left: 3px solid {colors.accent}; }}
+QFrame#workbenchStatusBar {{ background: {colors.accent}; border: none; color: #ffffff; }}
+QFrame#workbenchStatusBar QLabel {{ color: #ffffff; }}
+QFrame#workbenchStatusBar QLabel[themeRole="success"] {{ color: #ffffff; }}
+QFrame#workbenchStatusBar QLabel[themeRole="danger"] {{ color: #ffffff; font-weight: 700; }}
+QToolButton#statusPanelButton {{ background: transparent; border: none; border-radius: 4px; color: #ffffff; padding: 3px 8px; }}
+QToolButton#statusPanelButton:hover, QToolButton#statusPanelButton:checked {{ background: rgba(255, 255, 255, 38); }}
 QMenuBar, QMenu {{ background: {colors.surface}; color: {colors.text}; }}
 QMenuBar {{ border-bottom: 1px solid {colors.border}; padding: 2px; }}
 QMenuBar::item, QMenu::item {{ padding: 6px 12px; border-radius: 4px; }}

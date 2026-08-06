@@ -165,12 +165,28 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         assert isinstance(inserted, SequenceItem)
         self.assertEqual("plus-click-action", inserted.definition.id)
 
-    def test_drawer_toggle_is_attached_to_the_left_splitter_handle(self) -> None:
-        toggle = self.window.action_library_toggle
+    def test_workbench_keeps_canvas_and_safety_commands_available(self) -> None:
+        workbench = self.window.workbench_view
+        resource_button = workbench.activity_bar.buttons["resources"]
 
-        self.assertEqual("QSplitterHandle", toggle.parentWidget().metaObject().className())
-        self.assertFalse(toggle.icon().isNull())
-        self.assertEqual("收起动作库", toggle.accessibleName())
+        resource_button.click()
+        QApplication.processEvents()
+
+        self.assertFalse(workbench.side_stack.isVisible())
+        self.assertTrue(self.window.workflow_view.sequence_list.isVisible())
+        controls = self.window.workflow_view.control_panel
+        for button in (
+            controls.stop_btn,
+            controls.quick_stop_btn,
+            controls.emergency_stop_btn,
+        ):
+            self.assertTrue(button.isVisible())
+            self.assertGreaterEqual(button.height(), 44)
+
+        workbench.status_bar.buttons["poses"].click()
+        QApplication.processEvents()
+        self.assertEqual("poses", workbench.active_bottom_page)
+        self.assertTrue(self.window.device_pose_view.isVisible())
 
     def test_theme_menu_switches_the_single_application_theme(self) -> None:
         self.window._theme_actions[ThemeMode.DARK].trigger()

@@ -13,9 +13,6 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QListWidgetItem,
     QMainWindow,
-    QSplitter,
-    QVBoxLayout,
-    QWidget,
 )
 
 from ..bridges.execution import ExecutionBridge
@@ -46,7 +43,7 @@ from ...devices.runtime.ids import (
 )
 from ..views.log_widget import LogWidget
 from ..bridges.composition import CompositionBridge
-from ..views.device import DeviceControlView, DeviceStatusView
+from ..views.device import DeviceControlView, DeviceHealthView, DevicePoseView
 from ..views.dialogs import ActionConfigDialog
 from ..views.action_list import ACTION_TYPE_LABELS
 from ..views.action_picker import ActionPickerDialog
@@ -59,7 +56,7 @@ from .startup import (
 )
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import ActionLibraryView, WorkflowEditorView
-from ..views.animated_drawer import AnimatedSplitterDrawer, DrawerHandleButton
+from ..views.workbench import WorkbenchPage, WorkbenchView
 from ..theme import ThemeController, ThemeMode
 
 
@@ -102,10 +99,7 @@ class MainWindow(QMainWindow):
         self._notifications = GuiNotificationCenter(
             self,
             log_sink=self.log_widget.append_log,
-            status_sink=lambda message: self.statusBar().showMessage(
-                message,
-                5000,
-            ),
+            status_sink=self.workbench_view.status_bar.show_message,
         )
         self._sequence_revision = (
             services.composition.sequence_revision
@@ -329,54 +323,34 @@ class MainWindow(QMainWindow):
     def init_ui(self):
         self.setWindowTitle("机器人动作编排器")
         self.setMinimumSize(540, 800)
-        self.resize(540, 960)
-
-        self.create_menu()
-
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(4)
-
-        self.device_status_view = DeviceStatusView()
-        layout.addWidget(self.device_status_view)
-
-        # 底部：横向 Splitter，左=动作库，右=序列+控制+日志
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setObjectName("workspaceSplitter")
+        self.resize(900, 960)
 
         self.action_library_view = ActionLibraryView(self._services)
         self.workflow_view = WorkflowEditorView()
+        self.device_status_view = DeviceHealthView()
+        self.device_pose_view = DevicePoseView()
         self.device_control_view = DeviceControlView()
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(2, 2, 2, 2)
-        right_layout.setSpacing(2)
-        right_layout.addWidget(self.workflow_view, stretch=1)
-        right_layout.addWidget(self.device_control_view)
         self.log_widget = LogWidget()
-        right_layout.addWidget(self.log_widget)
-
-        self._connect_view_signals()
-
-        splitter.addWidget(self.action_library_view)
-        splitter.addWidget(right_panel)
-        self.action_library_toggle = DrawerHandleButton()
-        drawer_handle = splitter.handle(1)
-        drawer_handle_layout = QVBoxLayout(drawer_handle)
-        drawer_handle_layout.setContentsMargins(0, 0, 0, 0)
-        drawer_handle_layout.addWidget(self.action_library_toggle)
-        splitter.setCollapsible(0, True)
-        splitter.setStretchFactor(0, 1)
-        splitter.setStretchFactor(1, 2)
-        splitter.setSizes((280, 560))
-        self._action_library_drawer = AnimatedSplitterDrawer(
-            splitter,
-            self.action_library_toggle,
+        self.workbench_view = WorkbenchView(
+            side_pages=(
+                WorkbenchPage(
+                    key="resources",
+                    title="资源",
+                    symbol="▦",
+                    widget=self.action_library_view,
+                ),
+            ),
+            editor=self.workflow_view,
+            bottom_pages=(
+                WorkbenchPage("devices", "设备", "●", self.device_status_view),
+                WorkbenchPage("poses", "位姿", "⌖", self.device_pose_view),
+                WorkbenchPage("controls", "控制", "⌁", self.device_control_view),
+                WorkbenchPage("logs", "日志", "≡", self.log_widget),
+            ),
         )
-
-        layout.addWidget(splitter, stretch=1)
+        self.setCentralWidget(self.workbench_view)
+        self.create_menu()
+        self._connect_view_signals()
 
         self.pose_timer = QTimer(self)
         self.pose_timer.setInterval(1000)
@@ -403,9 +377,6 @@ class MainWindow(QMainWindow):
         workflow.edit_requested.connect(self.edit_sequence_item)
         workflow.repeat_requested.connect(self.repeat_sequence_selection)
         workflow.delete_requested.connect(self.delete_item)
-        workflow.clear_requested.connect(self.clear_sequence)
-        workflow.save_requested.connect(self.save_task)
-        workflow.load_requested.connect(self.load_task)
         workflow.composer_remove_requested.connect(self.remove_task_from_composer)
         workflow.composer_move_up_requested.connect(self.move_composed_task_up)
         workflow.composer_move_down_requested.connect(self.move_composed_task_down)
@@ -425,9 +396,8 @@ class MainWindow(QMainWindow):
         workflow.task_composer_list.action_dropped.connect(self._add_action_to_composer)
         workflow.task_composer_list.order_changed.connect(self._move_composed_task_rows)
 
-        device_status = self.device_status_view
-        device_status.refresh_requested.connect(self.refresh_arm_poses)
-        device_status.copy_pose_requested.connect(self.copy_robot_pose)
+        self.device_pose_view.refresh_requested.connect(self.refresh_arm_poses)
+        self.device_pose_view.copy_pose_requested.connect(self.copy_robot_pose)
         controls = self.device_control_view
         controls.gripper_requested.connect(self._set_gripper_state)
         controls.relay_requested.connect(self._set_relay_state)
@@ -455,7 +425,41 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        edit_menu = menubar.addMenu("编辑")
+        for label, shortcut, callback in (
+            ("撤销", "Ctrl+Z", self.workflow_view.sequence_list.undo),
+            ("重做", "Ctrl+Y", self.workflow_view.sequence_list.redo),
+            ("修改节点", "Enter", self.edit_sequence_item),
+            ("删除节点", "Delete", self.delete_item),
+            ("清空工作流", "Ctrl+Shift+Delete", self.clear_sequence),
+        ):
+            action = QAction(label, self)
+            action.setShortcut(shortcut)
+            action.triggered.connect(callback)
+            edit_menu.addAction(action)
+
         view_menu = menubar.addMenu("视图")
+        side_bar_action = QAction("资源侧栏", self)
+        side_bar_action.setShortcut("Ctrl+B")
+        side_bar_action.triggered.connect(
+            lambda: self.workbench_view.toggle_side_page("resources")
+        )
+        view_menu.addAction(side_bar_action)
+        panel_menu = view_menu.addMenu("底部面板")
+        for label, key in (
+            ("设备", "devices"),
+            ("机械臂位姿", "poses"),
+            ("基础控制", "controls"),
+            ("运行日志", "logs"),
+        ):
+            action = QAction(label, self)
+            action.triggered.connect(
+                lambda _checked=False, page_key=key: (
+                    self.workbench_view.toggle_bottom_page(page_key)
+                )
+            )
+            panel_menu.addAction(action)
+        view_menu.addSeparator()
         theme_menu = view_menu.addMenu("主题")
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
@@ -483,6 +487,28 @@ class MainWindow(QMainWindow):
             self._sync_theme_menu,
             Qt.ConnectionType.QueuedConnection,
         )
+
+        execution_menu = menubar.addMenu("执行")
+        for label, callback in (
+            ("开始执行", self.start_execution),
+            ("暂停/恢复", self.toggle_pause),
+            ("停止任务", self.stop_execution),
+            ("快速停止", lambda: self.request_safety_stop(StopMode.QUICK)),
+            ("设备急停", lambda: self.request_safety_stop(StopMode.EMERGENCY)),
+        ):
+            action = QAction(label, self)
+            action.triggered.connect(callback)
+            execution_menu.addAction(action)
+
+        device_menu = menubar.addMenu("设备")
+        refresh_pose_action = QAction("刷新机械臂位姿", self)
+        refresh_pose_action.triggered.connect(self.refresh_arm_poses)
+        device_menu.addAction(refresh_pose_action)
+        show_controls_action = QAction("打开基础控制", self)
+        show_controls_action.triggered.connect(
+            lambda: self.workbench_view.toggle_bottom_page("controls")
+        )
+        device_menu.addAction(show_controls_action)
 
     def _sync_theme_menu(self, mode: object) -> None:
         if isinstance(mode, ThemeMode):
@@ -655,13 +681,13 @@ class MainWindow(QMainWindow):
             if position is None:
                 error = receiver.last_error
                 text = f"UDP -- ({error})" if error else "UDP --"
-                self.device_status_view.render_localization(text)
+                self.device_pose_view.render_localization(text)
                 return
         except Exception as exc:
-            self.device_status_view.render_localization(f"UDP error: {exc}")
+            self.device_pose_view.render_localization(f"UDP error: {exc}")
             return
 
-        self.device_status_view.render_localization(
+        self.device_pose_view.render_localization(
             self.format_external_localization_text(position)
         )
 
@@ -669,11 +695,11 @@ class MainWindow(QMainWindow):
         pose = self._get_current_pose(robot_name)
         if pose is None:
             self.robot_pose_cache[robot_name] = None
-            self.device_status_view.render_pose(robot_name, "--")
+            self.device_pose_view.render_pose(robot_name, "--")
             return
 
         self.robot_pose_cache[robot_name] = pose
-        self.device_status_view.render_pose(robot_name, self.format_pose_text(pose))
+        self.device_pose_view.render_pose(robot_name, self.format_pose_text(pose))
 
     def _get_current_pose(self, robot_name: str):
         try:
@@ -755,6 +781,7 @@ class MainWindow(QMainWindow):
     def _render_device_state(self) -> None:
         state = self._device_view_model.snapshot()
         self.device_status_view.render_state(state)
+        self.workbench_view.status_bar.render_device_state(state)
         self.device_control_view.render_state(state)
 
     def initialize_pipette(self):

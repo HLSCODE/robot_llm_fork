@@ -1,7 +1,7 @@
 # GUI 应用架构
 
 > 文档类型：Current Architecture  
-> 最近更新：2026-08-03  
+> 最近更新：2026-08-06
 > 状态：Active
 
 ## 1. 目标与边界
@@ -13,7 +13,10 @@ GUI 是应用的表现层，不拥有设备、执行线程、任务持久化或�
 ```text
 MainWindow / Dialogs
         |
-ActionLibraryView / WorkflowEditorView / DeviceStatusView / DeviceControlView
+WorkbenchView
+  | Activity Bar / Side Bar / Editor / Bottom Panel / Status Bar
+  |
+ActionLibraryView / WorkflowEditorView / DeviceHealthView / DevicePoseView / DeviceControlView
         | commands       ^ immutable view state / Qt signals
         v                |
 TaskComposerService   DeviceViewModel   ExecutionViewModel
@@ -37,17 +40,25 @@ GuiNotificationCenter: operational message -> history/log/status/modal
 - 通过 `GuiNotificationCenter` 发布操作状态和用户可见错误。
 - 不保存设备连接或暂停状态的平行布尔值。
 - 不创建设备实例，不创建序列执行 worker，不直接访问 JSON 仓储。
+- 将唯一 `WorkbenchView` 设为中央控件；MainWindow 不再拥有 Splitter 尺寸、
+  Side Bar/Bottom Panel 当前页或展开状态。
 
 ### 2.2 稳定视图域
 
-- `ActionLibraryView` 负责动作分类页、已保存任务列表和 AI Assistant 的视图组合，
+- `WorkbenchView` 只拥有 Activity Bar、Side Bar、Editor、Bottom Panel、Status Bar
+  的布局状态；Side Bar 二次点击收起，Bottom Panel 非模态切换，两个方向均使用
+  视觉 1 px、实际命中 7 px 的可拖动分隔条。
+- `ActionLibraryView` 当前负责动作分类页、已保存任务列表和 AI Assistant 的视图组合，
   仅通过 create/edit/delete/camera-test/task-add 意图信号与窗口协作。
 - `WorkflowEditorView` 负责动作序列、任务组合器及其控制区；拖放事件在组件内解析，
-  执行按钮状态通过单一 `render_execution_controls()` 接口更新。
-- `DeviceStatusView` 负责设备状态灯、机械臂位姿和定位文本，只接收
-  `DeviceViewState` 与格式化后的展示文本。
+  执行按钮状态通过单一 `render_execution_controls()` 接口更新；两行紧凑命令区保持
+  停止任务、快速停止和设备急停常驻可见。
+- `DeviceHealthView` 负责设备状态灯，只接收 `DeviceViewState`；`DevicePoseView`
+  负责机械臂位姿、外部定位、刷新和复制意图。两者作为独立 Bottom Panel 页面按需显示。
 - `DeviceControlView` 负责夹爪、继电器和移液枪手动操作入口，只发出参数化意图信号，
-  不持有设备实例或调用 Application Service。
+  不持有设备实例或调用 Application Service，并作为 Bottom Panel 页面按需显示。
+- `LogWidget` 作为 Bottom Panel 页面，不再用固定高度常驻挤压画布；Workbench
+  Status Bar 保持设备摘要和通知出口，详细信息由对应页面展示。
 - `MainWindow` 直接持有上述组件，不再提供旧按钮、列表和状态标签属性别名。
 
 ### 2.3 TaskComposerService

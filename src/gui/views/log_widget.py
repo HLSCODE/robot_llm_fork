@@ -12,7 +12,7 @@ class LogWidget(QTextEdit):
         super().__init__(parent)
         self.setAccessibleName("运行日志")
         self.setReadOnly(True)
-        self.setMaximumHeight(120)
+        self.setMinimumHeight(100)
 
     def append_log(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
