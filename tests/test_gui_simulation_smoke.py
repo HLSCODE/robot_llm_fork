@@ -84,7 +84,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         QApplication.processEvents()
         self.window.shutdown_after_event_loop()
         asyncio.run(self.services.llm.close())
-        self.services.localization.close()
+        self.services.external_localization.close()
         self.assertEqual({}, self.services.devices.shutdown_all())
 
     def test_window_starts_with_shared_simulation_services(self) -> None:
@@ -309,7 +309,7 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 window.close()
                 QApplication.processEvents()
                 window.shutdown_after_event_loop()
-            services.localization.close()
+            services.external_localization.close()
             self.assertEqual({}, services.devices.shutdown_all())
 
     def test_speech_wait_timeout_starts_hardware_and_reports_progress(self) -> None:
@@ -349,7 +349,7 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 window.close()
                 QApplication.processEvents()
                 window.shutdown_after_event_loop()
-            services.localization.close()
+            services.external_localization.close()
             self.assertEqual({}, services.devices.shutdown_all())
 
     def test_hardware_initialization_after_speech_does_not_block_gui(self) -> None:
@@ -409,7 +409,7 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                 window.close()
                 QApplication.processEvents()
                 window.shutdown_after_event_loop()
-            services.localization.close()
+            services.external_localization.close()
             self.assertEqual({}, services.devices.shutdown_all())
 
 

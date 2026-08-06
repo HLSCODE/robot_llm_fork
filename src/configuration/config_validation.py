@@ -110,6 +110,28 @@ def validate_startup_configuration(
 
     _validate_data_paths(settings, issues)
     _validate_data_collection(settings.data_collection, issues)
+    if not settings.localization.external_localization_host.strip():
+        _error(
+            issues,
+            "invalid_external_localization_host",
+            "EXTERNAL_LOCALIZATION_HOST",
+            "不能为空",
+        )
+    for field, value in (
+        (
+            "EXTERNAL_LOCALIZATION_RECEIVE_SIZE_BYTES",
+            settings.localization.external_localization_receive_size_bytes,
+        ),
+        (
+            "EXTERNAL_LOCALIZATION_SOCKET_TIMEOUT_SECONDS",
+            settings.localization.external_localization_socket_timeout_seconds,
+        ),
+        (
+            "EXTERNAL_LOCALIZATION_JOIN_TIMEOUT_SECONDS",
+            settings.localization.external_localization_join_timeout_seconds,
+        ),
+    ):
+        _positive_value(value, issues, field)
     _positive_value(
         settings.execution.execution_action_timeout_seconds,
         issues,
@@ -145,6 +167,10 @@ def validate_startup_configuration(
             ("MOVE_CONTROLLER_PORT", settings.robot.move_controller_port),
             ("VISION_CAMERA_PORT", settings.vision.vision_camera_port),
             ("MINICPM_GATEWAY_PORT", settings.llm.minicpm_gateway_port),
+            (
+                "EXTERNAL_LOCALIZATION_PORT",
+                settings.localization.external_localization_port,
+            ),
         ):
             _port_value(value, issues, field)
 

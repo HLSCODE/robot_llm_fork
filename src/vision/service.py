@@ -175,7 +175,7 @@ class VisionService:
 
     def _capture_executor(self) -> CapturePipeline:
         if self._capture_pipeline is None:
-            from .executor import execute_vision_capture
+            from .pipelines import execute_vision_capture
 
             self._capture_pipeline = execute_vision_capture
         return self._capture_pipeline

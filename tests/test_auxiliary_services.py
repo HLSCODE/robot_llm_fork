@@ -273,7 +273,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
             window=FakeWindow(),
             auxiliary_host=FakeHost(),
             services=SimpleNamespace(
-                localization=FakeLocalization(),
+                external_localization=FakeLocalization(),
                 llm=FakeLLM(),
                 devices=FakeDevices(),
             ),
@@ -316,7 +316,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
                 window=FailingWindow(),
                 auxiliary_host=FakeHost(),
                 services=SimpleNamespace(
-                    localization=FakeLocalization(),
+                    external_localization=FakeLocalization(),
                     llm=FakeLLM(),
                     devices=FakeDevices(),
                 ),
@@ -372,7 +372,7 @@ class ApplicationHostCompositionTests(unittest.TestCase):
         _shutdown_application(
             FakeHost(),
             SimpleNamespace(
-                localization=FakeLocalization(),
+                external_localization=FakeLocalization(),
                 llm=FakeLLM(),
                 devices=FakeDevices(),
             ),

@@ -52,6 +52,15 @@ class DataCollectionSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class LocalizationSettings:
+    external_localization_host: str = "0.0.0.0"
+    external_localization_port: int = 22222
+    external_localization_receive_size_bytes: int = 1024
+    external_localization_socket_timeout_seconds: float = 0.2
+    external_localization_join_timeout_seconds: float = 1.0
+
+
+@dataclass(frozen=True, slots=True)
 class ServerSettings:
     websocket_enabled: bool = True
     websocket_security_enabled: bool = False
@@ -614,6 +623,7 @@ class ApplicationSettings:
     logging: LoggingSettings
     data: DataSettings
     data_collection: DataCollectionSettings
+    localization: LocalizationSettings
     server: ServerSettings
     secrets: SecretSettings
     execution: ExecutionSettings
@@ -643,6 +653,7 @@ class ApplicationSettings:
                 config,
                 source_names=_DATA_COLLECTION_SOURCE_NAMES,
             ),
+            localization=_snapshot(LocalizationSettings, config),
             server=_snapshot(ServerSettings, config),
             secrets=_snapshot(SecretSettings, config),
             execution=_snapshot(ExecutionSettings, config),
@@ -660,6 +671,7 @@ class ApplicationSettings:
             logging=LoggingSettings(),
             data=DataSettings(),
             data_collection=DataCollectionSettings(),
+            localization=LocalizationSettings(),
             server=ServerSettings(),
             secrets=SecretSettings(),
             execution=ExecutionSettings(),

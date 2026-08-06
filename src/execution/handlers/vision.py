@@ -11,7 +11,7 @@ from ...devices import (
 )
 from ...devices.runtime.ids import CAMERA, ROBOT_SYSTEM
 from ...vision.models import VisionResult
-from ..action_handlers import (
+from ..handler_api import (
     ActionCancelledError,
     ActionExecutionContext,
     ActionHandlerResult,

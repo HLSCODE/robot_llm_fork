@@ -27,8 +27,8 @@ import numpy as np
 from sklearn.mixture import GaussianMixture
 from ultralytics import YOLO, SAM
 
-from ..configuration.settings import VisionSettings
-from ..devices import (
+from ...configuration.settings import VisionSettings
+from ...devices import (
     ArmId,
     CartesianPose,
     DepthCameraSource,
@@ -43,7 +43,7 @@ from ..devices import (
 # ---------------------------------------------------------------
 # 路径与导入
 # ---------------------------------------------------------------
-from .interface import vertical_catch
+from .vertical import vertical_catch_main as vertical_catch
 
 # ---------------------------------------------------------------
 # 调试图片保存根目录（可用 VisionCaptureAction(debug_save_root=...) 覆盖）
@@ -199,7 +199,7 @@ def run_pingzi_capture(
     """
     执行瓶子检测、抓取和固定位置放置流程。
     """
-    from .bottle_capture import capture_and_move
+    from .bottle import capture_and_move
 
     return bool(
         capture_and_move(

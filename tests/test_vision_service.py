@@ -228,5 +228,5 @@ class VisionSimulationIntegrationTests(unittest.TestCase):
                 artifacts = list((Path(directory) / "debug").rglob("fixture.json"))
                 self.assertEqual(2, len(artifacts))
             finally:
-                services.localization.close()
+                services.external_localization.close()
                 services.devices.shutdown_all()

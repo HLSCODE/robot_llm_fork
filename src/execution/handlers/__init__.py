@@ -14,6 +14,7 @@ from .manipulation import (
     ToolChangerActionHandler,
     create_manipulation_handler,
 )
+from .core import InspectActionHandler, WaitActionHandler
 from .motion import (
     BaseMoveActionHandler,
     BodyMoveActionHandler,
@@ -38,6 +39,7 @@ __all__ = [
     "CircleDispenseActionHandler",
     "ExpressionDisplayActionHandler",
     "GripperActionHandler",
+    "InspectActionHandler",
     "ManipulateActionHandler",
     "ManipulationHandlerOptions",
     "MotionHandlerOptions",
@@ -55,5 +57,6 @@ __all__ = [
     "TrajectoryHandlerOptions",
     "VisionCaptureActionHandler",
     "VisionRelocalizationActionHandler",
+    "WaitActionHandler",
     "create_manipulation_handler",
 ]

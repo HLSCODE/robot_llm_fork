@@ -558,7 +558,7 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 含义：
 
 - `LLM_DEFAULT_PROVIDER`：默认 LLM provider。具体 task 可通过 `TaskProfile.default_provider` 覆盖，单次调用也可传 `provider` 覆盖。
-- `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/devices/cameras/` 支持的 `realsense` / `webcam`。
+- `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/devices/cameras/` 支持的 `realsense` / `opencv`。
 - `VISION_CAMERA_NAME`：视觉问答默认使用的相机名称或序列号；为空时使用所有在线相机。
 - `VOICE_SESSION_TIMEOUT_S`：唤醒后无交互多久自动休眠。
 - `VOICE_TTS_ENABLED`：是否在 `voice_stream` task 中请求模型生成语音回复。`classifier/planner` 等文本 task 不受该配置影响。

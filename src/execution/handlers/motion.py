@@ -16,7 +16,7 @@ from ...devices import (
     MotionMode,
 )
 from ...devices.runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
-from ..action_handlers import (
+from ..handler_api import (
     ActionCancelledError,
     ActionExecutionContext,
     ActionHandlerResult,
@@ -92,13 +92,13 @@ class RobotMoveActionHandler:
         execution_context: ExecutionContext,
         options: MotionHandlerOptions,
         vision_settings: VisionSettings,
-        localization_reader: Callable[..., dict[str, Any] | None],
+        external_localization_reader: Callable[..., dict[str, Any] | None],
     ) -> None:
         self._device_runtime = device_runtime
         self._execution_context = execution_context
         self._options = options
         self._vision_settings = vision_settings
-        self._localization_reader = localization_reader
+        self._external_localization_reader = external_localization_reader
 
     def __call__(
         self,
@@ -120,7 +120,7 @@ class RobotMoveActionHandler:
                 arm_name,
                 self._execution_context,
                 self._vision_settings,
-                self._localization_reader,
+                self._external_localization_reader,
                 lambda message: context.log(message, "info"),
             )
             arm = ArmId.parse(arm_name)

@@ -14,6 +14,10 @@ from ..devices.runtime.factory import create_device_runtime
 from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
 from ..llm import LLMRegistry
+from ..localization import (
+    NullExternalLocalizationProvider,
+    UdpExternalLocalizationProvider,
+)
 from ..skill_system import SkillEngine
 from .camera_access import CameraAccessService
 from .balance import register_balance_reader
@@ -27,7 +31,7 @@ from .data_collection import (
     DataCollectionRecorder,
     DataCollectionService,
 )
-from .localization import LocalizationService
+from .external_localization import ExternalLocalizationService
 from .safety import SafetyService
 from .services import (
     ApplicationServices,
@@ -66,7 +70,12 @@ def create_application_services(
         settings.vision,
         simulation=simulation,
     )
-    localization = LocalizationService()
+    localization_provider = (
+        NullExternalLocalizationProvider()
+        if simulation
+        else UdpExternalLocalizationProvider(settings.localization)
+    )
+    external_localization = ExternalLocalizationService(localization_provider)
     execution_context = ExecutionContext()
     vision_fixture = VisionPipelineFixture() if simulation else None
     vision = VisionService(
@@ -82,7 +91,7 @@ def create_application_services(
         settings.execution,
         settings.devices,
         settings.vision,
-        localization.latest,
+        external_localization.latest,
         execution_context,
         vision,
     )
@@ -135,7 +144,7 @@ def create_application_services(
     return ApplicationServices(
         camera_access=camera_access,
         vision=vision,
-        localization=localization,
+        external_localization=external_localization,
         composition=composition,
         task_composer=task_composer,
         data_collection=data_collection,

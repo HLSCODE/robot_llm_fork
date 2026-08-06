@@ -4,17 +4,17 @@ from .action_control import (
     ActionControlPolicyResolver,
     ActionStopTarget,
 )
-from .action_handlers import (
+from .handler_api import (
     ActionCancelledError,
     ActionExecutionContext,
     ActionHandler,
     ActionHandlerNotFoundError,
     ActionHandlerResult,
-    ActionHandlerRegistry,
     ActionResultCode,
     ActionResultStatus,
     ActionTimeoutError,
 )
+from .handler_registry import ActionHandlerRegistry
 from .control import ExecutionControl
 from .manager import (
     EngineCallbacks,

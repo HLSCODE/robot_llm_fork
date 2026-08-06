@@ -27,10 +27,10 @@ def resolve_robot_target_pose(
     arm: str,
     context: ExecutionContext,
     vision_settings: VisionSettings,
-    localization_reader: LocalizationReader,
+    external_localization_reader: LocalizationReader,
     log_fn: LogFn | None = None,
 ) -> list[float]:
-    """Resolve a robot move target after optional UDP or vision compensation."""
+    """Resolve a move target after external-UDP or vision-station compensation."""
     log = log_fn or (lambda message: None)
     target_pose = parse_pose(params.get("点位", ""))
     compensation = params.get("补偿") or {"mode": "none"}
@@ -45,7 +45,10 @@ def resolve_robot_target_pose(
         if not teach_offset:
             raise RuntimeError("UDP定位补偿已启用，但动作中缺少创建时定位基准")
 
-        current_offset = localization_reader(max_age=2.0, wait_timeout=1.5)
+        current_offset = external_localization_reader(
+            max_age=2.0,
+            wait_timeout=1.5,
+        )
         if current_offset is None:
             raise RuntimeError("UDP定位补偿已启用，但未收到当前有效定位数据")
 

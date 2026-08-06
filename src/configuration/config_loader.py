@@ -110,6 +110,11 @@ class _EnvironmentConfig:
     DATA_COLLECTION_CAMERA_EXTRINSICS: tuple[float, ...] = ()
     DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME: str = ""
     DATA_COLLECTION_CALIBRATION_ID: str = ""
+    EXTERNAL_LOCALIZATION_HOST: str = "0.0.0.0"
+    EXTERNAL_LOCALIZATION_PORT: int = 22222
+    EXTERNAL_LOCALIZATION_RECEIVE_SIZE_BYTES: int = 1024
+    EXTERNAL_LOCALIZATION_SOCKET_TIMEOUT_SECONDS: float = 0.2
+    EXTERNAL_LOCALIZATION_JOIN_TIMEOUT_SECONDS: float = 1.0
 
     # RealSense 相机配置
     CAMERA_PROVIDER: str = "realsense"
@@ -562,6 +567,28 @@ class _EnvironmentConfig:
         instance.DATA_COLLECTION_CALIBRATION_ID = os.getenv(
             "DATA_COLLECTION_CALIBRATION_ID",
             "",
+        )
+        instance.EXTERNAL_LOCALIZATION_HOST = os.getenv(
+            "EXTERNAL_LOCALIZATION_HOST",
+            "0.0.0.0",
+        )
+        instance.EXTERNAL_LOCALIZATION_PORT = int(
+            os.getenv("EXTERNAL_LOCALIZATION_PORT", "22222")
+        )
+        instance.EXTERNAL_LOCALIZATION_RECEIVE_SIZE_BYTES = int(
+            os.getenv("EXTERNAL_LOCALIZATION_RECEIVE_SIZE_BYTES", "1024")
+        )
+        instance.EXTERNAL_LOCALIZATION_SOCKET_TIMEOUT_SECONDS = float(
+            os.getenv(
+                "EXTERNAL_LOCALIZATION_SOCKET_TIMEOUT_SECONDS",
+                "0.2",
+            )
+        )
+        instance.EXTERNAL_LOCALIZATION_JOIN_TIMEOUT_SECONDS = float(
+            os.getenv(
+                "EXTERNAL_LOCALIZATION_JOIN_TIMEOUT_SECONDS",
+                "1.0",
+            )
         )
         instance.CAMERA_PROVIDER = os.getenv("CAMERA_PROVIDER", "realsense")
         instance.REALSENSE_DEVICE_SN = os.getenv("REALSENSE_DEVICE_SN", "")

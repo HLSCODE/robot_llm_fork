@@ -2,8 +2,8 @@ import cv2
 import numpy as np
 from numpy import ndarray
 from typing import Tuple
-from .convert import convert
-from .crawl import chage_pose
+from .coordinates import convert
+from .poses import change_pose
 
 
 def vertical_catch_main(
@@ -94,7 +94,7 @@ def vertical_catch_main(
     _z=0.15
 
     #计算最终位姿
-    finally_pose = chage_pose(list(catch_pose), _z)
+    finally_pose = change_pose(list(catch_pose), _z)
 
     finally_pose = finally_pose.copy()
     return above_object_pose, correct_angle_pose, finally_pose

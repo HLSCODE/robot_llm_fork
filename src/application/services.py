@@ -40,7 +40,7 @@ from ..vision.service import VisionService
 from .command_runtime import CommandRuntime
 from .composition import CompositionService
 from .safety import SafetyService
-from .localization import LocalizationService
+from .external_localization import ExternalLocalizationService
 from .teleoperation import TeleoperationService
 from .task_composer import TaskComposerService
 
@@ -461,7 +461,7 @@ def _arm_id(arm: str | ArmId) -> ArmId:
 class ApplicationServices:
     camera_access: CameraAccessService
     vision: VisionService
-    localization: LocalizationService
+    external_localization: ExternalLocalizationService
     composition: CompositionService
     task_composer: TaskComposerService
     data_collection: DataCollectionService

@@ -39,7 +39,7 @@ def pose_to_homogeneous_matrix(pose):
     return H
 
 
-def chage_pose(pose, num):
+def change_pose(pose, num):
     """
     根据物体和基座的其次变换矩阵 求得 物体z轴 0 0 num 所在位置对应 基座标系的位姿
     y轴补偿6cm

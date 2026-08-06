@@ -6,8 +6,8 @@ from typing import Callable
 import cv2
 import numpy as np
 
-from ..configuration.settings import VisionSettings
-from ..devices import (
+from ...configuration.settings import VisionSettings
+from ...devices import (
     ArmId,
     CartesianPose,
     DepthCameraSource,
@@ -15,12 +15,12 @@ from ..devices import (
     MotionOptions,
     RobotSystem,
 )
-from .capture import (
+from .grasp import (
     load_sam_model,
     load_yolo_model,
     process_mask_with_gmm,
 )
-from .interface import vertical_catch
+from .vertical import vertical_catch_main as vertical_catch
 
 
 def detect_target(

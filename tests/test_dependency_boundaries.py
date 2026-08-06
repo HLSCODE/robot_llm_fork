@@ -79,6 +79,16 @@ LEGACY_HARDWARE_PATHS = (
     "src/devices/cameras/camera_factory.py",
     "src/devices/motion/mobile_base/move_controller.py",
     "src/devices/motion/mobile_base/tcp_client.py",
+    "src/application/localization.py",
+    "src/execution/action_handlers.py",
+    "src/vision/executor.py",
+    "src/vision/capture.py",
+    "src/vision/bottle_capture.py",
+    "src/vision/catch.py",
+    "src/vision/convert.py",
+    "src/vision/crawl.py",
+    "src/vision/interface.py",
+    "src/vision/relocalization/cli.py",
 )
 
 

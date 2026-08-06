@@ -8,8 +8,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .detector import IMAGE_EXTENSIONS, detect_images, default_image_paths, expand_image_paths, find_l_inner_corners
-from .geometry import (
+from ..relocalization.detector import IMAGE_EXTENSIONS, detect_images, default_image_paths, expand_image_paths, find_l_inner_corners
+from ..relocalization.geometry import (
     apply_planar_compensation,
     as_matrix4,
     compute_marker_in_base_from_points,

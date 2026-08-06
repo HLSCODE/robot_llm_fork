@@ -11,7 +11,7 @@ from uuid import uuid4
 from ..devices import ResourceArbiter, ResourceLease
 from ..observability.logging_config import log_context
 from .action_control import ActionControlPolicy
-from .action_handlers import (
+from .handler_api import (
     ActionHandlerResult,
     ActionResultCode,
 )

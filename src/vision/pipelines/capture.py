@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Callable
 
-from ..configuration.settings import VisionSettings
-from .models import VisionPipelineResult
+from ...configuration.settings import VisionSettings
+from ..models import VisionPipelineResult
 
 # log_fn: str -> None
 
@@ -58,7 +58,7 @@ def execute_vision_capture(
             log_fn("相机管理器未启动，无法取帧")
             return VisionPipelineResult(False, frames_processed=0, inference_count=0)
 
-        from .capture import VisionCaptureAction
+        from .grasp import VisionCaptureAction
 
         action = VisionCaptureAction(
             robot_system=robot_system,

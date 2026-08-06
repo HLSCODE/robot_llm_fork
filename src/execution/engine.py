@@ -33,21 +33,20 @@ from .action_control import (
     resolve_wait_control_policy,
     validate_control_policy_routes,
 )
-from .action_handlers import (
+from .handler_api import (
     ActionCancelledError,
     ActionExecutionContext,
     ActionHandlerResult,
-    ActionHandlerRegistry,
     ActionResultCode,
     ActionTimeoutError,
-    InspectActionHandler,
-    WaitActionHandler,
 )
+from .handler_registry import ActionHandlerRegistry
 from .control import ExecutionControl
 from .handlers import (
     BaseMoveActionHandler,
     BodyMoveActionHandler,
     ChangeToolActionHandler,
+    InspectActionHandler,
     ManipulationHandlerOptions,
     MotionHandlerOptions,
     MoveActionHandler,
@@ -56,6 +55,7 @@ from .handlers import (
     TrajectoryHandlerOptions,
     VisionCaptureActionHandler,
     VisionRelocalizationActionHandler,
+    WaitActionHandler,
     create_manipulation_handler,
 )
 from .manager import EngineCallbacks
@@ -79,7 +79,7 @@ class ActionEngine:
         execution_settings: ExecutionSettings,
         device_settings: DeviceSettings,
         vision_settings: VisionSettings,
-        localization_reader,
+        external_localization_reader,
         execution_context: ExecutionContext,
         vision_service: VisionService,
     ) -> None:
@@ -112,7 +112,7 @@ class ActionEngine:
         )
         self._tapping_config_provider = device_settings.tapping_config
         self._vision_settings = vision_settings
-        self._localization_reader = localization_reader
+        self._external_localization_reader = external_localization_reader
         self._handler_registry = self._create_handler_registry()
 
     def _create_handler_registry(self) -> ActionHandlerRegistry:
@@ -123,7 +123,7 @@ class ActionEngine:
                 self.execution_context,
                 self._motion_handler_options,
                 self._vision_settings,
-                self._localization_reader,
+                self._external_localization_reader,
             ),
             BodyMoveActionHandler(
                 self._device_runtime,

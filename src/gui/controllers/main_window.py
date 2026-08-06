@@ -731,11 +731,11 @@ class MainWindow(QMainWindow):
     def refresh_arm_poses(self):
         self._refresh_single_robot_pose("robot1")
         self._refresh_single_robot_pose("robot2")
-        self.refresh_localization_position()
+        self.refresh_external_localization()
 
-    def refresh_localization_position(self):
+    def refresh_external_localization(self):
         try:
-            receiver = self._services.localization
+            receiver = self._services.external_localization
             position = receiver.latest(
                 max_age=10.0,
                 valid_only=False,
@@ -750,7 +750,9 @@ class MainWindow(QMainWindow):
             self.device_status_view.render_localization(f"UDP error: {exc}")
             return
 
-        self.device_status_view.render_localization(self.format_localization_text(position))
+        self.device_status_view.render_localization(
+            self.format_external_localization_text(position)
+        )
 
     def _refresh_single_robot_pose(self, robot_name: str):
         pose = self._get_current_pose(robot_name)
@@ -783,7 +785,7 @@ class MainWindow(QMainWindow):
             f"RX:{rx_deg:.1f} RY:{ry_deg:.1f} RZ:{rz_deg:.1f} deg"
         )
 
-    def format_localization_text(self, position: dict):
+    def format_external_localization_text(self, position: dict):
         age = max(0.0, time.time() - float(position.get("timestamp", 0.0)))
         tag_id = int(position.get("id", -99))
         if tag_id == -99:

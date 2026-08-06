@@ -147,6 +147,24 @@ class ConfigurationValidationTests(unittest.TestCase):
             {"invalid_number", "invalid_vision_version"},
             {issue.code for issue in report.errors},
         )
+
+    def test_invalid_external_localization_settings_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    EXTERNAL_LOCALIZATION_HOST=" ",
+                    EXTERNAL_LOCALIZATION_PORT=70_000,
+                    EXTERNAL_LOCALIZATION_RECEIVE_SIZE_BYTES=0,
+                ),
+                _options(simulation=False),
+            )
+
+        fields = {issue.field for issue in report.errors}
+        self.assertIn("EXTERNAL_LOCALIZATION_HOST", fields)
+        self.assertIn("EXTERNAL_LOCALIZATION_PORT", fields)
+        self.assertIn("EXTERNAL_LOCALIZATION_RECEIVE_SIZE_BYTES", fields)
+
     def test_non_loopback_binding_without_tls_is_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(

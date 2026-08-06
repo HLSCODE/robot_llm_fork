@@ -199,24 +199,27 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 │   ├── tasks/                 # versioned 任务
 │   └── skills/                # versioned 技能库
 └── src/
-    ├── application/builtin_data.py # 首次运行安装内置动作/技能
-    ├── core/                  # 数据模型、配置加载、存储、启动器
-    ├── gui/                   # PyQt6 主界面与执行线程
-    ├── widgets/               # GUI 组件与 AI 助手组件
-    ├── robot_server/          # WebSocket 服务、执行器、聊天转发
+    ├── application/           # 应用用例、组合根与跨设备编排
+    ├── bootstrap/             # 进程入口、GUI 和附加服务生命周期
+    ├── configuration/         # 环境解析、不可变 settings 与启动校验
+    ├── domain/                # 动作模型、执行上下文等稳定领域定义
+    ├── persistence/           # JSON 文档与工位配置持久化
+    ├── execution/             # 统一执行运行时、handler API/Registry
+    ├── gui/                   # PyQt6 views/view-models/controllers/bridges
+    ├── robot_server/          # WebSocket protocol/controllers/security/metrics
     ├── skill_system/          # 技能模型、注册表与匹配引擎
     ├── llm/                   # 大模型能力层与 provider 策略
-    ├── arm_sdk/               # RM 机械臂控制封装
-    ├── base_move/             # 底盘移动控制
-    ├── devices/               # 串口设备、快换手、继电器、吸液枪等
-    ├── cameras/               # RealSense / OpenCV 相机管理
-    ├── vision/                # 视觉抓取、采集与检测逻辑
-    └── actions/               # 可执行动作封装与轨迹文件
+    ├── devices/               # 设备能力、Runtime、Provider/Adapter/Driver/Transport
+    ├── localization/          # 外部定位输入 Provider（当前为 UDP）
+    ├── vision/                # 视觉 Service、pipelines、relocalization、artifacts、CLI
+    ├── data_collection/       # 示教数据采集、schema、写入与校验
+    ├── geometry/              # 坐标和位姿补偿纯计算
+    └── observability/         # 日志与运行上下文
 ```
 
 ## 动作类型
 
-当前核心动作类型定义在 `src/core/models.py`：
+当前核心动作类型定义在 `src/domain/models.py`：
 
 | 类型 | 含义 |
 |---|---|
@@ -250,8 +253,9 @@ LLM 配置通过 `LLM_DEFAULT_PROVIDER` 选择默认 provider，支持 `openai`�
 相机配置由 `CAMERA_PROVIDER` 决定：
 
 - `realsense`：使用 Intel RealSense
-- `webcam`：使用本地 USB / 内置摄像头
-- `auto`：由相机工厂自动选择
+- `opencv`：使用本地 USB / 内置摄像头
+
+Provider 必须显式配置；未知值会在应用装配阶段报错，不进行自动回退。
 
 视觉抓取流程中会用到：
 
