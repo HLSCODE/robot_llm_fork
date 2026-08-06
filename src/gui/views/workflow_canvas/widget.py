@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent, Signal
 from PySide6.QtGui import QColor, QPainterPath, QPen, QUndoCommand, QUndoStack
 from PySide6.QtWidgets import (
     QGraphicsPathItem,
@@ -29,7 +29,14 @@ from ....domain.workflow import (
     clone_sequence_entry,
 )
 from .items import InsertionItem, StartEndItem, WorkflowNodeItem
-from .tokens import CANVAS_MARGIN, NODE_GAP, NODE_WIDTH
+from .tokens import (
+    CANVAS_MARGIN,
+    NODE_GAP,
+    NODE_WIDTH,
+    TOOLBAR_SPACING,
+    TOUCH_TARGET_SIZE,
+    canvas_colors,
+)
 from .view import WorkflowCanvasView
 
 
@@ -78,18 +85,23 @@ class WorkflowCanvasWidget(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(TOOLBAR_SPACING)
         toolbar = QHBoxLayout()
-        toolbar.setSpacing(4)
+        toolbar.setSpacing(TOOLBAR_SPACING)
         self.fit_button = QPushButton("适合内容")
         self.zoom_button = QPushButton("100%")
-        for button in (self.fit_button, self.zoom_button):
-            button.setMinimumSize(88, 36)
+        for button, accessible_name in (
+            (self.fit_button, "画布适合内容"),
+            (self.zoom_button, "画布恢复百分之百缩放"),
+        ):
+            button.setAccessibleName(accessible_name)
+            button.setMinimumSize(96, TOUCH_TARGET_SIZE)
             toolbar.addWidget(button)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
 
         self.scene = QGraphicsScene(self)
+        self.scene.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.BspTreeIndex)
         self.view = WorkflowCanvasView(self)
         self.view.setScene(self.scene)
         self.view.setAccessibleName("任务工作流画布")
@@ -105,7 +117,17 @@ class WorkflowCanvasWidget(QWidget):
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self._undo_stack.canUndoChanged.connect(self.can_undo_changed)
         self._undo_stack.canRedoChanged.connect(self.can_redo_changed)
+        self._apply_palette()
         self._rebuild_scene()
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() in {
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        }:
+            self._apply_palette()
+            self.scene.update()
 
     def render_entries(
         self,
@@ -511,9 +533,12 @@ class WorkflowCanvasWidget(QWidget):
         midpoint = (source_y + target_y) / 2.0
         path.cubicTo(center_x, midpoint, center_x, midpoint, center_x, target_y)
         edge = QGraphicsPathItem(path)
-        edge.setPen(QPen(QColor("#94a3b8"), 2.0))
+        edge.setPen(QPen(canvas_colors().edge, 2.0))
         edge.setZValue(-10.0)
         self.scene.addItem(edge)
+
+    def _apply_palette(self) -> None:
+        self.scene.setBackgroundBrush(canvas_colors(self.palette()).canvas)
 
     def _on_action_dropped(self, action: ActionDefinition, scene_y: float) -> None:
         for index, entry in enumerate(self._entries):

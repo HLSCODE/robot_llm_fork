@@ -93,6 +93,16 @@ LEGACY_HARDWARE_PATHS = (
 
 
 class DependencyBoundaryTests(unittest.TestCase):
+    def test_legacy_sequence_list_editor_is_removed(self):
+        legacy_module = PROJECT_ROOT / "src/gui/views/components.py"
+        gui_sources = "\n".join(
+            path.read_text(encoding="utf-8-sig")
+            for path in (PROJECT_ROOT / "src/gui").rglob("*.py")
+        )
+
+        self.assertFalse(legacy_module.exists())
+        self.assertNotIn("SequenceListWidget", gui_sources)
+
     def test_main_window_does_not_access_workflow_graphics_internals(self):
         path = PROJECT_ROOT / "src/gui/controllers/main_window.py"
         source = path.read_text(encoding="utf-8-sig")

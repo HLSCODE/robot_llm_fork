@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsItem,
@@ -24,6 +24,10 @@ from .tokens import (
     NODE_WIDTH,
     STATUS_COLORS,
     STATUS_LABELS,
+    NODE_RADIUS,
+    canvas_colors,
+    canvas_font,
+    contrasting_text,
 )
 
 
@@ -47,6 +51,7 @@ class WorkflowNodeItem(QGraphicsObject):
         )
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setCacheMode(self.CacheMode.DeviceCoordinateCache)
+        self.setAcceptHoverEvents(True)
         self.setToolTip(self._tooltip())
 
     @property
@@ -70,20 +75,22 @@ class WorkflowNodeItem(QGraphicsObject):
     ) -> None:
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        palette = QApplication.palette()
-        background = palette.color(palette.ColorRole.Base)
-        foreground = palette.color(palette.ColorRole.Text)
-        border = QColor("#2563eb") if self.isSelected() else palette.color(
-            palette.ColorRole.Mid
-        )
-        painter.setBrush(QBrush(background))
+        colors = canvas_colors(QApplication.palette())
+        is_emphasized = self.isSelected() or self.isUnderMouse()
+        border = colors.accent if is_emphasized else colors.border
+        painter.setBrush(QBrush(colors.surface))
         painter.setPen(QPen(border, 3.0 if self.isSelected() else 1.5))
-        painter.drawRoundedRect(self.boundingRect(), 12.0, 12.0)
+        painter.drawRoundedRect(self.boundingRect(), NODE_RADIUS, NODE_RADIUS)
 
         if isinstance(self.entry, LoopBlock):
-            self._paint_loop(painter, foreground)
+            self._paint_loop(painter, colors.text, colors.secondary_text)
         else:
-            self._paint_action(painter, self.entry, foreground)
+            self._paint_action(
+                painter,
+                self.entry,
+                colors.text,
+                colors.secondary_text,
+            )
 
     def itemChange(  # noqa: N802
         self,
@@ -117,25 +124,21 @@ class WorkflowNodeItem(QGraphicsObject):
         painter: QPainter,
         item: SequenceItem,
         foreground: QColor,
+        secondary_text: QColor,
     ) -> None:
         color = ACTION_COLORS.get(item.definition.type, QColor("#64748b"))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(color)
         painter.drawRoundedRect(QRectF(0.0, 0.0, 10.0, NODE_HEIGHT), 5.0, 5.0)
         painter.setPen(foreground)
-        title_font = QFont()
-        title_font.setPointSize(11)
-        title_font.setBold(True)
-        painter.setFont(title_font)
+        painter.setFont(canvas_font(emphasis=True))
         painter.drawText(
             QRectF(24.0, 12.0, NODE_WIDTH - 42.0, 28.0),
             Qt.AlignmentFlag.AlignVCenter,
             item.definition.name,
         )
-        detail_font = QFont()
-        detail_font.setPointSize(9)
-        painter.setFont(detail_font)
-        painter.setPen(QColor("#64748b"))
+        painter.setFont(canvas_font(secondary=True))
+        painter.setPen(secondary_text)
         painter.drawText(
             QRectF(24.0, 42.0, NODE_WIDTH - 42.0, 22.0),
             Qt.AlignmentFlag.AlignVCenter,
@@ -149,14 +152,19 @@ class WorkflowNodeItem(QGraphicsObject):
             10.0,
             10.0,
         )
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(contrasting_text(status_color))
         painter.drawText(
             QRectF(NODE_WIDTH - 86.0, 58.0, 70.0, 22.0),
             Qt.AlignmentFlag.AlignCenter,
             STATUS_LABELS[item.status],
         )
 
-    def _paint_loop(self, painter: QPainter, foreground: QColor) -> None:
+    def _paint_loop(
+        self,
+        painter: QPainter,
+        foreground: QColor,
+        secondary_text: QColor,
+    ) -> None:
         loop = self.entry
         if not isinstance(loop, LoopBlock):
             return
@@ -168,17 +176,13 @@ class WorkflowNodeItem(QGraphicsObject):
             12.0,
         )
         painter.setPen(QColor("#ffffff"))
-        title_font = QFont()
-        title_font.setPointSize(11)
-        title_font.setBold(True)
-        painter.setFont(title_font)
+        painter.setFont(canvas_font(emphasis=True))
         painter.drawText(
             QRectF(18.0, 10.0, NODE_WIDTH - 36.0, 26.0),
             Qt.AlignmentFlag.AlignVCenter,
             f"循环 ×{loop.repeat_count}",
         )
-        detail_font = QFont()
-        detail_font.setPointSize(9)
+        detail_font = canvas_font(secondary=True)
         painter.setFont(detail_font)
         progress = (
             f" · 第 {loop.current_iteration}/{loop.repeat_count} 轮"
@@ -194,7 +198,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.setFont(detail_font)
         for index, child in enumerate(loop.items[:MAX_VISIBLE_LOOP_CHILDREN]):
             top = LOOP_HEADER_HEIGHT + index * LOOP_CHILD_HEIGHT
-            painter.setPen(QPen(QColor("#e2e8f0"), 1.0))
+            painter.setPen(QPen(canvas_colors().border, 1.0))
             painter.drawLine(
                 QPointF(16.0, top),
                 QPointF(NODE_WIDTH - 16.0, top),
@@ -212,7 +216,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 STATUS_LABELS[child.status],
             )
         if len(loop.items) > MAX_VISIBLE_LOOP_CHILDREN:
-            painter.setPen(QColor("#64748b"))
+            painter.setPen(secondary_text)
             painter.drawText(
                 QRectF(
                     20.0,
@@ -270,9 +274,7 @@ class StartEndItem(QGraphicsObject):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.boundingRect(), 20.0, 20.0)
         painter.setPen(QColor("#ffffff"))
-        font = QFont()
-        font.setBold(True)
-        painter.setFont(font)
+        painter.setFont(canvas_font(emphasis=True))
         painter.drawText(self.boundingRect(), Qt.AlignmentFlag.AlignCenter, self._label)
 
 
@@ -296,7 +298,7 @@ class InsertionItem(QGraphicsObject):
     ) -> None:
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor("#2563eb"))
+        painter.setBrush(canvas_colors().accent)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(self.boundingRect().adjusted(7.0, 7.0, -7.0, -7.0))
         painter.setPen(QPen(QColor("#ffffff"), 2.0))

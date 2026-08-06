@@ -26,7 +26,8 @@ from ...domain.models import (
 )
 from ...devices import StopMode
 from .ai_assistant import AIAssistantWidget
-from .components import ActionListWidget, ControlPanel
+from .action_list import ActionListWidget
+from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
 
 

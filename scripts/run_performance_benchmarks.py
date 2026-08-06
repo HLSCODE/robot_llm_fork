@@ -121,6 +121,14 @@ def default_benchmarks() -> dict[str, BenchmarkDefinition]:
         ),
         BenchmarkDefinition("action_schema_snapshot", _benchmark_action_schema_snapshot),
         BenchmarkDefinition("llm_golden_regression", _benchmark_llm_golden_regression),
+        BenchmarkDefinition(
+            "workflow_canvas_render_100",
+            _benchmark_workflow_canvas_render,
+        ),
+        BenchmarkDefinition(
+            "workflow_canvas_render_500",
+            _benchmark_workflow_canvas_render,
+        ),
     )
     return {definition.name: definition for definition in definitions}
 
@@ -362,6 +370,36 @@ def _benchmark_llm_golden_regression(iterations: int) -> None:
         report = run_regression_suite()
     if report is None or not report.succeeded:
         raise RuntimeError("LLM regression benchmark did not complete successfully")
+
+
+def _benchmark_workflow_canvas_render(node_count: int) -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from src.domain.models import ActionDefinition, SequenceItem
+    from src.gui.views.workflow_canvas import WorkflowCanvasWidget
+
+    application = QApplication.instance() or QApplication([])
+    action = ActionDefinition(
+        id="gui-performance-wait",
+        name="等待",
+        type=ActionType.WAIT,
+        parameters={"wait_seconds": 0.1},
+    )
+    entries = tuple(
+        SequenceItem(uuid=f"gui-performance-{index}", definition=action)
+        for index in range(node_count)
+    )
+    canvas = WorkflowCanvasWidget()
+    try:
+        canvas.render_entries(entries)
+        application.processEvents()
+        if canvas.entry_count() != node_count:
+            raise RuntimeError("workflow canvas benchmark lost nodes")
+    finally:
+        canvas.close()
+        canvas.deleteLater()
+        application.processEvents()
 
 
 def _build_parser() -> argparse.ArgumentParser:

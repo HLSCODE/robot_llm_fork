@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ....domain.models import ActionDefinition
-from .tokens import MAX_SCALE, MIN_SCALE
+from .tokens import FIT_PADDING, MAX_SCALE, MIN_SCALE
 
 
 class WorkflowCanvasView(QGraphicsView):
@@ -40,6 +40,12 @@ class WorkflowCanvasView(QGraphicsView):
             | QPainter.RenderHint.TextAntialiasing
         )
         self.setDragMode(self.DragMode.RubberBandDrag)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setAccessibleDescription(
+            "纵向任务编排画布；支持拖动排序、框选、滚轮缩放和键盘删除"
+        )
+        self.setViewportUpdateMode(self.ViewportUpdateMode.MinimalViewportUpdate)
+        self.setOptimizationFlag(self.OptimizationFlag.DontSavePainterState, True)
         self.setTransformationAnchor(self.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(self.ViewportAnchor.AnchorViewCenter)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -113,7 +119,12 @@ class WorkflowCanvasView(QGraphicsView):
         if scene is None or scene.itemsBoundingRect().isEmpty():
             return
         self.fitInView(
-            scene.itemsBoundingRect().adjusted(-24.0, -24.0, 24.0, 24.0),
+            scene.itemsBoundingRect().adjusted(
+                -FIT_PADDING,
+                -FIT_PADDING,
+                FIT_PADDING,
+                FIT_PADDING,
+            ),
             Qt.AspectRatioMode.KeepAspectRatio,
         )
 

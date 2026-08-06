@@ -35,6 +35,16 @@
       "iterations": 25,
       "samples": 5,
       "max_median_ms": 250.0
+    },
+    "workflow_canvas_render_100": {
+      "iterations": 100,
+      "samples": 3,
+      "max_median_ms": 150.0
+    },
+    "workflow_canvas_render_500": {
+      "iterations": 500,
+      "samples": 3,
+      "max_median_ms": 750.0
     }
   }
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QGraphicsProxyWidget
 
 from src.application import WorkflowCompiler
@@ -14,6 +15,7 @@ from src.domain.models import (
 )
 from src.domain.workflow import WorkflowDocument
 from src.gui.views import WorkflowCanvasWidget
+from src.gui.views.workflow_canvas.tokens import contrasting_text
 
 
 class WorkflowCanvasTests(unittest.TestCase):
@@ -123,7 +125,51 @@ class WorkflowCanvasTests(unittest.TestCase):
                 for item in self.canvas.scene.items()
             )
         )
-        self.assertGreaterEqual(self.canvas.fit_button.minimumHeight(), 36)
+        self.assertGreaterEqual(self.canvas.fit_button.minimumHeight(), 44)
+
+    def test_canvas_follows_light_and_dark_system_palettes(self) -> None:
+        original = QApplication.palette()
+        try:
+            for window, base, text in (
+                ("#f3f4f6", "#ffffff", "#111827"),
+                ("#111827", "#1f2937", "#f9fafb"),
+            ):
+                palette = QPalette()
+                palette.setColor(QPalette.ColorRole.Window, QColor(window))
+                palette.setColor(QPalette.ColorRole.Base, QColor(base))
+                palette.setColor(QPalette.ColorRole.Text, QColor(text))
+                palette.setColor(
+                    QPalette.ColorRole.PlaceholderText,
+                    QColor("#6b7280"),
+                )
+                palette.setColor(QPalette.ColorRole.Mid, QColor("#64748b"))
+                palette.setColor(QPalette.ColorRole.Highlight, QColor("#2563eb"))
+                QApplication.setPalette(palette)
+                QApplication.processEvents()
+                self.canvas.render_entries((_item("palette-node"),))
+
+                self.assertEqual(
+                    QColor(window),
+                    self.canvas.scene.backgroundBrush().color(),
+                )
+        finally:
+            QApplication.setPalette(original)
+            QApplication.processEvents()
+
+    def test_offscreen_size_matrix_preserves_accessible_touch_controls(self) -> None:
+        self.canvas.render_entries(tuple(_item(f"node-{index}") for index in range(20)))
+
+        for width, height in ((360, 640), (720, 1280), (1280, 720)):
+            self.canvas.resize(width, height)
+            QApplication.processEvents()
+            self.assertEqual("任务工作流画布", self.canvas.view.accessibleName())
+            self.assertTrue(self.canvas.view.accessibleDescription())
+            self.assertGreaterEqual(self.canvas.fit_button.height(), 44)
+            self.assertGreater(self.canvas.scene.itemsBoundingRect().height(), 0)
+
+    def test_semantic_status_text_uses_contrasting_foreground(self) -> None:
+        self.assertEqual(QColor("#111827"), contrasting_text(QColor("#f59e0b")))
+        self.assertEqual(QColor("#ffffff"), contrasting_text(QColor("#dc2626")))
 
 
 def _action(action_id: str) -> ActionDefinition:

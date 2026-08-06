@@ -1,8 +1,16 @@
-"""Shared visual and interaction tokens for the workflow canvas."""
+"""Shared visual and interaction tokens for the workflow canvas.
+
+Neutral colors are derived from the active Qt palette so the canvas follows
+light, dark and high-contrast system themes. Fixed colors are reserved for
+domain categories and semantic states.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtGui import QColor
+from dataclasses import dataclass
+
+from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtWidgets import QApplication
 
 from ....domain.models import ActionType, SequenceItemStatus
 
@@ -17,6 +25,53 @@ NODE_GAP = 54.0
 INSERT_TARGET_SIZE = 44.0
 MIN_SCALE = 0.45
 MAX_SCALE = 2.0
+FIT_PADDING = 24.0
+TOUCH_TARGET_SIZE = 44
+TOOLBAR_SPACING = 8
+NODE_RADIUS = 12.0
+
+
+@dataclass(frozen=True, slots=True)
+class CanvasColors:
+    surface: QColor
+    canvas: QColor
+    text: QColor
+    secondary_text: QColor
+    border: QColor
+    accent: QColor
+    edge: QColor
+
+
+def canvas_colors(palette: QPalette | None = None) -> CanvasColors:
+    active = QApplication.palette() if palette is None else palette
+    return CanvasColors(
+        surface=active.color(QPalette.ColorRole.Base),
+        canvas=active.color(QPalette.ColorRole.Window),
+        text=active.color(QPalette.ColorRole.Text),
+        secondary_text=active.color(QPalette.ColorRole.PlaceholderText),
+        border=active.color(QPalette.ColorRole.Mid),
+        accent=active.color(QPalette.ColorRole.Highlight),
+        edge=active.color(QPalette.ColorRole.Mid),
+    )
+
+
+def canvas_font(*, emphasis: bool = False, secondary: bool = False) -> QFont:
+    font = QFont(QApplication.font())
+    point_size = font.pointSizeF()
+    if point_size > 0:
+        font.setPointSizeF(max(9.0, point_size - (1.0 if secondary else 0.0)))
+    font.setBold(emphasis)
+    return font
+
+
+def contrasting_text(background: QColor) -> QColor:
+    """Return readable black/white text for a semantic background color."""
+    linear_luminance = (
+        0.2126 * background.redF()
+        + 0.7152 * background.greenF()
+        + 0.0722 * background.blueF()
+    )
+    return QColor("#111827") if linear_luminance > 0.58 else QColor("#ffffff")
 
 ACTION_COLORS = {
     ActionType.MOVE: QColor("#6366f1"),
