@@ -4,9 +4,9 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
@@ -37,7 +37,7 @@ from ...domain.models import ActionDefinition, ActionType
 class ActionPreviewDialog(QDialog):
     """Show an AI-expanded action sequence before explicit confirmation."""
 
-    confirmed = pyqtSignal(bool)
+    confirmed = Signal(bool)
 
     def __init__(
         self,

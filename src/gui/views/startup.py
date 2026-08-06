@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 class StartupProgressCard(QWidget):
     """Display bootstrap progress without exposing the unfinished main window."""
 
-    exit_requested = pyqtSignal()
+    exit_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()

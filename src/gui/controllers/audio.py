@@ -14,12 +14,12 @@ import sys
 from collections import deque
 from typing import Deque, Optional
 
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from ...voice_interaction.speech.output_gate import AudioOutputGate
 
 try:
-    from PyQt6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
+    from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
 except Exception as exc:  # pragma: no cover - depends on local Qt install
     QAudioFormat = None
     QAudioSink = None
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 class VoiceAudioPlayer(QObject):
     """Play base64 float32 PCM chunks through the default Qt audio device."""
 
-    error_occurred = pyqtSignal(str)
+    error_occurred = Signal(str)
 
     def __init__(
         self,

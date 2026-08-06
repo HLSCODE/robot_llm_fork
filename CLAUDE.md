@@ -5,7 +5,7 @@
 
 ## 技术栈
 - **语言**: Python 3
-- **GUI**: PyQt6（主应用，`uv run robot-llm` 启动）
+- **GUI**: PySide6（主应用，`uv run robot-llm` 启动）
 - **WebSocket 服务**: asyncio + websockets（由 GUI 进程托管的可选附加服务）
 - **机械臂 SDK**: RealMan RM C API (ctypes 封装)
 - **视觉**: RealSense D435 + YOLO + SAM2
@@ -31,7 +31,7 @@ src/
   device_runtime/       # 设备能力接口、机械臂 provider adapter、fake、生命周期和资源仲裁
   data_collection/      # 版本化采集 schema、recorder、事务写入与完整性验证
   gui/
-    main_window.py      # 主窗口（PyQt6）
+    main_window.py      # 主窗口（PySide6）
   robot_server/
     ws_server.py        # WebSocket 连接生命周期、鉴权、路由和投递
     protocol.py         # typed request/response 与全部 action schema
@@ -45,7 +45,7 @@ src/
   ai_integration/       # AI 控制器、执行桥接
   llm/                  # LLM 客户端（OpenAI、DeepSeek）
   skill_system/         # 技能引擎、注册表、默认技能
-  widgets/              # PyQt6 UI 组件
+  widgets/              # PySide6 UI 组件
 data/
   actions_library.json  # 动作库
   tasks/*.task          # 保存的任务序列

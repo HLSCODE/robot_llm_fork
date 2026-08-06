@@ -255,6 +255,26 @@ class DependencyBoundaryTests(unittest.TestCase):
 
         self.assertEqual([], remaining, "\n".join(remaining))
 
+    def test_only_pyside6_qt_binding_is_allowed(self):
+        forbidden_binding = "Py" + "Qt6"
+        violations: list[str] = []
+        for relative_directory in ("src", "scripts", "tests"):
+            for path in (PROJECT_ROOT / relative_directory).rglob("*.py"):
+                if path == Path(__file__).resolve():
+                    continue
+                if forbidden_binding in path.read_text(encoding="utf-8-sig"):
+                    violations.append(
+                        path.relative_to(PROJECT_ROOT).as_posix()
+                    )
+
+        project_configuration = (PROJECT_ROOT / "pyproject.toml").read_text(
+            encoding="utf-8-sig"
+        )
+        if forbidden_binding in project_configuration:
+            violations.append("pyproject.toml")
+
+        self.assertEqual([], violations, "\n".join(violations))
+
     def test_stable_layers_have_one_way_dependencies(self):
         violations: list[str] = []
         for relative_directory, allowed_prefixes in STABLE_LAYER_DEPENDENCIES.items():

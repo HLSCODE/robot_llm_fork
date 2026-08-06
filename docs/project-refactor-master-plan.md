@@ -5,7 +5,7 @@
 > 最近更新：2026-08-06
 >
 > 当前里程碑：M5 — 第二轮目录职责、Provider 边界与真实硬件验收
-> 计划进度：126/131（124 DONE + 2 DROPPED，96.2%）
+> 计划进度：127/132（125 DONE + 2 DROPPED，96.2%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -34,7 +34,7 @@
 
 项目目前已经具备完整的机器人应用雏形：
 
-- PyQt6 本地 GUI。
+- PySide6 本地 GUI。
 - WebSocket 远程控制服务。
 - 双机械臂、底盘、身体升降、夹爪、吸液枪、换枪、加粉装置和表情屏。
 - RealSense/OpenCV 相机、视觉抓取和视觉重定位。
@@ -835,6 +835,7 @@ src/
 | G-025 | P2 | DONE | 移动底盘已按当前 TCP 产品拆为 Provider/Adapter/Client 纵向切片，Client 独占 socket/JSON 帧，Adapter 实现 `MobileBase`，Provider 只负责装配；显示屏以静态 ProviderDefinition/Registry 取代字符串动态导入；删除旧底盘 Controller/Client 路径且未建立无第二实现的底盘 Registry |
 | G-026 | P2 | DONE | 视觉内部已形成 `pipelines/`、`relocalization/`、`artifacts.py`、`cli/` 四个明确边界，抓取算法和离线重定位 CLI 不再平铺/混入算法包；外部 Tag 定位新增 typed reading、Provider contract、UDP Provider 和 simulation Null Provider，socket/线程由 Provider 独占，Application Service 只负责新鲜度/有效性策略；配置、服务字段和执行参数统一使用 `external_localization`，与视觉工位重定位明确区分 |
 | G-027 | P3 | DONE | 删除混合职责的 `execution/action_handlers.py`，结果/上下文/Protocol 迁入 `handler_api.py`，分派迁入 `handler_registry.py`，无设备核心 handler 迁入 `handlers/core.py`；README 项目结构、动作模型路径和相机 Provider 说明已更新，旧 application/vision/execution 路径加入禁止回归清单，Mypy 同步覆盖新边界 |
+| G-028 | P0 | DONE | GUI Qt binding 一次性直切 PySide6；生产代码、测试、可选依赖、锁文件、打包 smoke 和文档同步迁移，使用原生 `Signal`/`Slot`，不保留兼容层；附加服务结果通过 GUI 线程 QObject receiver 驱动启动卡片到主窗口的过渡；架构测试禁止旧 binding 再次进入源码、脚本、测试或 `pyproject.toml` |
 
 完成标准：
 
@@ -1204,6 +1205,7 @@ M5 模块目录与依赖边界治理
 | 2026-08-05 | M5 | B/G | 相机、移动底盘与显示 Provider 边界收敛 | G-024/G-025 TODO → DONE | 相机建立 RealSense/OpenCV 静态 Provider Registry 和共享 capability，未知配置在组合根失败；移动底盘拆为单一 TCP Provider/Adapter/Client 产品切片；显示屏动态导入替换为静态 Provider 注册；删除 camera_factory、旧底盘 Controller/Client，不增加兼容值或空底盘 Registry | Compile、Ruff、Mypy（42 files）、Pytest（401 passed + 43 subtests，60.79%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-06 | M5 | A/F/G | 视觉、外部定位与 Handler API 边界收敛 | G-026/G-027 TODO → DONE | 视觉抓取算法迁入 pipelines，离线 CLI 与工位重定位算法分离；UDP 外部定位改为可注入 Provider，simulation 不创建网络资源，Application Service 只保留读取策略；action_handlers 拆为 handler API/Registry/core handlers；README、配置和旧路径门禁同步更新，不保留转发模块 | Compile、Ruff、Mypy（47 files）、Pytest（406 passed + 43 subtests，60.91%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 | 2026-08-06 | M5 | A/G | ExecutionManager 并发状态机与类型边界收口 | A-006 DOING → DONE | 修复 STARTING 阶段取消后 worker 回写 RUNNING 的状态回退；终态后抑制迟到生命周期事件；worker 可注入并覆盖并发 submit、启动前取消、取消/完成竞态、启动失败和租约释放；Mypy 扩展为整包检查 `src/execution` | Compile、Ruff、Mypy（61 files）、Pytest（410 passed + 43 subtests，61.00%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
+| 2026-08-06 | M5 | D/G | GUI Qt binding 许可证风险收敛 | G-028 → DONE | 删除旧 Qt binding、Qt6/SIP 依赖和全部导入，生产与测试代码直切 PySide6 原生 Signal/Slot；修复普通 Python 回调在 worker 线程注册 reveal timer 导致初始化卡片停在 100% 的问题，结果改由 GUI 线程 QObject receiver 处理；GUI/full extra、uv lock、可选依赖 smoke、README 和项目说明同步更新；新增旧 binding 和启动过渡回归门禁，不保留适配或兼容层 | Compile、Ruff、Mypy（61 files）、Pytest（412 passed + 43 subtests，61.03%）、LLM golden（14/14）、性能回归（7/7）、GUI extra 及 Wheel smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 

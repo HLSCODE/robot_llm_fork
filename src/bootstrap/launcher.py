@@ -112,12 +112,15 @@ def resolve_startup_options(
 
 def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     """Run the GUI and optional network services in one process."""
-    from PyQt6.QtCore import QThread, QTimer, Qt
-    from PyQt6.QtWidgets import QApplication
+    from PySide6.QtCore import QThread, QTimer, Qt
+    from PySide6.QtWidgets import QApplication
 
     from ..application import create_application_services
     from ..gui.controllers.main_window import MainWindow
-    from ..gui.controllers.startup import GuiAuxiliaryServiceStartupWorker
+    from ..gui.controllers.startup import (
+        GuiAuxiliaryServiceStartupWorker,
+        GuiAuxiliaryStartupResultReceiver,
+    )
     from ..gui.views import StartupProgressCard
 
     app = QApplication([sys.argv[0]])
@@ -131,6 +134,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     auxiliary_host = None
     auxiliary_startup_thread = None
     auxiliary_startup_worker = None
+    auxiliary_startup_receiver = None
     window = None
     try:
         startup_card.set_progress(
@@ -169,7 +173,9 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             QTimer.singleShot(180, reveal)
 
         def start_auxiliary_services(success: bool, message: str) -> None:
-            nonlocal auxiliary_startup_thread, auxiliary_startup_worker
+            nonlocal auxiliary_startup_thread
+            nonlocal auxiliary_startup_worker
+            nonlocal auxiliary_startup_receiver
             if not success:
                 startup_card.mark_failed(message)
                 return
@@ -201,9 +207,22 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
                 auxiliary_startup_thread = None
                 auxiliary_startup_worker = None
 
+            receiver = GuiAuxiliaryStartupResultReceiver(
+                services_started,
+                services_failed,
+                auxiliary_thread_finished,
+                app,
+            )
+
             thread.started.connect(worker.run)
-            worker.completed.connect(services_started)
-            worker.failed.connect(services_failed)
+            worker.completed.connect(
+                receiver.handle_completed,
+                Qt.ConnectionType.QueuedConnection,
+            )
+            worker.failed.connect(
+                receiver.handle_failed,
+                Qt.ConnectionType.QueuedConnection,
+            )
             worker.completed.connect(worker.deleteLater)
             worker.failed.connect(worker.deleteLater)
             worker.completed.connect(
@@ -214,10 +233,14 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
                 thread.quit,
                 Qt.ConnectionType.DirectConnection,
             )
-            thread.finished.connect(auxiliary_thread_finished)
+            thread.finished.connect(
+                receiver.handle_thread_finished,
+                Qt.ConnectionType.QueuedConnection,
+            )
             thread.finished.connect(thread.deleteLater)
             auxiliary_startup_thread = thread
             auxiliary_startup_worker = worker
+            auxiliary_startup_receiver = receiver
             thread.start()
 
         window.startup_finished.connect(start_auxiliary_services)

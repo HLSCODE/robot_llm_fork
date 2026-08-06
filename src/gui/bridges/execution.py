@@ -6,7 +6,7 @@ import logging
 from threading import Lock, Thread
 from typing import Any
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from ...application import ApplicationServices
 from ...domain.models import SequenceItem
@@ -27,15 +27,15 @@ class ExecutionBridge(QObject):
     short-lived dispatch thread so hardware I/O never blocks the Qt UI thread.
     """
 
-    execution_status_changed = pyqtSignal(str)
-    step_started = pyqtSignal(int, object)
-    step_completed = pyqtSignal(int, object)
-    step_failed = pyqtSignal(int, object, str)
-    loop_progress = pyqtSignal(str, int, int)
-    execution_completed = pyqtSignal(bool)
-    log_message = pyqtSignal(str)
-    safety_stop_completed = pyqtSignal(object)
-    safety_stop_failed = pyqtSignal(str)
+    execution_status_changed = Signal(str)
+    step_started = Signal(int, object)
+    step_completed = Signal(int, object)
+    step_failed = Signal(int, object, str)
+    loop_progress = Signal(str, int, int)
+    execution_completed = Signal(bool)
+    log_message = Signal(str)
+    safety_stop_completed = Signal(object)
+    safety_stop_failed = Signal(str)
 
     def __init__(self, services: ApplicationServices) -> None:
         super().__init__()

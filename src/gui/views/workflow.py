@@ -4,9 +4,9 @@ import json
 from collections.abc import Iterable
 from typing import Any
 
-from PyQt6.QtCore import QMimeData, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QMimeData, QSize, Qt, Signal
+from PySide6.QtGui import QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -51,9 +51,9 @@ class TaskLibraryListWidget(QListWidget):
 
 
 class TaskComposerListWidget(QListWidget):
-    order_changed = pyqtSignal(int, int)
-    task_dropped = pyqtSignal(str, int)
-    action_dropped = pyqtSignal(object, int)
+    order_changed = Signal(int, int)
+    task_dropped = Signal(str, int)
+    action_dropped = Signal(object, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -148,11 +148,11 @@ class TaskComposerListWidget(QListWidget):
 
 
 class ActionLibraryView(QWidget):
-    create_requested = pyqtSignal()
-    edit_requested = pyqtSignal()
-    delete_requested = pyqtSignal()
-    camera_test_requested = pyqtSignal()
-    task_add_requested = pyqtSignal()
+    create_requested = Signal()
+    edit_requested = Signal()
+    delete_requested = Signal()
+    camera_test_requested = Signal()
+    task_add_requested = Signal()
 
     def __init__(self, services: ApplicationServices, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -224,27 +224,27 @@ class ActionLibraryView(QWidget):
 
 
 class WorkflowEditorView(QWidget):
-    start_requested = pyqtSignal()
-    pause_requested = pyqtSignal()
-    stop_requested = pyqtSignal()
-    safety_stop_requested = pyqtSignal(object)
-    move_up_requested = pyqtSignal()
-    move_down_requested = pyqtSignal()
-    edit_requested = pyqtSignal()
-    repeat_requested = pyqtSignal()
-    delete_requested = pyqtSignal()
-    clear_requested = pyqtSignal()
-    save_requested = pyqtSignal()
-    load_requested = pyqtSignal()
-    composer_remove_requested = pyqtSignal()
-    composer_move_up_requested = pyqtSignal()
-    composer_move_down_requested = pyqtSignal()
-    composer_repeat_requested = pyqtSignal()
-    composer_clear_requested = pyqtSignal()
-    composer_refresh_requested = pyqtSignal()
-    composer_add_requested = pyqtSignal()
-    composer_execute_requested = pyqtSignal()
-    composer_save_requested = pyqtSignal()
+    start_requested = Signal()
+    pause_requested = Signal()
+    stop_requested = Signal()
+    safety_stop_requested = Signal(object)
+    move_up_requested = Signal()
+    move_down_requested = Signal()
+    edit_requested = Signal()
+    repeat_requested = Signal()
+    delete_requested = Signal()
+    clear_requested = Signal()
+    save_requested = Signal()
+    load_requested = Signal()
+    composer_remove_requested = Signal()
+    composer_move_up_requested = Signal()
+    composer_move_down_requested = Signal()
+    composer_repeat_requested = Signal()
+    composer_clear_requested = Signal()
+    composer_refresh_requested = Signal()
+    composer_add_requested = Signal()
+    composer_execute_requested = Signal()
+    composer_save_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)

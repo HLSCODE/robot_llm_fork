@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from ...application import (
     ApplicationServices,
@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 class AIController(QObject):
     """Expose the process command runtime through Qt signals."""
 
-    status_changed = pyqtSignal(str)
-    execution_started = pyqtSignal()
-    sequence_execution_started = pyqtSignal(list)
-    execution_finished = pyqtSignal(bool, str)
-    error_occurred = pyqtSignal(str)
+    status_changed = Signal(str)
+    execution_started = Signal()
+    sequence_execution_started = Signal(list)
+    execution_finished = Signal(bool, str)
+    error_occurred = Signal(str)
 
     def __init__(
         self,

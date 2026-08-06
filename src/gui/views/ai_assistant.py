@@ -7,9 +7,9 @@ import logging
 from time import monotonic
 from typing import Any, Dict
 
-from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal, pyqtSlot
-from PyQt6.QtGui import QColor, QTextCursor
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtGui import QColor, QTextCursor
+from PySide6.QtWidgets import (
     QCheckBox,
     QGroupBox,
     QHBoxLayout,
@@ -44,9 +44,9 @@ INTERACTION_SHUTDOWN_TIMEOUT_SECONDS = 3.0
 class VoiceSessionWorker(QObject):
     """Run one text turn through the interaction controller in a background thread."""
 
-    event_ready = pyqtSignal(dict)
-    error_occurred = pyqtSignal(str)
-    finished = pyqtSignal()
+    event_ready = Signal(dict)
+    error_occurred = Signal(str)
+    finished = Signal()
 
     def __init__(
         self,
@@ -60,7 +60,7 @@ class VoiceSessionWorker(QObject):
         self._text = text
         self._require_awake = require_awake
 
-    @pyqtSlot()
+    @Slot()
     def run(self):
         try:
             asyncio.run(self._run_async())
@@ -80,9 +80,9 @@ class VoiceSessionWorker(QObject):
 class VoiceSpeechRuntimeWorker(QObject):
     """Run real wake-word/ASR speech input in a background thread."""
 
-    event_ready = pyqtSignal(dict)
-    error_occurred = pyqtSignal(str)
-    finished = pyqtSignal()
+    event_ready = Signal(dict)
+    error_occurred = Signal(str)
+    finished = Signal()
 
     def __init__(
         self,
@@ -97,7 +97,7 @@ class VoiceSpeechRuntimeWorker(QObject):
         self._runtime = None
         self._stop_requested = False
 
-    @pyqtSlot()
+    @Slot()
     def run(self):
         try:
             asyncio.run(self._run_async())
@@ -106,7 +106,7 @@ class VoiceSpeechRuntimeWorker(QObject):
         finally:
             self.finished.emit()
 
-    @pyqtSlot()
+    @Slot()
     def stop(self):
         self._stop_requested = True
         if self._runtime is not None:
@@ -146,14 +146,14 @@ class AIAssistantWidget(QWidget):
     AI助手 Tab 组件
     提供自然语言交互和动作序列预览功能
     """
-    speech_runtime_startup_finished = pyqtSignal(bool)
-    welcome_task_execution_requested = pyqtSignal(str)
-    sequence_visualization_requested = pyqtSignal(object, bool, int)
-    step_started = pyqtSignal(int, object)
-    step_completed = pyqtSignal(int, object)
-    step_failed = pyqtSignal(int, object, str)
-    loop_progress = pyqtSignal(str, int, int)
-    execution_completed = pyqtSignal(bool)
+    speech_runtime_startup_finished = Signal(bool)
+    welcome_task_execution_requested = Signal(str)
+    sequence_visualization_requested = Signal(object, bool, int)
+    step_started = Signal(int, object)
+    step_completed = Signal(int, object)
+    step_failed = Signal(int, object, str)
+    loop_progress = Signal(str, int, int)
+    execution_completed = Signal(bool)
 
     def __init__(self, services: ApplicationServices, parent=None):
         super().__init__(parent)
@@ -730,11 +730,11 @@ class AIAssistantWidget(QWidget):
         self.preview_button.setEnabled(False)
         self.execute_button.setEnabled(False)
 
-    @pyqtSlot(dict)
+    @Slot(dict)
     def _handle_dialog_event(self, event: dict):
         self._handle_interaction_event(event, source="dialog")
 
-    @pyqtSlot(dict)
+    @Slot(dict)
     def _handle_voice_event(self, event: dict):
         self._handle_interaction_event(event, source="voice")
 
@@ -875,13 +875,13 @@ class AIAssistantWidget(QWidget):
 
         self._update_voice_status_display()
 
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_voice_worker_error(self, error: str):
         self._add_system_message(f"对话错误: {error}")
         self._voice_processing = False
         self._set_input_enabled(True)
 
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_speech_worker_error(self, error: str):
         was_starting = self._speech_runtime_starting
         self._speech_runtime_starting = False
@@ -895,14 +895,14 @@ class AIAssistantWidget(QWidget):
             self._speech_runtime_startup_reported = True
             self.speech_runtime_startup_finished.emit(False)
 
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_voice_audio_error(self, error: str):
         if self._voice_audio_playback_error_reported:
             return
         self._voice_audio_playback_error_reported = True
         self._add_system_message(f"语音播放失败: {error}")
 
-    @pyqtSlot()
+    @Slot()
     def _on_voice_worker_finished(self):
         self._finish_bot_delta()
         self._voice_processing = False
@@ -910,12 +910,12 @@ class AIAssistantWidget(QWidget):
         self._update_voice_status_display()
         self.status_label.setText("状态: 就绪")
 
-    @pyqtSlot()
+    @Slot()
     def _on_voice_thread_finished(self):
         self._voice_thread = None
         self._voice_worker = None
 
-    @pyqtSlot()
+    @Slot()
     def _on_speech_worker_finished(self):
         was_starting = self._speech_runtime_starting
         self._speech_runtime_starting = False
@@ -927,7 +927,7 @@ class AIAssistantWidget(QWidget):
             self._speech_runtime_startup_reported = True
             self.speech_runtime_startup_finished.emit(False)
 
-    @pyqtSlot()
+    @Slot()
     def _on_speech_thread_finished(self):
         self._speech_thread = None
         self._speech_worker = None
@@ -983,12 +983,12 @@ class AIAssistantWidget(QWidget):
 
     # ==================== 执行上下文信号处理 ====================
 
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_status_changed(self, status: str):
         """状态变更"""
         self.status_label.setText(f"状态: {status}")
 
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_error_occurred(self, error: str):
         """错误发生"""
         self._add_system_message(f"错误: {error}")
@@ -999,7 +999,7 @@ class AIAssistantWidget(QWidget):
         self.preview_button.setEnabled(has_preview)
         self.cancel_button.setEnabled(has_preview)
 
-    @pyqtSlot()
+    @Slot()
     def _on_execution_started(self):
         """执行开始"""
         self._add_system_message("开始执行动作序列...")
@@ -1010,14 +1010,14 @@ class AIAssistantWidget(QWidget):
         if sequence:
             self.sequence_visualization_requested.emit(sequence, True, 50)
 
-    @pyqtSlot(bool, str)
+    @Slot(bool, str)
     def _on_execution_finished(self, success: bool, message: str):
         """执行完成"""
         result = "成功" if success else "失败"
         self._add_bot_message(f"执行{result}: {message}")
         self._reset_ui()
 
-    @pyqtSlot(str)
+    @Slot(str)
     def _on_execution_log(self, message: str):
         """执行日志"""
         # 在对话历史中显示执行日志

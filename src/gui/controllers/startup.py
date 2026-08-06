@@ -8,7 +8,7 @@ from enum import Enum
 from threading import Event
 from typing import TYPE_CHECKING
 
-from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
+from PySide6.QtCore import QObject, Signal, Slot
 
 from ...devices.runtime.ids import BODY_AXIS, MOBILE_BASE, PIPETTE, ROBOT_SYSTEM
 
@@ -81,9 +81,9 @@ class HardwareStartupStepResult:
 class GuiHardwareStartupWorker(QObject):
     """Initialize startup-owned hardware without blocking the Qt event loop."""
 
-    step_started = pyqtSignal(str)
-    step_completed = pyqtSignal(object)
-    completed = pyqtSignal(object)
+    step_started = Signal(str)
+    step_completed = Signal(object)
+    completed = Signal(object)
 
     def __init__(
         self,
@@ -99,7 +99,7 @@ class GuiHardwareStartupWorker(QObject):
     def request_stop(self) -> None:
         self._stop_requested.set()
 
-    @pyqtSlot()
+    @Slot()
     def run(self) -> None:
         results: list[HardwareStartupStepResult] = []
         for device_id, operation in self._operations():
@@ -164,14 +164,14 @@ class GuiHardwareStartupWorker(QObject):
 class GuiAuxiliaryServiceStartupWorker(QObject):
     """Wait for optional service startup outside the Qt application thread."""
 
-    completed = pyqtSignal(object)
-    failed = pyqtSignal(str)
+    completed = Signal(object)
+    failed = Signal(str)
 
     def __init__(self, start_services: Callable[[], object]) -> None:
         super().__init__()
         self._start_services = start_services
 
-    @pyqtSlot()
+    @Slot()
     def run(self) -> None:
         try:
             snapshots = self._start_services()
@@ -179,3 +179,31 @@ class GuiAuxiliaryServiceStartupWorker(QObject):
             self.failed.emit(str(exc))
             return
         self.completed.emit(snapshots)
+
+
+class GuiAuxiliaryStartupResultReceiver(QObject):
+    """Deliver auxiliary startup results on the receiver's Qt thread."""
+
+    def __init__(
+        self,
+        on_completed: Callable[[object], None],
+        on_failed: Callable[[str], None],
+        on_thread_finished: Callable[[], None],
+        parent: QObject | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._on_completed = on_completed
+        self._on_failed = on_failed
+        self._on_thread_finished = on_thread_finished
+
+    @Slot(object)
+    def handle_completed(self, snapshots: object) -> None:
+        self._on_completed(snapshots)
+
+    @Slot(str)
+    def handle_failed(self, error: str) -> None:
+        self._on_failed(error)
+
+    @Slot()
+    def handle_thread_finished(self) -> None:
+        self._on_thread_finished()

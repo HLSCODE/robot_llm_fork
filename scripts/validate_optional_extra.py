@@ -26,7 +26,7 @@ def _check_server() -> None:
 def _check_gui() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-    from PyQt6.QtWidgets import QApplication, QWidget
+    from PySide6.QtWidgets import QApplication, QWidget
 
     from src.gui.controllers.main_window import MainWindow
 

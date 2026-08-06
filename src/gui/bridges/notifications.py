@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Protocol
 
-from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
-from PyQt6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 
 class GuiNotificationLevel(str, Enum):
@@ -68,7 +68,7 @@ class QtMessageBoxPresenter:
 class GuiNotificationCenter(QObject):
     """Own operational GUI notifications and their observable state."""
 
-    notification_requested = pyqtSignal(object)
+    notification_requested = Signal(object)
 
     def __init__(
         self,
@@ -143,7 +143,7 @@ class GuiNotificationCenter(QObject):
         self.notification_requested.emit(notification)
         return notification
 
-    @pyqtSlot(object)
+    @Slot(object)
     def _record_and_present(self, notification: GuiNotification) -> None:
         self._history.append(notification)
         self._log_sink(notification.message)

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from threading import Thread
+from threading import Event, Thread
+from time import monotonic, sleep
 from types import SimpleNamespace
 import unittest
 
-from PyQt6.QtCore import QThread
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtCore import QThread, QTimer, Qt
+from PySide6.QtWidgets import QApplication
 
 from src.application import (
     ComposedAction,
@@ -26,6 +27,21 @@ from src.gui.bridges.notifications import (
     GuiNotificationLevel,
 )
 from src.gui.view_models import DeviceViewModel, ExecutionViewModel
+from src.gui.controllers.startup import (
+    GuiAuxiliaryServiceStartupWorker,
+    GuiAuxiliaryStartupResultReceiver,
+)
+
+
+def _process_events_until(predicate, timeout_seconds: float = 2.0) -> bool:
+    deadline = monotonic() + timeout_seconds
+    while monotonic() < deadline:
+        QApplication.processEvents()
+        if predicate():
+            return True
+        sleep(0.005)
+    QApplication.processEvents()
+    return bool(predicate())
 
 
 def _action(action_id: str) -> ActionDefinition:
@@ -212,6 +228,53 @@ class GuiNotificationCenterTests(unittest.TestCase):
 
         self.assertEqual([gui_thread], sink_threads)
         parent.deleteLater()
+
+
+class GuiAuxiliaryStartupResultReceiverTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.application = QApplication.instance() or QApplication([])
+
+    def test_worker_result_schedules_transition_on_gui_thread(self) -> None:
+        transition_completed = Event()
+        thread_finished = Event()
+        callback_threads: list[QThread] = []
+        worker_thread = QThread()
+        worker = GuiAuxiliaryServiceStartupWorker(lambda: ("ready",))
+
+        def handle_completed(_snapshots: object) -> None:
+            callback_threads.append(QThread.currentThread())
+            QTimer.singleShot(0, transition_completed.set)
+
+        receiver = GuiAuxiliaryStartupResultReceiver(
+            handle_completed,
+            self.fail,
+            thread_finished.set,
+        )
+        worker.moveToThread(worker_thread)
+        worker_thread.started.connect(worker.run)
+        worker.completed.connect(
+            receiver.handle_completed,
+            Qt.ConnectionType.QueuedConnection,
+        )
+        worker.completed.connect(
+            worker_thread.quit,
+            Qt.ConnectionType.DirectConnection,
+        )
+        worker_thread.finished.connect(
+            receiver.handle_thread_finished,
+            Qt.ConnectionType.QueuedConnection,
+        )
+
+        worker_thread.start()
+
+        self.assertTrue(_process_events_until(transition_completed.is_set))
+        self.assertTrue(_process_events_until(thread_finished.is_set))
+        self.assertEqual([QThread.currentThread()], callback_threads)
+        self.assertTrue(worker_thread.wait(1000))
+        worker.deleteLater()
+        receiver.deleteLater()
+        worker_thread.deleteLater()
 
 
 class _FakeExecutionService:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PySide6.QtCore import QObject, Signal
 
 from ...application import CompositionService
 
@@ -10,7 +10,7 @@ from ...application import CompositionService
 class CompositionBridge(QObject):
     """Marshal composition events from service threads to the Qt thread."""
 
-    changed = pyqtSignal(object)
+    changed = Signal(object)
 
     def __init__(
         self,

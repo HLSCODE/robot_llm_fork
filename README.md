@@ -1,6 +1,6 @@
 # Robot Action Orchestrator
 
-机器人操作编排系统，支持通过 PyQt6 图形界面或 WebSocket 服务编排、执行和管理机器人动作，并集成 AI 自然语言任务规划、统一 LLM 能力层、视觉感知、双机械臂、底盘、升降平台、快换手、吸液枪和 MiniCPM Realtime 聊天等能力。
+机器人操作编排系统，支持通过 PySide6 图形界面或 WebSocket 服务编排、执行和管理机器人动作，并集成 AI 自然语言任务规划、统一 LLM 能力层、视觉感知、双机械臂、底盘、升降平台、快换手、吸液枪和 MiniCPM Realtime 聊天等能力。
 
 ## 功能概览
 
@@ -21,7 +21,7 @@
 
 依赖以 `pyproject.toml` 为唯一声明源，`uv.lock` 固定可重复安装版本。主要包括：
 
-- `PyQt6`
+- `PySide6`
 - `websockets`
 - `openai`
 - `python-dotenv`
@@ -205,7 +205,7 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
     ├── domain/                # 动作模型、执行上下文等稳定领域定义
     ├── persistence/           # JSON 文档与工位配置持久化
     ├── execution/             # 统一执行运行时、handler API/Registry
-    ├── gui/                   # PyQt6 views/view-models/controllers/bridges
+    ├── gui/                   # PySide6 views/view-models/controllers/bridges
     ├── robot_server/          # WebSocket protocol/controllers/security/metrics
     ├── skill_system/          # 技能模型、注册表与匹配引擎
     ├── llm/                   # 大模型能力层与 provider 策略

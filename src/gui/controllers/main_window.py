@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import List
 from uuid import uuid4
 
-from PyQt6.QtCore import QSize, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QColor, QIcon
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QAction, QColor, QIcon
+from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QInputDialog,
@@ -59,8 +59,8 @@ from ..views.workflow import ActionLibraryView, WorkflowEditorView
 
 
 class MainWindow(QMainWindow):
-    startup_progress_changed = pyqtSignal(int, str, str)
-    startup_finished = pyqtSignal(bool, str)
+    startup_progress_changed = Signal(int, str, str)
+    startup_finished = Signal(bool, str)
 
     def __init__(self, services: ApplicationServices):
         super().__init__()
@@ -1296,7 +1296,7 @@ class MainWindow(QMainWindow):
             self.action_library_view.task_library_list.addItem(item)
 
     def _create_task_list_icon(self) -> QIcon:
-        from PyQt6.QtGui import QFont, QPainter, QPixmap
+        from PySide6.QtGui import QFont, QPainter, QPixmap
 
         pixmap = QPixmap(28, 28)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -1310,7 +1310,7 @@ class MainWindow(QMainWindow):
         font.setPointSize(12)
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255))
-        from PyQt6.QtCore import QRectF
+        from PySide6.QtCore import QRectF
         painter.drawText(QRectF(0, 0, 28, 28), Qt.AlignmentFlag.AlignCenter, "📋")
         painter.end()
         return QIcon(pixmap)
@@ -1495,8 +1495,8 @@ class MainWindow(QMainWindow):
     }
 
     def _create_task_card_icon(self, task_name: str, step_count: int, title: str | None = None):
-        from PyQt6.QtCore import QRectF
-        from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 
         width, height = 130, 88
         pixmap = QPixmap(width, height)
@@ -1560,8 +1560,8 @@ class MainWindow(QMainWindow):
         return QIcon(pixmap)
 
     def _create_action_card_icon(self, action: ActionDefinition):
-        from PyQt6.QtCore import QRectF
-        from PyQt6.QtGui import QColor, QFont, QPainter, QPixmap
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
 
         width, height = 130, 88
         pixmap = QPixmap(width, height)
@@ -2021,7 +2021,7 @@ class MainWindow(QMainWindow):
             )
             return
 
-        from PyQt6.QtCore import QTimer
+        from PySide6.QtCore import QTimer
 
         if replace:
             self._services.composition.clear_sequence(
@@ -2077,7 +2077,7 @@ class MainWindow(QMainWindow):
         self.action_library_view.set_camera_test_running(True)
 
         class _TestWorker(QThread):
-            result = pyqtSignal(bool, str)
+            result = Signal(bool, str)
 
             def __init__(self, services: ApplicationServices):
                 super().__init__()

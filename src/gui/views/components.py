@@ -1,14 +1,14 @@
-from PyQt6.QtWidgets import (QWidget, QListWidget, QListWidgetItem,
+from PySide6.QtWidgets import (QWidget, QListWidget, QListWidgetItem,
                             QPushButton, QVBoxLayout, QHBoxLayout, QTextEdit,
                             QTreeWidget, QTreeWidgetItem, QMenu, QInputDialog)
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QMimeData
-from PyQt6.QtGui import QIcon, QColor, QDrag
+from PySide6.QtCore import Qt, Signal, QSize, QMimeData
+from PySide6.QtGui import QIcon, QColor, QDrag
 import json
 from ...domain.models import ActionDefinition, SequenceItem, SequenceItemStatus, ActionType, LoopBlock, SequenceEntry
 
 
 class ActionListWidget(QListWidget):
-    action_selected = pyqtSignal(ActionDefinition)
+    action_selected = Signal(ActionDefinition)
 
     # ── 动作类型 → (emoji, 颜色) 映射 ──
     _TYPE_STYLE = {
@@ -106,7 +106,7 @@ class ActionListWidget(QListWidget):
 
     def _create_rich_icon(self, color: QColor, emoji: str) -> QIcon:
         """绘制带 emoji + 渐变背景的圆角图标 (44×44)"""
-        from PyQt6.QtGui import QPixmap, QPainter, QFont, QLinearGradient
+        from PySide6.QtGui import QPixmap, QPainter, QFont, QLinearGradient
 
         size = 44
         pixmap = QPixmap(size, size)
@@ -133,7 +133,7 @@ class ActionListWidget(QListWidget):
         font.setPointSize(18)
         painter.setFont(font)
         painter.setPen(QColor(255, 255, 255))
-        from PyQt6.QtCore import QRectF
+        from PySide6.QtCore import QRectF
         painter.drawText(
             QRectF(0, 0, size, size),
             Qt.AlignmentFlag.AlignCenter,
@@ -152,7 +152,7 @@ class SequenceListWidget(QTreeWidget):
     - 通过 UUID 映射实现 O(1) 的树节点查找
     """
 
-    sequence_changed = pyqtSignal()
+    sequence_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -524,8 +524,8 @@ class SequenceListWidget(QTreeWidget):
     }
 
     def _create_text_icon(self, text: str, action_type: ActionType, status: SequenceItemStatus, index: int | None = None) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor, QPen
-        from PyQt6.QtCore import QRectF
+        from PySide6.QtGui import QPixmap, QPainter, QFont, QColor, QPen
+        from PySide6.QtCore import QRectF
 
         width, height = 130, 88
         pixmap = QPixmap(width, height)
@@ -618,8 +618,8 @@ class SequenceListWidget(QTreeWidget):
         return QIcon(pixmap)
 
     def _create_loop_icon(self, child_count: int, repeat_count: int, current_iteration: int = 0) -> QIcon:
-        from PyQt6.QtGui import QPixmap, QPainter, QFont, QColor
-        from PyQt6.QtCore import QRectF
+        from PySide6.QtGui import QPixmap, QPainter, QFont, QColor
+        from PySide6.QtCore import QRectF
 
         width, height = 130, 88
         pixmap = QPixmap(width, height)
@@ -788,19 +788,19 @@ class SequenceListWidget(QTreeWidget):
 
 
 class ControlPanel(QWidget):
-    start_clicked = pyqtSignal()
-    pause_clicked = pyqtSignal()
-    stop_clicked = pyqtSignal()
-    quick_stop_clicked = pyqtSignal()
-    emergency_stop_clicked = pyqtSignal()
-    move_up_clicked = pyqtSignal()
-    move_down_clicked = pyqtSignal()
-    edit_clicked = pyqtSignal()
-    repeat_clicked = pyqtSignal()
-    delete_clicked = pyqtSignal()
-    clear_clicked = pyqtSignal()
-    save_clicked = pyqtSignal()
-    load_clicked = pyqtSignal()
+    start_clicked = Signal()
+    pause_clicked = Signal()
+    stop_clicked = Signal()
+    quick_stop_clicked = Signal()
+    emergency_stop_clicked = Signal()
+    move_up_clicked = Signal()
+    move_down_clicked = Signal()
+    edit_clicked = Signal()
+    repeat_clicked = Signal()
+    delete_clicked = Signal()
+    clear_clicked = Signal()
+    save_clicked = Signal()
+    load_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)

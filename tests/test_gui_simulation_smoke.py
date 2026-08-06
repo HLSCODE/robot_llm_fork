@@ -7,8 +7,8 @@ from time import monotonic, sleep
 import unittest
 from unittest.mock import patch
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QApplication
 
 from src.application import create_application_services
 from src.domain.models import ActionDefinition, ActionType, SequenceItem

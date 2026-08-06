@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QFrame,
     QGroupBox,
     QHBoxLayout,
@@ -18,8 +18,8 @@ from ..view_models.models import DeviceViewState
 
 
 class DeviceStatusView(QWidget):
-    refresh_requested = pyqtSignal()
-    copy_pose_requested = pyqtSignal(str)
+    refresh_requested = Signal()
+    copy_pose_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -149,9 +149,9 @@ class DeviceStatusView(QWidget):
 
 
 class DeviceControlView(QFrame):
-    gripper_requested = pyqtSignal(bool)
-    relay_requested = pyqtSignal(int, bool)
-    pipette_eject_requested = pyqtSignal()
+    gripper_requested = Signal(bool)
+    relay_requested = Signal(int, bool)
+    pipette_eject_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
