@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
+from dataclasses import replace
 from enum import Enum
 import logging
 from pathlib import Path
@@ -17,6 +18,7 @@ from ..domain.models import (
     SequenceItem,
     SequenceItemStatus,
 )
+from ..domain.workflow import WorkflowDocument
 
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,27 @@ class CompositionRepository(Protocol):
         task_name: str,
         new_task_name: str,
     ) -> tuple[str, str]: ...
+
+    def list_workflow_names(self) -> tuple[str, ...]: ...
+
+    def load_workflow(
+        self,
+        workflow_name: str,
+    ) -> WorkflowDocument | None: ...
+
+    def save_workflow(
+        self,
+        workflow_name: str,
+        document: WorkflowDocument,
+    ) -> str: ...
+
+    def delete_workflow(self, workflow_name: str) -> bool: ...
+
+    def load_workflow_draft(self) -> WorkflowDocument | None: ...
+
+    def save_workflow_draft(self, document: WorkflowDocument) -> None: ...
+
+    def delete_workflow_draft(self) -> bool: ...
 
 
 CompositionListener = Callable[[CompositionEvent], None]
@@ -476,6 +499,86 @@ class CompositionService:
         self._notify(event)
         return names
 
+    def list_workflows(self) -> tuple[str, ...]:
+        with self._lock:
+            return self._repository.list_workflow_names()
+
+    def load_workflow(self, workflow_name: str) -> WorkflowDocument:
+        with self._lock:
+            document = self._repository.load_workflow(workflow_name)
+            if document is None:
+                raise FileNotFoundError(workflow_name)
+            return _clone_workflow(document)
+
+    def save_workflow(
+        self,
+        workflow_name: str,
+        document: WorkflowDocument,
+        *,
+        origin: str,
+        expected_revision: int | None = None,
+    ) -> tuple[str, WorkflowDocument]:
+        with self._lock:
+            current = self._repository.load_workflow(workflow_name)
+            current_revision = current.revision if current is not None else 0
+            if (
+                expected_revision is not None
+                and expected_revision != current_revision
+            ):
+                raise CompositionRevisionConflict(
+                    "workflow changed since it was displayed: "
+                    f"expected revision {expected_revision}, "
+                    f"current revision {current_revision}"
+                )
+            stored = replace(
+                _clone_workflow(document),
+                revision=current_revision + 1,
+            )
+            stored_name = self._repository.save_workflow(
+                workflow_name,
+                stored,
+            )
+            event = self._next_event_unlocked(
+                CompositionChangeType.TASKS,
+                origin,
+            )
+        self._notify(event)
+        return stored_name, _clone_workflow(stored)
+
+    def delete_workflow(
+        self,
+        workflow_name: str,
+        *,
+        origin: str,
+    ) -> str:
+        with self._lock:
+            if not self._repository.delete_workflow(workflow_name):
+                raise FileNotFoundError(workflow_name)
+            normalized_name = Path(workflow_name).with_suffix(
+                ".workflow"
+            ).name
+            event = self._next_event_unlocked(
+                CompositionChangeType.TASKS,
+                origin,
+            )
+        self._notify(event)
+        return normalized_name
+
+    def load_workflow_draft(self) -> WorkflowDocument | None:
+        with self._lock:
+            document = self._repository.load_workflow_draft()
+            return None if document is None else _clone_workflow(document)
+
+    def save_workflow_draft(self, document: WorkflowDocument) -> None:
+        with self._lock:
+            self._repository.save_workflow_draft(
+                _clone_workflow(document)
+            )
+
+    def discard_workflow_draft(self) -> bool:
+        with self._lock:
+            return self._repository.delete_workflow_draft()
+
     def insert_task_entries(
         self,
         task_name: str,
@@ -644,6 +747,10 @@ def _pending_entry(entry: SequenceEntry) -> SequenceEntry:
     else:
         cloned.status = SequenceItemStatus.PENDING
     return cloned
+
+
+def _clone_workflow(document: WorkflowDocument) -> WorkflowDocument:
+    return WorkflowDocument.from_dict(deepcopy(document.to_dict()))
 
 
 def _flatten_entries(

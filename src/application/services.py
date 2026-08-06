@@ -43,6 +43,8 @@ from .safety import SafetyService
 from .external_localization import ExternalLocalizationService
 from .teleoperation import TeleoperationService
 from .task_composer import TaskComposerService
+from .workflow_compiler import WorkflowCompiler
+from .workflow_preflight import WorkflowPreflightService
 
 if TYPE_CHECKING:
     from .data_collection import DataCollectionService
@@ -86,6 +88,13 @@ class ExecutionService:
             origin=origin,
             listener=listener,
         )
+
+    def required_resources(
+        self,
+        sequence: Sequence[Any],
+    ) -> tuple[str, ...]:
+        """Resolve resources for a non-reserving UI preflight check."""
+        return self._manager.required_resources(sequence)
 
     def pause(self) -> None:
         self._manager.pause()
@@ -466,6 +475,8 @@ class ApplicationServices:
     task_composer: TaskComposerService
     data_collection: DataCollectionService
     execution: ExecutionService
+    workflow_compiler: WorkflowCompiler
+    workflow_preflight: WorkflowPreflightService
     devices: DeviceManagementService
     manual_control: ManualControlService
     teleoperation: TeleoperationService

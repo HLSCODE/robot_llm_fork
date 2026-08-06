@@ -1,0 +1,359 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from src.application import (
+    CompositionRevisionConflict,
+    CompositionService,
+    WorkflowCompilationError,
+    WorkflowCompiler,
+    WorkflowIssueCode,
+    WorkflowPreflightIssueCode,
+    WorkflowPreflightService,
+    WorkflowValidator,
+)
+from src.domain.models import (
+    ActionDefinition,
+    ActionType,
+    LoopBlock,
+    SequenceItem,
+    SequenceItemStatus,
+)
+from src.domain.workflow import (
+    CanvasPosition,
+    UnsupportedWorkflowDocumentVersion,
+    WorkflowDocument,
+    WorkflowNode,
+)
+from src.execution import ExecutionSnapshot, ExecutionState
+from src.persistence.storage import JsonCompositionRepository
+
+
+class WorkflowDocumentTests(unittest.TestCase):
+    def test_versioned_round_trip_preserves_layout_and_resets_runtime_state(self) -> None:
+        action = _item("action-item")
+        action.status = SequenceItemStatus.SUCCESS
+        loop_child = _item("loop-child")
+        loop_child.status = SequenceItemStatus.FAILED
+        loop = LoopBlock(
+            uuid="loop-entry",
+            items=[loop_child],
+            repeat_count=3,
+            current_iteration=2,
+        )
+        document = WorkflowDocument(
+            workflow_id="workflow-1",
+            name="Example",
+            revision=4,
+            nodes=(
+                WorkflowNode(
+                    "node-action",
+                    action,
+                    CanvasPosition(12.5, 24.0),
+                ),
+                WorkflowNode(
+                    "node-loop",
+                    loop,
+                    CanvasPosition(12.5, 80.0),
+                ),
+            ),
+            order=("node-loop", "node-action"),
+        )
+
+        restored = WorkflowDocument.from_dict(document.to_dict())
+
+        self.assertEqual(document.workflow_id, restored.workflow_id)
+        self.assertEqual(document.order, restored.order)
+        self.assertEqual(CanvasPosition(12.5, 24.0), restored.nodes[0].position)
+        restored_action = restored.nodes[0].entry
+        restored_loop = restored.nodes[1].entry
+        self.assertIsInstance(restored_action, SequenceItem)
+        self.assertIsInstance(restored_loop, LoopBlock)
+        assert isinstance(restored_action, SequenceItem)
+        assert isinstance(restored_loop, LoopBlock)
+        self.assertIs(SequenceItemStatus.PENDING, restored_action.status)
+        self.assertEqual(0, restored_loop.current_iteration)
+        self.assertIs(SequenceItemStatus.PENDING, restored_loop.items[0].status)
+
+    def test_future_document_version_is_rejected(self) -> None:
+        document = _document((_node("node-1", _item("item-1")),))
+        payload = document.to_dict()
+        payload["schema_version"] = 99
+
+        with self.assertRaises(UnsupportedWorkflowDocumentVersion):
+            WorkflowDocument.from_dict(payload)
+
+
+class WorkflowPersistenceTests(unittest.TestCase):
+    def test_composition_service_owns_revisioned_workflow_persistence(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            service = CompositionService(
+                JsonCompositionRepository(
+                    actions_file=root / "actions.json",
+                    tasks_directory=root / "tasks",
+                )
+            )
+            document = _document((_node("node-1", _item("item-1")),))
+
+            stored_name, stored = service.save_workflow(
+                "demo",
+                document,
+                origin="test",
+                expected_revision=0,
+            )
+
+            self.assertEqual("demo.workflow", stored_name)
+            self.assertEqual(1, stored.revision)
+            self.assertEqual(("demo.workflow",), service.list_workflows())
+            self.assertEqual(stored, service.load_workflow("demo"))
+            with self.assertRaises(CompositionRevisionConflict):
+                service.save_workflow(
+                    "demo",
+                    document,
+                    origin="stale-editor",
+                    expected_revision=0,
+                )
+            self.assertEqual(1, service.load_workflow("demo").revision)
+
+    def test_workflow_draft_can_be_recovered_and_discarded(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            service = CompositionService(
+                JsonCompositionRepository(
+                    actions_file=root / "actions.json",
+                    tasks_directory=root / "tasks",
+                )
+            )
+            document = _document((_node("node-1", _item("item-1")),))
+
+            service.save_workflow_draft(document)
+
+            self.assertEqual(document, service.load_workflow_draft())
+            self.assertTrue(service.discard_workflow_draft())
+            self.assertIsNone(service.load_workflow_draft())
+            self.assertFalse(service.discard_workflow_draft())
+
+
+class WorkflowValidationTests(unittest.TestCase):
+    def test_invalid_order_duplicate_uuid_and_action_parameters_are_reported(self) -> None:
+        first = _item("shared", wait_seconds=0)
+        second = _item("shared")
+        document = WorkflowDocument(
+            workflow_id="workflow-1",
+            name="Invalid",
+            revision=0,
+            nodes=(
+                _node("node-1", first),
+                _node("node-2", second),
+            ),
+            order=("node-1", "node-1", "missing"),
+        )
+
+        result = WorkflowValidator().validate(document)
+
+        self.assertFalse(result.valid)
+        self.assertEqual(
+            {
+                WorkflowIssueCode.DUPLICATE_ENTRY_UUID,
+                WorkflowIssueCode.DUPLICATE_ITEM_UUID,
+                WorkflowIssueCode.INVALID_ACTION,
+                WorkflowIssueCode.ORDER_DUPLICATE,
+                WorkflowIssueCode.ORDER_MISSING_NODE,
+                WorkflowIssueCode.ORDER_UNKNOWN_NODE,
+            },
+            {issue.code for issue in result.issues},
+        )
+
+    def test_loop_expansion_limit_is_checked_without_mutating_document(self) -> None:
+        loop = LoopBlock(
+            uuid="loop-1",
+            items=[_item("child-1"), _item("child-2")],
+            repeat_count=3,
+        )
+        document = _document((_node("loop-node", loop),))
+
+        result = WorkflowValidator(max_expanded_steps=5).validate(document)
+
+        self.assertEqual(6, result.expanded_step_count)
+        self.assertIn(
+            WorkflowIssueCode.EXPANSION_LIMIT,
+            {issue.code for issue in result.issues},
+        )
+        self.assertEqual(3, loop.repeat_count)
+
+
+class WorkflowCompilerTests(unittest.TestCase):
+    def test_compile_uses_document_order_and_builds_runtime_event_mapping(self) -> None:
+        plain = _item("plain-item", wait_seconds=None)
+        loop = LoopBlock(
+            uuid="loop-entry",
+            items=[_item("loop-a"), _item("loop-b")],
+            repeat_count=2,
+        )
+        document = WorkflowDocument(
+            workflow_id="workflow-1",
+            name="Compile",
+            revision=7,
+            nodes=(
+                _node("plain-node", plain),
+                _node("loop-node", loop),
+            ),
+            order=("loop-node", "plain-node"),
+        )
+
+        compiled = WorkflowCompiler().compile(document)
+
+        self.assertEqual(7, compiled.revision)
+        self.assertEqual(("loop-entry", "plain-item"), tuple(
+            entry.uuid for entry in compiled.entries
+        ))
+        self.assertEqual(5, len(compiled.steps))
+        self.assertEqual(
+            ("loop-node", "loop-node", "loop-node", "loop-node", "plain-node"),
+            tuple(step.node_id for step in compiled.steps),
+        )
+        self.assertEqual((1, 1, 2, 2, 0), tuple(
+            step.loop_iteration for step in compiled.steps
+        ))
+        self.assertEqual("loop-node", compiled.node_id_for_loop("loop-entry"))
+        self.assertEqual("plain-node", compiled.node_id_for_step(4))
+        self.assertIsNone(compiled.node_id_for_step(99))
+        compiled_plain = compiled.entries[1]
+        assert isinstance(compiled_plain, SequenceItem)
+        self.assertEqual(1.0, compiled_plain.definition.parameters["wait_seconds"])
+
+    def test_invalid_document_is_not_compiled(self) -> None:
+        document = _document((_node("node-1", _item("item-1", wait_seconds=0)),))
+
+        with self.assertRaises(WorkflowCompilationError) as context:
+            WorkflowCompiler().compile(document)
+
+        self.assertFalse(context.exception.validation.valid)
+
+
+class WorkflowPreflightTests(unittest.TestCase):
+    def test_active_execution_and_device_readiness_are_reported_separately(self) -> None:
+        compiled = WorkflowCompiler().compile(
+            _document((_node("node-1", _item("item-1")),))
+        )
+        execution = _ExecutionProbe(
+            state=ExecutionState.RUNNING,
+            resources=("robot_system", "camera"),
+        )
+        devices = _DeviceProbe(
+            {
+                "robot_system": {"ready": False},
+            }
+        )
+
+        result = WorkflowPreflightService(execution, devices).check(compiled)
+
+        self.assertFalse(result.ready)
+        self.assertEqual(("robot_system", "camera"), result.required_resources)
+        self.assertEqual(
+            {
+                WorkflowPreflightIssueCode.EXECUTION_ACTIVE,
+                WorkflowPreflightIssueCode.DEVICE_NOT_READY,
+                WorkflowPreflightIssueCode.DEVICE_MISSING,
+            },
+            {issue.code for issue in result.issues},
+        )
+
+    def test_policy_failure_is_a_typed_preflight_issue(self) -> None:
+        compiled = WorkflowCompiler().compile(
+            _document((_node("node-1", _item("item-1")),))
+        )
+        execution = _ExecutionProbe(
+            state=ExecutionState.IDLE,
+            error=ValueError("unsupported action policy"),
+        )
+
+        result = WorkflowPreflightService(
+            execution,
+            _DeviceProbe({}),
+        ).check(compiled)
+
+        self.assertEqual((), result.required_resources)
+        self.assertEqual(
+            (WorkflowPreflightIssueCode.POLICY_REJECTED,),
+            tuple(issue.code for issue in result.issues),
+        )
+
+
+class _ExecutionProbe:
+    def __init__(
+        self,
+        *,
+        state: ExecutionState,
+        resources: tuple[str, ...] = (),
+        error: Exception | None = None,
+    ) -> None:
+        self._state = state
+        self._resources = resources
+        self._error = error
+
+    def snapshot(self) -> ExecutionSnapshot:
+        return ExecutionSnapshot(run_id=None, state=self._state)
+
+    def required_resources(self, sequence) -> tuple[str, ...]:
+        if self._error is not None:
+            raise self._error
+        return self._resources
+
+
+class _DeviceProbe:
+    def __init__(self, statuses: dict[str, dict[str, object]]) -> None:
+        self._statuses = statuses
+
+    def status(self) -> dict[str, dict[str, object]]:
+        return self._statuses
+
+
+def _action(
+    action_id: str,
+    *,
+    wait_seconds: float | None = 1.0,
+) -> ActionDefinition:
+    parameters = {} if wait_seconds is None else {"wait_seconds": wait_seconds}
+    return ActionDefinition(
+        id=action_id,
+        name=f"Action {action_id}",
+        type=ActionType.WAIT,
+        parameters=parameters,
+    )
+
+
+def _item(
+    item_uuid: str,
+    *,
+    wait_seconds: float | None = 1.0,
+) -> SequenceItem:
+    return SequenceItem(
+        uuid=item_uuid,
+        definition=_action(item_uuid, wait_seconds=wait_seconds),
+    )
+
+
+def _node(node_id: str, entry) -> WorkflowNode:
+    return WorkflowNode(
+        node_id=node_id,
+        entry=entry,
+        position=CanvasPosition(0.0, 0.0),
+    )
+
+
+def _document(nodes: tuple[WorkflowNode, ...]) -> WorkflowDocument:
+    return WorkflowDocument(
+        workflow_id="workflow-1",
+        name="Workflow",
+        revision=0,
+        nodes=nodes,
+        order=tuple(node.node_id for node in nodes),
+    )
+
+
+if __name__ == "__main__":
+    unittest.main()

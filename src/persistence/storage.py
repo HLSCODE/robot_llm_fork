@@ -9,7 +9,9 @@ from .json_documents import (
     JsonDocumentSchemaError,
     load_collection_document,
     migrate_collection_document,
+    read_json_document,
     write_collection_document,
+    write_json_atomic,
 )
 from ..domain.models import (
     ActionDefinition,
@@ -17,6 +19,7 @@ from ..domain.models import (
     SequenceEntry,
     SequenceItem,
 )
+from ..domain.workflow import WorkflowDocument, WorkflowDocumentError
 
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +33,8 @@ TASK_DOCUMENT = CollectionDocumentSpec(
     collection_key="entries",
     legacy_kind="list",
 )
+WORKFLOW_FILE_SUFFIX = ".workflow"
+WORKFLOW_DRAFT_FILE_NAME = ".workflow-draft"
 
 
 class JsonCompositionRepository:
@@ -108,6 +113,80 @@ class JsonCompositionRepository:
                 sorted(path.name for path in self._tasks_directory.glob("*.task") if path.is_file())
             )
 
+    def list_workflow_names(self) -> tuple[str, ...]:
+        with self._lock:
+            if not self._tasks_directory.is_dir():
+                return ()
+            return tuple(
+                sorted(
+                    path.name
+                    for path in self._tasks_directory.glob(
+                        f"*{WORKFLOW_FILE_SUFFIX}"
+                    )
+                    if path.is_file()
+                )
+            )
+
+    def load_workflow(
+        self,
+        workflow_name: str,
+    ) -> WorkflowDocument | None:
+        path = self._workflow_path(workflow_name)
+        with self._lock:
+            if not path.is_file():
+                return None
+            try:
+                return WorkflowDocument.from_dict(read_json_document(path))
+            except WorkflowDocumentError as exc:
+                raise JsonDocumentSchemaError(
+                    f"{path.name} is not a valid workflow document"
+                ) from exc
+
+    def save_workflow(
+        self,
+        workflow_name: str,
+        document: WorkflowDocument,
+    ) -> str:
+        path = self._workflow_path(workflow_name)
+        with self._lock:
+            write_json_atomic(path, document.to_dict())
+        return path.name
+
+    def delete_workflow(self, workflow_name: str) -> bool:
+        path = self._workflow_path(workflow_name)
+        with self._lock:
+            if not path.is_file():
+                return False
+            path.unlink()
+            return True
+
+    def load_workflow_draft(self) -> WorkflowDocument | None:
+        path = self._workflow_draft_path()
+        with self._lock:
+            if not path.is_file():
+                return None
+            try:
+                return WorkflowDocument.from_dict(read_json_document(path))
+            except WorkflowDocumentError as exc:
+                raise JsonDocumentSchemaError(
+                    f"{path.name} is not a valid workflow draft"
+                ) from exc
+
+    def save_workflow_draft(self, document: WorkflowDocument) -> None:
+        with self._lock:
+            write_json_atomic(
+                self._workflow_draft_path(),
+                document.to_dict(),
+            )
+
+    def delete_workflow_draft(self) -> bool:
+        path = self._workflow_draft_path()
+        with self._lock:
+            if not path.is_file():
+                return False
+            path.unlink()
+            return True
+
     def load_task(
         self,
         task_name: str,
@@ -178,7 +257,25 @@ class JsonCompositionRepository:
             return old_name, new_path.name
 
     def _task_path(self, task_name: str) -> Path:
-        requested_name = str(task_name).strip()
+        requested_name = self._plain_name(task_name, "task")
+        path = self._tasks_directory / requested_name
+        if path.suffix != ".task":
+            path = path.with_suffix(".task")
+        return path
+
+    def _workflow_path(self, workflow_name: str) -> Path:
+        requested_name = self._plain_name(workflow_name, "workflow")
+        path = self._tasks_directory / requested_name
+        if path.suffix != WORKFLOW_FILE_SUFFIX:
+            path = path.with_suffix(WORKFLOW_FILE_SUFFIX)
+        return path
+
+    def _workflow_draft_path(self) -> Path:
+        return self._tasks_directory / WORKFLOW_DRAFT_FILE_NAME
+
+    @staticmethod
+    def _plain_name(value: str, label: str) -> str:
+        requested_name = str(value).strip()
         if (
             not requested_name
             or requested_name in {".", ".."}
@@ -186,8 +283,7 @@ class JsonCompositionRepository:
             or "/" in requested_name
             or "\\" in requested_name
         ):
-            raise ValueError("task name must be a non-empty plain file name")
-        path = self._tasks_directory / requested_name
-        if path.suffix != ".task":
-            path = path.with_suffix(".task")
-        return path
+            raise ValueError(
+                f"{label} name must be a non-empty plain file name"
+            )
+        return requested_name

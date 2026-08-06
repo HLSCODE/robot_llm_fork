@@ -142,6 +142,11 @@ def write_json_atomic(path: Path, payload: Any) -> None:
         raise
 
 
+def read_json_document(path: Path) -> Any:
+    """Read a JSON value and translate parser failures to document errors."""
+    return _read_json(path)
+
+
 def _read_json(path: Path) -> Any:
     try:
         with path.open("r", encoding="utf-8") as file:

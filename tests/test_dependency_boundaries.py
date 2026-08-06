@@ -93,6 +93,41 @@ LEGACY_HARDWARE_PATHS = (
 
 
 class DependencyBoundaryTests(unittest.TestCase):
+    def test_workflow_application_boundary_has_no_parallel_runtime(self):
+        workflow_paths = (
+            PROJECT_ROOT / "src/domain/workflow.py",
+            PROJECT_ROOT / "src/application/workflow_validation.py",
+            PROJECT_ROOT / "src/application/workflow_compiler.py",
+            PROJECT_ROOT / "src/application/workflow_preflight.py",
+        )
+        forbidden_imports = ("src.gui", "src.devices")
+        forbidden_classes = {
+            "WorkflowExecutor",
+            "NodeHandlerRegistry",
+            "BaseNodeHandler",
+        }
+        violations: list[str] = []
+        for path in workflow_paths:
+            module_name = ".".join(
+                path.relative_to(PROJECT_ROOT).with_suffix("").parts
+            )
+            package = module_name.rpartition(".")[0]
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
+            for node in ast.walk(tree):
+                for imported in self._imported_modules(node, package):
+                    if imported.startswith(forbidden_imports):
+                        violations.append(
+                            f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} "
+                            f"imports {imported}"
+                        )
+                if isinstance(node, ast.ClassDef) and node.name in forbidden_classes:
+                    violations.append(
+                        f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} "
+                        f"defines forbidden parallel runtime {node.name}"
+                    )
+
+        self.assertEqual([], violations, "\n".join(violations))
+
     def test_transport_package_does_not_export_semantic_devices(self):
         from src.devices import transports
 

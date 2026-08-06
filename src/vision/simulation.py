@@ -29,13 +29,14 @@ class VisionPipelineFixture:
 
     def capture(
         self,
-        _robot_system: RobotSystem,
-        _camera: DepthCameraSource,
+        robot_system: RobotSystem,
+        camera: DepthCameraSource,
         parameters: dict[str, object],
-        _settings: VisionSettings,
+        settings: VisionSettings,
         log: Callable[[str], None],
         debug_directory: str,
     ) -> VisionPipelineResult:
+        del robot_system, camera, settings
         self.capture_calls.append(dict(parameters))
         self._write_fixture(debug_directory, "capture", parameters)
         log("simulation vision capture completed")
@@ -43,15 +44,16 @@ class VisionPipelineFixture:
 
     def relocalize(
         self,
-        _robot_system: RobotSystem,
-        _camera: CameraSource,
+        robot_system: RobotSystem,
+        camera: CameraSource,
         parameters: dict[str, object],
         execution_context: ExecutionContext,
-        _settings: VisionSettings,
-        _station_storage: VisionStationStorage,
+        settings: VisionSettings,
+        station_storage: VisionStationStorage,
         debug_directory: str,
         log: Callable[[str], None],
     ) -> VisionPipelineResult:
+        del robot_system, camera, settings, station_storage
         self.relocalization_calls.append(dict(parameters))
         station_id = str(parameters.get("station_id") or "simulation-station")
         arm = normalize_arm_name(str(parameters.get("arm") or "left"))

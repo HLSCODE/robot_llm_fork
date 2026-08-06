@@ -129,6 +129,15 @@ class ExecutionManager:
         self._thread: ExecutionWorker | None = None
         self._listener: ExecutionListener | None = None
 
+    def required_resources(
+        self,
+        sequence: Sequence[Any],
+    ) -> tuple[str, ...]:
+        """Resolve submission resources without acquiring them or doing I/O."""
+        if not sequence:
+            raise ValueError("execution sequence must not be empty")
+        return tuple(self._execution_resources(tuple(sequence)))
+
     def submit(
         self,
         sequence: Sequence[Any],
@@ -149,7 +158,7 @@ class ExecutionManager:
                 )
 
             run_id = uuid4().hex
-            resources = self._execution_resources(sequence)
+            resources = self.required_resources(sequence)
             lease = (
                 self._resource_arbiter.acquire(
                     owner_id=f"execution:{run_id}",

@@ -43,6 +43,8 @@ from .services import (
 )
 from .teleoperation import TeleoperationService
 from .task_composer import TaskComposerService
+from .workflow_compiler import WorkflowCompiler
+from .workflow_preflight import WorkflowPreflightService
 
 
 def create_application_services(
@@ -127,6 +129,8 @@ def create_application_services(
         resources,
         safety,
     )
+    workflow_compiler = WorkflowCompiler()
+    workflow_preflight = WorkflowPreflightService(execution, devices)
     data_collection = DataCollectionService(
         camera_access=camera_access,
         devices=devices,
@@ -149,6 +153,8 @@ def create_application_services(
         task_composer=task_composer,
         data_collection=data_collection,
         execution=execution,
+        workflow_compiler=workflow_compiler,
+        workflow_preflight=workflow_preflight,
         devices=devices,
         manual_control=manual_control,
         teleoperation=teleoperation,
