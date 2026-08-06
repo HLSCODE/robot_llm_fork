@@ -139,7 +139,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         )
         self.assertTrue(
             _wait_until(
-                lambda: self.window.workflow_view.sequence_list.topLevelItemCount() == 1
+                lambda: self.window.workflow_view.sequence_list.entry_count() == 1
             )
         )
 

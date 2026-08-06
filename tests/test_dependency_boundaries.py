@@ -93,6 +93,23 @@ LEGACY_HARDWARE_PATHS = (
 
 
 class DependencyBoundaryTests(unittest.TestCase):
+    def test_main_window_does_not_access_workflow_graphics_internals(self):
+        path = PROJECT_ROOT / "src/gui/controllers/main_window.py"
+        source = path.read_text(encoding="utf-8-sig")
+        forbidden_members = (
+            "topLevelItem",
+            "QTreeWidgetItem",
+            "_item_map",
+            "_update_item_display",
+            "_update_loop_display",
+            "_find_item_by_entry",
+        )
+        remaining = [
+            member for member in forbidden_members if member in source
+        ]
+
+        self.assertEqual([], remaining, "\n".join(remaining))
+
     def test_workflow_application_boundary_has_no_parallel_runtime(self):
         workflow_paths = (
             PROJECT_ROOT / "src/domain/workflow.py",

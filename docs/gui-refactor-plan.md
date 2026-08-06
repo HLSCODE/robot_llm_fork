@@ -6,9 +6,10 @@
 > 文档性质：目标架构与实施计划，不代表当前功能已经完成  
 > 最近更新：2026-08-06
 
-> 实施进度：基础批次 D-015～D-017 已完成；纯 WorkflowDocument、版本化
-> `.workflow` 持久化与草稿恢复、结构 Validator、执行 Preflight、Compiler
-> 及稳定节点映射已经落地。下一批进入 D-018/D-019 画布与功能等价集成。
+> 实施进度：D-015～D-019 已完成；纯 WorkflowDocument、版本化 `.workflow`
+> 持久化与草稿恢复、Validator/Preflight/Compiler、稳定节点映射、受约束
+> QGraphics 画布、Loop 容器、Undo/Redo、触控导航和现有功能等价接入已经
+> 落地。下一批进入 D-020/D-021 视觉/可访问性/性能门禁与一次切换清理。
 
 ## 1. 结论
 

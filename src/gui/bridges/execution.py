@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from threading import Lock, Thread
-from typing import Any
 
 from PySide6.QtCore import QObject, Signal
 
 from ...application import ApplicationServices
-from ...domain.models import SequenceItem
+from ...domain.models import SequenceEntry
 from ...devices import StopMode
 from ...execution import (
     ExecutionEvent,
@@ -46,7 +46,7 @@ class ExecutionBridge(QObject):
 
     def execute_sequence_items(
         self,
-        items: list[SequenceItem] | list[Any],
+        items: Sequence[SequenceEntry],
         *,
         origin: str,
     ) -> bool:

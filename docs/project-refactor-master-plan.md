@@ -5,7 +5,7 @@
 > 最近更新：2026-08-06
 >
 > 当前里程碑：M6 — GUI 工作流画布、触控交互与表现层收敛
-> 计划进度：130/139（128 DONE + 2 DROPPED，93.5%）
+> 计划进度：132/139（130 DONE + 2 DROPPED，95.0%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -571,8 +571,8 @@ src/
 | D-015 | P0 | DONE | 冻结 GUI 功能等价清单与架构 ADR，明确受约束画布、Loop 表现、单一执行入口、安全停止语义和直接切换门槛 |
 | D-016 | P1 | DONE | 建立纯 Python WorkflowDocument、Schema 版本、草稿恢复和 revision 冲突保护；复用 ActionDefinition/SequenceItem/LoopBlock，并由 CompositionService 独占版本化 `.workflow` 持久化，现有 `.task` 格式不变 |
 | D-017 | P1 | DONE | 实现结构 Validator、执行 Preflight 与 WorkflowCompiler，将合法文档编译为 SequenceEntry，并建立展开步骤索引/Loop UUID 到节点的稳定映射；应用组合根持有唯一实例，未新增执行器和动作 Handler |
-| D-018 | P1 | TODO | 实现受约束 QGraphics 工作流画布、Loop 容器、自动布局、“+”插入、拖动排序、参数抽屉、Undo/Redo 及鼠标/键盘/触控完整路径 |
-| D-019 | P1 | TODO | 接入任务组合、AI/语音预览、轨迹、相机、日志、设备状态和三类停止控制，并继续将 MainWindow 收敛为窗口壳、页面 Controller 与稳定视图组件 |
+| D-018 | P1 | DONE | 实现受约束 QGraphics 工作流画布、Loop 容器、自动布局、“+”插入、拖动排序、参数摘要面板、Undo/Redo、鼠标/键盘/触控导航及执行期编辑锁定 |
+| D-019 | P1 | DONE | 任务组合、AI/语音预览、轨迹、相机、日志、设备状态和三类停止控制继续复用现有服务；当前序列统一经 Compiler/Preflight/ExecutionBridge 执行，MainWindow 已删除 QTreeWidgetItem 和画布私有绘制/映射依赖 |
 | D-020 | P2 | TODO | 建立 GUI 设计令牌、系统 Palette/高 DPI、图标许可证、可访问性、100/500 节点性能预算和 Qt offscreen 回归矩阵 |
 | D-021 | P1 | TODO | 在功能等价、数据迁移、性能与安全验收通过后一次切换到新编辑器，删除旧列表编辑器和旧路径，不保留双写、双运行或兼容层 |
 
@@ -1244,12 +1244,12 @@ M6 GUI 工作流画布与表现层收敛
 | 2026-08-06 | M5 | D/G | GUI Qt binding 许可证风险收敛 | G-028 → DONE | 删除旧 Qt binding、Qt6/SIP 依赖和全部导入，生产与测试代码直切 PySide6 原生 Signal/Slot；修复普通 Python 回调在 worker 线程注册 reveal timer 导致初始化卡片停在 100% 的问题，结果改由 GUI 线程 QObject receiver 处理；GUI/full extra、uv lock、可选依赖 smoke、README 和项目说明同步更新；新增旧 binding 和启动过渡回归门禁，不保留适配或兼容层 | Compile、Ruff、Mypy（61 files）、Pytest（412 passed + 43 subtests，61.03%）、LLM golden（14/14）、性能回归（7/7）、GUI extra 及 Wheel smoke 全通过 |
 | 2026-08-06 | M6 | D | GUI 工作流画布方案修订与立项 | D-015～D-021 新增为 TODO | 修订 GUI 专项计划：废止平行 WorkflowExecutor/节点 Handler 和首版移除 Loop 的方案；确立纯编辑模型、CompositionService 唯一持久化、Validator/Preflight/Compiler、ExecutionManager 唯一执行链、受约束触控画布、三类停止、安全验收及一次切换路线 | 文档评审；本次仅更新计划文档，未执行代码变更 |
 | 2026-08-06 | M6 | D/A/G | GUI 工作流模型、持久化与编译边界落地 | D-015/D-016/D-017 TODO → DONE；ADR-M-014 Proposed → Accepted | 新增纯 WorkflowDocument 与版本化序列化；CompositionService 独占 `.workflow` 原子保存、revision 冲突和崩溃草稿；Validator 区分结构错误，Compiler 输出规范 SequenceEntry 及步骤/Loop 节点映射，Preflight 无副作用检查运行占用、策略和设备就绪；组合根持有唯一 Compiler/Preflight，未新增执行器或 Handler | Compile、Ruff、Mypy（68 files）、Pytest（423 passed + 43 subtests，61.52%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
+| 2026-08-06 | M6 | D/A/G | 受约束工作流画布与现有功能等价接入 | D-018/D-019 TODO → DONE | 新增轻量 QGraphics 自绘画布、Start/End 表现节点、Loop 容器、自动布局、“+”插入、动作拖放/双击、拖动排序、多选、Undo/Redo、参数摘要、循环次数/展开、缩放和触控滚动；执行期禁用编辑；GUI 当前序列经 Compiler/Preflight 提交原 ExecutionBridge，AI 直接执行事件补建同一节点映射；MainWindow 删除全部旧树图元私有访问，任务组合、日志、设备状态和三类停止控制保持原服务边界 | Compile、Ruff、Mypy（75 files）、Pytest（428 passed + 43 subtests，61.42%）、LLM golden（14/14）、性能回归（7/7）及 Wheel smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 
-1. **D-018/D-019**：先做现有任务与 Loop 的只读画布和执行状态映射，再整批完成编辑、触控、任务组合、AI/语音、日志、设备状态、安全控制及 MainWindow 收敛。
-2. **D-020/D-021**：完成设计令牌、DPI/可访问性、100/500 节点性能、offscreen 回归和数据备份迁移后，一次切换并删除旧列表编辑器。
-3. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-4. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
-6. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+1. **D-020/D-021**：完成设计令牌、DPI/可访问性、100/500 节点性能、offscreen 回归和数据备份迁移后，一次切换并删除旧列表编辑器。
+2. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+3. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+5. 完成 simulation smoke test 后执行逐设备真实硬件验收。

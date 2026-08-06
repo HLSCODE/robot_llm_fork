@@ -56,6 +56,12 @@ class ActionListWidget(QListWidget):
                 color: #1e40af;
             }
         """)
+        self.itemDoubleClicked.connect(self._emit_selected_action)
+
+    def _emit_selected_action(self, item: QListWidgetItem) -> None:
+        action = item.data(Qt.ItemDataRole.UserRole)
+        if isinstance(action, ActionDefinition):
+            self.action_selected.emit(action)
 
     def startDrag(self, supportedActions):
         current_item = self.currentItem()
@@ -801,6 +807,8 @@ class ControlPanel(QWidget):
     clear_clicked = Signal()
     save_clicked = Signal()
     load_clicked = Signal()
+    undo_clicked = Signal()
+    redo_clicked = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -811,20 +819,42 @@ class ControlPanel(QWidget):
         layout.setSpacing(5)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Sequence edit row
+        # History and order row
         edit_row1 = QHBoxLayout()
         edit_row1.setSpacing(4)
-        for label, slot in [("↑ 上移", self.move_up_clicked.emit),
-                            ("↓ 下移", self.move_down_clicked.emit),
-                            ("✏ 修改", self.edit_clicked.emit),
-                            ("🔁 循环", self.repeat_clicked.emit),
-                            ("🗑 删除", self.delete_clicked.emit),
-                            ("✕ 清空", self.clear_clicked.emit)]:
+        self.undo_btn = QPushButton("↶ 撤销")
+        self.redo_btn = QPushButton("↷ 重做")
+        for button, slot in (
+            (self.undo_btn, self.undo_clicked.emit),
+            (self.redo_btn, self.redo_clicked.emit),
+        ):
+            button.setMinimumHeight(32)
+            button.setEnabled(False)
+            button.clicked.connect(slot)
+            edit_row1.addWidget(button)
+        for label, slot in [
+            ("↑ 上移", self.move_up_clicked.emit),
+            ("↓ 下移", self.move_down_clicked.emit),
+        ]:
             btn = QPushButton(label)
-            btn.setMinimumHeight(30)
+            btn.setMinimumHeight(32)
             btn.clicked.connect(slot)
             edit_row1.addWidget(btn)
         layout.addLayout(edit_row1)
+
+        edit_row2 = QHBoxLayout()
+        edit_row2.setSpacing(4)
+        for label, slot in [
+            ("✏ 修改", self.edit_clicked.emit),
+            ("🔁 循环", self.repeat_clicked.emit),
+            ("🗑 删除", self.delete_clicked.emit),
+            ("✕ 清空", self.clear_clicked.emit),
+        ]:
+            btn = QPushButton(label)
+            btn.setMinimumHeight(32)
+            btn.clicked.connect(slot)
+            edit_row2.addWidget(btn)
+        layout.addLayout(edit_row2)
 
         # Save/Load row
         save_load_row = QHBoxLayout()
@@ -915,6 +945,14 @@ class ControlPanel(QWidget):
         layout.addLayout(safety_row)
 
         self.setLayout(layout)
+
+    def set_undo_redo_enabled(
+        self,
+        can_undo: bool,
+        can_redo: bool,
+    ) -> None:
+        self.undo_btn.setEnabled(can_undo)
+        self.redo_btn.setEnabled(can_redo)
 
 
 class LogWidget(QTextEdit):

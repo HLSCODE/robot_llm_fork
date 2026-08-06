@@ -18,10 +18,16 @@ from PySide6.QtWidgets import (
 )
 
 from ...application import ApplicationServices
-from ...domain.models import ActionDefinition, ActionType
+from ...domain.models import (
+    ActionDefinition,
+    ActionType,
+    LoopBlock,
+    SequenceItem,
+)
 from ...devices import StopMode
 from .ai_assistant import AIAssistantWidget
-from .components import ActionListWidget, ControlPanel, SequenceListWidget
+from .components import ActionListWidget, ControlPanel
+from .workflow_canvas import WorkflowCanvasWidget
 
 
 class TaskLibraryListWidget(QListWidget):
@@ -153,6 +159,7 @@ class ActionLibraryView(QWidget):
     delete_requested = Signal()
     camera_test_requested = Signal()
     task_add_requested = Signal()
+    action_insert_requested = Signal(object)
 
     def __init__(self, services: ApplicationServices, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -171,6 +178,10 @@ class ActionLibraryView(QWidget):
             ActionType.VISION_CAPTURE: ActionListWidget(),
             ActionType.TRAJECTORY: ActionListWidget(),
         }
+        for action_list in self.action_lists.values():
+            action_list.action_selected.connect(
+                self.action_insert_requested.emit
+            )
         for action_type, title in (
             (ActionType.MOVE, "移动类"),
             (ActionType.MANIPULATE, "执行类"),
@@ -245,6 +256,7 @@ class WorkflowEditorView(QWidget):
     composer_add_requested = Signal()
     composer_execute_requested = Signal()
     composer_save_requested = Signal()
+    insert_action_at_requested = Signal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -259,9 +271,22 @@ class WorkflowEditorView(QWidget):
         action_layout = QVBoxLayout(action_page)
         action_layout.setContentsMargins(2, 2, 2, 2)
         action_layout.setSpacing(2)
-        self.sequence_list = SequenceListWidget()
+        self.sequence_list = WorkflowCanvasWidget()
         self.sequence_list.setMinimumHeight(140)
         action_layout.addWidget(self.sequence_list, stretch=2)
+        self.parameter_panel = NodeParameterPanel()
+        self.parameter_panel.edit_requested.connect(self.edit_requested)
+        self.parameter_panel.unwrap_requested.connect(
+            self.sequence_list.unwrap_selected_loop
+        )
+        self.sequence_list.selection_summary_changed.connect(
+            self.parameter_panel.render_entry
+        )
+        self.sequence_list.edit_requested.connect(self.edit_requested)
+        self.sequence_list.insert_action_requested.connect(
+            self.insert_action_at_requested
+        )
+        action_layout.addWidget(self.parameter_panel)
         self.control_panel = ControlPanel()
         self._connect_control_panel()
         action_layout.addWidget(self.control_panel)
@@ -289,6 +314,20 @@ class WorkflowEditorView(QWidget):
         controls.quick_stop_clicked.connect(lambda: self.safety_stop_requested.emit(StopMode.QUICK))
         controls.emergency_stop_clicked.connect(
             lambda: self.safety_stop_requested.emit(StopMode.EMERGENCY)
+        )
+        controls.undo_clicked.connect(self.sequence_list.undo)
+        controls.redo_clicked.connect(self.sequence_list.redo)
+        self.sequence_list.can_undo_changed.connect(
+            lambda enabled: controls.set_undo_redo_enabled(
+                enabled,
+                controls.redo_btn.isEnabled(),
+            )
+        )
+        self.sequence_list.can_redo_changed.connect(
+            lambda enabled: controls.set_undo_redo_enabled(
+                controls.undo_btn.isEnabled(),
+                enabled,
+            )
         )
 
     def _create_composer(self) -> QWidget:
@@ -386,3 +425,61 @@ class WorkflowEditorView(QWidget):
         self.composer_pause_button.setText(text)
         self.composer_pause_button.setEnabled(can_toggle)
         self.composer_stop_button.setEnabled(can_cancel)
+
+
+class NodeParameterPanel(QGroupBox):
+    """Compact touch-friendly parameter summary for the selected node."""
+
+    edit_requested = Signal()
+    unwrap_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__("节点参数", parent)
+        self.setVisible(False)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(8)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        self.summary.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.summary, stretch=1)
+        self.edit_button = QPushButton("编辑参数")
+        self.edit_button.setMinimumSize(96, 44)
+        self.edit_button.clicked.connect(self.edit_requested)
+        layout.addWidget(self.edit_button)
+        self.unwrap_button = QPushButton("展开循环")
+        self.unwrap_button.setMinimumSize(96, 44)
+        self.unwrap_button.clicked.connect(self.unwrap_requested)
+        self.unwrap_button.setVisible(False)
+        layout.addWidget(self.unwrap_button)
+
+    def render_entry(self, entry: object | None) -> None:
+        if entry is None:
+            self.setVisible(False)
+            return
+        if isinstance(entry, SequenceItem):
+            parameters = "，".join(
+                f"{name}={value}"
+                for name, value in entry.definition.parameters.items()
+            )
+            self.summary.setText(
+                f"{entry.definition.name}\n{parameters or '无参数'}"
+            )
+            self.edit_button.setVisible(True)
+            self.edit_button.setText("编辑参数")
+            self.unwrap_button.setVisible(False)
+            self.setVisible(True)
+            return
+        if isinstance(entry, LoopBlock):
+            self.summary.setText(
+                f"循环 ×{entry.repeat_count} · "
+                f"{len(entry.items)} 个动作 · {entry.total_steps} 步"
+            )
+            self.edit_button.setText("修改次数")
+            self.edit_button.setVisible(True)
+            self.unwrap_button.setVisible(True)
+            self.setVisible(True)
+            return
+        self.setVisible(False)

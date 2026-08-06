@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QSplitter,
-    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,6 +26,7 @@ from ...application import (
     CompositionChangeType,
     CompositionEvent,
     CompositionRevisionConflict,
+    WorkflowCompilationError,
 )
 from ...domain.models import (
     ActionDefinition,
@@ -36,6 +36,7 @@ from ...domain.models import (
     SequenceItem,
     SequenceItemStatus,
 )
+from ...domain.workflow import WorkflowDocument
 from ...devices import StopMode
 from ...devices.runtime.ids import (
     BODY_AXIS,
@@ -43,7 +44,7 @@ from ...devices.runtime.ids import (
     PIPETTE,
     ROBOT_SYSTEM,
 )
-from ..views.components import LogWidget, SequenceListWidget
+from ..views.components import LogWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceStatusView
 from ..views.dialogs import ActionConfigDialog
@@ -369,6 +370,9 @@ class MainWindow(QMainWindow):
         library.delete_requested.connect(self.delete_action)
         library.camera_test_requested.connect(self.test_camera)
         library.task_add_requested.connect(self.add_task_to_composer)
+        library.action_insert_requested.connect(
+            self._insert_action_from_library
+        )
 
         workflow = self.workflow_view
         workflow.start_requested.connect(self.start_execution)
@@ -392,6 +396,9 @@ class MainWindow(QMainWindow):
         workflow.composer_add_requested.connect(self.add_task_to_composer)
         workflow.composer_execute_requested.connect(self.execute_composed_task)
         workflow.composer_save_requested.connect(self.save_composed_task)
+        workflow.insert_action_at_requested.connect(
+            self._choose_action_for_insertion
+        )
         workflow.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
         workflow.task_composer_list.action_dropped.connect(self._add_action_to_composer)
         workflow.task_composer_list.order_changed.connect(self._move_composed_task_rows)
@@ -1163,6 +1170,8 @@ class MainWindow(QMainWindow):
             self._sequence_revision = (
                 self._services.composition.sequence_revision
             )
+            if event.origin == "gui-canvas":
+                return
             self._render_sequence(
                 self._services.composition.sequence_entries()
             )
@@ -1171,7 +1180,7 @@ class MainWindow(QMainWindow):
         try:
             self._services.composition.replace_sequence(
                 self.workflow_view.sequence_list.get_entries(),
-                origin="gui",
+                origin="gui-canvas",
                 expected_revision=self._sequence_revision,
             )
         except CompositionRevisionConflict:
@@ -1194,16 +1203,47 @@ class MainWindow(QMainWindow):
         self,
         entries: Sequence[SequenceEntry],
     ) -> None:
-        self.workflow_view.sequence_list.blockSignals(True)
-        try:
-            self.workflow_view.sequence_list.clear_sequence()
-            for entry in entries:
-                if isinstance(entry, LoopBlock):
-                    self.workflow_view.sequence_list.add_loop_block(entry)
-                elif isinstance(entry, SequenceItem):
-                    self.workflow_view.sequence_list.add_sequence_item(entry)
-        finally:
-            self.workflow_view.sequence_list.blockSignals(False)
+        self.workflow_view.sequence_list.render_entries(entries)
+
+    def _insert_action_from_library(
+        self,
+        action: ActionDefinition,
+    ) -> None:
+        current_row = self.workflow_view.sequence_list.current_entry_row()
+        insert_at = (
+            self.workflow_view.sequence_list.entry_count()
+            if current_row < 0
+            else current_row + 1
+        )
+        self.workflow_view.sequence_list.insert_action(action, insert_at)
+
+    def _choose_action_for_insertion(self, index: int) -> None:
+        actions = [
+            action
+            for action_group in self.actions.values()
+            for action in action_group
+        ]
+        if not actions:
+            self._notifications.warning("动作库为空，请先创建动作")
+            return
+        labels = [
+            f"{action.name} · {action.type.value}"
+            for action in actions
+        ]
+        selected, accepted = QInputDialog.getItem(
+            self,
+            "插入动作",
+            "选择动作:",
+            labels,
+            0,
+            False,
+        )
+        if not accepted:
+            return
+        self.workflow_view.sequence_list.insert_action(
+            actions[labels.index(selected)],
+            index,
+        )
 
     def _refresh_execute_merged_list(self):
         self.action_library_view.action_list(ActionType.MANIPULATE).clear()
@@ -1642,10 +1682,6 @@ class MainWindow(QMainWindow):
         )
         if filename:
             task_name = Path(filename).name
-            self._services.composition.replace_sequence(
-                entries,
-                origin="gui",
-            )
             stored_name = (
                 self._services.composition.save_current_task(
                     task_name,
@@ -1674,14 +1710,16 @@ class MainWindow(QMainWindow):
             self._notifications.info(f"任务已加载: {task_name}")
 
     def start_execution(self):
-        sequence = list(
-            self._services.composition.flattened_sequence()
-        )
-        if not sequence:
+        entries = self._services.composition.sequence_entries()
+        if not entries:
             self._notifications.warning("请先添加动作到序列中")
             return
 
-        self._start_sequence_execution(sequence, display_list=self.workflow_view.sequence_list, label="动作编排序列")
+        self._start_sequence_execution(
+            entries,
+            display_list=self.workflow_view.sequence_list,
+            label="动作编排序列",
+        )
 
     def execute_composed_task(self):
         sequence = self._build_composed_task_sequence()
@@ -1715,56 +1753,59 @@ class MainWindow(QMainWindow):
 
         self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务")
 
-    def _start_sequence_execution(self, sequence: list[SequenceItem], display_list=None, label: str = "序列"):
+    def _start_sequence_execution(
+        self,
+        sequence: Sequence[SequenceEntry],
+        display_list=None,
+        label: str = "序列",
+    ):
         if self._execution_view_model.snapshot().active:
             self._notifications.warning("当前已有序列正在执行")
             return
+
+        if display_list is not None:
+            try:
+                document = WorkflowDocument.from_entries(
+                    workflow_id="current-sequence",
+                    name="当前任务",
+                    revision=self._sequence_revision,
+                    entries=sequence,
+                )
+                compiled = self._services.workflow_compiler.compile(document)
+            except WorkflowCompilationError as exc:
+                self._notifications.warning(
+                    f"工作流校验失败：{exc}",
+                    modal=False,
+                )
+                return
+            preflight = self._services.workflow_preflight.check(compiled)
+            if not preflight.ready:
+                self._notifications.warning(
+                    "执行前检查未通过：\n"
+                    + "\n".join(issue.message for issue in preflight.issues),
+                    modal=False,
+                )
+                return
+            entries = list(compiled.entries)
+            display_list.begin_execution(compiled)
+        else:
+            entries = [
+                entry
+                for entry in sequence
+                if isinstance(entry, (SequenceItem, LoopBlock))
+            ]
 
         self._notifications.info(f"开始执行{label}...")
         self._execution_display_list = display_list
         self._set_trajectory_buttons_enabled(False)
         self._pause_pose_refresh()
 
-        # 获取执行条目：如果有 display_list（即从序列列表执行），使用树中的 entries
-        # 否则（如组合任务执行），使用传入的扁平 sequence
-        if display_list is not None:
-            entries = list(
-                self._services.composition.sequence_entries()
-            )
-        else:
-            entries = list(sequence)  # 扁平列表，无 LoopBlock
-
-        # 重置所有条目的状态
-        def _reset_entry(entry):
-            if isinstance(entry, LoopBlock):
-                entry.current_iteration = 0
-                for child in entry.items:
-                    child.status = SequenceItemStatus.PENDING
-            elif isinstance(entry, SequenceItem):
-                entry.status = SequenceItemStatus.PENDING
-
-        for entry in entries:
-            _reset_entry(entry)
-
-        # 刷新 UI（仅当有 display_list 时）
-        if display_list is not None:
-            for i in range(self.workflow_view.sequence_list.topLevelItemCount()):
-                tree_item = self.workflow_view.sequence_list.topLevelItem(i)
-                entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
-                if isinstance(entry, LoopBlock):
-                    self.workflow_view.sequence_list._update_loop_display(tree_item, entry)
-                    for j in range(tree_item.childCount()):
-                        child_tree = tree_item.child(j)
-                        child_entry = child_tree.data(0, Qt.ItemDataRole.UserRole)
-                        if isinstance(child_entry, SequenceItem):
-                            self.workflow_view.sequence_list._update_item_display(child_tree, child_entry, j)
-                elif isinstance(entry, SequenceItem):
-                    self.workflow_view.sequence_list._update_item_display(tree_item, entry, i)
-
         if not self._execution_bridge.execute_sequence_items(
             entries,
             origin="gui",
         ):
+            if display_list is not None:
+                display_list.finish_execution()
             self._set_trajectory_buttons_enabled(True)
             self._resume_pose_refresh()
             self._notifications.warning("提交执行失败")
@@ -1804,6 +1845,9 @@ class MainWindow(QMainWindow):
         else:
             self._notifications.warning(message, modal=False)
         self._render_execution_state()
+        display_list = getattr(self, "_execution_display_list", None)
+        if display_list is not None:
+            display_list.finish_execution()
         self._execution_display_list = self.workflow_view.sequence_list
         self._set_trajectory_buttons_enabled(True)
         self._resume_pose_refresh()
@@ -1820,126 +1864,116 @@ class MainWindow(QMainWindow):
     def on_step_started(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
         if display_list is not None:
-            display_list.update_item_status(item)
-            tree_item = display_list._find_item_by_entry(item)
-            if tree_item is not None:
-                display_list.scroll_to_entry(tree_item)
+            self._ensure_canvas_execution_mapping(display_list)
+            display_list.update_execution_step(index, item)
 
     def on_step_completed(self, index: int, item: SequenceItem):
         display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
         if display_list is not None:
-            display_list.update_item_status(item)
+            self._ensure_canvas_execution_mapping(display_list)
+            display_list.update_execution_step(index, item)
 
     def on_step_failed(self, index: int, item: SequenceItem, error_msg: str):
         display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
         if display_list is not None:
-            display_list.update_item_status(item)
+            self._ensure_canvas_execution_mapping(display_list)
+            display_list.update_execution_step(index, item)
         self._notifications.error(
             f"步骤 {index + 1} 失败:\n{error_msg}",
             title="执行失败",
         )
 
     def on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int):
-        """更新循环块执行进度显示"""
-        tree_item = self.workflow_view.sequence_list._item_map.get(loop_uuid)
-        if tree_item is not None:
-            entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(entry, LoopBlock):
-                entry.current_iteration = current_iteration
-                self.workflow_view.sequence_list._update_loop_display(tree_item, entry)
+        del total_iterations
+        display_list = getattr(self, "_execution_display_list", None)
+        if display_list is not None:
+            self._ensure_canvas_execution_mapping(display_list)
+            display_list.update_loop_progress(loop_uuid, current_iteration)
+
+    def _ensure_canvas_execution_mapping(self, display_list) -> None:
+        if display_list.execution_mapping_active:
+            return
+        entries = self._services.composition.sequence_entries()
+        if not entries:
+            return
+        document = WorkflowDocument.from_entries(
+            workflow_id="current-sequence",
+            name="当前任务",
+            revision=self._sequence_revision,
+            entries=entries,
+        )
+        try:
+            compiled = self._services.workflow_compiler.compile(document)
+        except WorkflowCompilationError:
+            return
+        display_list.begin_execution(compiled)
 
     def move_item_up(self):
-        current_row = self.workflow_view.sequence_list.current_entry_row()
-        if current_row > 0:
-            item = self.workflow_view.sequence_list.take_entry(current_row)
-            self.workflow_view.sequence_list.insert_entry(current_row - 1, item)
-            self.refresh_sequence_numbers(selected_row=current_row - 1)
-            self._publish_current_sequence()
+        self.workflow_view.sequence_list.move_selected(-1)
 
     def move_item_down(self):
-        current_row = self.workflow_view.sequence_list.current_entry_row()
-        if current_row < self.workflow_view.sequence_list.entry_count() - 1:
-            item = self.workflow_view.sequence_list.take_entry(current_row)
-            self.workflow_view.sequence_list.insert_entry(current_row + 1, item)
-            self.refresh_sequence_numbers(selected_row=current_row + 1)
-            self._publish_current_sequence()
+        self.workflow_view.sequence_list.move_selected(1)
 
     def delete_item(self):
-        current_row = self.workflow_view.sequence_list.current_entry_row()
-        if current_row >= 0:
-            self.workflow_view.sequence_list.take_entry(current_row)
-            next_row = min(current_row, self.workflow_view.sequence_list.entry_count() - 1)
-            self.refresh_sequence_numbers(selected_row=next_row)
-            self._publish_current_sequence()
+        if not self.workflow_view.sequence_list.delete_selected():
+            self._notifications.warning("请先选择要删除的节点")
 
     def repeat_sequence_selection(self):
         """将选中的连续动作包裹为 LoopBlock 循环容器"""
-        rows = self._selected_contiguous_rows(self.workflow_view.sequence_list, "请选择要循环的连续动作")
-        if rows is None:
+        rows = self.workflow_view.sequence_list.selected_entry_rows()
+        if not rows:
+            self._notifications.warning("请选择要循环的连续动作")
             return
+        if rows != list(range(rows[0], rows[-1] + 1)):
+            self._notifications.warning("只能循环连续选中的项目")
+            return
+
+        selected_loop = self.workflow_view.sequence_list.current_loop_block()
+        initial_count = (
+            selected_loop.repeat_count
+            if len(rows) == 1 and selected_loop is not None
+            else 2
+        )
 
         repeat_count, ok = QInputDialog.getInt(
             self,
             "循环执行",
             "循环次数 n:",
+            initial_count,
             2,
-            1,
             999,
             1,
         )
         if not ok or repeat_count <= 1:
             return
 
-        # 收集选中的 SequenceItem（从树节点中取出，展开 LoopBlock 的子项）
-        selected_items: list[SequenceItem] = []
-        for row in rows:
-            tree_item = self.workflow_view.sequence_list.topLevelItem(row)
-            entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(entry, SequenceItem):
-                selected_items.append(entry)
-            elif isinstance(entry, LoopBlock):
-                # 把循环块内的子动作展开收集（保持内容不丢失）
-                for child in entry.items:
-                    selected_items.append(SequenceItem.from_dict(child.to_dict()))
-
-        if not selected_items:
-            self._notifications.warning("未找到可循环的动作")
+        if len(rows) == 1 and selected_loop is not None:
+            self.workflow_view.sequence_list.update_current_loop_count(
+                repeat_count
+            )
+            self._notifications.info(
+                f"循环次数已更新为 {repeat_count}"
+            )
             return
 
-        # 从后往前移除（避免索引偏移）
-        for row in reversed(rows):
-            self.workflow_view.sequence_list.take_entry(row)
-
-        # 创建 LoopBlock 并插入
-        loop = LoopBlock.from_sequence_items(selected_items, repeat_count)
-        insert_at = rows[0]
-        tree_item = QTreeWidgetItem()
-        self.workflow_view.sequence_list._update_loop_display(tree_item, loop)
-        tree_item.setData(0, Qt.ItemDataRole.UserRole, loop)
-        self.workflow_view.sequence_list._register_item(tree_item, loop)
-        for i, child_item in enumerate(loop.items):
-            child_tree = QTreeWidgetItem()
-            self.workflow_view.sequence_list._update_item_display(child_tree, child_item, i)
-            child_tree.setData(0, Qt.ItemDataRole.UserRole, child_item)
-            self.workflow_view.sequence_list._register_item(child_tree, child_item)
-            tree_item.addChild(child_tree)
-        tree_item.setExpanded(True)
-        self.workflow_view.sequence_list.insertTopLevelItem(insert_at, tree_item)
-        self.workflow_view.sequence_list.setCurrentItem(tree_item)
-
-        total_steps = len(selected_items) * repeat_count
+        try:
+            total_steps = self.workflow_view.sequence_list.wrap_selected_in_loop(
+                repeat_count
+            )
+        except ValueError as exc:
+            self._notifications.warning(str(exc))
+            return
         self._notifications.info(
-            f"已创建循环块: {len(selected_items)}个动作 × {repeat_count}次 = {total_steps}步"
+            f"已创建循环块，共 {total_steps} 步"
         )
-        self._publish_current_sequence()
 
     def _selected_contiguous_rows(
         self,
-        list_widget: SequenceListWidget,
+        list_widget,
         empty_message: str,
     ) -> list[int] | None:
         rows = sorted(
-            index.row() for index in list_widget.selected_entry_indexes()
+            index.row() for index in list_widget.selectedIndexes()
         )
         if not rows:
             self._notifications.warning(empty_message)
@@ -1949,24 +1983,26 @@ class MainWindow(QMainWindow):
             return None
         return rows
 
-    def _clone_sequence_item(self, item: SequenceItem) -> SequenceItem:
-        return SequenceItem(
-            uuid=str(uuid4()),
-            definition=item.definition,
-            status=SequenceItemStatus.PENDING,
-        )
-
     def edit_sequence_item(self):
-        current_tree_item = self.workflow_view.sequence_list.currentItem()
-        if current_tree_item is None:
-            self._notifications.warning("请先选择要修改的序列项")
-            return
-
-        seq_item = current_tree_item.data(0, Qt.ItemDataRole.UserRole)
-        if not isinstance(seq_item, SequenceItem):
-            self._notifications.warning(
-                "请选择一个动作项（不能修改循环块本身）"
+        seq_item = self.workflow_view.sequence_list.current_sequence_item()
+        if seq_item is None:
+            loop = self.workflow_view.sequence_list.current_loop_block()
+            if loop is None:
+                self._notifications.warning("请先选择要修改的序列项")
+                return
+            repeat_count, accepted = QInputDialog.getInt(
+                self,
+                "修改循环次数",
+                "循环次数:",
+                loop.repeat_count,
+                2,
+                999,
+                1,
             )
+            if accepted:
+                self.workflow_view.sequence_list.update_current_loop_count(
+                    repeat_count
+                )
             return
 
         action_def = seq_item.definition
@@ -1984,9 +2020,9 @@ class MainWindow(QMainWindow):
             return
 
         updated_definition = dialog.get_action_definition()
-        seq_item.definition = updated_definition
-        self.workflow_view.sequence_list.update_item_status(seq_item)
-        self._publish_current_sequence()
+        self.workflow_view.sequence_list.update_current_action(
+            updated_definition
+        )
         self._notifications.info(f"已更新序列动作: {updated_definition.name}")
 
     def add_ai_sequence(
@@ -2053,20 +2089,8 @@ class MainWindow(QMainWindow):
             self._notifications.info("序列已清空")
 
     def refresh_sequence_numbers(self, selected_row: int | None = None):
-        """刷新树中所有顶层项的显示序号"""
-        for i in range(self.workflow_view.sequence_list.topLevelItemCount()):
-            tree_item = self.workflow_view.sequence_list.topLevelItem(i)
-            entry = tree_item.data(0, Qt.ItemDataRole.UserRole)
-            if isinstance(entry, SequenceItem):
-                self.workflow_view.sequence_list._update_item_display(tree_item, entry, i)
-            elif isinstance(entry, LoopBlock):
-                self.workflow_view.sequence_list._update_loop_display(tree_item, entry)
-                for j in range(tree_item.childCount()):
-                    child_tree = tree_item.child(j)
-                    child_entry = child_tree.data(0, Qt.ItemDataRole.UserRole)
-                    if isinstance(child_entry, SequenceItem):
-                        self.workflow_view.sequence_list._update_item_display(child_tree, child_entry, j)
-        if selected_row is not None and 0 <= selected_row < self.workflow_view.sequence_list.topLevelItemCount():
+        """Keep the selected canvas node visible after external operations."""
+        if selected_row is not None:
             self.workflow_view.sequence_list.set_current_entry_row(selected_row)
 
     def test_camera(self):

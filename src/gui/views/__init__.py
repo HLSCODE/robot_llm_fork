@@ -4,6 +4,7 @@ from .device import DeviceControlView, DeviceStatusView
 from .dialogs import ActionConfigDialog, ActionPreviewDialog, SchemaActionForm
 from .startup import StartupProgressCard
 from .workflow import ActionLibraryView, WorkflowEditorView
+from .workflow_canvas import WorkflowCanvasWidget
 
 __all__ = [
     "ActionConfigDialog",
@@ -14,4 +15,5 @@ __all__ = [
     "SchemaActionForm",
     "StartupProgressCard",
     "WorkflowEditorView",
+    "WorkflowCanvasWidget",
 ]
