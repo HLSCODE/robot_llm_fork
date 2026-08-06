@@ -7,7 +7,6 @@ from typing import Any
 from PySide6.QtCore import QMimeData, QSize, Qt, Signal
 from PySide6.QtGui import QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import (
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -17,13 +16,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...application import ApplicationServices
 from ...domain.models import (
     ActionDefinition,
     ActionType,
 )
 from ...devices import StopMode
-from .ai_assistant import AIAssistantWidget
 from .action_list import ActionListWidget
 from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
@@ -148,10 +145,9 @@ class ActionLibraryView(QWidget):
     edit_requested = Signal()
     delete_requested = Signal()
     camera_test_requested = Signal()
-    task_add_requested = Signal()
     action_insert_requested = Signal(object)
 
-    def __init__(self, services: ApplicationServices, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
@@ -180,20 +176,8 @@ class ActionLibraryView(QWidget):
             (ActionType.VISION_CAPTURE, "视觉类"),
         ):
             self.action_tabs.addTab(self.action_lists[action_type], title)
-        self.ai_assistant = AIAssistantWidget(services)
-        self.action_tabs.addTab(self.ai_assistant, "🤖 AI助手")
         self.action_tabs.addTab(self.action_lists[ActionType.TRAJECTORY], "轨迹类")
-        layout.addWidget(self.action_tabs, stretch=2)
-
-        task_group = QGroupBox("已保存任务")
-        task_layout = QVBoxLayout(task_group)
-        task_layout.setContentsMargins(6, 6, 6, 6)
-        task_layout.setSpacing(4)
-        self.task_library_list = TaskLibraryListWidget()
-        self.task_library_list.setMinimumHeight(140)
-        self.task_library_list.itemDoubleClicked.connect(lambda _: self.task_add_requested.emit())
-        task_layout.addWidget(self.task_library_list)
-        layout.addWidget(task_group, stretch=1)
+        layout.addWidget(self.action_tabs, stretch=1)
 
         buttons = QHBoxLayout()
         buttons.setSpacing(4)
@@ -206,12 +190,13 @@ class ActionLibraryView(QWidget):
             button.setMinimumHeight(32)
             button.clicked.connect(lambda _checked=False, target=signal: target.emit())
             buttons.addWidget(button)
-        self.camera_test_button = QPushButton("📷 测试相机")
+        layout.addLayout(buttons)
+
+        self.camera_test_button = QPushButton("测试相机")
         self.camera_test_button.setMinimumHeight(32)
         set_theme_role(self.camera_test_button, "success")
         self.camera_test_button.clicked.connect(lambda: self.camera_test_requested.emit())
-        buttons.addWidget(self.camera_test_button)
-        layout.addLayout(buttons)
+        layout.addWidget(self.camera_test_button)
 
     def action_list(self, action_type: ActionType) -> ActionListWidget:
         return self.action_lists[action_type]
@@ -219,6 +204,112 @@ class ActionLibraryView(QWidget):
     def set_camera_test_running(self, running: bool) -> None:
         self.camera_test_button.setEnabled(not running)
         self.camera_test_button.setText("测试中..." if running else "测试相机")
+
+
+class TaskLibraryView(QWidget):
+    task_add_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        title = QLabel("已保存任务")
+        title_font = title.font()
+        title_font.setBold(True)
+        title.setFont(title_font)
+        layout.addWidget(title)
+        self.task_library_list = TaskLibraryListWidget()
+        self.task_library_list.setMinimumHeight(140)
+        self.task_library_list.itemDoubleClicked.connect(lambda _: self.task_add_requested.emit())
+        layout.addWidget(self.task_library_list, stretch=1)
+        add_button = QPushButton("添加到任务组合")
+        add_button.setMinimumHeight(32)
+        add_button.clicked.connect(lambda: self.task_add_requested.emit())
+        set_theme_role(add_button, "primary")
+        layout.addWidget(add_button)
+
+
+class TaskComposerView(QWidget):
+    remove_requested = Signal()
+    move_up_requested = Signal()
+    move_down_requested = Signal()
+    repeat_requested = Signal()
+    clear_requested = Signal()
+    refresh_requested = Signal()
+    add_task_requested = Signal()
+    add_action_requested = Signal()
+    execute_requested = Signal()
+    save_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        title = QLabel("任务组合")
+        title_font = title.font()
+        title_font.setBold(True)
+        title.setFont(title_font)
+        self.task_composer_list = TaskComposerListWidget()
+        self.task_composer_list.setMinimumHeight(140)
+        layout.addWidget(title)
+        layout.addWidget(self.task_composer_list, stretch=1)
+
+        self._add_button_row(
+            layout,
+            (
+                ("↑ 上移", self.move_up_requested),
+                ("↓ 下移", self.move_down_requested),
+                ("循环", self.repeat_requested),
+            ),
+            28,
+        )
+        self._add_button_row(
+            layout,
+            (
+                ("移除", self.remove_requested),
+                ("清空", self.clear_requested),
+                ("刷新任务", self.refresh_requested),
+            ),
+            28,
+        )
+        self._add_button_row(
+            layout,
+            (
+                ("添加任务", self.add_task_requested),
+                ("添加动作", self.add_action_requested),
+            ),
+            30,
+        )
+        actions = self._add_button_row(
+            layout,
+            (
+                ("执行当前组合", self.execute_requested),
+                ("保存组合", self.save_requested),
+            ),
+            32,
+        )
+        set_theme_role(actions[0], "success")
+        set_theme_role(actions[1], "primary")
+
+    @staticmethod
+    def _add_button_row(
+        layout: QVBoxLayout,
+        specs: Iterable[tuple[str, Any]],
+        height: int,
+    ) -> list[QPushButton]:
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        buttons = []
+        for text, signal in specs:
+            button = QPushButton(text)
+            button.setMinimumHeight(height)
+            button.clicked.connect(lambda _checked=False, target=signal: target.emit())
+            row.addWidget(button)
+            buttons.append(button)
+        layout.addLayout(row)
+        return buttons
 
 
 class WorkflowEditorView(QWidget):
@@ -231,15 +322,6 @@ class WorkflowEditorView(QWidget):
     edit_requested = Signal()
     repeat_requested = Signal()
     delete_requested = Signal()
-    composer_remove_requested = Signal()
-    composer_move_up_requested = Signal()
-    composer_move_down_requested = Signal()
-    composer_repeat_requested = Signal()
-    composer_clear_requested = Signal()
-    composer_refresh_requested = Signal()
-    composer_add_requested = Signal()
-    composer_execute_requested = Signal()
-    composer_save_requested = Signal()
     insert_action_at_requested = Signal(int)
     insert_action_in_loop_requested = Signal(str, int)
 
@@ -248,17 +330,9 @@ class WorkflowEditorView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
-        tabs = QTabWidget()
-        tabs.setTabPosition(QTabWidget.TabPosition.North)
-        tabs.setMovable(False)
-
-        action_page = QWidget()
-        action_layout = QVBoxLayout(action_page)
-        action_layout.setContentsMargins(2, 2, 2, 2)
-        action_layout.setSpacing(2)
         self.sequence_list = WorkflowCanvasWidget()
         self.sequence_list.setMinimumHeight(140)
-        action_layout.addWidget(self.sequence_list, stretch=2)
+        layout.addWidget(self.sequence_list, stretch=1)
         self.sequence_list.edit_requested.connect(self.edit_requested)
         self.sequence_list.insert_action_requested.connect(
             self.insert_action_at_requested.emit
@@ -271,11 +345,7 @@ class WorkflowEditorView(QWidget):
         )
         self.control_panel = ControlPanel()
         self._connect_control_panel()
-        action_layout.addWidget(self.control_panel)
-
-        tabs.addTab(action_page, "动作编排")
-        tabs.addTab(self._create_composer(), "任务组合")
-        layout.addWidget(tabs, stretch=1)
+        layout.addWidget(self.control_panel)
 
     def _connect_control_panel(self) -> None:
         controls = self.control_panel
@@ -309,92 +379,7 @@ class WorkflowEditorView(QWidget):
             )
         )
 
-    def _create_composer(self) -> QWidget:
-        page = QWidget()
-        page_layout = QVBoxLayout(page)
-        page_layout.setContentsMargins(2, 2, 2, 2)
-        page_layout.setSpacing(2)
-        panel = QGroupBox("任务组合器")
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
-        title = QLabel("组合计划")
-        title_font = title.font()
-        title_font.setBold(True)
-        title.setFont(title_font)
-        self.task_composer_list = TaskComposerListWidget()
-        self.task_composer_list.setMinimumHeight(140)
-        layout.addWidget(title)
-        layout.addWidget(self.task_composer_list, stretch=1)
-
-        self._add_button_row(
-            layout,
-            (
-                ("↑ 上移", self.composer_move_up_requested),
-                ("↓ 下移", self.composer_move_down_requested),
-                ("🔁 循环", self.composer_repeat_requested),
-                ("🗑 移除", self.composer_remove_requested),
-                ("✕ 清空", self.composer_clear_requested),
-            ),
-            28,
-        )
-        self._add_button_row(
-            layout,
-            (
-                ("🔄 刷新", self.composer_refresh_requested),
-                ("＋ 添加", self.composer_add_requested),
-            ),
-            28,
-        )
-        execute = self._add_button_row(
-            layout,
-            (
-                ("▶ 执行当前组合", self.composer_execute_requested),
-                ("⏸ 暂停", self.pause_requested),
-            ),
-            32,
-        )
-        set_theme_role(execute[0], "success")
-        self.composer_pause_button = execute[1]
-        set_theme_role(self.composer_pause_button, "warning")
-        stop_save = self._add_button_row(
-            layout,
-            (
-                ("⏹ 停止任务", self.stop_requested),
-                ("💾 保存组合", self.composer_save_requested),
-            ),
-            32,
-        )
-        self.composer_stop_button = stop_save[0]
-        self.composer_stop_button.setAccessibleName("停止任务")
-        self.composer_stop_button.setToolTip("请求当前任务在可中断点停止；不会触发设备硬件急停")
-        set_theme_role(self.composer_stop_button, "danger")
-        set_theme_role(stop_save[1], "primary")
-        page_layout.addWidget(panel, stretch=1)
-        return page
-
-    @staticmethod
-    def _add_button_row(
-        layout: QVBoxLayout,
-        specs: Iterable[tuple[str, Any]],
-        height: int,
-    ) -> list[QPushButton]:
-        row = QHBoxLayout()
-        row.setSpacing(4)
-        buttons = []
-        for text, signal in specs:
-            button = QPushButton(text)
-            button.setMinimumHeight(height)
-            button.clicked.connect(lambda _checked=False, target=signal: target.emit())
-            row.addWidget(button)
-            buttons.append(button)
-        layout.addLayout(row)
-        return buttons
-
     def render_execution_controls(self, text: str, can_toggle: bool, can_cancel: bool) -> None:
         self.control_panel.pause_btn.setText(text)
         self.control_panel.pause_btn.setEnabled(can_toggle)
         self.control_panel.stop_btn.setEnabled(can_cancel)
-        self.composer_pause_button.setText(text)
-        self.composer_pause_button.setEnabled(can_toggle)
-        self.composer_stop_button.setEnabled(can_cancel)

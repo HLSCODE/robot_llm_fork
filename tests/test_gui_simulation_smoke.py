@@ -106,12 +106,12 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertTrue(self.services.devices.is_ready(ROBOT_SYSTEM))
         self.assertTrue(self.services.devices.is_ready(BODY_AXIS))
         self.assertTrue(
-            self.window.action_library_view.ai_assistant.simulation_checkbox.isChecked()
+            self.window.ai_assistant_view.simulation_checkbox.isChecked()
         )
         self.assertFalse(
-            self.window.action_library_view.ai_assistant.simulation_checkbox.isEnabled()
+            self.window.ai_assistant_view.simulation_checkbox.isEnabled()
         )
-        assistant = self.window.action_library_view.ai_assistant
+        assistant = self.window.ai_assistant_view
         self.assertIs(assistant._ai_controller._llm_registry, self.services.llm)
         self.assertIs(assistant._voice_controller.llm_registry, self.services.llm)
         self.assertIsNotNone(self.window.workflow_view.sequence_list)
@@ -167,11 +167,24 @@ class GuiSimulationSmokeTests(unittest.TestCase):
 
     def test_workbench_keeps_canvas_and_safety_commands_available(self) -> None:
         workbench = self.window.workbench_view
-        resource_button = workbench.activity_bar.buttons["resources"]
+        self.assertEqual(
+            {"tasks", "actions", "assistant", "composer"},
+            set(workbench.activity_bar.buttons),
+        )
+        workbench.activity_bar.buttons["composer"].click()
+        QApplication.processEvents()
+        self.assertEqual("composer", workbench.active_side_page)
+        self.assertTrue(self.window.task_composer_view.isVisible())
+
+        resource_button = workbench.activity_bar.buttons["tasks"]
 
         resource_button.click()
         QApplication.processEvents()
 
+        self.assertEqual("tasks", workbench.active_side_page)
+        self.assertTrue(self.window.task_library_view.isVisible())
+        resource_button.click()
+        QApplication.processEvents()
         self.assertFalse(workbench.side_stack.isVisible())
         self.assertTrue(self.window.workflow_view.sequence_list.isVisible())
         controls = self.window.workflow_view.control_panel
@@ -283,7 +296,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.window._add_action_to_composer(first, 0)
         self.window._add_action_to_composer(second, 1)
 
-        self.window.workflow_view.task_composer_list.order_changed.emit(0, 1)
+        self.window.task_composer_view.task_composer_list.order_changed.emit(0, 1)
 
         entries = self.services.task_composer.entries()
         self.assertEqual(
@@ -291,9 +304,22 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             [entry.action.id for entry in entries],
         )
         self.assertTrue(
-            self.window.workflow_view.task_composer_list.item(0).data(
+            self.window.task_composer_view.task_composer_list.item(0).data(
                 Qt.ItemDataRole.UserRole
             )
+        )
+
+        third = ActionDefinition(
+            id="composer-third",
+            name="Composer third",
+            type=ActionType.WAIT,
+            parameters={"wait_seconds": 1.0},
+        )
+        with patch.object(self.window, "_choose_action", return_value=third):
+            self.window.task_composer_view.add_action_requested.emit()
+        self.assertEqual(
+            "composer-third",
+            self.services.task_composer.entries()[-1].action.id,
         )
 
     def test_ai_widget_uses_narrow_signals_without_main_window_reference(self) -> None:
@@ -306,8 +332,8 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             )
         )
 
-        self.assertFalse(hasattr(self.window.action_library_view.ai_assistant, "_main_window"))
-        self.window.action_library_view.ai_assistant.sequence_visualization_requested.emit(
+        self.assertFalse(hasattr(self.window.ai_assistant_view, "_main_window"))
+        self.window.ai_assistant_view.sequence_visualization_requested.emit(
             [item],
             True,
             0,
@@ -379,7 +405,7 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                         is GuiStartupState.WAITING_FOR_SPEECH
                     )
                 )
-                window.action_library_view.ai_assistant.speech_runtime_startup_finished.emit(
+                window.ai_assistant_view.speech_runtime_startup_finished.emit(
                     True
                 )
                 self.assertTrue(
@@ -478,7 +504,7 @@ class GuiSpeechStartupSmokeTests(unittest.TestCase):
                         is GuiStartupState.WAITING_FOR_SPEECH
                     )
                 )
-                window.action_library_view.ai_assistant.speech_runtime_startup_finished.emit(
+                window.ai_assistant_view.speech_runtime_startup_finished.emit(
                     True
                 )
                 self.assertTrue(_wait_until(initialization_started.is_set))

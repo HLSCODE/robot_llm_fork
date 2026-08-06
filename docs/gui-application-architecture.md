@@ -16,7 +16,8 @@ MainWindow / Dialogs
 WorkbenchView
   | Activity Bar / Side Bar / Editor / Bottom Panel / Status Bar
   |
-ActionLibraryView / WorkflowEditorView / DeviceHealthView / DevicePoseView / DeviceControlView
+TaskLibraryView / ActionLibraryView / AIAssistantWidget / TaskComposerView
+WorkflowEditorView / DeviceHealthView / DevicePoseView / DeviceControlView
         | commands       ^ immutable view state / Qt signals
         v                |
 TaskComposerService   DeviceViewModel   ExecutionViewModel
@@ -48,11 +49,15 @@ GuiNotificationCenter: operational message -> history/log/status/modal
 - `WorkbenchView` 只拥有 Activity Bar、Side Bar、Editor、Bottom Panel、Status Bar
   的布局状态；Side Bar 二次点击收起，Bottom Panel 非模态切换，两个方向均使用
   视觉 1 px、实际命中 7 px 的可拖动分隔条。
-- `ActionLibraryView` 当前负责动作分类页、已保存任务列表和 AI Assistant 的视图组合，
-  仅通过 create/edit/delete/camera-test/task-add 意图信号与窗口协作。
-- `WorkflowEditorView` 负责动作序列、任务组合器及其控制区；拖放事件在组件内解析，
-  执行按钮状态通过单一 `render_execution_controls()` 接口更新；两行紧凑命令区保持
-  停止任务、快速停止和设备急停常驻可见。
+- `TaskLibraryView` 只展示 `CompositionService` 的已保存任务投影，并发出添加到组合的
+  意图；`ActionLibraryView` 只展示按类型分类的基础动作并发出增删改、插入和相机测试意图。
+- `AIAssistantWidget` 是独立资源页，继续复用唯一 LLM/CommandRuntime，不嵌入动作库，
+  也不反向持有 MainWindow。
+- `TaskComposerView` 只渲染 `TaskComposerService` 草稿并发出添加、排序、循环、移除、
+  清空、执行和保存意图；列表拖放只解析输入，不作为业务状态源。
+- `WorkflowEditorView` 只负责动作序列画布及其控制区；执行按钮状态通过单一
+  `render_execution_controls()` 接口更新；两行紧凑命令区保持停止任务、快速停止和
+  设备急停常驻可见，不再包含任务组合 Tab 或第二套暂停/停止控件。
 - `DeviceHealthView` 负责设备状态灯，只接收 `DeviceViewState`；`DevicePoseView`
   负责机械臂位姿、外部定位、刷新和复制意图。两者作为独立 Bottom Panel 页面按需显示。
 - `DeviceControlView` 负责夹爪、继电器和移液枪手动操作入口，只发出参数化意图信号，

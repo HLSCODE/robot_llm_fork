@@ -2,11 +2,11 @@
 
 > 适用场景：竖屏、窄窗口、触控操作、机器人动作编排与任务执行  
 > 推荐技术栈：Python + PySide6 + QGraphicsView/QGraphicsScene  
-> 文档版本：V1.8
+> 文档版本：V1.9
 > 文档性质：目标架构与实施计划，不代表当前功能已经完成  
 > 最近更新：2026-08-06
 
-> 实施进度：D-015～D-022、D-024 已完成；D-023、D-025 待实施。纯 WorkflowDocument、版本化 `.workflow`
+> 实施进度：D-015～D-024 已完成；D-025 待实施。纯 WorkflowDocument、版本化 `.workflow`
 > 持久化与草稿恢复、Validator/Preflight/Compiler、稳定节点映射、受约束
 > QGraphics 画布、Loop 容器、Undo/Redo、触控导航和现有功能等价接入已经
 > 落地。系统 Palette、集中设计令牌、44 px 触控目标、可访问性、Qt
@@ -26,8 +26,12 @@
 
 > M7 第一批已完成：唯一 Workbench 壳层、Activity Bar、固定细线可拖动 Side Bar、
 > 非模态 Bottom Panel、Status Bar 与紧凑常驻安全命令已经切换；旧箭头抽屉和
-> 设备/位姿/基础控制/日志常驻布局已删除。资源页拆分、SVG 和布局持久化继续由
-> D-023、D-025 完成。
+> 设备/位姿/基础控制/日志常驻布局已删除。
+>
+> M7 第二批已完成：已保存任务、分类基础动作、AI 助手和任务组合已经拆为四个
+> 独立 Side Bar 资源页，Activity Bar 可直接切换或收起当前页；任务组合器已从
+> 中央 Editor 移出，中央区域只保留工作流画布与唯一执行控制区。SVG 和布局
+> 持久化继续由 D-025 完成。
 
 ## 1. 结论
 
@@ -458,8 +462,8 @@ src/
 
 ### 阶段 9：资源页与底部面板拆分
 
-- 将 `ActionLibraryView` 拆为任务、动作、AI 和任务组合资源页，保持原意图信号及 Application Service 边界。
-- 将设备状态/位姿、日志和基础控制迁入 Bottom Panel，并建立 Status Bar 摘要投影。
+- 已将 `ActionLibraryView` 拆为任务、动作、AI 和任务组合资源页，保持原意图信号及 Application Service 边界。
+- 已将设备状态/位姿、日志和基础控制迁入 Bottom Panel，并建立 Status Bar 摘要投影。
 - 保存/加载、编辑和执行命令统一进入菜单、工具栏、快捷键或节点上下文菜单，删除重复的大按钮入口。
 
 ### 阶段 10：SVG、布局持久化与一次切换

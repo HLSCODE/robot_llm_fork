@@ -42,6 +42,7 @@ from ...devices.runtime.ids import (
     ROBOT_SYSTEM,
 )
 from ..views.log_widget import LogWidget
+from ..views.ai_assistant import AIAssistantWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceHealthView, DevicePoseView
 from ..views.dialogs import ActionConfigDialog
@@ -55,7 +56,12 @@ from .startup import (
     HardwareStartupStepResult,
 )
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
-from ..views.workflow import ActionLibraryView, WorkflowEditorView
+from ..views.workflow import (
+    ActionLibraryView,
+    TaskComposerView,
+    TaskLibraryView,
+    WorkflowEditorView,
+)
 from ..views.workbench import WorkbenchPage, WorkbenchView
 from ..theme import ThemeController, ThemeMode
 
@@ -132,7 +138,7 @@ class MainWindow(QMainWindow):
         )
         self._render_execution_state()
 
-        ai_assistant = self.action_library_view.ai_assistant
+        ai_assistant = self.ai_assistant_view
         if ai_assistant is not None:
             ai_assistant.speech_runtime_startup_finished.connect(
                 self._on_speech_runtime_startup_finished
@@ -169,7 +175,7 @@ class MainWindow(QMainWindow):
 
         try:
             speech_start_requested = False
-            ai_assistant = self.action_library_view.ai_assistant
+            ai_assistant = self.ai_assistant_view
             if ai_assistant is not None:
                 speech_start_requested = (
                     ai_assistant.start_voice_speech_runtime_if_configured()
@@ -249,7 +255,7 @@ class MainWindow(QMainWindow):
         """Continue hardware startup if ASR/KWS first-load is still downloading."""
         if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
             return
-        self.action_library_view.ai_assistant.notify_speech_startup_wait_timeout()
+        self.ai_assistant_view.notify_speech_startup_wait_timeout()
         self.startup_progress_changed.emit(
             44,
             "语音模型继续后台加载，开始初始化设备...",
@@ -325,7 +331,10 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(540, 800)
         self.resize(900, 960)
 
-        self.action_library_view = ActionLibraryView(self._services)
+        self.task_library_view = TaskLibraryView()
+        self.action_library_view = ActionLibraryView()
+        self.ai_assistant_view = AIAssistantWidget(self._services)
+        self.task_composer_view = TaskComposerView()
         self.workflow_view = WorkflowEditorView()
         self.device_status_view = DeviceHealthView()
         self.device_pose_view = DevicePoseView()
@@ -334,10 +343,28 @@ class MainWindow(QMainWindow):
         self.workbench_view = WorkbenchView(
             side_pages=(
                 WorkbenchPage(
-                    key="resources",
-                    title="资源",
-                    symbol="▦",
+                    key="tasks",
+                    title="已保存任务",
+                    symbol="T",
+                    widget=self.task_library_view,
+                ),
+                WorkbenchPage(
+                    key="actions",
+                    title="基础动作",
+                    symbol="A",
                     widget=self.action_library_view,
+                ),
+                WorkbenchPage(
+                    key="assistant",
+                    title="AI 助手",
+                    symbol="AI",
+                    widget=self.ai_assistant_view,
+                ),
+                WorkbenchPage(
+                    key="composer",
+                    title="任务组合",
+                    symbol="C",
+                    widget=self.task_composer_view,
                 ),
             ),
             editor=self.workflow_view,
@@ -362,9 +389,11 @@ class MainWindow(QMainWindow):
         library.edit_requested.connect(self.edit_action)
         library.delete_requested.connect(self.delete_action)
         library.camera_test_requested.connect(self.test_camera)
-        library.task_add_requested.connect(self.add_task_to_composer)
         library.action_insert_requested.connect(
             self._insert_action_from_library
+        )
+        self.task_library_view.task_add_requested.connect(
+            self.add_task_to_composer
         )
 
         workflow = self.workflow_view
@@ -377,24 +406,26 @@ class MainWindow(QMainWindow):
         workflow.edit_requested.connect(self.edit_sequence_item)
         workflow.repeat_requested.connect(self.repeat_sequence_selection)
         workflow.delete_requested.connect(self.delete_item)
-        workflow.composer_remove_requested.connect(self.remove_task_from_composer)
-        workflow.composer_move_up_requested.connect(self.move_composed_task_up)
-        workflow.composer_move_down_requested.connect(self.move_composed_task_down)
-        workflow.composer_repeat_requested.connect(self.repeat_composer_selection)
-        workflow.composer_clear_requested.connect(self.clear_task_composer)
-        workflow.composer_refresh_requested.connect(self.refresh_task_library)
-        workflow.composer_add_requested.connect(self.add_task_to_composer)
-        workflow.composer_execute_requested.connect(self.execute_composed_task)
-        workflow.composer_save_requested.connect(self.save_composed_task)
         workflow.insert_action_at_requested.connect(
             self._choose_action_for_insertion
         )
         workflow.insert_action_in_loop_requested.connect(
             self._choose_action_for_loop_insertion
         )
-        workflow.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
-        workflow.task_composer_list.action_dropped.connect(self._add_action_to_composer)
-        workflow.task_composer_list.order_changed.connect(self._move_composed_task_rows)
+        composer = self.task_composer_view
+        composer.remove_requested.connect(self.remove_task_from_composer)
+        composer.move_up_requested.connect(self.move_composed_task_up)
+        composer.move_down_requested.connect(self.move_composed_task_down)
+        composer.repeat_requested.connect(self.repeat_composer_selection)
+        composer.clear_requested.connect(self.clear_task_composer)
+        composer.refresh_requested.connect(self.refresh_task_library)
+        composer.add_task_requested.connect(self.choose_task_for_composer)
+        composer.add_action_requested.connect(self.choose_action_for_composer)
+        composer.execute_requested.connect(self.execute_composed_task)
+        composer.save_requested.connect(self.save_composed_task)
+        composer.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
+        composer.task_composer_list.action_dropped.connect(self._add_action_to_composer)
+        composer.task_composer_list.order_changed.connect(self._move_composed_task_rows)
 
         self.device_pose_view.refresh_requested.connect(self.refresh_arm_poses)
         self.device_pose_view.copy_pose_requested.connect(self.copy_robot_pose)
@@ -975,7 +1006,7 @@ class MainWindow(QMainWindow):
             2: ActionType.INSPECT,
             3: ActionType.CHANGE_GUN,
             4: ActionType.VISION_CAPTURE,
-            6: ActionType.TRAJECTORY
+            5: ActionType.TRAJECTORY
         }
         action_type = action_type_map.get(current_tab)
         if action_type is None:
@@ -1188,7 +1219,7 @@ class MainWindow(QMainWindow):
             0: ActionType.MOVE,  # 移动类 Tab，需要进一步选择
             2: ActionType.INSPECT,
             3: ActionType.CHANGE_GUN,
-            6: ActionType.TRAJECTORY
+            5: ActionType.TRAJECTORY
         }
         if current_tab == 1:
             options = ["执行器动作", "等待"]
@@ -1246,15 +1277,12 @@ class MainWindow(QMainWindow):
             2: self.action_library_view.action_list(ActionType.INSPECT),
             3: self.action_library_view.action_list(ActionType.CHANGE_GUN),
             4: self.action_library_view.action_list(ActionType.VISION_CAPTURE),
-            6: self.action_library_view.action_list(ActionType.TRAJECTORY)
+            5: self.action_library_view.action_list(ActionType.TRAJECTORY)
         }
         return tab_list_map.get(current_tab)
 
     def refresh_task_library(self):
-        if not hasattr(self, "task_library_list"):
-            return
-
-        self.action_library_view.task_library_list.clear()
+        self.task_library_view.task_library_list.clear()
         for summary in self._services.composition.list_tasks():
             task_name = summary.name
             step_count = summary.step_count
@@ -1264,7 +1292,7 @@ class MainWindow(QMainWindow):
             item.setIcon(self._create_task_list_icon())
             item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖到组合计划中")
             item.setData(Qt.ItemDataRole.UserRole, task_name)
-            self.action_library_view.task_library_list.addItem(item)
+            self.task_library_view.task_library_list.addItem(item)
 
     def _create_task_list_icon(self) -> QIcon:
         from PySide6.QtGui import QFont, QPainter, QPixmap
@@ -1287,13 +1315,46 @@ class MainWindow(QMainWindow):
         return QIcon(pixmap)
 
     def add_task_to_composer(self):
-        current_item = self.action_library_view.task_library_list.currentItem()
+        current_item = self.task_library_view.task_library_list.currentItem()
         if current_item is None:
             self._notifications.warning("请先选择一个已保存任务")
             return
 
         task_name = current_item.data(Qt.ItemDataRole.UserRole)
-        self._add_task_name_to_composer(task_name, self.workflow_view.task_composer_list.count())
+        self._add_task_name_to_composer(
+            task_name,
+            self.task_composer_view.task_composer_list.count(),
+        )
+
+    def choose_task_for_composer(self) -> None:
+        task_names = [
+            summary.name
+            for summary in self._services.composition.list_tasks()
+        ]
+        if not task_names:
+            self._notifications.warning("已保存任务为空")
+            return
+        task_name, accepted = QInputDialog.getItem(
+            self,
+            "添加任务",
+            "选择已保存任务:",
+            task_names,
+            0,
+            False,
+        )
+        if accepted and task_name:
+            self._add_task_name_to_composer(
+                task_name,
+                self.task_composer_view.task_composer_list.count(),
+            )
+
+    def choose_action_for_composer(self) -> None:
+        action = self._choose_action("添加动作到任务组合")
+        if action is not None:
+            self._add_action_to_composer(
+                action,
+                self.task_composer_view.task_composer_list.count(),
+            )
 
     def _add_task_name_to_composer(self, task_name: str, insert_row: int | None = None):
         self._services.task_composer.add_task(task_name, index=insert_row)
@@ -1311,7 +1372,7 @@ class MainWindow(QMainWindow):
             self._notifications.info(f"已加入动作组合: {action.name}")
 
     def remove_task_from_composer(self):
-        row = self.workflow_view.task_composer_list.currentRow()
+        row = self.task_composer_view.task_composer_list.currentRow()
         if row >= 0:
             self._services.task_composer.remove(row)
             self._refresh_task_composer_display()
@@ -1323,24 +1384,29 @@ class MainWindow(QMainWindow):
         self._move_composed_task(1)
 
     def _move_composed_task(self, offset: int):
-        current_row = self.workflow_view.task_composer_list.currentRow()
+        composer_list = self.task_composer_view.task_composer_list
+        current_row = composer_list.currentRow()
         target_row = current_row + offset
-        if current_row < 0 or target_row < 0 or target_row >= self.workflow_view.task_composer_list.count():
+        if current_row < 0 or target_row < 0 or target_row >= composer_list.count():
             return
 
         self._services.task_composer.move(current_row, target_row)
         self._refresh_task_composer_display()
-        self.workflow_view.task_composer_list.setCurrentRow(target_row)
+        composer_list.setCurrentRow(target_row)
 
     def _move_composed_task_rows(self, source_row: int, target_row: int) -> None:
         if source_row == target_row:
             return
         self._services.task_composer.move(source_row, target_row)
         self._refresh_task_composer_display()
-        self.workflow_view.task_composer_list.setCurrentRow(target_row)
+        self.task_composer_view.task_composer_list.setCurrentRow(target_row)
 
     def repeat_composer_selection(self):
-        rows = self._selected_contiguous_rows(self.workflow_view.task_composer_list, "请选择要循环的连续任务或动作")
+        composer_list = self.task_composer_view.task_composer_list
+        rows = self._selected_contiguous_rows(
+            composer_list,
+            "请选择要循环的连续任务或动作",
+        )
         if rows is None:
             return
 
@@ -1362,7 +1428,7 @@ class MainWindow(QMainWindow):
         self._services.task_composer.repeat(start_row, end_row, repeat_count)
         self._refresh_task_composer_display()
         for row in range(start_row, start_row + block_length * repeat_count):
-            self.workflow_view.task_composer_list.item(row).setSelected(True)
+            composer_list.item(row).setSelected(True)
         self._notifications.info(f"组合块已设置为循环 {repeat_count} 次")
 
     def clear_task_composer(self):
@@ -1415,7 +1481,8 @@ class MainWindow(QMainWindow):
         return list(self._services.task_composer.build_sequence())
 
     def _refresh_task_composer_display(self):
-        self.workflow_view.task_composer_list.clear()
+        composer_list = self.task_composer_view.task_composer_list
+        composer_list.clear()
         for entry in self._services.task_composer.entries():
             item = QListWidgetItem()
             if isinstance(entry, ComposedAction):
@@ -1424,7 +1491,7 @@ class MainWindow(QMainWindow):
                 item.setText(f"{action.name} (动作)")
                 item.setIcon(self._create_action_card_icon(action))
                 item.setToolTip(f"{action.name}\n类型: {action.type.value}\n拖动可调整顺序")
-                self.workflow_view.task_composer_list.addItem(item)
+                composer_list.addItem(item)
                 continue
 
             if not isinstance(entry, ComposedTask):
@@ -1435,7 +1502,7 @@ class MainWindow(QMainWindow):
             item.setText(f"{task_name} ({step_count} 步)")
             item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
             item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖动可调整顺序")
-            self.workflow_view.task_composer_list.addItem(item)
+            composer_list.addItem(item)
 
     def _task_step_count(self, task_name: str) -> int:
         return self._services.task_composer.step_count(ComposedTask(task_name))
@@ -2141,7 +2208,7 @@ class MainWindow(QMainWindow):
             camera_thread.requestInterruption()
         if self._hardware_startup_worker is not None:
             self._hardware_startup_worker.request_stop()
-        self.action_library_view.ai_assistant.prepare_shutdown()
+        self.ai_assistant_view.prepare_shutdown()
         self._composition_bridge.close()
         self._startup_lifecycle.close()
         event.accept()
@@ -2166,4 +2233,4 @@ class MainWindow(QMainWindow):
                     "相机测试线程未在 2 秒内退出，将由设备关闭流程继续清理",
                     modal=False,
                 )
-        self.action_library_view.ai_assistant.shutdown()
+        self.ai_assistant_view.shutdown()
