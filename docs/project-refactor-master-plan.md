@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-06
 >
-> 当前里程碑：M6 — GUI 工作流画布、触控交互与表现层收敛
-> 计划进度：134/139（132 DONE + 2 DROPPED，96.4%）
+> 当前里程碑：M7 — GUI 工作台信息架构与空间收敛
+> 计划进度：134/143（132 DONE + 2 DROPPED，93.7%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -540,6 +540,10 @@ src/
   新建 `WorkflowExecutor`/节点 Handler、首版移除循环及 Qt/领域模型混合等方案已废止，
   统一改为复用 `CompositionService`、规范 `SequenceEntry`、`ExecutionBridge`、
   `ExecutionManager` 和唯一 `ActionHandlerRegistry`。
+- M6 已完成受约束画布与旧编辑器切换，但当前主窗口仍把设备状态/位姿、动作与任务库、
+  执行按钮、基础控制和日志同时常驻，竖屏下画布被压缩；`ActionLibraryView` 同时组合
+  动作分类、任务和 AI，资源导航层级不清。下一阶段只重组 GUI 工作台壳层，不改动
+  Application Service、DeviceRuntime、ExecutionManager 或现有领域模型。
 
 ### 9.2 目标
 
@@ -549,6 +553,10 @@ src/
 - 动作表单由统一 action schema 驱动。
 - AI、语音、手工控制共享同一状态源。
 - 启动和关闭流程可观测、有超时、可取消。
+- 主窗口采用 Top Menu、Activity Bar、Side Bar、Editor、Bottom Panel 和 Status Bar
+  的工作台信息架构，使画布成为默认主区域。
+- 资源、持续状态与操作命令分层展示；低频详情按需展开，关键故障与安全停止始终可见。
+- 统一 SVG/Qt Resource 图标、布局偏好持久化和深浅主题状态，不以 Emoji 作为主导航体系。
 
 ### 9.3 工作项
 
@@ -575,6 +583,10 @@ src/
 | D-019 | P1 | DONE | 任务组合、AI/语音预览、轨迹、相机、日志、设备状态和三类停止控制继续复用现有服务；当前序列统一经 Compiler/Preflight/ExecutionBridge 执行，MainWindow 已删除 QTreeWidgetItem 和画布私有绘制/映射依赖 |
 | D-020 | P2 | DONE | GUI 视觉/交互令牌集中定义，提供 `system/light/dark` 三种应用级统一主题和“视图 → 主题”即时切换；中性颜色、字体、画布、表单、菜单、状态和禁用态共享单一 Palette/QSS，支持高 DPI；关键按钮使用 44 px 触控目标和 accessibleName/Description；建立浅色/深色、360×640/720×1280/1280×720 offscreen 矩阵及 100/500 节点版本化性能预算；视觉资产许可证清单已记录 |
 | D-021 | P1 | DONE | 新画布已作为唯一编辑器运行；原 QTreeWidget SequenceListWidget 与 components 聚合模块直接删除，动作库、控制面板、日志拆为单责视图文件；现有 `.task` 无 GUI 私有格式而无需迁移，`.workflow` 的版本化迁移/备份由 D-016 负责；不保留双写、双运行、转发或兼容层 |
+| D-022 | P1 | TODO | 建立唯一 Workbench 壳层：顶部菜单、固定 Activity Bar、可调整 Side Bar、中央 Editor、可调整 Bottom Panel 和 Status Bar；左侧图标负责切换/二次点击收起资源页，删除旧箭头抽屉和纵向堆叠主布局，不保留双壳层 |
+| D-023 | P1 | TODO | 将 `ActionLibraryView` 拆为已保存任务、分类基础动作、AI 助手和任务组合独立资源页；基础动作在页内分类，复用现有意图信号、CompositionService 与 AI 边界，不增加 GUI 业务状态源 |
+| D-024 | P0 | TODO | 将设备详情/位姿、日志和基础控制迁入非模态 Bottom Panel，由 Status Bar 展示同源摘要；开始、暂停/恢复、停止任务、快速停止和设备急停形成常驻命令条，任何 Side/Bottom Panel 状态下均不得隐藏关键故障和三类停止 |
+| D-025 | P2 | TODO | 建立可追踪许可证的单色 SVG + Qt Resource 图标体系；支持 system/light/dark、高 DPI、键盘/读屏状态；版本化持久化 Side Bar/Bottom Panel 的当前页、尺寸和可见性，并对损坏值提供恢复默认布局 |
 
 ### 9.4 完成标准
 
@@ -587,6 +599,10 @@ src/
 - 工作流只经 Compiler 转为规范 SequenceEntry，再提交唯一 ExecutionManager。
 - Loop、任务组合、AI 导入及三类停止控制在新编辑器中无功能回退。
 - 新编辑器满足目标分辨率、DPI、纯触控、可访问性和性能预算，切换后旧编辑器已删除。
+- 画布在默认布局中占据主要空间，资源页与持续详情不再同时常驻挤压画布。
+- Side Bar 分隔线保持 1 px 视觉样式并提供足够透明命中区；Bottom Panel 可调整且非模态。
+- SVG 导航在主题、DPI、wheel 打包和无工作目录假设下可用；布局偏好损坏时可恢复。
+- 安全停止与关键故障在所有页面、抽屉和面板状态下保持可见、可理解和可操作。
 
 ## 10. Track E：LLM、语音交互与技能系统
 
@@ -881,6 +897,7 @@ src/
 | ADR-M-012 | Accepted | MVC 适用范围 | MVC/MVVM 只用于 GUI、WebSocket/HTTP 表现层；执行与硬件采用 Application Service + Ports/Adapters |
 | ADR-M-013 | Accepted | 硬件实现角色 | Service 编排用例，Provider 创建产品，Adapter 实现能力，Driver 封装厂商协议，Transport 负责通信；禁止用 `XxxService` 混称底层驱动 |
 | ADR-M-014 | Accepted | GUI 工作流画布边界 | 使用受约束画布和纯 WorkflowDocument；复用 CompositionService、SequenceEntry、ExecutionManager 与 ActionHandlerRegistry，不新增 GUI 执行器、Handler 或持久化仓库 |
+| ADR-M-015 | Accepted | GUI 工作台信息架构 | 只借鉴 VS Code 的 Top Menu/Activity Bar/Side Bar/Editor/Bottom Panel/Status Bar 分区；保持工业控制的触控尺寸、常驻安全命令和单一应用状态源，不引入扩展宿主或通用多编辑器框架 |
 
 ADR 状态：`Proposed`、`Accepted`、`Superseded`、`Rejected`。
 
@@ -940,6 +957,15 @@ M6 GUI 工作流画布与表现层收敛
   ├─ MainWindow shell/page decomposition
   ├─ accessibility/performance/offscreen gates
   └─ one-time cutover and old-editor removal
+       |
+       v
+M7 GUI 工作台信息架构与空间收敛
+  ├─ top menu and activity navigation
+  ├─ resource side bar pages
+  ├─ canvas-first editor workspace
+  ├─ bottom details panel and status bar
+  ├─ persistent safety command strip
+  └─ SVG resources and layout persistence
 ```
 
 ### 14.1 M0：安全与工程基线
@@ -1016,6 +1042,18 @@ M6 GUI 工作流画布与表现层收敛
 - MainWindow 只承担窗口壳、导航和顶层 Qt 生命周期，页面行为由 Controller/Application Service 协调。
 - 鼠标、键盘、纯触控、高 DPI、可访问性、100/500 节点性能和 Qt offscreen 回归通过。
 - 数据备份和一次性前向迁移通过后直接切换，旧列表编辑器与旧路径已经删除。
+
+### 14.8 M7：GUI 工作台信息架构与空间收敛
+
+完成条件：
+
+- 主窗口只有一套 Workbench 壳层，Activity Bar 切换独立资源页，画布成为默认主工作区。
+- Side Bar 和 Bottom Panel 可拖动、可收起并恢复布局；分隔线视觉保持 1 px，命中区满足鼠标与触控要求。
+- 设备状态/位姿、日志和基础控制按需展示，Status Bar 使用同一 ViewModel 快照提供常驻摘要。
+- 开始、暂停/恢复、停止任务、快速停止和设备急停在所有布局状态下保持清晰可见；软件急停语义不变。
+- 文件/编辑/视图/执行/设备菜单、画布工具栏、上下文菜单和快捷键不存在相互矛盾的重复状态。
+- SVG/Qt Resource 图标、许可证、深浅主题、高 DPI、可访问名称、wheel 打包和布局恢复回归全部通过。
+- 旧箭头抽屉、悬停扩宽控制条、纵向堆叠主布局和重复的大按钮入口已删除，不保留兼容层。
 
 ## 15. 质量门禁
 
@@ -1251,10 +1289,14 @@ M6 GUI 工作流画布与表现层收敛
 | 2026-08-06 | M6 | D/G | GUI 多选稳定性、抽屉命中区与动作分类选择 | D-018/D-020 能力增强 | 节点单击不再误触发拖动完成和 Scene 重建，Shift 多选保持图元身份、坐标、SceneRect 与滚动位置稳定；抽屉边缘默认收敛为细线，悬停时整条高度显示高亮箭头并可点击；“+”动作选择改为类型与分类内动作双栏结构，复用唯一类型标签并隐藏空分类 | Compile、Ruff、Mypy（81 files）、Pytest（449 passed + 43 subtests，63.07%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；默认/悬停抽屉状态和分类选择器深色离屏复核通过 |
 | 2026-08-06 | M6 | D/G | GUI 选择状态单一化与可拖动抽屉分隔条 | D-018/D-020 能力增强 | 删除节点自定义选择与 QGraphicsItem 默认选择/移动并行处理，普通左键只做单选，Shift+左键只做集合切换，节点排序统一走显式命令；抽屉分隔条默认实际占用 4 px、悬停实际扩为 28 px，整条支持单击开合和水平拖动实时调整宽度，并记忆拖动结果 | Compile、Ruff、Mypy（81 files）、Pytest（450 passed + 43 subtests，63.18%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；4 px/28 px 主窗口离屏布局和拖动回归通过 |
 | 2026-08-06 | M6 | D/G | GUI 节点拖动排序与参数按需展示 | D-018 能力增强 | 在单一自定义选择状态机上增加 8 px 阈值纵向拖动，松开后按落点提交一次可撤销排序并自动吸附；Shift 多选不进入拖动，单击不重建场景；删除常驻节点参数摘要面板，参数编辑统一由双击、右键或修改命令按需打开 | Compile、Ruff、Mypy（81 files）、Pytest（451 passed + 43 subtests，63.12%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过 |
+| 2026-08-06 | M7 | D/G | GUI 工作台信息架构评审与立项 | D-022～D-025 新增为 TODO；ADR-M-015 → Accepted | 基于当前竖屏拥挤问题确立画布优先的 Workbench：顶部菜单、Activity Bar、独立资源 Side Bar、中央 Editor、非模态 Bottom Panel 和常驻 Status Bar；规定细线可拖动分隔、任务/动作/AI/组合拆页、设备/位姿/日志/基础控制按需展示、SVG/Qt Resource 与布局持久化；三类停止和关键故障不得因面板收起而隐藏，不改变 Application Service、DeviceRuntime 或唯一执行链 | 文档评审；本次仅更新计划文档，未执行代码变更 |
 
 ## 22. 建议的首批实施顺序
 
-1. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-2. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-3. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
-4. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+1. **D-022/D-024**：一次建立唯一 Workbench 壳层和常驻安全命令条，先保证画布空间、三类停止及关键故障摘要，再删除旧主布局。
+2. **D-023**：整批拆分任务、动作、AI 和任务组合资源页，并迁移设备/位姿、日志及基础控制到底部面板。
+3. **D-025**：统一 SVG/Qt Resource、布局持久化、主题/DPI/可访问性和 wheel 回归，完成 M7 直接切换。
+4. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+5. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+6. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+7. 完成 simulation smoke test 后执行逐设备真实硬件验收。
