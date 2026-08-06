@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-06
 >
-> 当前里程碑：M7 — GUI 工作台信息架构与空间收敛
-> 计划进度：137/143（135 DONE + 2 DROPPED，95.8%）
+> 当前里程碑：M7 — GUI 工作台信息架构与空间收敛（已完成）
+> 计划进度：138/143（136 DONE + 2 DROPPED，96.5%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -586,7 +586,7 @@ src/
 | D-022 | P1 | DONE | 已建立唯一 Workbench 壳层：顶部文件/编辑/视图/执行/设备菜单、固定 Activity Bar、可调整 Side Bar、中央 Editor、可调整 Bottom Panel 和 Status Bar；左侧资源入口支持二次点击收起，分隔条保持 1 px 视觉与 7 px 命中区；旧箭头抽屉和纵向堆叠主布局已删除，不保留双壳层 |
 | D-023 | P1 | DONE | 已将聚合资源区拆为 `TaskLibraryView`、`ActionLibraryView`、独立 AI Assistant 和 `TaskComposerView` 四个 Side Bar 页面；Activity Bar 直接切换/收起页面，中央 Editor 删除任务组合 Tab；所有列表继续渲染 CompositionService/TaskComposerService 状态，未增加 GUI 业务状态源或兼容路径 |
 | D-024 | P0 | DONE | 设备详情、位姿、日志和基础控制已迁入非模态 Bottom Panel，Status Bar 展示同源设备摘要和通知；执行/编辑控制由五行大按钮收敛为两行命令区，停止任务、快速停止和设备急停在 Side/Bottom Panel 任意状态下常驻可见 |
-| D-025 | P2 | TODO | 建立可追踪许可证的单色 SVG + Qt Resource 图标体系；支持 system/light/dark、高 DPI、键盘/读屏状态；版本化持久化 Side Bar/Bottom Panel 的当前页、尺寸和可见性，并对损坏值提供恢复默认布局 |
+| D-025 | P2 | DONE | 已建立项目自制 CC0 单色 SVG + 编译 Qt Resource 图标体系，Activity/Status 入口按 Palette 与 1x/2x/3x 渲染，主要命令区删除 Emoji 装饰；schema v1 QSettings 偏好持久化 Side/Bottom 当前页、可见性与尺寸，严格拒绝损坏/未知版本/已删除页面并恢复默认，提供显式恢复默认布局命令和 wheel 内容门禁 |
 
 ### 9.4 完成标准
 
@@ -1292,11 +1292,11 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-06 | M7 | D/G | GUI 工作台信息架构评审与立项 | D-022～D-025 新增为 TODO；ADR-M-015 → Accepted | 基于当前竖屏拥挤问题确立画布优先的 Workbench：顶部菜单、Activity Bar、独立资源 Side Bar、中央 Editor、非模态 Bottom Panel 和常驻 Status Bar；规定细线可拖动分隔、任务/动作/AI/组合拆页、设备/位姿/日志/基础控制按需展示、SVG/Qt Resource 与布局持久化；三类停止和关键故障不得因面板收起而隐藏，不改变 Application Service、DeviceRuntime 或唯一执行链 | 文档评审；本次仅更新计划文档，未执行代码变更 |
 | 2026-08-06 | M7 | D/G | Workbench 壳层与常驻安全控制整批切换 | D-022/D-024 TODO → DONE | 新增独立 WorkbenchView，使用 Activity Bar、水平/垂直细线 Splitter、中央 Editor、非模态 Bottom Panel 和自有 Status Bar；设备健康与位姿拆为独立被动视图，设备/位姿/基础控制/日志改为底部按需页；五行大按钮收敛为编辑/执行两行命令，停止、快停、设备急停常驻；新增文件/编辑/视图/执行/设备菜单并删除 AnimatedSplitterDrawer、箭头按钮、固定日志高度和旧纵向堆叠壳层，不保留兼容入口 | Compile、Ruff、Mypy（83 files）、Pytest（452 passed + 43 subtests，63.17%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；900×960 深色 Workbench 和位姿面板展开状态离屏复核通过 |
 | 2026-08-06 | M7 | D/G | GUI 独立资源页整批拆分 | D-023 TODO → DONE | 将聚合动作库拆为已保存任务、分类基础动作、AI 助手和任务组合四个 Side Bar 页面，Activity Bar 可直接切换/收起；中央 Editor 删除任务组合 Tab 与第二套暂停/停止控件，只保留画布和唯一执行控制区；任务组合页提供显式任务/动作选择，继续由 CompositionService 与 TaskComposerService 独占状态，不保留旧属性或兼容路径 | Compile、Ruff、Mypy（83 files）、Pytest（452 passed + 43 subtests，63.14%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过 |
+| 2026-08-06 | M7 | D/G | GUI SVG 资产与布局偏好收口 | D-025 TODO → DONE；M7 完成 | 新增 8 个项目自制 CC0 单色 SVG、Qt Resource 清单及编译资源模块，Activity/Status 入口按 Palette 和 1x/2x/3x 渲染，主要命令区删除 Emoji 装饰；新增 schema v1 WorkbenchLayoutState 与 QSettings 存储，持久化 Side/Bottom 页、可见性和尺寸，严格拒绝损坏/未知版本/已删除页面并恢复默认；视图菜单提供恢复默认布局，wheel 强制包含源 SVG、许可证、qrc 与编译资源 | Compile、Ruff、Mypy（83 files）、Pytest（460 passed + 43 subtests，63.41%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 
-1. **D-025**：统一 SVG/Qt Resource、布局持久化、主题/DPI/可访问性和 wheel 回归，完成 M7 直接切换。
-2. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
-5. 完成 simulation smoke test 后执行逐设备真实硬件验收。
+1. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+2. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+3. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+4. 完成 simulation smoke test 后执行逐设备真实硬件验收。

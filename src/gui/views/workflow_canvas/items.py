@@ -284,7 +284,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawText(
             QRectF(card_left + 18.0, 10.0, NODE_WIDTH - 36.0, 26.0),
             Qt.AlignmentFlag.AlignVCenter,
-            "●  循环",
+            "循环",
         )
         detail_font = canvas_font(secondary=True)
         painter.setFont(detail_font)

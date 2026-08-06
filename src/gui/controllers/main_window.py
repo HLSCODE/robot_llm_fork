@@ -64,6 +64,8 @@ from ..views.workflow import (
 )
 from ..views.workbench import WorkbenchPage, WorkbenchView
 from ..theme import ThemeController, ThemeMode
+from ..icons import IconName
+from ..workbench_layout import WorkbenchLayoutStore
 
 
 class MainWindow(QMainWindow):
@@ -74,10 +76,12 @@ class MainWindow(QMainWindow):
         self,
         services: ApplicationServices,
         theme_controller: ThemeController,
+        layout_store: WorkbenchLayoutStore | None = None,
     ) -> None:
         super().__init__()
         self._services = services
         self._theme_controller = theme_controller
+        self._layout_store = layout_store
         self._theme_controller.setParent(self)
         self._execution_bridge = ExecutionBridge(services)
         self._device_view_model = DeviceViewModel(services.devices)
@@ -107,6 +111,11 @@ class MainWindow(QMainWindow):
             log_sink=self.log_widget.append_log,
             status_sink=self.workbench_view.status_bar.show_message,
         )
+        if self.workbench_view.layout_recovery_reason is not None:
+            self._notifications.warning(
+                "工作台布局偏好已损坏，已恢复默认布局",
+                modal=False,
+            )
         self._sequence_revision = (
             services.composition.sequence_revision
         )
@@ -345,35 +354,36 @@ class MainWindow(QMainWindow):
                 WorkbenchPage(
                     key="tasks",
                     title="已保存任务",
-                    symbol="T",
+                    icon=IconName.TASKS,
                     widget=self.task_library_view,
                 ),
                 WorkbenchPage(
                     key="actions",
                     title="基础动作",
-                    symbol="A",
+                    icon=IconName.ACTIONS,
                     widget=self.action_library_view,
                 ),
                 WorkbenchPage(
                     key="assistant",
                     title="AI 助手",
-                    symbol="AI",
+                    icon=IconName.ASSISTANT,
                     widget=self.ai_assistant_view,
                 ),
                 WorkbenchPage(
                     key="composer",
                     title="任务组合",
-                    symbol="C",
+                    icon=IconName.COMPOSER,
                     widget=self.task_composer_view,
                 ),
             ),
             editor=self.workflow_view,
             bottom_pages=(
-                WorkbenchPage("devices", "设备", "●", self.device_status_view),
-                WorkbenchPage("poses", "位姿", "⌖", self.device_pose_view),
-                WorkbenchPage("controls", "控制", "⌁", self.device_control_view),
-                WorkbenchPage("logs", "日志", "≡", self.log_widget),
+                WorkbenchPage("devices", "设备", IconName.DEVICES, self.device_status_view),
+                WorkbenchPage("poses", "位姿", IconName.POSES, self.device_pose_view),
+                WorkbenchPage("controls", "控制", IconName.CONTROLS, self.device_control_view),
+                WorkbenchPage("logs", "日志", IconName.LOGS, self.log_widget),
             ),
+            layout_store=self._layout_store,
         )
         self.setCentralWidget(self.workbench_view)
         self.create_menu()
@@ -473,7 +483,7 @@ class MainWindow(QMainWindow):
         side_bar_action = QAction("资源侧栏", self)
         side_bar_action.setShortcut("Ctrl+B")
         side_bar_action.triggered.connect(
-            lambda: self.workbench_view.toggle_side_page("resources")
+            self.workbench_view.toggle_last_side_page
         )
         view_menu.addAction(side_bar_action)
         panel_menu = view_menu.addMenu("底部面板")
@@ -518,6 +528,10 @@ class MainWindow(QMainWindow):
             self._sync_theme_menu,
             Qt.ConnectionType.QueuedConnection,
         )
+        view_menu.addSeparator()
+        reset_layout_action = QAction("恢复默认布局", self)
+        reset_layout_action.triggered.connect(self.workbench_view.reset_layout)
+        view_menu.addAction(reset_layout_action)
 
         execution_menu = menubar.addMenu("执行")
         for label, callback in (
@@ -2209,6 +2223,7 @@ class MainWindow(QMainWindow):
         if self._hardware_startup_worker is not None:
             self._hardware_startup_worker.request_stop()
         self.ai_assistant_view.prepare_shutdown()
+        self.workbench_view.persist_layout()
         self._composition_bridge.close()
         self._startup_lifecycle.close()
         event.accept()

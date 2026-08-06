@@ -39,8 +39,8 @@ class ControlPanel(QWidget):
         for button in (
             self.undo_btn,
             self.redo_btn,
-            self._button("↑ 上移", self.move_up_clicked.emit, compact=True),
-            self._button("↓ 下移", self.move_down_clicked.emit, compact=True),
+            self._button("上移", self.move_up_clicked.emit, compact=True),
+            self._button("下移", self.move_down_clicked.emit, compact=True),
             self._button("修改", self.edit_clicked.emit, compact=True),
             self._button("循环", self.repeat_clicked.emit, compact=True),
             self._button("删除", self.delete_clicked.emit, compact=True),
@@ -50,15 +50,15 @@ class ControlPanel(QWidget):
 
         execution_row = QHBoxLayout()
         execution_row.setSpacing(4)
-        self.start_btn = self._button("▶ 开始", self.start_clicked.emit)
-        self.pause_btn = self._button("⏸ 暂停", self.pause_clicked.emit)
+        self.start_btn = self._button("开始", self.start_clicked.emit)
+        self.pause_btn = self._button("暂停", self.pause_clicked.emit)
         self.stop_btn = self._button("■ 停止", self.stop_clicked.emit)
         self.quick_stop_btn = self._button(
-            "⚡ 快停",
+            "快速停止",
             self.quick_stop_clicked.emit,
         )
         self.emergency_stop_btn = self._button(
-            "● 设备急停",
+            "设备急停",
             self.emergency_stop_clicked.emit,
         )
         set_theme_role(self.start_btn, "success")
@@ -96,7 +96,7 @@ class ControlPanel(QWidget):
         compact: bool = False,
     ) -> QPushButton:
         button = QPushButton(label)
-        button.setAccessibleName(label.lstrip("↶↷↑↓✏🔁🗑✕💾📂▶⏸⏹⚡🛑 "))
+        button.setAccessibleName(label)
         button.setMinimumHeight(36 if compact else 44)
         button.clicked.connect(callback)
         return button

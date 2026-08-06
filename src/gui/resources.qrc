@@ -1,0 +1,12 @@
+<RCC>
+  <qresource prefix="/icons">
+    <file alias="tasks.svg">assets/icons/tasks.svg</file>
+    <file alias="actions.svg">assets/icons/actions.svg</file>
+    <file alias="assistant.svg">assets/icons/assistant.svg</file>
+    <file alias="composer.svg">assets/icons/composer.svg</file>
+    <file alias="devices.svg">assets/icons/devices.svg</file>
+    <file alias="poses.svg">assets/icons/poses.svg</file>
+    <file alias="controls.svg">assets/icons/controls.svg</file>
+    <file alias="logs.svg">assets/icons/logs.svg</file>
+  </qresource>
+</RCC>

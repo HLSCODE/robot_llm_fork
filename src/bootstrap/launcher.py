@@ -118,6 +118,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     from ..application import create_application_services
     from ..gui.controllers.main_window import MainWindow
     from ..gui.theme import ThemeController, ThemeMode
+    from ..gui.workbench_layout import QSettingsWorkbenchLayoutStore
     from ..gui.controllers.startup import (
         GuiAuxiliaryServiceStartupWorker,
         GuiAuxiliaryStartupResultReceiver,
@@ -161,7 +162,11 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             settings,
             services,
         )
-        window = MainWindow(services, theme_controller)
+        window = MainWindow(
+            services,
+            theme_controller,
+            layout_store=QSettingsWorkbenchLayoutStore(),
+        )
         window.startup_progress_changed.connect(startup_card.set_progress)
 
         def reveal_main_window(message: str) -> None:

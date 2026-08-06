@@ -7,6 +7,12 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.gui.view_models.models import DeviceViewState
+from src.gui.icons import IconName
+from src.gui.workbench_layout import (
+    LayoutLoadResult,
+    WORKBENCH_LAYOUT_SCHEMA_VERSION,
+    WorkbenchLayoutState,
+)
 from src.gui.views.workbench import WorkbenchPage, WorkbenchView
 from src.gui.views.workbench.shell import (
     BOTTOM_PANEL_MINIMUM_HEIGHT,
@@ -26,12 +32,12 @@ class WorkbenchViewTests(unittest.TestCase):
         self.log_page = QWidget()
         self.workbench = WorkbenchView(
             side_pages=(
-                WorkbenchPage("resources", "资源", "R", self.resource_page),
+                WorkbenchPage("resources", "资源", IconName.TASKS, self.resource_page),
             ),
             editor=QWidget(),
             bottom_pages=(
-                WorkbenchPage("devices", "设备", "D", self.device_page),
-                WorkbenchPage("logs", "日志", "L", self.log_page),
+                WorkbenchPage("devices", "设备", IconName.DEVICES, self.device_page),
+                WorkbenchPage("logs", "日志", IconName.LOGS, self.log_page),
             ),
         )
         self.workbench.resize(900, 700)
@@ -49,6 +55,10 @@ class WorkbenchViewTests(unittest.TestCase):
         button = self.workbench.activity_bar.buttons["resources"]
 
         self.assertTrue(button.isChecked())
+        self.assertEqual("", button.text())
+        self.assertFalse(button.icon().isNull())
+        self.assertEqual("资源", button.accessibleName())
+        self.assertTrue(button.accessibleDescription())
         self.assertTrue(self.workbench.side_stack.isVisible())
         self.assertEqual(SPLITTER_HIT_WIDTH, self.workbench.side_splitter.handleWidth())
 
@@ -74,6 +84,8 @@ class WorkbenchViewTests(unittest.TestCase):
         QTest.mouseClick(device_button, Qt.MouseButton.LeftButton)
         QApplication.processEvents()
         self.assertEqual("devices", self.workbench.active_bottom_page)
+        self.assertEqual("设备", device_button.text())
+        self.assertFalse(device_button.icon().isNull())
         self.assertIs(self.device_page, self.workbench.bottom_stack.currentWidget())
         self.assertGreaterEqual(
             self.workbench.bottom_splitter.sizes()[1],
@@ -107,6 +119,119 @@ class WorkbenchViewTests(unittest.TestCase):
             "danger",
             self.workbench.status_bar.device_summary.property("themeRole"),
         )
+
+    def test_restores_and_persists_versioned_layout_state(self) -> None:
+        store = _MemoryLayoutStore(
+            LayoutLoadResult(
+                WorkbenchLayoutState(
+                    schema_version=WORKBENCH_LAYOUT_SCHEMA_VERSION,
+                    side_page="resources",
+                    side_visible=False,
+                    side_width=360,
+                    bottom_page="logs",
+                    bottom_visible=True,
+                    bottom_height=180,
+                )
+            )
+        )
+        workbench = WorkbenchView(
+            side_pages=(
+                WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),
+            ),
+            editor=QWidget(),
+            bottom_pages=(
+                WorkbenchPage("devices", "设备", IconName.DEVICES, QWidget()),
+                WorkbenchPage("logs", "日志", IconName.LOGS, QWidget()),
+            ),
+            layout_store=store,
+        )
+        workbench.resize(900, 700)
+        workbench.show()
+        QApplication.processEvents()
+
+        self.assertIsNone(workbench.active_side_page)
+        self.assertEqual("logs", workbench.active_bottom_page)
+        workbench.toggle_last_side_page()
+        workbench.persist_layout()
+        assert store.saved is not None
+        self.assertTrue(store.saved.side_visible)
+        self.assertEqual("resources", store.saved.side_page)
+        self.assertEqual("logs", store.saved.bottom_page)
+        workbench.close()
+
+    def test_unknown_persisted_page_recovers_default_layout(self) -> None:
+        store = _MemoryLayoutStore(
+            LayoutLoadResult(
+                WorkbenchLayoutState(
+                    schema_version=WORKBENCH_LAYOUT_SCHEMA_VERSION,
+                    side_page="removed",
+                    side_visible=True,
+                    side_width=300,
+                    bottom_page="devices",
+                    bottom_visible=False,
+                    bottom_height=180,
+                )
+            )
+        )
+        workbench = WorkbenchView(
+            side_pages=(
+                WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),
+            ),
+            editor=QWidget(),
+            bottom_pages=(
+                WorkbenchPage("devices", "设备", IconName.DEVICES, QWidget()),
+            ),
+            layout_store=store,
+        )
+
+        self.assertEqual("resources", workbench.active_side_page)
+        self.assertIsNotNone(workbench.layout_recovery_reason)
+        self.assertTrue(store.cleared)
+        workbench.close()
+
+    def test_reset_layout_restores_default_pages_and_sizes(self) -> None:
+        store = _MemoryLayoutStore(LayoutLoadResult(None))
+        workbench = WorkbenchView(
+            side_pages=(
+                WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),
+            ),
+            editor=QWidget(),
+            bottom_pages=(
+                WorkbenchPage("devices", "设备", IconName.DEVICES, QWidget()),
+                WorkbenchPage("logs", "日志", IconName.LOGS, QWidget()),
+            ),
+            layout_store=store,
+        )
+        workbench.toggle_bottom_page("logs")
+        workbench.toggle_side_page("resources")
+
+        workbench.reset_layout()
+
+        state = workbench.layout_state()
+        self.assertEqual("resources", workbench.active_side_page)
+        self.assertIsNone(workbench.active_bottom_page)
+        self.assertTrue(state.side_visible)
+        self.assertFalse(state.bottom_visible)
+        self.assertEqual(280, state.side_width)
+        self.assertEqual(220, state.bottom_height)
+        self.assertEqual(state, store.saved)
+        workbench.close()
+
+
+class _MemoryLayoutStore:
+    def __init__(self, result: LayoutLoadResult) -> None:
+        self.result = result
+        self.saved: WorkbenchLayoutState | None = None
+        self.cleared = False
+
+    def load(self) -> LayoutLoadResult:
+        return self.result
+
+    def save(self, state: WorkbenchLayoutState) -> None:
+        self.saved = state
+
+    def clear(self) -> None:
+        self.cleared = True
 
 
 if __name__ == "__main__":

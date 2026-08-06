@@ -21,6 +21,17 @@ REQUIRED_WHEEL_MEMBERS = {
     "src/domain/models.py",
     "src/execution/workflows/powder_dispense.py",
     "src/gui/views/ai_assistant.py",
+    "src/gui/resources.qrc",
+    "src/gui/resources_rc.py",
+    "src/gui/assets/icons/LICENSE.txt",
+    "src/gui/assets/icons/tasks.svg",
+    "src/gui/assets/icons/actions.svg",
+    "src/gui/assets/icons/assistant.svg",
+    "src/gui/assets/icons/composer.svg",
+    "src/gui/assets/icons/devices.svg",
+    "src/gui/assets/icons/poses.svg",
+    "src/gui/assets/icons/controls.svg",
+    "src/gui/assets/icons/logs.svg",
     "src/persistence/storage.py",
 }
 FORBIDDEN_WHEEL_PREFIXES = (

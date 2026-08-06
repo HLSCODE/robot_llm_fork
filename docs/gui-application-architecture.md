@@ -49,6 +49,12 @@ GuiNotificationCenter: operational message -> history/log/status/modal
 - `WorkbenchView` 只拥有 Activity Bar、Side Bar、Editor、Bottom Panel、Status Bar
   的布局状态；Side Bar 二次点击收起，Bottom Panel 非模态切换，两个方向均使用
   视觉 1 px、实际命中 7 px 的可拖动分隔条。
+- `WorkbenchLayoutState` 是 schema v1 不可变布局偏好；组合根注入
+  `QSettingsWorkbenchLayoutStore`，保存 Side/Bottom 当前页、可见性和尺寸。未知版本、
+  字段、类型、范围或已删除页面会清理损坏值并恢复默认布局；“视图 → 恢复默认布局”
+  提供显式恢复入口。
+- Activity Bar 与 Status Bar 图标使用 `IconName` 和编译后的 Qt Resource SVG；图标
+  随 Palette 变化重绘并覆盖 1x/2x/3x，不从文件系统动态查找资源。
 - `TaskLibraryView` 只展示 `CompositionService` 的已保存任务投影，并发出添加到组合的
   意图；`ActionLibraryView` 只展示按类型分类的基础动作并发出增删改、插入和相机测试意图。
 - `AIAssistantWidget` 是独立资源页，继续复用唯一 LLM/CommandRuntime，不嵌入动作库，
@@ -133,6 +139,7 @@ canonical schema；只有文件选择器、设备发现等纯交互增强才可�
 | 临时任务组合草稿 | `TaskComposerService` | service 快照 |
 | GUI 启动阶段 | `GuiStartupLifecycle` | `GuiStartupState` |
 | 动作参数定义 | canonical action schema | `SchemaActionForm` |
+| Workbench 布局偏好 | `QSettingsWorkbenchLayoutStore` | schema v1 `WorkbenchLayoutState` |
 
 ## 4. 扩展规则
 
@@ -172,3 +179,5 @@ AI Assistant 不获取 MainWindow 对象。它通过以下窄信号协作：
 - ActionConfigDialog 内部的表单校验提示仍属于对话框局部交互；如后续需要统一
   非模态体验，应通过注入 presenter 实现，不得引入全局 UI 单例。
 - 真实设备的逐项验收、RealMan 停止延迟和恢复条件仍按总计划执行。
+- GUI 工作台 M7 已完成；后续视觉调整不得重新引入 Unicode/Emoji 导航图标、裸资源
+  相对路径或第二套布局状态源。

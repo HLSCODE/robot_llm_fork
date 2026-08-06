@@ -277,7 +277,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
                 in self.window.log_widget.toPlainText()
             )
         )
-        self.assertEqual("⏸ 暂停", self.window.workflow_view.control_panel.pause_btn.text())
+        self.assertEqual("暂停", self.window.workflow_view.control_panel.pause_btn.text())
         self.assertEqual({}, self.services.resources.snapshot())
 
     def test_task_composer_widget_renders_service_owned_draft(self) -> None:

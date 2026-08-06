@@ -259,8 +259,8 @@ class TaskComposerView(QWidget):
         self._add_button_row(
             layout,
             (
-                ("↑ 上移", self.move_up_requested),
-                ("↓ 下移", self.move_down_requested),
+                ("上移", self.move_up_requested),
+                ("下移", self.move_down_requested),
                 ("循环", self.repeat_requested),
             ),
             28,

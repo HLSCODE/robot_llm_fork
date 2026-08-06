@@ -129,7 +129,7 @@ class DeviceAndExecutionViewModelTests(unittest.TestCase):
         execution.state = ExecutionState.RUNNING
         paused = view_model.toggle_pause()
         self.assertEqual(ExecutionState.PAUSED, paused.state)
-        self.assertEqual("▶ 继续", paused.pause_button_text)
+        self.assertEqual("继续", paused.pause_button_text)
         resumed = view_model.toggle_pause()
         self.assertEqual(ExecutionState.RUNNING, resumed.state)
         cancelled = view_model.cancel()

@@ -1,0 +1,5 @@
+Robot LLM GUI icons
+
+These eight SVG icons were created specifically for this project and contain no
+third-party artwork. They are dedicated to the public domain under CC0 1.0:
+https://creativecommons.org/publicdomain/zero/1.0/

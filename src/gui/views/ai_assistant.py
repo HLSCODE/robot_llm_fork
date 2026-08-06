@@ -233,7 +233,7 @@ class AIAssistantWidget(QWidget):
         status_layout = QHBoxLayout(status_widget)
         status_layout.setContentsMargins(8, 2, 8, 2)
 
-        self.status_label = QLabel("⚡ 状态: 就绪")
+        self.status_label = QLabel("状态: 就绪")
         status_layout.addWidget(self.status_label)
 
         self.model_label = QLabel("模型: —")
@@ -349,7 +349,7 @@ class AIAssistantWidget(QWidget):
         self.preview_button.clicked.connect(self._on_preview_clicked)
         action_layout.addWidget(self.preview_button)
 
-        self.cancel_button = QPushButton("✕ 取消")
+        self.cancel_button = QPushButton("取消")
         self.cancel_button.setEnabled(False)
         self.cancel_button.setMinimumHeight(34)
         set_theme_role(self.cancel_button, "danger")

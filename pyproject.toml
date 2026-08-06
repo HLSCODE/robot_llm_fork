@@ -89,6 +89,9 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["src*"]
 
+[tool.setuptools.package-data]
+"src.gui" = ["resources.qrc", "assets/icons/*.svg", "assets/icons/LICENSE.txt"]
+
 [[tool.uv.index]]
 name = "tuna"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"

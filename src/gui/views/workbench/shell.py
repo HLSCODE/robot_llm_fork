@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QPainter, QPen
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -19,6 +19,12 @@ from PySide6.QtWidgets import (
 )
 
 from ...view_models.models import DeviceViewState
+from ...icons import IconName, themed_icon
+from ...workbench_layout import (
+    WORKBENCH_LAYOUT_SCHEMA_VERSION,
+    WorkbenchLayoutState,
+    WorkbenchLayoutStore,
+)
 
 
 ACTIVITY_BAR_WIDTH = 52
@@ -28,13 +34,16 @@ SIDE_BAR_MINIMUM_WIDTH = 220
 SIDE_BAR_MAXIMUM_WIDTH = 440
 BOTTOM_PANEL_DEFAULT_HEIGHT = 220
 BOTTOM_PANEL_MINIMUM_HEIGHT = 120
+BOTTOM_PANEL_MAXIMUM_HEIGHT = 600
+LAYOUT_SAVE_DELAY_MS = 250
+STATUS_ICON_COLOR = QColor("#ffffff")
 
 
 @dataclass(frozen=True, slots=True)
 class WorkbenchPage:
     key: str
     title: str
-    symbol: str
+    icon: IconName
     widget: QWidget
 
 
@@ -85,21 +94,36 @@ class _ActivityBar(QFrame):
         for page in pages:
             button = QToolButton()
             button.setObjectName("activityButton")
-            button.setText(page.symbol)
             button.setToolTip(page.title)
             button.setAccessibleName(page.title)
+            button.setAccessibleDescription(f"显示或收起{page.title}资源页")
             button.setCheckable(True)
             button.setFixedSize(44, 44)
+            button.setIconSize(QSize(22, 22))
             button.clicked.connect(
                 lambda _checked=False, key=page.key: self.page_requested.emit(key)
             )
             layout.addWidget(button)
             self.buttons[page.key] = button
+        self._pages = {page.key: page for page in pages}
         layout.addStretch(1)
+        self._refresh_icons()
 
     def render_active_page(self, page_key: str | None) -> None:
         for key, button in self.buttons.items():
             button.setChecked(key == page_key)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() in {
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        }:
+            self._refresh_icons()
+
+    def _refresh_icons(self) -> None:
+        for key, button in self.buttons.items():
+            button.setIcon(themed_icon(button, self._pages[key].icon, size=22))
 
 
 class WorkbenchStatusBar(QFrame):
@@ -126,16 +150,20 @@ class WorkbenchStatusBar(QFrame):
         for page in pages:
             button = QToolButton()
             button.setObjectName("statusPanelButton")
-            button.setText(f"{page.symbol} {page.title}")
+            button.setText(page.title)
             button.setToolTip(f"显示或隐藏{page.title}")
             button.setAccessibleName(f"显示或隐藏{page.title}")
+            button.setAccessibleDescription(f"切换底部{page.title}面板")
             button.setCheckable(True)
             button.setMinimumHeight(28)
+            button.setIconSize(QSize(16, 16))
             button.clicked.connect(
                 lambda _checked=False, key=page.key: self.panel_requested.emit(key)
             )
             layout.addWidget(button)
             self.buttons[page.key] = button
+        self._pages = {page.key: page for page in pages}
+        self._refresh_icons()
         self._message_timer = QTimer(self)
         self._message_timer.setSingleShot(True)
         self._message_timer.timeout.connect(self.message_label.clear)
@@ -147,6 +175,25 @@ class WorkbenchStatusBar(QFrame):
     def render_active_panel(self, page_key: str | None) -> None:
         for key, button in self.buttons.items():
             button.setChecked(key == page_key)
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() in {
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        }:
+            self._refresh_icons()
+
+    def _refresh_icons(self) -> None:
+        for key, button in self.buttons.items():
+            button.setIcon(
+                themed_icon(
+                    button,
+                    self._pages[key].icon,
+                    size=16,
+                    color=STATUS_ICON_COLOR,
+                )
+            )
 
     def render_device_state(self, state: DeviceViewState) -> None:
         ready_count = sum(
@@ -174,6 +221,7 @@ class WorkbenchView(QWidget):
         side_pages: tuple[WorkbenchPage, ...],
         editor: QWidget,
         bottom_pages: tuple[WorkbenchPage, ...],
+        layout_store: WorkbenchLayoutStore | None = None,
         parent: QWidget | None = None,
     ) -> None:
         if not side_pages:
@@ -183,10 +231,19 @@ class WorkbenchView(QWidget):
         super().__init__(parent)
         self._side_pages = {page.key: page for page in side_pages}
         self._bottom_pages = {page.key: page for page in bottom_pages}
+        self._default_side_page = side_pages[0].key
+        self._default_bottom_page = bottom_pages[0].key
+        self._selected_side_page = self._default_side_page
+        self._selected_bottom_page = self._default_bottom_page
         self._active_side_page: str | None = side_pages[0].key
         self._active_bottom_page: str | None = None
         self._last_side_width = SIDE_BAR_DEFAULT_WIDTH
         self._last_bottom_height = BOTTOM_PANEL_DEFAULT_HEIGHT
+        self._layout_store = layout_store
+        self.layout_recovery_reason: str | None = None
+        self._layout_save_timer = QTimer(self)
+        self._layout_save_timer.setSingleShot(True)
+        self._layout_save_timer.timeout.connect(self.persist_layout)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -210,6 +267,7 @@ class WorkbenchView(QWidget):
         self.bottom_stack = QStackedWidget()
         self.bottom_stack.setObjectName("workbenchBottomPanel")
         self.bottom_stack.setMinimumHeight(BOTTOM_PANEL_MINIMUM_HEIGHT)
+        self.bottom_stack.setMaximumHeight(BOTTOM_PANEL_MAXIMUM_HEIGHT)
         for page in bottom_pages:
             self.bottom_stack.addWidget(page.widget)
         self.bottom_stack.hide()
@@ -220,6 +278,7 @@ class WorkbenchView(QWidget):
         self.bottom_splitter.addWidget(self.bottom_stack)
         self.bottom_splitter.setStretchFactor(0, 1)
         self.bottom_splitter.setStretchFactor(1, 0)
+        self.bottom_splitter.setSizes((640, BOTTOM_PANEL_DEFAULT_HEIGHT))
 
         self.side_splitter = _ThinLineSplitter(Qt.Orientation.Horizontal)
         self.side_splitter.setObjectName("workbenchSideSplitter")
@@ -236,7 +295,7 @@ class WorkbenchView(QWidget):
         self.status_bar = WorkbenchStatusBar(bottom_pages)
         self.status_bar.panel_requested.connect(self.toggle_bottom_page)
         root.addWidget(self.status_bar)
-        self._show_side_page(side_pages[0].key)
+        self._restore_layout()
 
     @property
     def active_side_page(self) -> str | None:
@@ -256,8 +315,12 @@ class WorkbenchView(QWidget):
             self.side_stack.hide()
             self._active_side_page = None
             self.activity_bar.render_active_page(None)
+            self._schedule_layout_save()
             return
         self._show_side_page(page_key)
+
+    def toggle_last_side_page(self) -> None:
+        self.toggle_side_page(self._selected_side_page)
 
     def toggle_bottom_page(self, page_key: str) -> None:
         self._require_page(page_key, self._bottom_pages, "bottom")
@@ -269,15 +332,37 @@ class WorkbenchView(QWidget):
             self.bottom_stack.hide()
             self._active_bottom_page = None
             self.status_bar.render_active_panel(None)
+            self._schedule_layout_save()
             return
-        page = self._bottom_pages[page_key]
-        self.bottom_stack.setCurrentWidget(page.widget)
-        self.bottom_stack.show()
-        available = max(1, sum(self.bottom_splitter.sizes()))
-        height = min(self._last_bottom_height, max(1, available // 2))
-        self.bottom_splitter.setSizes((available - height, height))
-        self._active_bottom_page = page_key
-        self.status_bar.render_active_panel(page_key)
+        self._show_bottom_page(page_key)
+
+    def reset_layout(self) -> None:
+        self._selected_side_page = self._default_side_page
+        self._selected_bottom_page = self._default_bottom_page
+        self._last_side_width = SIDE_BAR_DEFAULT_WIDTH
+        self._last_bottom_height = BOTTOM_PANEL_DEFAULT_HEIGHT
+        self.bottom_stack.hide()
+        self._active_bottom_page = None
+        self.status_bar.render_active_panel(None)
+        self._show_side_page(self._default_side_page)
+        self.persist_layout()
+
+    def persist_layout(self) -> None:
+        if self._layout_store is None:
+            return
+        self._layout_save_timer.stop()
+        self._layout_store.save(self.layout_state())
+
+    def layout_state(self) -> WorkbenchLayoutState:
+        return WorkbenchLayoutState(
+            schema_version=WORKBENCH_LAYOUT_SCHEMA_VERSION,
+            side_page=self._selected_side_page,
+            side_visible=self._active_side_page is not None,
+            side_width=self._last_side_width,
+            bottom_page=self._selected_bottom_page,
+            bottom_visible=self._active_bottom_page is not None,
+            bottom_height=self._last_bottom_height,
+        )
 
     def _show_side_page(self, page_key: str) -> None:
         page = self._side_pages[page_key]
@@ -290,16 +375,93 @@ class WorkbenchView(QWidget):
             max(1, available // 2),
         )
         self.side_splitter.setSizes((width, available - width))
+        self._selected_side_page = page_key
         self._active_side_page = page_key
         self.activity_bar.render_active_page(page_key)
+        self._schedule_layout_save()
+
+    def _show_bottom_page(self, page_key: str) -> None:
+        page = self._bottom_pages[page_key]
+        self.bottom_stack.setCurrentWidget(page.widget)
+        self.bottom_stack.show()
+        available = max(1, sum(self.bottom_splitter.sizes()))
+        height = min(
+            max(self._last_bottom_height, BOTTOM_PANEL_MINIMUM_HEIGHT),
+            max(1, available // 2),
+        )
+        self.bottom_splitter.setSizes((available - height, height))
+        self._selected_bottom_page = page_key
+        self._active_bottom_page = page_key
+        self.status_bar.render_active_panel(page_key)
+        self._schedule_layout_save()
 
     def _remember_side_width(self, _position: int, _index: int) -> None:
         if self.side_stack.isVisible():
-            self._last_side_width = self.side_splitter.sizes()[0]
+            self._last_side_width = min(
+                max(self.side_splitter.sizes()[0], SIDE_BAR_MINIMUM_WIDTH),
+                SIDE_BAR_MAXIMUM_WIDTH,
+            )
+            self._schedule_layout_save()
 
     def _remember_bottom_height(self, _position: int, _index: int) -> None:
         if self.bottom_stack.isVisible():
-            self._last_bottom_height = self.bottom_splitter.sizes()[1]
+            self._last_bottom_height = max(
+                min(
+                    self.bottom_splitter.sizes()[1],
+                    BOTTOM_PANEL_MAXIMUM_HEIGHT,
+                ),
+                BOTTOM_PANEL_MINIMUM_HEIGHT,
+            )
+            self._schedule_layout_save()
+
+    def _restore_layout(self) -> None:
+        if self._layout_store is None:
+            self._show_side_page(self._default_side_page)
+            return
+        result = self._layout_store.load()
+        self.layout_recovery_reason = result.reason if result.recovered else None
+        state = result.state
+        if state is None:
+            self._show_side_page(self._default_side_page)
+            return
+        if (
+            state.side_page not in self._side_pages
+            or state.bottom_page not in self._bottom_pages
+        ):
+            self.layout_recovery_reason = "布局偏好引用了已不存在的页面"
+            self._layout_store.clear()
+            self._show_side_page(self._default_side_page)
+            return
+        self._selected_side_page = state.side_page
+        self._selected_bottom_page = state.bottom_page
+        self._last_side_width = min(
+            max(state.side_width, SIDE_BAR_MINIMUM_WIDTH),
+            SIDE_BAR_MAXIMUM_WIDTH,
+        )
+        self._last_bottom_height = max(
+            min(state.bottom_height, BOTTOM_PANEL_MAXIMUM_HEIGHT),
+            BOTTOM_PANEL_MINIMUM_HEIGHT,
+        )
+        if state.side_visible:
+            self._show_side_page(state.side_page)
+        else:
+            self.side_stack.setCurrentWidget(self._side_pages[state.side_page].widget)
+            self.side_stack.hide()
+            self._active_side_page = None
+            self.activity_bar.render_active_page(None)
+        if state.bottom_visible:
+            self._show_bottom_page(state.bottom_page)
+        else:
+            self.bottom_stack.setCurrentWidget(
+                self._bottom_pages[state.bottom_page].widget
+            )
+            self.bottom_stack.hide()
+            self._active_bottom_page = None
+            self.status_bar.render_active_panel(None)
+
+    def _schedule_layout_save(self) -> None:
+        if self._layout_store is not None:
+            self._layout_save_timer.start(LAYOUT_SAVE_DELAY_MS)
 
     @staticmethod
     def _require_page(

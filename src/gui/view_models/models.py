@@ -56,7 +56,7 @@ class ExecutionViewModel:
             can_pause=state is ExecutionState.RUNNING,
             can_resume=state is ExecutionState.PAUSED,
             can_cancel=snapshot.active,
-            pause_button_text="▶ 继续" if state is ExecutionState.PAUSED else "⏸ 暂停",
+            pause_button_text="继续" if state is ExecutionState.PAUSED else "暂停",
         )
 
     def toggle_pause(self) -> ExecutionViewState:

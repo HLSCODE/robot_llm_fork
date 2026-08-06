@@ -173,7 +173,7 @@ class DeviceControlView(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
-        title = QLabel("🎮 基础控制")
+        title = QLabel("基础控制")
         title_font = title.font()
         title_font.setBold(True)
         title.setFont(title_font)
