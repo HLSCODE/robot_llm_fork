@@ -10,8 +10,11 @@ from typing import Any
 from ...domain.models import (
     ActionDefinition,
     LoopBlock,
+    ParallelBlock,
+    SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    sequence_entry_from_dict,
 )
 from ...devices import StopMode
 from ...execution import (
@@ -67,17 +70,9 @@ class ExecutionWebSocketHandler:
             )
             return
 
-        # 重置状态
-        total_steps = 0
         for entry in sequence:
-            if isinstance(entry, LoopBlock):
-                entry.current_iteration = 0
-                for child in entry.items:
-                    child.status = SequenceItemStatus.PENDING
-                total_steps += len(entry.items) * entry.repeat_count
-            elif isinstance(entry, SequenceItem):
-                entry.status = SequenceItemStatus.PENDING
-                total_steps += 1
+            _reset_entry(entry)
+        total_steps = sum(_expanded_step_count(entry) for entry in sequence)
 
         await self._submit_execution(
             websocket,
@@ -123,17 +118,9 @@ class ExecutionWebSocketHandler:
             return
 
         for entry in entries:
-            if isinstance(entry, LoopBlock):
-                entry.current_iteration = 0
-                for child in entry.items:
-                    child.status = SequenceItemStatus.PENDING
-            elif isinstance(entry, SequenceItem):
-                entry.status = SequenceItemStatus.PENDING
+            _reset_entry(entry)
 
-        total_steps = sum(
-            len(e.items) * e.repeat_count if isinstance(e, LoopBlock) else 1
-            for e in entries
-        )
+        total_steps = sum(_expanded_step_count(entry) for entry in entries)
 
         await self._submit_execution(
             websocket,
@@ -222,7 +209,7 @@ class ExecutionWebSocketHandler:
     async def _submit_execution(
         self,
         websocket,
-        sequence: list,
+        sequence: list[SequenceEntry],
         *,
         origin: str,
         message: str,
@@ -241,7 +228,7 @@ class ExecutionWebSocketHandler:
             self._on_execution_event(event)
 
         try:
-            handle = self._server._services.execution.start(
+            handle = self._server._services.execution.start_entries(
                 sequence,
                 origin=origin,
                 listener=listener,
@@ -288,22 +275,21 @@ class ExecutionWebSocketHandler:
             events_released = True
         return True
 
-    def _parse_sequence(self, raw: list) -> list:
+    def _parse_sequence(self, raw: list[dict[str, Any]]) -> list[SequenceEntry]:
         """
-        将前端传来的 JSON 数组转换为 SequenceEntry 列表（含 LoopBlock）
+        将前端传来的 JSON 数组转换为 SequenceEntry 列表。
 
         支持三种格式:
-        1. 循环块:  {"kind": "loop", "uuid": "...", "items": [...], "repeat_count": N}
+        1. 结构节点: kind 为 loop 或 parallel
         2. 完整格式: {"uuid": "...", "definition": {...}, "status": "PENDING"}
         3. 简化格式: {"name": "...", "type": "MOVE_TO_POINT", "parameters": {...}}
         """
-        sequence = []
+        sequence: list[SequenceEntry] = []
         for item_data in raw:
-            if item_data.get("kind") == "loop":
-                loop = LoopBlock.from_dict(item_data)
-                for child in loop.items:
-                    child.status = SequenceItemStatus.PENDING
-                sequence.append(loop)
+            if item_data.get("kind") in {"loop", "parallel"}:
+                entry = sequence_entry_from_dict(item_data)
+                _reset_entry(entry)
+                sequence.append(entry)
             elif "definition" in item_data:
                 seq_item = SequenceItem.from_dict(item_data)
                 seq_item.status = SequenceItemStatus.PENDING
@@ -520,3 +506,33 @@ class ExecutionWebSocketHandler:
                 outcome=event.event_type.value,
                 code=event.data.get("code") or None,
             )
+
+
+def _reset_entry(entry: SequenceEntry) -> None:
+    if isinstance(entry, SequenceItem):
+        entry.status = SequenceItemStatus.PENDING
+        return
+    if isinstance(entry, LoopBlock):
+        entry.current_iteration = 0
+        for child in entry.items:
+            _reset_entry(child)
+        return
+    for branch in entry.branches:
+        for child in branch.items:
+            _reset_entry(child)
+
+
+def _expanded_step_count(entry: SequenceEntry) -> int:
+    if isinstance(entry, SequenceItem):
+        return 1
+    if isinstance(entry, LoopBlock):
+        return entry.repeat_count * sum(
+            _expanded_step_count(child) for child in entry.items
+        )
+    if isinstance(entry, ParallelBlock):
+        return sum(
+            _expanded_step_count(child)
+            for branch in entry.branches
+            for child in branch.items
+        )
+    raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")

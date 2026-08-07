@@ -1,16 +1,25 @@
 """Synchronous action engine used exclusively by ExecutionManager."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import Any
 
 from ..domain.execution_context import ExecutionContext
 from ..domain.models import (
     ActionType,
-    LoopBlock,
-    SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+)
+from ..domain.execution_plan import (
+    ExecutionAction,
+    ExecutionLoop,
+    ExecutionNode,
+    ExecutionParallel,
+    ExecutionPlan,
+    ExecutionSequence,
+    ExecutionStepIdentity,
+    iter_execution_steps,
 )
 from ..devices import DeviceNotRegisteredError, DeviceRuntime
 from ..configuration.settings import (
@@ -60,7 +69,7 @@ from .handlers import (
     create_manipulation_handler,
 )
 from .manager import EngineCallbacks
-from .models import EngineResult
+from .models import EngineResult, ParallelResourceConflictError
 from ..vision.service import VisionService
 
 logger = logging.getLogger(__name__)
@@ -213,121 +222,220 @@ class ActionEngine:
 
     def run(
         self,
-        sequence: Sequence[SequenceEntry],
+        plan: ExecutionPlan,
         control: ExecutionControl,
         callbacks: EngineCallbacks,
     ) -> EngineResult:
-        """Execute a sequence in the current worker thread."""
+        """Execute one structured plan in the manager-owned worker."""
         self._callbacks = callbacks
         self.execution_context.clear()
-        failure: ActionHandlerResult | None = None
+        identities = {
+            identity.path: identity
+            for identity, _item in iter_execution_steps(plan)
+        }
         try:
-            flat_sequence: list[tuple[SequenceItem, LoopBlock | None]] = []
-            for entry in sequence:
-                if isinstance(entry, LoopBlock):
-                    for _ in range(entry.repeat_count):
-                        for child in entry.items:
-                            clone = SequenceItem.from_dict(child.to_dict())
-                            clone.uuid = child.uuid
-                            flat_sequence.append((clone, entry))
-                elif isinstance(entry, SequenceItem):
-                    flat_sequence.append((entry, None))
-
-            loop_iteration: dict[str, int] = {}
-            loop_item_counter: dict[str, int] = {}
-
-            for index, (item, loop) in enumerate(flat_sequence):
-                if control.cancel_requested:
-                    self._on_log("执行已停止")
-                    return EngineResult(success=False, cancelled=True)
-                if not control.wait_if_paused():
-                    self._on_log("执行已停止")
-                    return EngineResult(success=False, cancelled=True)
-
-                if loop is not None:
-                    counter = loop_item_counter.get(loop.uuid, 0)
-                    iter_size = len(loop.items)
-                    if counter == 0:
-                        current_iter = loop_iteration.get(loop.uuid, 0) + 1
-                        loop_iteration[loop.uuid] = current_iter
-                        self._on_log(f"🔁 循环块 第 {current_iter}/{loop.repeat_count} 轮开始")
-                        self._on_loop_progress(loop.uuid, current_iter, loop.repeat_count)
-                    loop_item_counter[loop.uuid] = (counter + 1) % iter_size
-
-                try:
-                    control_policy = self._handler_registry.control_policy(
-                        item.definition.type,
-                        item.definition.parameters,
-                    )
-                    item.status = SequenceItemStatus.RUNNING
-                    self._on_step_started(index, item, control_policy)
-                    result = self._execute_action(
-                        item,
-                        control,
-                        control_policy,
-                    )
-                    if result.successful:
-                        item.status = SequenceItemStatus.SUCCESS
-                        self._on_step_completed(index, item)
-                    elif self._cancel_requested(control):
-                        self._reset_cancelled_item(item)
-                        return EngineResult(success=False, cancelled=True)
-                    else:
-                        item.status = SequenceItemStatus.FAILED
-                        failure = result
-                        self._on_step_failed(index, item, result)
-                        break
-                except ActionCancelledError:
-                    item.status = SequenceItemStatus.PENDING
-                    return EngineResult(success=False, cancelled=True)
-                except Exception as exc:
-                    item.status = SequenceItemStatus.FAILED
-                    failure = ActionHandlerResult.failed(
-                        ActionResultCode.INTERNAL_ERROR,
-                        f"执行异常: {exc}",
-                        operation=self._RUN_STEP_OPERATION,
-                    )
-                    self._on_step_failed(index, item, failure)
-                    break
+            return self._execute_sequence(
+                plan.root,
+                control,
+                identities,
+                path="root",
+            )
         finally:
             self._callbacks = None
 
-        if control.cancel_requested:
-            return EngineResult(success=False, cancelled=True)
-        if failure is not None:
-            return EngineResult(
-                success=False,
-                error=failure.message,
-                error_code=failure.code.value,
-                error_operation=failure.operation,
-                error_device_id=failure.device_id,
-                error_category=failure.error_category,
-                raw_error_code=failure.raw_error_code,
-            )
-        return EngineResult(success=True)
-
     def required_resources(
         self,
-        sequence: Sequence[SequenceEntry],
+        plan: ExecutionPlan,
     ) -> tuple[str, ...]:
-        """Resolve the exact device lease set before accepting a run."""
-        resources: list[str] = []
-        seen: set[str] = set()
-        for entry in sequence:
-            items = entry.items if isinstance(entry, LoopBlock) else (entry,)
-            for item in items:
-                if not isinstance(item, SequenceItem):
-                    continue
-                policy = self._handler_registry.control_policy(
-                    item.definition.type,
-                    item.definition.parameters,
+        """Resolve leases and reject conflicting parallel branches."""
+        return self._node_resources(plan.root)
+
+    def _execute_sequence(
+        self,
+        sequence: ExecutionSequence,
+        control: ExecutionControl,
+        identities: dict[str, ExecutionStepIdentity],
+        *,
+        path: str,
+    ) -> EngineResult:
+        for index, node in enumerate(sequence.children):
+            if not control.wait_if_paused():
+                return EngineResult(success=False, cancelled=True)
+            result = self._execute_node(
+                node,
+                control,
+                identities,
+                path=f"{path}/{index}",
+            )
+            if not result.success:
+                return result
+        return EngineResult(success=True)
+
+    def _execute_node(
+        self,
+        node: ExecutionNode,
+        control: ExecutionControl,
+        identities: dict[str, ExecutionStepIdentity],
+        *,
+        path: str,
+    ) -> EngineResult:
+        if isinstance(node, ExecutionAction):
+            return self._execute_plan_action(node.item, control, identities[path])
+        if isinstance(node, ExecutionLoop):
+            for iteration in range(1, node.repeat_count + 1):
+                self._on_loop_progress(node.loop_id, iteration, node.repeat_count)
+                result = self._execute_sequence(
+                    node.body,
+                    control,
+                    identities,
+                    path=f"{path}/iteration/{iteration}",
                 )
-                for device_id in policy.device_ids:
-                    if device_id in seen:
-                        continue
-                    seen.add(device_id)
-                    resources.append(device_id)
-        return tuple(resources)
+                if not result.success:
+                    return result
+            return EngineResult(success=True)
+        return self._execute_parallel(node, control, identities, path=path)
+
+    def _execute_plan_action(
+        self,
+        item: SequenceItem,
+        control: ExecutionControl,
+        identity: ExecutionStepIdentity,
+    ) -> EngineResult:
+        if control.cancel_requested:
+            return EngineResult(success=False, cancelled=True)
+        try:
+            policy = self._handler_registry.control_policy(
+                item.definition.type,
+                item.definition.parameters,
+            )
+            item.status = SequenceItemStatus.RUNNING
+            self._on_step_started(identity, item, policy)
+            result = self._execute_action(item, control, policy)
+            if result.successful:
+                item.status = SequenceItemStatus.SUCCESS
+                self._on_step_completed(identity, item)
+                return EngineResult(success=True)
+            if self._reset_if_cancelled(control, item):
+                return EngineResult(success=False, cancelled=True)
+            item.status = SequenceItemStatus.FAILED
+            self._on_step_failed(identity, item, result)
+            return _engine_failure(result)
+        except ActionCancelledError:
+            item.status = SequenceItemStatus.PENDING
+            return EngineResult(success=False, cancelled=True)
+        except Exception as exc:
+            item.status = SequenceItemStatus.FAILED
+            failure = ActionHandlerResult.failed(
+                ActionResultCode.INTERNAL_ERROR,
+                f"执行异常: {exc}",
+                operation=self._RUN_STEP_OPERATION,
+            )
+            self._on_step_failed(identity, item, failure)
+            return _engine_failure(failure)
+
+    def _execute_parallel(
+        self,
+        node: ExecutionParallel,
+        control: ExecutionControl,
+        identities: dict[str, ExecutionStepIdentity],
+        *,
+        path: str,
+    ) -> EngineResult:
+        branch_controls = {
+            branch.branch_id: control.child()
+            for branch in node.branches
+        }
+        results: dict[str, EngineResult] = {}
+        with ThreadPoolExecutor(
+            max_workers=len(node.branches),
+            thread_name_prefix=f"ExecutionBranch-{node.parallel_id[:8]}",
+        ) as executor:
+            futures = {}
+            for branch in node.branches:
+                self._on_parallel_branch(node.parallel_id, branch.branch_id, "started")
+                future = executor.submit(
+                    self._execute_sequence,
+                    branch.body,
+                    branch_controls[branch.branch_id],
+                    identities,
+                    path=f"{path}/branch/{branch.branch_id}",
+                )
+                futures[future] = branch.branch_id
+            for future in as_completed(futures):
+                branch_id = futures[future]
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    result = EngineResult(
+                        success=False,
+                        error=f"并行分支执行异常: {exc}",
+                        error_code=ActionResultCode.INTERNAL_ERROR.value,
+                        error_operation="execution.parallel.branch",
+                    )
+                results[branch_id] = result
+                state = "completed" if result.success else (
+                    "cancelled" if result.cancelled else "failed"
+                )
+                self._on_parallel_branch(
+                    node.parallel_id,
+                    branch_id,
+                    state,
+                    result.error,
+                )
+                if not result.success and not result.cancelled:
+                    for other_id, branch_control in branch_controls.items():
+                        if other_id != branch_id:
+                            branch_control.cancel()
+        if control.cancel_requested:
+            return EngineResult(success=False, cancelled=True)
+        failures = [
+            results[branch.branch_id]
+            for branch in node.branches
+            if not results[branch.branch_id].success
+            and not results[branch.branch_id].cancelled
+        ]
+        return failures[0] if failures else EngineResult(success=True)
+
+    def _node_resources(
+        self,
+        node: ExecutionSequence | ExecutionNode,
+    ) -> tuple[str, ...]:
+        if isinstance(node, ExecutionAction):
+            return tuple(dict.fromkeys(self._handler_registry.control_policy(
+                node.item.definition.type,
+                node.item.definition.parameters,
+            ).device_ids))
+        if isinstance(node, ExecutionSequence):
+            resources: list[str] = []
+            for child in node.children:
+                for resource_id in self._node_resources(child):
+                    if resource_id not in resources:
+                        resources.append(resource_id)
+            return tuple(resources)
+        if isinstance(node, ExecutionLoop):
+            return self._node_resources(node.body)
+        branch_resources = [
+            self._node_resources(branch.body)
+            for branch in node.branches
+        ]
+        for left_index, left in enumerate(branch_resources):
+            for right_index in range(left_index + 1, len(branch_resources)):
+                overlap = set(left) & set(branch_resources[right_index])
+                if overlap:
+                    raise ParallelResourceConflictError(
+                        node.parallel_id,
+                        sorted(overlap)[0],
+                        (
+                            node.branches[left_index].branch_id,
+                            node.branches[right_index].branch_id,
+                        ),
+                    )
+        merged_resources: list[str] = []
+        for branch in branch_resources:
+            for resource_id in branch:
+                if resource_id not in merged_resources:
+                    merged_resources.append(resource_id)
+        return tuple(merged_resources)
 
     def _required_callbacks(self) -> EngineCallbacks:
         if self._callbacks is None:
@@ -336,26 +444,30 @@ class ActionEngine:
 
     def _on_step_started(
         self,
-        index: int,
+        identity: ExecutionStepIdentity,
         item: SequenceItem,
         control_policy: ActionControlPolicy,
     ) -> None:
         self._required_callbacks().on_step_started(
-            index,
+            identity,
             item,
             control_policy,
         )
 
-    def _on_step_completed(self, index: int, item: SequenceItem) -> None:
-        self._required_callbacks().on_step_completed(index, item)
+    def _on_step_completed(
+        self,
+        identity: ExecutionStepIdentity,
+        item: SequenceItem,
+    ) -> None:
+        self._required_callbacks().on_step_completed(identity, item)
 
     def _on_step_failed(
         self,
-        index: int,
+        identity: ExecutionStepIdentity,
         item: SequenceItem,
         failure: ActionHandlerResult,
     ) -> None:
-        self._required_callbacks().on_step_failed(index, item, failure)
+        self._required_callbacks().on_step_failed(identity, item, failure)
 
     def _on_loop_progress(
         self,
@@ -369,6 +481,20 @@ class ActionEngine:
             total_iterations,
         )
 
+    def _on_parallel_branch(
+        self,
+        parallel_id: str,
+        branch_id: str,
+        state: str,
+        error: str = "",
+    ) -> None:
+        self._required_callbacks().on_parallel_branch(
+            parallel_id,
+            branch_id,
+            state,
+            error,
+        )
+
     def _on_log(self, message: str, level: str = "info") -> None:
         self._required_callbacks().on_log(message, level)
 
@@ -376,11 +502,16 @@ class ActionEngine:
     def _reset_cancelled_item(item: SequenceItem) -> None:
         item.status = SequenceItemStatus.PENDING
 
-    @staticmethod
-    def _cancel_requested(control: ExecutionControl) -> bool:
-        # The value may change while a handler runs in another thread. Keeping
-        # the second read behind a method prevents stale flow narrowing.
-        return control.cancel_requested
+    @classmethod
+    def _reset_if_cancelled(
+        cls,
+        control: ExecutionControl,
+        item: SequenceItem,
+    ) -> bool:
+        if not control.cancel_requested:
+            return False
+        cls._reset_cancelled_item(item)
+        return True
 
     # ------------------------------------------------------------------
     # 动作分发（与 execution.py 逻辑一致）
@@ -483,3 +614,15 @@ class ActionEngine:
                 device_id=target.device_id,
             )
         return None
+
+
+def _engine_failure(failure: ActionHandlerResult) -> EngineResult:
+    return EngineResult(
+        success=False,
+        error=failure.message,
+        error_code=failure.code.value,
+        error_operation=failure.operation,
+        error_device_id=failure.device_id,
+        error_category=failure.error_category,
+        raw_error_code=failure.raw_error_code,
+    )

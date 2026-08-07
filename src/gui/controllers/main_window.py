@@ -29,6 +29,7 @@ from ...domain.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
+    ParallelBlock,
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
@@ -1787,24 +1788,27 @@ class MainWindow(QMainWindow):
                     modal=False,
                 )
                 return
-            entries = list(compiled.entries)
             display_list.begin_execution(compiled)
+            plan = compiled.plan
         else:
             entries = [
                 entry
                 for entry in sequence
-                if isinstance(entry, (SequenceItem, LoopBlock))
+                if isinstance(entry, (SequenceItem, LoopBlock, ParallelBlock))
             ]
+            plan = None
 
         self._notifications.info(f"开始执行{label}...")
         self._execution_display_list = display_list
         self._set_trajectory_buttons_enabled(False)
         self._pause_pose_refresh()
 
-        if not self._execution_bridge.execute_sequence_items(
-            entries,
-            origin="gui",
-        ):
+        submitted = (
+            self._execution_bridge.execute_plan(plan, origin="gui")
+            if plan is not None
+            else self._execution_bridge.execute_sequence_items(entries, origin="gui")
+        )
+        if not submitted:
             if display_list is not None:
                 display_list.finish_execution()
             self._set_trajectory_buttons_enabled(True)

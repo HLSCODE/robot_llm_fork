@@ -25,8 +25,10 @@ from ..domain.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
+    ParallelBlock,
     SequenceEntry,
     SequenceItem,
+    sequence_entry_from_dict,
 )
 from ..skill_system import SkillEngine
 from ..skill_system.models import SkillMatchResult
@@ -590,7 +592,22 @@ class CommandRuntime:
 
 
 def _items(entry: SequenceEntry) -> tuple[SequenceItem, ...]:
-    return tuple(entry.items) if isinstance(entry, LoopBlock) else (entry,)
+    if isinstance(entry, SequenceItem):
+        return (entry,)
+    if isinstance(entry, LoopBlock):
+        return tuple(
+            item
+            for child in entry.items
+            for item in _items(child)
+        )
+    if isinstance(entry, ParallelBlock):
+        return tuple(
+            item
+            for branch in entry.branches
+            for child in branch.items
+            for item in _items(child)
+        )
+    raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
 
 
 def _serialize_entry(entry: SequenceEntry) -> dict[str, Any]:
@@ -598,11 +615,7 @@ def _serialize_entry(entry: SequenceEntry) -> dict[str, Any]:
 
 
 def _deserialize_entry(data: dict[str, Any]) -> SequenceEntry:
-    return (
-        LoopBlock.from_dict(_copy_dict(data))
-        if data.get("kind") == "loop"
-        else SequenceItem.from_dict(_copy_dict(data))
-    )
+    return sequence_entry_from_dict(_copy_dict(data))
 
 
 def _copy_dict(value: dict[str, Any]) -> dict[str, Any]:

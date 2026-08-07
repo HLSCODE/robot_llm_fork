@@ -78,6 +78,7 @@ from .workflow_compiler import (
     CompiledStep,
     CompiledWorkflow,
     LoopNodeMapping,
+    ParallelNodeMapping,
     WorkflowCompilationError,
     WorkflowCompiler,
 )
@@ -160,6 +161,7 @@ __all__ = [
     "CompiledStep",
     "CompiledWorkflow",
     "LoopNodeMapping",
+    "ParallelNodeMapping",
     "WorkflowCompilationError",
     "WorkflowCompiler",
     "WorkflowIssueCode",

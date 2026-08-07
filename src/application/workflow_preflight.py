@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
-from ..domain.models import SequenceEntry
+from ..domain.execution_plan import ExecutionPlan
 from ..execution import ExecutionSnapshot
 from .workflow_compiler import CompiledWorkflow
 
@@ -17,7 +16,7 @@ class ExecutionPreflightPort(Protocol):
 
     def required_resources(
         self,
-        sequence: Sequence[SequenceEntry],
+        plan: ExecutionPlan,
     ) -> tuple[str, ...]: ...
 
 
@@ -76,7 +75,7 @@ class WorkflowPreflightService:
             )
 
         try:
-            resources = self._execution.required_resources(workflow.entries)
+            resources = self._execution.required_resources(workflow.plan)
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             issues.append(
                 WorkflowPreflightIssue(

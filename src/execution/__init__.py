@@ -32,6 +32,7 @@ from .models import (
     ExecutionSnapshot,
     ExecutionState,
     ExecutionStateError,
+    ParallelResourceConflictError,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "ExecutionSnapshot",
     "ExecutionState",
     "ExecutionStateError",
+    "ParallelResourceConflictError",
 ]

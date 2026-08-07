@@ -684,7 +684,7 @@ class RobotApplicationServiceTests(unittest.TestCase):
 
         services.trajectory_teaching.start("right")
         with self.assertRaises(ResourceBusyError):
-            services.execution.start([item], origin="test")
+            services.execution.start_entries([item], origin="test")
 
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "trajectory.txt"
@@ -692,7 +692,7 @@ class RobotApplicationServiceTests(unittest.TestCase):
             self.assertEqual(path, result.path)
             self.assertTrue(path.is_file())
 
-        final = services.execution.start([item], origin="test").wait(1)
+        final = services.execution.start_entries([item], origin="test").wait(1)
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
 
 

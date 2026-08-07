@@ -5,7 +5,7 @@
 > 最近更新：2026-08-07
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：147/154（145 DONE + 2 DROPPED，95.5%）
+> 计划进度：149/155（147 DONE + 2 DROPPED，96.1%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -380,8 +380,8 @@ src/
 | A-011 | P1 | DONE | simulation 与真实模式共用状态机和执行入口 |
 | A-012 | P3 | DONE | 删除 legacy executor，未引入 backend 开关 |
 | A-013 | P1 | DONE | GUI 成为唯一桌面应用宿主，附加网络服务与 GUI 共用 ApplicationServices，退出顺序由组合根统一管理 |
-| A-014 | P1 | TODO | 将执行输入从 `SequenceItem | LoopBlock` 线性集合升级为结构化执行计划，首先覆盖可嵌套 Sequence/Action/Loop，并为已立项的 Parallel 节点定义编译映射、资源集合、join/failure policy 和确定性事件身份；不引入第二执行器 |
-| A-015 | P1 | TODO | 在唯一 ExecutionManager/ResourceArbiter 内实现受控并行分支调度；明确资源冲突拒绝、分支失败传播、cancel-all、暂停/恢复、终态聚合和审计语义，使用 fake device 完成竞态与释放测试后再做真实硬件验收 |
+| A-014 | P1 | DONE | 执行输入已升级为不可变 ExecutionPlan，递归覆盖 Sequence/Action/Loop/Parallel；WorkflowDocument v3、Validator、Compiler、Preflight、CLI、GUI/WS 提交边界共享同一计划模型，步骤 path/runtime index、Loop/Parallel/branch 身份确定且不引入第二执行器 |
+| A-015 | P1 | DONE | 唯一 ExecutionManager/ResourceArbiter 内已实现受控并行：提交前拒绝跨分支设备资源交集，分支失败执行 cancel-all 并 join 全部分支，父级 pause/resume/cancel 统一传播，分支事件与唯一聚合终态进入原有审计链；无硬件并发/释放回归已完成，真实设备仅保留既有 B-007 验收 |
 
 ### 6.3 完成标准
 
@@ -579,17 +579,18 @@ src/
 | D-013 | P2 | DONE | 提取 `ActionLibraryView` 与 `WorkflowEditorView`，统一动作库、任务库、序列和任务组合器的构造、意图信号及执行控件渲染接口 |
 | D-014 | P2 | DONE | 提取 `DeviceStatusView` 与 `DeviceControlView`，统一设备状态、位姿、定位和手动控制视图；组件不持有设备或应用服务 |
 | D-015 | P0 | DONE | 冻结 GUI 功能等价清单与架构 ADR，明确受约束画布、Loop 表现、单一执行入口、安全停止语义和直接切换门槛 |
-| D-016 | P1 | DONE | 建立纯 Python WorkflowDocument、Schema 版本、草稿恢复和 revision 冲突保护；该 v1 基础已由 G-029 的 WorkflowDocument v2 和唯一 `*.workflow.json` 正式格式取代 |
+| D-016 | P1 | DONE | 建立纯 Python WorkflowDocument、Schema 版本、草稿恢复和 revision 冲突保护；该 v1 基础先由 G-029 的唯一 `*.workflow.json` v2 取代，现已继续前向升级为 v3 |
 | D-017 | P1 | DONE | 实现结构 Validator、执行 Preflight 与 WorkflowCompiler，将合法文档编译为 SequenceEntry，并建立展开步骤索引/Loop UUID 到节点的稳定映射；应用组合根持有唯一实例，未新增执行器和动作 Handler |
 | D-018 | P1 | DONE | 实现受约束 QGraphics 工作流画布、Loop 容器、自动布局、“+”插入、带阈值拖动排序及显式上移/下移、按需参数编辑、Undo/Redo、鼠标/键盘/触控导航及执行期编辑锁定 |
 | D-019 | P1 | DONE | 任务组合、AI/语音预览、轨迹、相机、日志、设备状态和三类停止控制继续复用现有服务；当前序列统一经 Compiler/Preflight/ExecutionBridge 执行，MainWindow 已删除 QTreeWidgetItem 和画布私有绘制/映射依赖 |
 | D-020 | P2 | DONE | GUI 视觉/交互令牌集中定义，提供 `system/light/dark` 三种应用级统一主题和“视图 → 主题”即时切换；中性颜色、字体、画布、表单、菜单、状态和禁用态共享单一 Palette/QSS，支持高 DPI；关键按钮使用 44 px 触控目标和 accessibleName/Description；建立浅色/深色、360×640/720×1280/1280×720 offscreen 矩阵及 100/500 节点版本化性能预算；视觉资产许可证清单已记录 |
-| D-021 | P1 | DONE | 新画布已作为唯一编辑器运行；原 QTreeWidget SequenceListWidget 与 components 聚合模块直接删除，动作库、控制面板、日志拆为单责视图文件；任务持久化后续已由 G-029/G-032 一次迁移为唯一 WorkflowDocument v2，不保留双写、双运行、转发或兼容层 |
+| D-021 | P1 | DONE | 新画布已作为唯一编辑器运行；原 QTreeWidget SequenceListWidget 与 components 聚合模块直接删除，动作库、控制面板、日志拆为单责视图文件；任务持久化已由 G-029/G-032 一次迁移为唯一 WorkflowDocument，当前版本为 v3，不保留双写、双运行、转发或兼容层 |
 | D-022 | P1 | DONE | 已建立唯一 Workbench 壳层：顶部文件/编辑/视图/执行/设备菜单、固定 Activity Bar、可调整 Side Bar、中央 Editor、可调整 Bottom Panel 和 Status Bar；左侧资源入口支持二次点击收起，分隔条保持 1 px 视觉与 7 px 命中区；旧箭头抽屉和纵向堆叠主布局已删除，不保留双壳层 |
 | D-023 | P1 | DONE | 已将聚合资源区拆为 `TaskLibraryView`、`ActionLibraryView`、独立 AI Assistant 和 `TaskComposerView` 四个 Side Bar 页面；Activity Bar 直接切换/收起页面，中央 Editor 删除任务组合 Tab；所有列表继续渲染 CompositionService/TaskComposerService 状态，未增加 GUI 业务状态源或兼容路径 |
 | D-024 | P0 | DONE | 设备详情、位姿、日志和基础控制已迁入非模态 Bottom Panel，Status Bar 展示同源设备摘要和通知；执行/编辑控制由五行大按钮收敛为两行命令区，停止任务、快速停止和设备急停在 Side/Bottom Panel 任意状态下常驻可见 |
 | D-025 | P2 | DONE | 已建立项目自制 CC0 单色 SVG + 编译 Qt Resource 图标体系，Activity/Status 入口按 Palette 与 1x/2x/3x 渲染，主要命令区删除 Emoji 装饰；schema v1 QSettings 偏好持久化 Side/Bottom 当前页、可见性与尺寸，严格拒绝损坏/未知版本/已删除页面并恢复默认，提供显式恢复默认布局命令和 wheel 内容门禁 |
 | D-026 | P0 | DONE | 主窗口在首次渲染前通过 `CompositionService.list_tasks()` 刷新 TaskLibraryView；真实 MainWindow offscreen 回归预置磁盘任务并验证首屏条目名称，避免已保存任务再次显示为空 |
+| D-027 | P1 | TODO | 为 WorkflowDocument v3 Parallel 节点补齐画布复合节点、分支增删/排序、动作拖入分支、上下文命令、执行态分支高亮及保存/加载 offscreen 回归；继续复用既有 WorkflowCompiler/ExecutionPlan，不在 GUI 新增调度器 |
 
 ### 9.4 完成标准
 
@@ -599,7 +600,7 @@ src/
 - UI 主线程不执行阻塞操作。
 - 启动、执行和关闭均有明确状态和错误反馈。
 - WorkflowDocument、Qt Bridge/Scene 与运行时状态边界清晰，GUI 不定义平行动作模型。
-- 工作流只经 Compiler 转为规范 SequenceEntry，再提交唯一 ExecutionManager。
+- 工作流只经 Compiler 转为规范 ExecutionPlan，再提交唯一 ExecutionManager。
 - Loop、任务组合、AI 导入及三类停止控制在新编辑器中无功能回退。
 - 新编辑器满足目标分辨率、DPI、纯触控、可访问性和性能预算，切换后旧编辑器已删除。
 - 画布在默认布局中占据主要空间，资源页与持续详情不再同时常驻挤压画布。
@@ -798,7 +799,7 @@ src/
 当前问题：
 
 - 内置动作/技能与本机用户数据已分离；缺失用户库时只安装一次内置目录。
-- Action、Skill、Workflow 已统一使用 schema v2、原始备份和原子替换。
+- Action、Skill 使用 schema v2，Workflow 使用 schema v3；三者均具备原始备份和原子替换。
 - 用户可见“任务”只保存为 `workflows/*.workflow.json`；草稿进入 `drafts/`，旧 `.task`、
   `.workflow` 和备份已移入 `migration-backups/workflow-v1/`。
 - WorkflowDocument 使用结构化 Sequence/Action/Loop 根节点，布局独立进入 presentation，
@@ -896,7 +897,7 @@ src/
 | G-026 | P2 | DONE | 视觉内部已形成 `pipelines/`、`relocalization/`、`artifacts.py`、`cli/` 四个明确边界，抓取算法和离线重定位 CLI 不再平铺/混入算法包；外部 Tag 定位新增 typed reading、Provider contract、UDP Provider 和 simulation Null Provider，socket/线程由 Provider 独占，Application Service 只负责新鲜度/有效性策略；配置、服务字段和执行参数统一使用 `external_localization`，与视觉工位重定位明确区分 |
 | G-027 | P3 | DONE | 删除混合职责的 `execution/action_handlers.py`，结果/上下文/Protocol 迁入 `handler_api.py`，分派迁入 `handler_registry.py`，无设备核心 handler 迁入 `handlers/core.py`；README 项目结构、动作模型路径和相机 Provider 说明已更新，旧 application/vision/execution 路径加入禁止回归清单，Mypy 同步覆盖新边界 |
 | G-028 | P0 | DONE | GUI Qt binding 一次性直切 PySide6；生产代码、测试、可选依赖、锁文件、打包 smoke 和文档同步迁移，使用原生 `Signal`/`Slot`，不保留兼容层；附加服务结果通过 GUI 线程 QObject receiver 驱动启动卡片到主窗口的过渡；架构测试禁止旧 binding 再次进入源码、脚本、测试或 `pyproject.toml` |
-| G-029 | P1 | DONE | `WorkflowDocument` 已升级 schema v2 和唯一 `*.workflow.json`；结构化 `Sequence/Action/Loop` 根节点替代线性 `order` 持久化语义，布局进入独立 presentation，运行状态不写入定义；节点采用显式联合类型，可后续增加 Parallel/Condition 而未预建通用 BPMN |
+| G-029 | P1 | DONE | `WorkflowDocument` 已升级 schema v3 和唯一 `*.workflow.json`；递归 `Sequence/Action/Loop/Parallel` 替代线性 `order` 持久化语义，布局进入独立 presentation，运行状态不写入定义；Condition 仍未立项且未预建通用 BPMN |
 | G-030 | P1 | DONE | Action 已直切 `actions/library.json` schema v2；拒绝重复 ID/名称并逐项执行 ActionSchema 参数校验，34 个机械臂点位由字符串迁移为 6 元素 JSON 数组；Workflow 当前保存完整 ActionDefinition 快照以保证可复现，ID 仅用于来源追踪，不在执行时动态解析最新目录版本 |
 | G-031 | P1 | DONE | 集中式技能集合已拆为 `skills/<domain>/<id>.skill.json`；SkillRegistry 确定性递归加载、逐文件 schema/动作类型/参数/绑定校验、跨文件 ID 唯一校验并在全部成功后替换内存目录；`default_skills.py` 和手写索引已删除，内置与用户数据共享 JSON 格式 |
 | G-032 | P1 | DONE | Action/Skill/Workflow 显式迁移均已完成；`robot-workflow-data` 默认 dry-run，临时生成、重新加载和目标冲突校验后原子发布，17 个旧任务及 `.bak` 已移入可恢复归档；runtime 旧集合、`.task` 和旧 `.workflow` 入口全部删除 |
@@ -1097,7 +1098,7 @@ M7 GUI 工作台信息架构与空间收敛
 
 - 启动 GUI 时已保存任务立即显示，保存/删除后的事件刷新与首屏加载使用同一查询入口。
 - `.task`、`.workflow` 已通过显式工具一次迁移为唯一 `*.workflow.json`，正常读取无写盘副作用，运行时不存在双格式分支。
-- WorkflowDocument v2 区分执行控制流和 presentation 元数据，运行状态不进入定义；现有顺序与 Loop round-trip、编译映射和执行语义不回退。
+- WorkflowDocument v3 区分执行控制流和 presentation 元数据，运行状态不进入定义；Sequence/Action/Loop/Parallel 可递归组合，编译后只生成一个 ExecutionPlan；v2 活动任务已一次性前向迁移，不保留运行时兼容分支。
 - 动作 ID 全局唯一，持久化参数使用规范机器字段和 JSON 类型，ActionSchema 继续是 UI/API/Skill/Planner 的唯一字段定义。
 - 每个 Skill 独立保存为 `*.skill.json`，跨文件 ID/动作引用/参数绑定严格校验，Python 内不存在第二份完整技能目录。
 - Planner 可区分 Action、Skill、Workflow 和 ExecutionControl；夹爪、相对移动等单步语音指令经过消歧、限幅、预览和风险确认后进入唯一 ExecutionManager。
@@ -1347,10 +1348,11 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-07 | M8 | A/E/G | 类型化命令域与高频单步设备指令收口 | E-014/E-015/E-016 TODO → DONE | 新增四类 typed command、严格 Planner JSON 边界和统一 CommandCatalog；确定性解析覆盖执行控制、左右夹爪、机械臂 base 坐标相对移动、底盘相对位移及精确 Action/Skill/Workflow，歧义/越界禁止 LLM 猜测；CommandRuntime 统一展开、schema 校验、预览和风险审批；机械臂相对移动复用 ArmStateReader、ArmMotion 及统一停止策略，夹爪编号正确映射左右臂；WebSocket 改为 `ai_command_matched`/`command_info` | Ruff（src/tests）通过；本批 10 个源文件 Mypy 通过；Pytest 489 passed + 48 subtests；LLM golden 14/14；全仓 Mypy 仍有 593 个既有问题，未作为本批完成条件 |
 | 2026-08-07 | M8 | E/G | Action/Skill schema v2 与目录化整批切换 | G-030/G-031 TODO → DONE；G-032/G-033 TODO → DOING | Action 切换为目录集合并强制 ID/名称/参数唯一有效，34 个点位规范化为数组；13 个 Skill 按领域拆分、确定性加载和原子 Registry 替换，合并旧 Python/用户双事实源差异后删除 `default_skills.py`；配置直切目录变量，内置 JSON/Schema 纳入 package-data；活动旧集合移动到可恢复备份，runtime 不保留旧入口 | 活动目录只读校验 46 actions / 13 skills，数量与语义指纹稳定；Ruff、相关 Mypy、Pytest 471 passed + 48 subtests、LLM golden 14/14、wheel 构建与隔离安装 smoke 全通过 |
 | 2026-08-07 | M8 | D/G | WorkflowDocument v2 与唯一任务格式整批切换 | G-029/G-032/G-033 → DONE | 删除 Repository 的 `.task`/旧 `.workflow` 双 API，任务 UI/API 统一落到结构化 WorkflowDocument v2；控制流与 presentation 分离，运行状态不落盘；新增 `workflows/`、`drafts/`、Workflow JSON Schema、目录配置和 `robot-workflow-data` 显式迁移工具；17 个活动任务转换为 `*.workflow.json`，旧文件及 `.bak` 可恢复归档 | 活动数据 17 workflows / 272 顶层条目全部由新 Repository 加载；统一门禁通过：Mypy 83 files、Pytest 473 passed + 48 subtests、coverage 63.90%、LLM golden 14/14、性能 9/9、wheel smoke 通过 |
+| 2026-08-07 | M8 | A/D/G | 结构化 ExecutionPlan 与受控并行运行时 | A-014/A-015 TODO → DONE；D-027 新增为 TODO | WorkflowDocument/Schema 直接升级 v3；新增结构不可变且自校验的 ExecutionPlan 和递归 Sequence/Action/Loop/Parallel 编译；唯一 ExecutionManager 内按分支调度，提交前拒绝设备资源冲突，失败 cancel-all、父级 pause/resume/cancel、全分支 join 和唯一终态均保持原状态机/审计语义；GUI 编译结果直接提交 plan，WS/CLI 使用统一递归解析；17 个活动 workflow 一次迁移到 v3，不保留 v2 读取兼容 | Compile、Ruff、Mypy（84 files）、Pytest（497 passed + 48 subtests，64.51%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；聚焦结构/并行回归 51 passed + 18 subtests |
 
 ## 22. 建议的首批实施顺序
 
-1. **A-014/A-015**：在已有顺序/Loop 语义稳定后扩展结构化控制流 Compiler 与并行调度，先完成无硬件资源冲突、失败传播和取消测试，再进入真实设备验收。
-3. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-4. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-5. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+1. **D-027**：在既有 WorkflowDocument v3/ExecutionPlan 上实现 Parallel 画布复合节点与编辑交互，不新增 GUI 执行器。
+2. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+3. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。

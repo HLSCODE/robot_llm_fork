@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import time
+from threading import RLock
 from typing import Any
 
 from .arm_names import normalize_arm_name
@@ -23,13 +24,19 @@ class ExecutionContext:
 
     def __init__(self) -> None:
         self._vision_states: dict[tuple[str, str], VisionRelocalizationState] = {}
+        self._lock = RLock()
 
     def set_vision_state(self, state: VisionRelocalizationState) -> None:
         key = (state.station_id, normalize_arm_name(state.arm))
-        self._vision_states[key] = state
+        with self._lock:
+            self._vision_states[key] = state
 
     def get_vision_state(self, station_id: str, arm: str) -> VisionRelocalizationState | None:
-        return self._vision_states.get((station_id, normalize_arm_name(arm)))
+        with self._lock:
+            return self._vision_states.get(
+                (station_id, normalize_arm_name(arm))
+            )
 
     def clear(self) -> None:
-        self._vision_states.clear()
+        with self._lock:
+            self._vision_states.clear()

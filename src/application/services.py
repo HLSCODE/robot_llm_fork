@@ -34,6 +34,8 @@ from ..execution import (
     ExecutionManager,
     ExecutionSnapshot,
 )
+from ..domain.execution_plan import ExecutionPlan
+from ..domain.models import SequenceEntry
 from ..llm import LLMRegistry
 from .camera_access import CameraAccessService
 from ..vision.service import VisionService
@@ -78,23 +80,42 @@ class ExecutionService:
 
     def start(
         self,
-        sequence: Sequence[Any],
+        plan: ExecutionPlan,
         *,
         origin: str,
         listener: ExecutionListener | None = None,
     ) -> ExecutionHandle:
         return self._manager.submit(
-            sequence,
+            plan,
+            origin=origin,
+            listener=listener,
+        )
+
+    def start_entries(
+        self,
+        entries: Sequence[SequenceEntry],
+        *,
+        origin: str,
+        listener: ExecutionListener | None = None,
+    ) -> ExecutionHandle:
+        return self.start(
+            ExecutionPlan.from_entries(entries),
             origin=origin,
             listener=listener,
         )
 
     def required_resources(
         self,
-        sequence: Sequence[Any],
+        plan: ExecutionPlan,
     ) -> tuple[str, ...]:
         """Resolve resources for a non-reserving UI preflight check."""
-        return self._manager.required_resources(sequence)
+        return self._manager.required_resources(plan)
+
+    def required_resources_for_entries(
+        self,
+        entries: Sequence[SequenceEntry],
+    ) -> tuple[str, ...]:
+        return self.required_resources(ExecutionPlan.from_entries(entries))
 
     def pause(self) -> None:
         self._manager.pause()

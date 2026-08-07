@@ -32,6 +32,10 @@ class ExecutionEventType(str, Enum):
     STEP_COMPLETED = "step_completed"
     STEP_FAILED = "step_failed"
     LOOP_PROGRESS = "loop_progress"
+    PARALLEL_BRANCH_STARTED = "parallel_branch_started"
+    PARALLEL_BRANCH_COMPLETED = "parallel_branch_completed"
+    PARALLEL_BRANCH_FAILED = "parallel_branch_failed"
+    PARALLEL_BRANCH_CANCELLED = "parallel_branch_cancelled"
     LOG = "log"
     PAUSED = "paused"
     RESUMED = "resumed"
@@ -100,3 +104,19 @@ class ExecutionAlreadyRunningError(ExecutionRuntimeError):
 
 class ExecutionStateError(ExecutionRuntimeError):
     pass
+
+
+class ParallelResourceConflictError(ExecutionRuntimeError):
+    def __init__(
+        self,
+        parallel_id: str,
+        resource_id: str,
+        branch_ids: tuple[str, str],
+    ) -> None:
+        self.parallel_id = parallel_id
+        self.resource_id = resource_id
+        self.branch_ids = branch_ids
+        super().__init__(
+            f"parallel '{parallel_id}' branches {branch_ids[0]!r} and "
+            f"{branch_ids[1]!r} both require resource {resource_id!r}"
+        )

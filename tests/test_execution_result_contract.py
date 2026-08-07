@@ -278,7 +278,7 @@ class _ImmediateExecution:
     def snapshot(self):
         return SimpleNamespace(active=False)
 
-    def start(self, _sequence, *, origin, listener):
+    def start_entries(self, _sequence, *, origin, listener):
         listener(ExecutionEvent(
             run_id="run-42",
             event_type=ExecutionEventType.ACCEPTED,

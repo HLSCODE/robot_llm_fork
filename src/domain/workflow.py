@@ -10,6 +10,10 @@ from typing import Any, Mapping, Sequence, TypeAlias
 from .models import (
     ActionDefinition,
     LoopBlock,
+    ParallelBlock,
+    ParallelBranch,
+    ParallelFailurePolicy,
+    ParallelJoinPolicy,
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
@@ -17,7 +21,7 @@ from .models import (
 
 
 WORKFLOW_DOCUMENT_SCHEMA = "robot_llm.workflow"
-WORKFLOW_DOCUMENT_VERSION = 2
+WORKFLOW_DOCUMENT_VERSION = 3
 WORKFLOW_SCHEMA_REFERENCE = "../schemas/workflow.schema.json"
 
 
@@ -108,17 +112,15 @@ class WorkflowLoopNode:
     node_id: str
     loop_uuid: str
     repeat_count: int
-    body: tuple[WorkflowActionNode, ...]
+    body: WorkflowSequence
 
     def __post_init__(self) -> None:
         _require_text(self.node_id, "loop node_id")
         _require_text(self.loop_uuid, "loop_uuid")
         if isinstance(self.repeat_count, bool) or not isinstance(self.repeat_count, int):
             raise TypeError("loop repeat_count must be an integer")
-        if not isinstance(self.body, tuple) or not all(
-            isinstance(node, WorkflowActionNode) for node in self.body
-        ):
-            raise TypeError("loop body must be a tuple of action nodes")
+        if not isinstance(self.body, WorkflowSequence):
+            raise TypeError("loop body must be a workflow sequence")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -126,10 +128,7 @@ class WorkflowLoopNode:
             "node_id": self.node_id,
             "loop_uuid": self.loop_uuid,
             "repeat_count": self.repeat_count,
-            "body": {
-                "kind": "sequence",
-                "children": [node.to_dict() for node in self.body],
-            },
+            "body": self.body.to_dict(),
         }
 
     @classmethod
@@ -143,15 +142,11 @@ class WorkflowLoopNode:
             raw_children = raw_body.get("children")
             if not isinstance(raw_children, list):
                 raise WorkflowDocumentError("loop body children must be an array")
-            children = tuple(
-                _parse_action_node(child, context="loop body")
-                for child in raw_children
-            )
             return cls(
                 node_id=data["node_id"],
                 loop_uuid=data["loop_uuid"],
                 repeat_count=data["repeat_count"],
-                body=children,
+                body=WorkflowSequence.from_dict(raw_body),
             )
         except KeyError as exc:
             raise WorkflowDocumentError(
@@ -159,7 +154,88 @@ class WorkflowLoopNode:
             ) from exc
 
 
-WorkflowNode: TypeAlias = WorkflowActionNode | WorkflowLoopNode
+@dataclass(frozen=True, slots=True)
+class WorkflowParallelBranch:
+    branch_id: str
+    body: WorkflowSequence
+
+    def __post_init__(self) -> None:
+        _require_text(self.branch_id, "parallel branch_id")
+        if not isinstance(self.body, WorkflowSequence):
+            raise TypeError("parallel branch body must be a workflow sequence")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"branch_id": self.branch_id, "body": self.body.to_dict()}
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkflowParallelBranch:
+        try:
+            raw_body = data["body"]
+            if not isinstance(raw_body, Mapping):
+                raise WorkflowDocumentError("parallel branch body must be an object")
+            return cls(
+                branch_id=data["branch_id"],
+                body=WorkflowSequence.from_dict(raw_body),
+            )
+        except KeyError as exc:
+            raise WorkflowDocumentError(
+                f"parallel branch is missing {exc.args[0]!r}"
+            ) from exc
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowParallelNode:
+    node_id: str
+    parallel_uuid: str
+    branches: tuple[WorkflowParallelBranch, ...]
+    join_policy: ParallelJoinPolicy = ParallelJoinPolicy.ALL
+    failure_policy: ParallelFailurePolicy = ParallelFailurePolicy.CANCEL_ALL
+
+    def __post_init__(self) -> None:
+        _require_text(self.node_id, "parallel node_id")
+        _require_text(self.parallel_uuid, "parallel_uuid")
+        if not isinstance(self.branches, tuple) or not all(
+            isinstance(branch, WorkflowParallelBranch) for branch in self.branches
+        ):
+            raise TypeError("parallel branches must be a tuple")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "parallel",
+            "node_id": self.node_id,
+            "parallel_uuid": self.parallel_uuid,
+            "join_policy": self.join_policy.value,
+            "failure_policy": self.failure_policy.value,
+            "branches": [branch.to_dict() for branch in self.branches],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkflowParallelNode:
+        try:
+            raw_branches = data["branches"]
+            if not isinstance(raw_branches, list):
+                raise WorkflowDocumentError("parallel branches must be an array")
+            return cls(
+                node_id=data["node_id"],
+                parallel_uuid=data["parallel_uuid"],
+                branches=tuple(
+                    WorkflowParallelBranch.from_dict(branch)
+                    for branch in raw_branches
+                ),
+                join_policy=ParallelJoinPolicy(data["join_policy"]),
+                failure_policy=ParallelFailurePolicy(data["failure_policy"]),
+            )
+        except KeyError as exc:
+            raise WorkflowDocumentError(
+                f"parallel node is missing {exc.args[0]!r}"
+            ) from exc
+        except ValueError as exc:
+            raise WorkflowDocumentError("parallel policy is invalid") from exc
+
+
+WorkflowNode: TypeAlias = (
+    WorkflowActionNode | WorkflowLoopNode | WorkflowParallelNode
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +246,10 @@ class WorkflowSequence:
 
     def __post_init__(self) -> None:
         if not isinstance(self.children, tuple) or not all(
-            isinstance(node, (WorkflowActionNode, WorkflowLoopNode))
+            isinstance(
+                node,
+                (WorkflowActionNode, WorkflowLoopNode, WorkflowParallelNode),
+            )
             for node in self.children
         ):
             raise TypeError("workflow children must be workflow nodes")
@@ -299,10 +378,23 @@ class WorkflowDocument:
                         node_id=entry.uuid,
                         loop_uuid=entry.uuid,
                         repeat_count=entry.repeat_count,
-                        body=tuple(
-                            _action_node(item, node_id=item.uuid)
-                            for item in entry.items
+                        body=_sequence_from_entries(entry.items),
+                    )
+                )
+            elif isinstance(entry, ParallelBlock):
+                nodes.append(
+                    WorkflowParallelNode(
+                        node_id=entry.uuid,
+                        parallel_uuid=entry.uuid,
+                        branches=tuple(
+                            WorkflowParallelBranch(
+                                branch.branch_id,
+                                _sequence_from_entries(branch.items),
+                            )
+                            for branch in entry.branches
                         ),
+                        join_policy=entry.join_policy,
+                        failure_policy=entry.failure_policy,
                     )
                 )
             else:
@@ -325,13 +417,28 @@ class WorkflowDocument:
         for node in self.root.children:
             if isinstance(node, WorkflowActionNode):
                 entries.append(_sequence_item(node))
-            else:
+            elif isinstance(node, WorkflowLoopNode):
                 entries.append(
                     LoopBlock(
                         uuid=node.loop_uuid,
-                        items=[_sequence_item(child) for child in node.body],
+                        items=list(_entries_from_sequence(node.body)),
                         repeat_count=node.repeat_count,
                         current_iteration=0,
+                    )
+                )
+            else:
+                entries.append(
+                    ParallelBlock(
+                        uuid=node.parallel_uuid,
+                        branches=[
+                            ParallelBranch(
+                                branch.branch_id,
+                                list(_entries_from_sequence(branch.body)),
+                            )
+                            for branch in node.branches
+                        ],
+                        join_policy=node.join_policy,
+                        failure_policy=node.failure_policy,
                     )
                 )
         return tuple(entries)
@@ -345,9 +452,22 @@ def clone_sequence_entry(entry: SequenceEntry) -> SequenceEntry:
     if isinstance(entry, LoopBlock):
         return LoopBlock(
             uuid=entry.uuid,
-            items=[_clone_item(item) for item in entry.items],
+            items=[clone_sequence_entry(item) for item in entry.items],
             repeat_count=entry.repeat_count,
             current_iteration=0,
+        )
+    if isinstance(entry, ParallelBlock):
+        return ParallelBlock(
+            uuid=entry.uuid,
+            branches=[
+                ParallelBranch(
+                    branch.branch_id,
+                    [clone_sequence_entry(item) for item in branch.items],
+                )
+                for branch in entry.branches
+            ],
+            join_policy=entry.join_policy,
+            failure_policy=entry.failure_policy,
         )
     if isinstance(entry, SequenceItem):
         return SequenceItem(
@@ -366,14 +486,9 @@ def _parse_node(data: object) -> WorkflowNode:
         return WorkflowActionNode.from_dict(data)
     if kind == "loop":
         return WorkflowLoopNode.from_dict(data)
+    if kind == "parallel":
+        return WorkflowParallelNode.from_dict(data)
     raise WorkflowDocumentError(f"unsupported workflow node kind {kind!r}")
-
-
-def _parse_action_node(data: object, *, context: str) -> WorkflowActionNode:
-    node = _parse_node(data)
-    if not isinstance(node, WorkflowActionNode):
-        raise WorkflowDocumentError(f"{context} currently supports action nodes only")
-    return node
 
 
 def _action_node(item: SequenceItem, *, node_id: str) -> WorkflowActionNode:
@@ -398,6 +513,25 @@ def _clone_item(item: SequenceItem) -> SequenceItem:
         definition=ActionDefinition.from_dict(deepcopy(item.definition.to_dict())),
         status=SequenceItemStatus.PENDING,
     )
+
+
+def _sequence_from_entries(entries: Sequence[SequenceEntry]) -> WorkflowSequence:
+    return WorkflowDocument.from_entries(
+        workflow_id="nested",
+        name="nested",
+        revision=0,
+        entries=entries,
+    ).root
+
+
+def _entries_from_sequence(sequence: WorkflowSequence) -> tuple[SequenceEntry, ...]:
+    document = WorkflowDocument(
+        workflow_id="nested",
+        name="nested",
+        revision=0,
+        root=sequence,
+    )
+    return document.to_entries()
 
 
 def _require_text(value: object, label: str) -> str:

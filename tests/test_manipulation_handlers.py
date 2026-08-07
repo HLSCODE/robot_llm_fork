@@ -629,7 +629,7 @@ class ManipulationRuntimeIntegrationTests(unittest.TestCase):
             for action_id, parameters in definitions
         ]
 
-        final = services.execution.start(
+        final = services.execution.start_entries(
             sequence,
             origin="test",
         ).wait(1)

@@ -14,9 +14,11 @@ from uuid import uuid4
 from ..domain.models import (
     ActionDefinition,
     LoopBlock,
+    ParallelBlock,
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    sequence_entry_from_dict,
 )
 from ..domain.workflow import WorkflowDocument
 
@@ -729,23 +731,19 @@ def _clone_action(action: ActionDefinition) -> ActionDefinition:
 
 
 def _clone_entry(entry: SequenceEntry) -> SequenceEntry:
-    if isinstance(entry, LoopBlock):
-        return LoopBlock.from_dict(deepcopy(entry.to_dict()))
-    if isinstance(entry, SequenceItem):
-        return SequenceItem.from_dict(deepcopy(entry.to_dict()))
-    raise TypeError(
-        f"unsupported sequence entry: {type(entry).__name__}"
-    )
+    return sequence_entry_from_dict(deepcopy(entry.to_dict()))
 
 
 def _pending_entry(entry: SequenceEntry) -> SequenceEntry:
     cloned = _clone_entry(entry)
-    if isinstance(cloned, LoopBlock):
-        cloned.current_iteration = 0
-        for child in cloned.items:
-            child.status = SequenceItemStatus.PENDING
-    else:
+    if isinstance(cloned, SequenceItem):
         cloned.status = SequenceItemStatus.PENDING
+    elif isinstance(cloned, LoopBlock):
+        cloned.current_iteration = 0
+        cloned.items = [_pending_entry(child) for child in cloned.items]
+    elif isinstance(cloned, ParallelBlock):
+        for branch in cloned.branches:
+            branch.items = [_pending_entry(child) for child in branch.items]
     return cloned
 
 
@@ -763,14 +761,15 @@ def _flatten_entries(
 ) -> list[SequenceItem]:
     flattened: list[SequenceItem] = []
     for entry in entries:
+        if isinstance(entry, SequenceItem):
+            flattened.append(_pending_entry(entry))
+            continue
         if isinstance(entry, LoopBlock):
             for _ in range(entry.repeat_count):
-                flattened.extend(
-                    _pending_entry(child)
-                    for child in entry.items
-                )
+                flattened.extend(_flatten_entries(entry.items))
             continue
-        flattened.append(_pending_entry(entry))
+        for branch in entry.branches:
+            flattened.extend(_flatten_entries(branch.items))
     return flattened
 
 

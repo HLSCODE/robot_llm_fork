@@ -7,19 +7,28 @@ import time
 class ExecutionControl:
     """Thread-safe cooperative pause and cancellation state for one run."""
 
-    def __init__(self) -> None:
+    def __init__(self, parent: ExecutionControl | None = None) -> None:
         self._cancelled = Event()
         self._pause_condition = Condition()
         self._paused = False
+        self._parent = parent
 
     @property
     def cancel_requested(self) -> bool:
-        return self._cancelled.is_set()
+        return self._cancelled.is_set() or bool(
+            self._parent is not None and self._parent.cancel_requested
+        )
 
     @property
     def paused(self) -> bool:
         with self._pause_condition:
-            return self._paused
+            return self._paused or bool(
+                self._parent is not None and self._parent.paused
+            )
+
+    def child(self) -> ExecutionControl:
+        """Create a branch-local cancellation scope sharing parent pause/cancel."""
+        return ExecutionControl(parent=self)
 
     def cancel(self) -> None:
         self._cancelled.set()
@@ -44,7 +53,7 @@ class ExecutionControl:
         deadline: float | None = None,
     ) -> bool:
         with self._pause_condition:
-            while self._paused and not self._cancelled.is_set():
+            while self.paused and not self.cancel_requested:
                 wait_seconds = poll_seconds
                 if deadline is not None:
                     remaining = deadline - time.monotonic()
@@ -52,7 +61,7 @@ class ExecutionControl:
                         break
                     wait_seconds = min(wait_seconds, remaining)
                 self._pause_condition.wait(timeout=wait_seconds)
-        return not self._cancelled.is_set()
+        return not self.cancel_requested
 
     def sleep(
         self,
@@ -63,7 +72,7 @@ class ExecutionControl:
     ) -> bool:
         sleep_deadline = time.monotonic() + max(0.0, seconds)
         while time.monotonic() < sleep_deadline:
-            if self._cancelled.is_set() or not self.wait_if_paused(
+            if self.cancel_requested or not self.wait_if_paused(
                 deadline=deadline
             ):
                 return False
@@ -75,4 +84,4 @@ class ExecutionControl:
             self._cancelled.wait(
                 timeout=min(poll_seconds, max(0.0, remaining))
             )
-        return not self._cancelled.is_set()
+        return not self.cancel_requested

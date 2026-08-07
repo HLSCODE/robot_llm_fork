@@ -341,16 +341,14 @@ uv run --frozen --group dev python scripts/run_quality_checks.py
 - presentation/transport/execution 层不得导入具体硬件。
 - CompositionService 并发动作写入、任务编辑、防御性快照和跨入口事件广播。
 
-下一批测试：
+结构化执行自动化覆盖：
 
-- pause 与 cancel 并发。
-- shutdown timeout。
-- listener 异常隔离。
-- LoopBlock 展开和非法 repeat。
-- 全 ActionType simulation。
-- WebSocket accepted/step/terminal 事件顺序。
-- GUI signal 的主线程投递。
-- 多客户端相机 subscribe/unsubscribe 与断线竞态。
+- ExecutionPlan 的 Sequence/Action/Loop/Parallel 递归编译和稳定 step path。
+- Parallel 分支设备资源交集在提交前拒绝，不初始化设备。
+- 分支失败执行 cancel-all，所有线程 join 后才聚合终态。
+- 父级 pause/resume/cancel 传播到全部分支，每个 run 只产生一个终态。
+- GUI 编译结果直接提交 ExecutionPlan；WebSocket/CLI 使用统一递归 SequenceEntry 解析。
+- 剩余并行工作仅为 D-027 画布表达和 B-007 真实硬件停止时延验收，不新增执行器。
 
 ## 7. 真实硬件验收
 

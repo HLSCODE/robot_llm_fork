@@ -84,7 +84,7 @@ class SequenceItem:
 class LoopBlock:
     """循环块容器 — 将一组动作包裹起来循环执行 N 次"""
     uuid: str
-    items: List[SequenceItem]
+    items: List['SequenceEntry']
     repeat_count: int
     current_iteration: int = 0  # 执行时追踪当前轮次
 
@@ -105,7 +105,7 @@ class LoopBlock:
     def from_dict(cls, data: Dict[str, Any]) -> 'LoopBlock':
         return cls(
             uuid=data.get("uuid", str(uuid4())),
-            items=[SequenceItem.from_dict(item) for item in data.get("items", [])],
+            items=[sequence_entry_from_dict(item) for item in data.get("items", [])],
             repeat_count=data.get("repeat_count", 2),
         )
 
@@ -120,5 +120,71 @@ class LoopBlock:
         )
 
 
-# 序列条目的联合类型：普通动作 或 循环块
-SequenceEntry = Union[SequenceItem, LoopBlock]
+class ParallelJoinPolicy(str, Enum):
+    ALL = "all"
+
+
+class ParallelFailurePolicy(str, Enum):
+    CANCEL_ALL = "cancel_all"
+
+
+@dataclass
+class ParallelBranch:
+    branch_id: str
+    items: List['SequenceEntry']
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "branch_id": self.branch_id,
+            "items": [item.to_dict() for item in self.items],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ParallelBranch':
+        return cls(
+            branch_id=str(data["branch_id"]),
+            items=[sequence_entry_from_dict(item) for item in data.get("items", [])],
+        )
+
+
+@dataclass
+class ParallelBlock:
+    uuid: str
+    branches: List[ParallelBranch]
+    join_policy: ParallelJoinPolicy = ParallelJoinPolicy.ALL
+    failure_policy: ParallelFailurePolicy = ParallelFailurePolicy.CANCEL_ALL
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "kind": "parallel",
+            "uuid": self.uuid,
+            "join_policy": self.join_policy.value,
+            "failure_policy": self.failure_policy.value,
+            "branches": [branch.to_dict() for branch in self.branches],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'ParallelBlock':
+        return cls(
+            uuid=str(data.get("uuid", uuid4())),
+            branches=[
+                ParallelBranch.from_dict(branch)
+                for branch in data.get("branches", [])
+            ],
+            join_policy=ParallelJoinPolicy(data.get("join_policy", "all")),
+            failure_policy=ParallelFailurePolicy(
+                data.get("failure_policy", "cancel_all")
+            ),
+        )
+
+
+SequenceEntry = Union[SequenceItem, LoopBlock, ParallelBlock]
+
+
+def sequence_entry_from_dict(data: Dict[str, Any]) -> SequenceEntry:
+    kind = data.get("kind", "action")
+    if kind == "loop":
+        return LoopBlock.from_dict(data)
+    if kind == "parallel":
+        return ParallelBlock.from_dict(data)
+    return SequenceItem.from_dict(data)

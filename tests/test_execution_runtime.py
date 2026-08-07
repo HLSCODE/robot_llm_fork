@@ -5,7 +5,14 @@ import logging
 import unittest
 
 from src.application import create_application_services
-from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.domain.models import (
+    ActionDefinition,
+    ActionType,
+    ParallelBlock,
+    ParallelBranch,
+    SequenceItem,
+)
+from src.domain.execution_plan import ExecutionPlan, iter_execution_steps
 from src.observability.logging_config import LoggingContextFilter
 from src.configuration.settings import ApplicationSettings
 from src.devices import (
@@ -65,20 +72,21 @@ class _BlockingEngine:
 
     def run(
         self,
-        sequence,
+        plan: ExecutionPlan,
         control: ExecutionControl,
         callbacks: EngineCallbacks,
     ) -> EngineResult:
         self.started.set()
+        identity, item = next(iter_execution_steps(plan))
         callbacks.on_step_started(
-            0,
-            sequence[0],
+            identity,
+            item,
             resolve_wait_control_policy({}),
         )
         while not self.release.is_set():
             if not control.sleep(0.01):
                 return EngineResult(success=False, cancelled=True)
-        callbacks.on_step_completed(0, sequence[0])
+        callbacks.on_step_completed(identity, item)
         return EngineResult(success=True)
 
 
@@ -118,6 +126,26 @@ class _FailingWorker:
 
     def join(self, timeout: float | None = None) -> None:
         del timeout
+
+
+def _test_plan(action_id: str) -> ExecutionPlan:
+    return ExecutionPlan.from_entries((SequenceItem.from_definition(
+        ActionDefinition(
+            id=action_id,
+            name=action_id,
+            type=ActionType.WAIT,
+            parameters={"wait_seconds": 0.01},
+        )
+    ),))
+
+
+def _parallel_wait(action_id: str) -> SequenceItem:
+    return SequenceItem.from_definition(ActionDefinition(
+        id=action_id,
+        name=action_id,
+        type=ActionType.WAIT,
+        parameters={"wait_seconds": 2.0},
+    ))
 
 
 class DeviceRuntimeTests(unittest.TestCase):
@@ -302,14 +330,14 @@ class ExecutionManagerTests(unittest.TestCase):
 
     def test_single_run_pause_resume_and_completion(self):
         handle = self.manager.submit(
-            ["step"],
+            _test_plan("step"),
             origin="test",
             listener=self.events.append,
         )
         self.assertTrue(self.engine.started.wait(1))
 
         with self.assertRaises(ExecutionAlreadyRunningError):
-            self.manager.submit(["other"], origin="test")
+            self.manager.submit(_test_plan("other"), origin="test")
 
         handle.pause()
         self.assertEqual(ExecutionState.PAUSED, handle.snapshot().state)
@@ -325,7 +353,7 @@ class ExecutionManagerTests(unittest.TestCase):
         self.assertIn(ExecutionEventType.SUCCEEDED, event_types)
 
     def test_cancel_releases_resources(self):
-        handle = self.manager.submit(["step"], origin="test")
+        handle = self.manager.submit(_test_plan("step"), origin="test")
         self.assertTrue(self.engine.started.wait(1))
         handle.cancel()
         final = handle.wait(1)
@@ -347,7 +375,11 @@ class ExecutionManagerTests(unittest.TestCase):
             worker_factory=create_worker,
         )
         events = []
-        handle = manager.submit(["step"], origin="test", listener=events.append)
+        handle = manager.submit(
+            _test_plan("step"),
+            origin="test",
+            listener=events.append,
+        )
 
         handle.cancel()
         self.assertEqual(ExecutionState.CANCELLING, handle.snapshot().state)
@@ -375,7 +407,11 @@ class ExecutionManagerTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(RuntimeError, "worker start rejected"):
-            manager.submit(["step"], origin="test", listener=events.append)
+            manager.submit(
+                _test_plan("step"),
+                origin="test",
+                listener=events.append,
+            )
 
         snapshot = manager.snapshot()
         self.assertEqual(ExecutionState.FAILED, snapshot.state)
@@ -397,7 +433,7 @@ class ExecutionManagerTests(unittest.TestCase):
         def submit() -> None:
             barrier.wait()
             try:
-                handle = self.manager.submit(["step"], origin="race")
+                handle = self.manager.submit(_test_plan("step"), origin="race")
             except ExecutionAlreadyRunningError as exc:
                 with result_lock:
                     rejections.append(exc)
@@ -426,7 +462,7 @@ class ExecutionManagerTests(unittest.TestCase):
                 events.append(event)
 
         handle = self.manager.submit(
-            ["step"],
+            _test_plan("step"),
             origin="race",
             listener=listener,
         )
@@ -485,7 +521,7 @@ class ExecutionManagerTests(unittest.TestCase):
         manager_logger.addHandler(handler)
         manager_logger.setLevel(logging.INFO)
         try:
-            handle = self.manager.submit(["step"], origin="test")
+            handle = self.manager.submit(_test_plan("step"), origin="test")
             self.assertTrue(self.engine.started.wait(1))
             self.engine.release.set()
             handle.wait(1)
@@ -513,7 +549,7 @@ class ExecutionManagerTests(unittest.TestCase):
                 release_listener.wait(1)
 
         handle = self.manager.submit(
-            ["step"],
+            _test_plan("step"),
             origin="test",
             listener=listener,
         )
@@ -523,13 +559,67 @@ class ExecutionManagerTests(unittest.TestCase):
         self.assertEqual(ExecutionState.SUCCEEDED, handle.snapshot().state)
 
         with self.assertRaises(ExecutionAlreadyRunningError):
-            self.manager.submit(["other"], origin="test")
+            self.manager.submit(_test_plan("other"), origin="test")
 
         release_listener.set()
         self.assertEqual(ExecutionState.SUCCEEDED, handle.wait(1).state)
 
 
 class ApplicationServiceTests(unittest.TestCase):
+    def test_parallel_run_pause_resume_and_cancel_reaches_one_terminal_state(self):
+        services = create_application_services(
+            ApplicationSettings.defaults(),
+            simulation=True,
+        )
+        branch_started = Event()
+        events = []
+
+        def listener(event) -> None:
+            events.append(event)
+            if sum(
+                item.event_type is ExecutionEventType.PARALLEL_BRANCH_STARTED
+                for item in events
+            ) == 2:
+                branch_started.set()
+
+        parallel = ParallelBlock(
+            uuid="parallel-control",
+            branches=[
+                ParallelBranch("left", [_parallel_wait("left")]),
+                ParallelBranch("right", [_parallel_wait("right")]),
+            ],
+        )
+        handle = services.execution.start_entries(
+            [parallel],
+            origin="test",
+            listener=listener,
+        )
+        self.assertTrue(branch_started.wait(1))
+
+        handle.pause()
+        self.assertEqual(ExecutionState.PAUSED, handle.snapshot().state)
+        handle.resume()
+        self.assertEqual(ExecutionState.RUNNING, handle.snapshot().state)
+        handle.cancel()
+
+        self.assertEqual(ExecutionState.CANCELLED, handle.wait(1).state)
+        terminal = [
+            event for event in events
+            if event.event_type in {
+                ExecutionEventType.SUCCEEDED,
+                ExecutionEventType.FAILED,
+                ExecutionEventType.CANCELLED,
+            }
+        ]
+        self.assertEqual(
+            [ExecutionEventType.CANCELLED],
+            [event.event_type for event in terminal],
+        )
+        self.assertEqual(2, sum(
+            event.event_type is ExecutionEventType.PARALLEL_BRANCH_CANCELLED
+            for event in events
+        ))
+
     def test_simulated_wait_action_uses_unified_runtime(self):
         services = create_application_services(
             ApplicationSettings.defaults(),
@@ -544,7 +634,7 @@ class ApplicationServiceTests(unittest.TestCase):
             )
         )
 
-        handle = services.execution.start([item], origin="test")
+        handle = services.execution.start_entries([item], origin="test")
         final = handle.wait(1)
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
         self.assertFalse(services.devices.shutdown_all())
@@ -570,10 +660,10 @@ class ApplicationServiceTests(unittest.TestCase):
         )
 
         with self.assertRaises(ResourceBusyError):
-            services.execution.start([item], origin="test")
+            services.execution.start_entries([item], origin="test")
 
         services.teleoperation.stop("test")
-        final = services.execution.start([item], origin="test").wait(1)
+        final = services.execution.start_entries([item], origin="test").wait(1)
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
 
     def test_quick_stop_cancels_execution_and_stops_ready_robot(self):
@@ -590,7 +680,7 @@ class ApplicationServiceTests(unittest.TestCase):
                 parameters={"wait_seconds": 5},
             )
         )
-        services.execution.start([item], origin="test")
+        services.execution.start_entries([item], origin="test")
 
         report = services.safety.stop(
             StopMode.QUICK,

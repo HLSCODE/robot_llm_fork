@@ -1,4 +1,4 @@
-"""Explicit one-way migration from legacy task/workflow files to workflow v2."""
+"""Explicit one-way migration from legacy task/workflow files to workflow v3."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import shutil
 from tempfile import TemporaryDirectory
 from typing import Mapping, Sequence
 
-from ..domain.models import LoopBlock, SequenceEntry, SequenceItem
+from ..domain.models import SequenceEntry, sequence_entry_from_dict
 from ..domain.workflow import CanvasPosition, WorkflowDocument
 from ..persistence.json_documents import read_json_document, write_json_atomic
 from ..persistence.storage import WORKFLOW_FILE_SUFFIX
@@ -149,11 +149,7 @@ def _entry(path: Path, raw_entry: object) -> SequenceEntry:
         raise ValueError(f"{path.name}: entry must be an object")
     try:
         entry_data = dict(raw_entry)
-        return (
-            LoopBlock.from_dict(entry_data)
-            if raw_entry.get("kind") == "loop"
-            else SequenceItem.from_dict(entry_data)
-        )
+        return sequence_entry_from_dict(entry_data)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"{path.name}: invalid task entry") from exc
 
@@ -164,7 +160,7 @@ def _apply(
     workflows_directory: Path,
     backup_directory: Path,
 ) -> None:
-    with TemporaryDirectory(prefix="workflow-v2-", dir=workflows_directory.parent) as raw_stage:
+    with TemporaryDirectory(prefix="workflow-v3-", dir=workflows_directory.parent) as raw_stage:
         stage = Path(raw_stage)
         staged: list[tuple[Path, MigrationItem]] = []
         for index, item in enumerate(items):

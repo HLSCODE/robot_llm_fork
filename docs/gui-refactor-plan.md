@@ -43,7 +43,7 @@
 > Activity Bar 和画布外框的重复线条。仅输入焦点、可拖动分隔、工作流节点边界及
 > 安全/状态语义保留必要描边。
 
-> 2026-08-07 M8 数据模型切换已完成：`*.workflow.json`/WorkflowDocument v2 已成为
+> 2026-08-07 M8 数据模型切换已完成：`*.workflow.json`/WorkflowDocument v3 已成为
 > 用户可见“任务”的唯一源文档，执行计划由 Compiler 派生；控制流与 presentation
 > 分离，运行状态不落盘。17 个旧任务已由显式 CLI 转换并归档，`.task`、旧
 > `.workflow`、读取时隐式迁移、双格式 Repository API 和旧目录配置已从 runtime 删除。
@@ -63,7 +63,7 @@ WorkflowValidator（结构与 Schema 校验）
     ↓
 WorkflowCompiler（编译并生成节点映射）
     ↓
-tuple[SequenceEntry, ...]
+ExecutionPlan（Sequence/Action/Loop/Parallel）
     ↓
 ExecutionBridge（Qt 事件适配）
     ↓
@@ -79,7 +79,7 @@ DeviceRuntime / Application Service
 - `ExecutionManager` 是唯一序列执行器。
 - `ActionHandlerRegistry` 是唯一动作 Handler 注册表。
 - `CompositionService` 是动作、任务和当前序列的唯一持久化入口。
-- `ActionDefinition`、`SequenceItem`、`LoopBlock`、`SequenceEntry` 和 `ActionSchema` 是规范领域模型。
+- `ActionDefinition`、`SequenceItem`、`LoopBlock`、`ParallelBlock`、`SequenceEntry`、`ExecutionPlan` 和 `ActionSchema` 是规范领域模型。
 - GUI 不直接访问设备、JSON 文件、Handler 或 Provider。
 - 不保留新旧编辑器双写、双执行或长期兼容层；达到切换门槛后一次切换并删除旧入口。
 
@@ -99,7 +99,7 @@ DeviceRuntime / Application Service
 
 非目标：
 
-- 第一阶段不实现条件分支、并行执行、数据流和子流程。
+- 第一阶段不实现条件分支、数据流和子流程；受控并行运行时已在 M8 完成，画布编辑与可视化由 D-027 单独实施。
 - 第一阶段不实现任意拓扑、任意端口连接或通用 BPMN 引擎。
 - 不为未立项能力预建执行上下文、节点 Handler 或协议兼容层。
 
@@ -110,11 +110,12 @@ DeviceRuntime / Application Service
 | Action | 一个规范化的 `ActionDefinition` |
 | Sequence item | 带稳定 UUID、状态和 Action 的 `SequenceItem` |
 | Loop block | 带重复次数和子项的 `LoopBlock` |
-| Sequence entry | `SequenceItem | LoopBlock`，是运行时输入元素 |
+| Sequence entry | `SequenceItem | LoopBlock | ParallelBlock`，是持久化/组合边界元素 |
+| Execution plan | Compiler 生成的不可变递归执行输入，包含 Sequence/Action/Loop/Parallel |
 | Workflow document | GUI 编辑期纯 Python 文档，包含节点、顺序和布局元数据 |
 | Task | 用户可见概念；持久化为唯一 `*.workflow.json`/WorkflowDocument，运行时计划由 Compiler 派生 |
 | Node | Action、Loop、Start 或 End 的画布表现，不是新的业务动作类型 |
-| Compile | 将合法编辑文档转换为规范 `SequenceEntry`，不执行设备动作 |
+| Compile | 将合法编辑文档转换为规范 `ExecutionPlan`，不执行设备动作 |
 | Preflight | 执行前检查设备在线、能力、资源和停止能力等瞬时条件 |
 
 文档和界面不得混用“序列、工作流、组合任务”表达同一对象；用户可见名称统一为“任务”，画布内部使用 Workflow/Node。
@@ -285,8 +286,9 @@ WorkflowDocument
 └─ presentation: positions/collapsed/viewport
 ```
 
-- 首批 schema v2 必须完整支持可嵌套 Sequence/Action/Loop；Parallel 只有在
-  A-014/A-015 的编译、资源、失败、取消和调度语义同时完成后才可写入生产任务。
+- schema v3 已完整支持可嵌套 Sequence/Action/Loop/Parallel；A-014/A-015 已完成
+  编译、资源冲突、失败、取消、join、事件身份和调度语义。GUI 在 D-027 完成前
+  不提供 Parallel 创建/修改入口，但 API/Compiler/Runtime 使用同一正式模型。
 - `presentation` 不参与执行语义，运行状态和执行历史不得写回 WorkflowDocument。
 - Action 节点保存规范化可复现快照及来源 action ID/revision，不按显示名称解析。
 - 不实现任意连线图或通用 BPMN；Condition 不执行任意代码，表达式模型另行评审。
@@ -326,7 +328,7 @@ Preflight 单独检查瞬时条件：
 
 `WorkflowCompiler` 只负责：
 
-- 将文档顺序转换为 `tuple[SequenceEntry, ...]`。
+- 将文档结构转换为不可变 `ExecutionPlan`，并保留可持久化 `SequenceEntry` 投影。
 - 保留 `SequenceItem.uuid`/Loop UUID。
 - 生成运行步骤与 `node_id` 的稳定映射。
 - 返回不可变编译快照和诊断信息。
@@ -513,14 +515,22 @@ src/
 - 已持久化 Side Bar/Bottom Panel 尺寸、可见性和当前页面，损坏状态安全恢复默认布局。
 - 已完成尺寸矩阵、键盘、读屏、功能等价和安全回归并直接切换；真实触控屏继续随设备验收确认。
 
-### 阶段 11：任务数据模型 v2 与格式单一化
+### 阶段 11：任务数据模型 v3 与格式单一化
 
 - 已修复启动时已保存任务未刷新的回归，并完成迁移前行为基线。
-- 已冻结 WorkflowDocument v2、`*.workflow.json`、presentation 和结构化控制流 Schema。
+- 已冻结 WorkflowDocument v3、`*.workflow.json`、presentation 和结构化控制流 Schema；
+  v2 活动数据已一次迁移，运行时不保留兼容读取。
 - 已通过 `robot-workflow-data` 将 `.task`/旧 `.workflow` 一次转换，并删除双格式
   Repository API、读取时隐式迁移和旧路径配置。
 - GUI 资源页、保存/加载、任务组合和 WebSocket 已统一使用 Workflow Repository；
   AI/语音后续 typed command 继续复用该入口，不在 View 中直接枚举文件。
+
+### 阶段 12：Parallel 画布表达（D-027，待实施）
+
+- 复用既有 WorkflowParallelNode/ExecutionPlan，仅增加画布复合节点和编辑命令。
+- 分支的新增、删除、排序和动作移动必须经过同一 WorkflowDocument 修改边界。
+- 执行态按 parallel UUID/branch ID/step path 高亮；不以 GUI 线程承担调度。
+- 补保存/加载、Undo/Redo、键鼠/触控和 offscreen 主题/尺寸回归后再关闭任务。
 
 ## 15. 测试与验收
 
@@ -529,7 +539,7 @@ src/
 - Workflow 文档序列化 round-trip、Schema 升级和损坏数据拒绝。
 - `.task`/`.workflow` 到 `*.workflow.json` 的 dry-run、备份、语义指纹和失败不切换测试。
 - 主窗口启动时已有任务立即显示，首屏加载与保存/删除事件刷新结果一致。
-- Validator、Compiler 与 `SequenceEntry` 的确定性和 Loop 覆盖。
+- Validator、Compiler 与 `ExecutionPlan` 的确定性，以及嵌套 Loop/Parallel 覆盖。
 - 每种 Undo/Redo 命令及连续拖动合并。
 - UUID 到执行事件/节点状态的映射。
 - Qt offscreen：加载、编辑、保存、执行、暂停、取消和关闭。

@@ -222,7 +222,10 @@ class VisionSimulationIntegrationTests(unittest.TestCase):
                         )
                     ),
                 ]
-                handle = services.execution.start(sequence, origin="vision-fixture-test")
+                handle = services.execution.start_entries(
+                    sequence,
+                    origin="vision-fixture-test",
+                )
                 self.assertTrue(handle.wait(timeout=2))
                 self.assertEqual(ExecutionState.SUCCEEDED, handle.snapshot().state)
                 artifacts = list((Path(directory) / "debug").rglob("fixture.json"))

@@ -18,15 +18,19 @@ from src.domain.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
+    ParallelBlock,
+    ParallelBranch,
     SequenceItem,
     SequenceItemStatus,
 )
+from src.domain.execution_plan import ExecutionPlan
 from src.domain.workflow import (
     CanvasPosition,
     UnsupportedWorkflowDocumentVersion,
     WorkflowActionNode,
     WorkflowDocument,
     WorkflowLoopNode,
+    WorkflowParallelNode,
 )
 from src.execution import ExecutionSnapshot, ExecutionState
 from src.persistence.storage import JsonCompositionRepository
@@ -76,6 +80,59 @@ class WorkflowDocumentTests(unittest.TestCase):
 
         with self.assertRaises(UnsupportedWorkflowDocumentVersion):
             WorkflowDocument.from_dict(payload)
+
+    def test_nested_parallel_and_loop_round_trip_as_v3(self) -> None:
+        parallel = ParallelBlock(
+            uuid="parallel-1",
+            branches=[
+                ParallelBranch("left", [_item("left-item")]),
+                ParallelBranch(
+                    "right",
+                    [LoopBlock("nested-loop", [_item("right-item")], 2)],
+                ),
+            ],
+        )
+        document = WorkflowDocument.from_entries(
+            workflow_id="workflow-structured",
+            name="Structured",
+            revision=1,
+            entries=(parallel,),
+        )
+
+        payload = document.to_dict()
+        restored = WorkflowDocument.from_dict(payload)
+
+        self.assertEqual(3, payload["schema_version"])
+        restored_parallel = restored.root.children[0]
+        self.assertIsInstance(restored_parallel, WorkflowParallelNode)
+        assert isinstance(restored_parallel, WorkflowParallelNode)
+        self.assertIsInstance(
+            restored_parallel.branches[1].body.children[0],
+            WorkflowLoopNode,
+        )
+        self.assertEqual(document, restored)
+
+    def test_direct_execution_plan_rejects_invalid_parallel_structure(self) -> None:
+        invalid = ParallelBlock(
+            uuid="parallel-invalid",
+            branches=[ParallelBranch("only", [_item("item-1")])],
+        )
+
+        with self.assertRaisesRegex(ValueError, "2 to 8 branches"):
+            ExecutionPlan.from_entries((invalid,))
+
+    def test_direct_execution_plan_rejects_duplicate_action_identity(self) -> None:
+        item = _item("duplicate-item")
+        parallel = ParallelBlock(
+            uuid="parallel-duplicate",
+            branches=[
+                ParallelBranch("left", [item]),
+                ParallelBranch("right", [item]),
+            ],
+        )
+
+        with self.assertRaisesRegex(ValueError, "duplicate execution node id"):
+            ExecutionPlan.from_entries((parallel,))
 
 
 class WorkflowPersistenceTests(unittest.TestCase):
@@ -216,6 +273,36 @@ class WorkflowCompilerTests(unittest.TestCase):
             WorkflowCompiler().compile(document)
 
         self.assertFalse(context.exception.validation.valid)
+
+    def test_parallel_compile_has_stable_branch_paths_and_mapping(self) -> None:
+        parallel = ParallelBlock(
+            uuid="parallel-1",
+            branches=[
+                ParallelBranch("left", [_item("left-item")]),
+                ParallelBranch(
+                    "right",
+                    [LoopBlock("nested-loop", [_item("right-item")], 2)],
+                ),
+            ],
+        )
+
+        compiled = WorkflowCompiler().compile(
+            WorkflowDocument.from_entries(
+                workflow_id="workflow-parallel",
+                name="Parallel",
+                revision=2,
+                entries=(parallel,),
+            )
+        )
+
+        self.assertEqual(3, len(compiled.steps))
+        self.assertEqual(
+            ("left", "right", "right"),
+            tuple(step.branch_id for step in compiled.steps),
+        )
+        self.assertEqual((0, 1, 2), tuple(step.runtime_index for step in compiled.steps))
+        self.assertEqual("parallel-1", compiled.node_id_for_parallel("parallel-1"))
+        self.assertTrue(all(step.path.startswith("root/0/branch/") for step in compiled.steps))
 
 
 class WorkflowPreflightTests(unittest.TestCase):

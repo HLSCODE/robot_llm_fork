@@ -9,6 +9,7 @@ from threading import Lock, Thread
 from PySide6.QtCore import QObject, Signal
 
 from ...application import ApplicationServices
+from ...domain.execution_plan import ExecutionPlan
 from ...domain.models import SequenceEntry
 from ...devices import StopMode
 from ...execution import (
@@ -54,9 +55,21 @@ class ExecutionBridge(QObject):
         if not items:
             self.log_message.emit("动作序列为空")
             return False
+        return self.execute_plan(ExecutionPlan.from_entries(items), origin=origin)
+
+    def execute_plan(
+        self,
+        plan: ExecutionPlan,
+        *,
+        origin: str,
+    ) -> bool:
+        """Submit a compiled plan without rebuilding its stable node identities."""
+        if not plan.root.children:
+            self.log_message.emit("动作序列为空")
+            return False
         try:
             self._execution.start(
-                items,
+                plan,
                 origin=origin,
                 listener=self._on_event,
             )

@@ -408,7 +408,7 @@ class MotionHandlerIntegrationTests(unittest.TestCase):
             for definition in definitions
         ]
 
-        final = services.execution.start(
+        final = services.execution.start_entries(
             sequence,
             origin="test",
         ).wait(1)

@@ -77,13 +77,13 @@ class CameraAccessServiceTests(unittest.TestCase):
 
         self.assertTrue(session.active)
         self.assertTrue(services.resources.owner_of(CAMERA).startswith("camera:test:"))
-        wait_result = services.execution.start(
+        wait_result = services.execution.start_entries(
             [wait_item],
             origin="test",
         ).wait(1)
         self.assertEqual(ExecutionState.SUCCEEDED, wait_result.state)
         with self.assertRaises(ResourceBusyError):
-            services.execution.start([vision_item], origin="test")
+            services.execution.start_entries([vision_item], origin="test")
 
         session.close()
         session.close()

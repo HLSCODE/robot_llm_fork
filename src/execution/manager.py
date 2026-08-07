@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 import logging
 from threading import RLock, Thread
@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from uuid import uuid4
 
 from ..devices import ResourceArbiter, ResourceLease
+from ..domain.execution_plan import ExecutionPlan, ExecutionStepIdentity
 from ..observability.logging_config import log_context
 from .action_control import ActionControlPolicy
 from .handler_api import (
@@ -42,17 +43,24 @@ _EVENT_STATES = {
 
 @dataclass(frozen=True, slots=True)
 class EngineCallbacks:
-    on_step_started: Callable[[int, Any, ActionControlPolicy], None]
-    on_step_completed: Callable[[int, Any], None]
-    on_step_failed: Callable[[int, Any, ActionHandlerResult], None]
+    on_step_started: Callable[
+        [ExecutionStepIdentity, Any, ActionControlPolicy],
+        None,
+    ]
+    on_step_completed: Callable[[ExecutionStepIdentity, Any], None]
+    on_step_failed: Callable[
+        [ExecutionStepIdentity, Any, ActionHandlerResult],
+        None,
+    ]
     on_loop_progress: Callable[[str, int, int], None]
+    on_parallel_branch: Callable[[str, str, str, str], None]
     on_log: Callable[[str, str], None]
 
 
 class ExecutionEngine(Protocol):
     def run(
         self,
-        sequence: Sequence[Any],
+        plan: ExecutionPlan,
         control: ExecutionControl,
         callbacks: EngineCallbacks,
     ) -> EngineResult: ...
@@ -103,7 +111,7 @@ class ExecutionManager:
         engine: ExecutionEngine,
         resource_arbiter: ResourceArbiter,
         execution_resources: Callable[
-            [Sequence[Any]],
+            [ExecutionPlan],
             tuple[str, ...],
         ],
         *,
@@ -131,22 +139,22 @@ class ExecutionManager:
 
     def required_resources(
         self,
-        sequence: Sequence[Any],
+        plan: ExecutionPlan,
     ) -> tuple[str, ...]:
         """Resolve submission resources without acquiring them or doing I/O."""
-        if not sequence:
-            raise ValueError("execution sequence must not be empty")
-        return tuple(self._execution_resources(tuple(sequence)))
+        if not plan.root.children:
+            raise ValueError("execution plan must not be empty")
+        return tuple(self._execution_resources(plan))
 
     def submit(
         self,
-        sequence: Sequence[Any],
+        plan: ExecutionPlan,
         *,
         origin: str,
         listener: ExecutionListener | None = None,
     ) -> ExecutionHandle:
-        if not sequence:
-            raise ValueError("execution sequence must not be empty")
+        if not plan.root.children:
+            raise ValueError("execution plan must not be empty")
 
         with self._lock:
             worker_alive = (
@@ -158,7 +166,7 @@ class ExecutionManager:
                 )
 
             run_id = uuid4().hex
-            resources = self.required_resources(sequence)
+            resources = self.required_resources(plan)
             lease = (
                 self._resource_arbiter.acquire(
                     owner_id=f"execution:{run_id}",
@@ -181,11 +189,10 @@ class ExecutionManager:
             self._finished_at = None
             self._control = control
             self._listener = listener
-            frozen_sequence = tuple(sequence)
             self._thread = self._worker_factory(
                 lambda: self._run(
                     run_id,
-                    frozen_sequence,
+                    plan,
                     control,
                     lease,
                 ),
@@ -277,17 +284,17 @@ class ExecutionManager:
     def _run(
         self,
         run_id: str,
-        sequence: Sequence[Any],
+        plan: ExecutionPlan,
         control: ExecutionControl,
         lease: ResourceLease | None,
     ) -> None:
         with log_context(run_id=run_id, operation="execution.run"):
-            self._run_with_context(run_id, sequence, control, lease)
+            self._run_with_context(run_id, plan, control, lease)
 
     def _run_with_context(
         self,
         run_id: str,
-        sequence: Sequence[Any],
+        plan: ExecutionPlan,
         control: ExecutionControl,
         lease: ResourceLease | None,
     ) -> None:
@@ -304,27 +311,28 @@ class ExecutionManager:
             return
 
         callbacks = EngineCallbacks(
-            on_step_started=lambda index, item, policy: self._emit(
+            on_step_started=lambda identity, item, policy: self._emit(
                 run_id,
                 ExecutionEventType.STEP_STARTED,
-                index=index,
+                index=identity.runtime_index,
                 item=item,
-                data=policy.to_event_data(),
+                data={**policy.to_event_data(), **identity.to_event_data()},
             ),
-            on_step_completed=lambda index, item: self._emit(
+            on_step_completed=lambda identity, item: self._emit(
                 run_id,
                 ExecutionEventType.STEP_COMPLETED,
-                index=index,
+                index=identity.runtime_index,
                 item=item,
+                data=identity.to_event_data(),
             ),
-            on_step_failed=lambda index, item, failure: self._emit(
+            on_step_failed=lambda identity, item, failure: self._emit(
                 run_id,
                 ExecutionEventType.STEP_FAILED,
-                index=index,
+                index=identity.runtime_index,
                 item=item,
                 message=failure.message,
                 level="error",
-                data=failure.to_event_data(),
+                data={**failure.to_event_data(), **identity.to_event_data()},
             ),
             on_loop_progress=lambda loop_uuid, current, total: self._emit(
                 run_id,
@@ -335,6 +343,15 @@ class ExecutionManager:
                     "total_iterations": total,
                 },
             ),
+            on_parallel_branch=lambda parallel_id, branch_id, state, error: (
+                self._emit_parallel_branch(
+                    run_id,
+                    parallel_id,
+                    branch_id,
+                    state,
+                    error,
+                )
+            ),
             on_log=self._create_log_callback(run_id),
         )
 
@@ -344,7 +361,7 @@ class ExecutionManager:
             logger.info("Execution started: origin=%s", self._origin)
             self._emit(run_id, ExecutionEventType.STARTED)
             try:
-                result = self._engine.run(sequence, control, callbacks)
+                result = self._engine.run(plan, control, callbacks)
             except Exception as exc:
                 logger.exception(
                     "Unhandled execution engine error: run_id=%s",
@@ -404,6 +421,34 @@ class ExecutionManager:
             )
 
         return on_log
+
+    def _emit_parallel_branch(
+        self,
+        run_id: str,
+        parallel_id: str,
+        branch_id: str,
+        state: str,
+        error: str,
+    ) -> None:
+        event_type = {
+            "started": ExecutionEventType.PARALLEL_BRANCH_STARTED,
+            "completed": ExecutionEventType.PARALLEL_BRANCH_COMPLETED,
+            "failed": ExecutionEventType.PARALLEL_BRANCH_FAILED,
+            "cancelled": ExecutionEventType.PARALLEL_BRANCH_CANCELLED,
+        }.get(state)
+        if event_type is None:
+            raise ValueError(f"unknown parallel branch state: {state}")
+        self._emit(
+            run_id,
+            event_type,
+            message=error,
+            level="error" if state == "failed" else "info",
+            data={
+                "parallel_id": parallel_id,
+                "branch_id": branch_id,
+                "branch_state": state,
+            },
+        )
 
     def _emit(
         self,

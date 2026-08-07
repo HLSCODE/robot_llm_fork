@@ -188,6 +188,7 @@ files = [
     "src/application/workflow_compiler.py",
     "src/application/workflow_preflight.py",
     "src/application/workflow_validation.py",
+    "src/domain/execution_plan.py",
     "src/domain/workflow.py",
     "src/robot_server/protocol/messages.py",
     "src/robot_server/protocol/routing.py",

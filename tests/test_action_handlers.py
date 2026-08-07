@@ -231,7 +231,7 @@ class ActionTimeoutIntegrationTests(unittest.TestCase):
         )
 
         events = []
-        final = services.execution.start(
+        final = services.execution.start_entries(
             [item],
             origin="test",
             listener=events.append,

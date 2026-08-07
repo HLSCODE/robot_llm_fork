@@ -4,24 +4,15 @@
   "title": "Robot LLM Workflow Document",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "$schema",
-    "schema",
-    "schema_version",
-    "workflow_id",
-    "name",
-    "revision",
-    "root",
-    "presentation"
-  ],
+  "required": ["$schema", "schema", "schema_version", "workflow_id", "name", "revision", "root", "presentation"],
   "properties": {
     "$schema": {"type": "string"},
     "schema": {"const": "robot_llm.workflow"},
-    "schema_version": {"const": 2},
+    "schema_version": {"const": 3},
     "workflow_id": {"type": "string", "minLength": 1},
     "name": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 0},
-    "root": {"$ref": "#/$defs/rootSequence"},
+    "root": {"$ref": "#/$defs/sequence"},
     "presentation": {
       "type": "object",
       "additionalProperties": false,
@@ -39,12 +30,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["x", "y"],
-      "properties": {
-        "x": {"type": "number"},
-        "y": {"type": "number"}
-      }
+      "properties": {"x": {"type": "number"}, "y": {"type": "number"}}
     },
-    "rootSequence": {
+    "sequence": {
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "children"],
@@ -52,17 +40,14 @@
         "kind": {"const": "sequence"},
         "children": {
           "type": "array",
-          "items": {"oneOf": [{"$ref": "#/$defs/action"}, {"$ref": "#/$defs/loop"}]}
+          "items": {
+            "oneOf": [
+              {"$ref": "#/$defs/action"},
+              {"$ref": "#/$defs/loop"},
+              {"$ref": "#/$defs/parallel"}
+            ]
+          }
         }
-      }
-    },
-    "actionSequence": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "children"],
-      "properties": {
-        "kind": {"const": "sequence"},
-        "children": {"type": "array", "items": {"$ref": "#/$defs/action"}}
       }
     },
     "action": {
@@ -95,7 +80,34 @@
         "node_id": {"type": "string", "minLength": 1},
         "loop_uuid": {"type": "string", "minLength": 1},
         "repeat_count": {"type": "integer", "minimum": 2},
-        "body": {"$ref": "#/$defs/actionSequence"}
+        "body": {"$ref": "#/$defs/sequence"}
+      }
+    },
+    "parallelBranch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["branch_id", "body"],
+      "properties": {
+        "branch_id": {"type": "string", "minLength": 1},
+        "body": {"$ref": "#/$defs/sequence"}
+      }
+    },
+    "parallel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "node_id", "parallel_uuid", "join_policy", "failure_policy", "branches"],
+      "properties": {
+        "kind": {"const": "parallel"},
+        "node_id": {"type": "string", "minLength": 1},
+        "parallel_uuid": {"type": "string", "minLength": 1},
+        "join_policy": {"const": "all"},
+        "failure_policy": {"const": "cancel_all"},
+        "branches": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": {"$ref": "#/$defs/parallelBranch"}
+        }
       }
     }
   }

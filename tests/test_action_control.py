@@ -6,8 +6,12 @@ from src.domain.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
+    ParallelBlock,
+    ParallelBranch,
     SequenceItem,
+    SequenceItemStatus,
 )
+from src.domain.execution_plan import ExecutionPlan
 from src.domain.execution_context import ExecutionContext
 from src.configuration.settings import (
     DeviceSettings,
@@ -40,6 +44,7 @@ from src.execution import (
     ActionStopTarget,
     EngineCallbacks,
     ExecutionControl,
+    ParallelResourceConflictError,
 )
 from src.execution.action_control import (
     resolve_base_move_control_policy,
@@ -347,14 +352,36 @@ class ActionControlPolicyTests(unittest.TestCase):
         )
         loop = LoopBlock(
             uuid="loop",
-            items=[vision, vision],
+            items=[vision, SequenceItem.from_definition(vision.definition)],
             repeat_count=2,
         )
 
         self.assertEqual(
             (ROBOT_SYSTEM, CAMERA),
-            engine.required_resources([wait, loop]),
+            engine.required_resources(ExecutionPlan.from_entries((wait, loop))),
         )
+
+    def test_parallel_branches_cannot_share_a_device_resource(self):
+        engine = _create_engine(DeviceRuntime())
+        left = SequenceItem.from_definition(ActionDefinition(
+            "left", "left", ActionType.MOVE, {},
+        ))
+        right = SequenceItem.from_definition(ActionDefinition(
+            "right", "right", ActionType.TRAJECTORY, {},
+        ))
+        parallel = ParallelBlock(
+            uuid="parallel-robot",
+            branches=[
+                ParallelBranch("left", [left]),
+                ParallelBranch("right", [right]),
+            ],
+        )
+
+        with self.assertRaises(ParallelResourceConflictError) as context:
+            engine.required_resources(ExecutionPlan.from_entries((parallel,)))
+
+        self.assertEqual(ROBOT_SYSTEM, context.exception.resource_id)
+        self.assertEqual(("left", "right"), context.exception.branch_ids)
 
 class ActionControlPreflightTests(unittest.TestCase):
     def test_engine_rejects_stop_capability_mismatch_before_device_init(self):
@@ -395,10 +422,17 @@ class ActionControlPreflightTests(unittest.TestCase):
             on_step_completed=lambda _index, _item: None,
             on_step_failed=(lambda _index, _item, failure: failures.append(failure)),
             on_loop_progress=lambda _uuid, _current, _total: None,
+            on_parallel_branch=(
+                lambda _parallel, _branch, _state, _error: None
+            ),
             on_log=lambda _message, _level: None,
         )
 
-        result = engine.run([item], ExecutionControl(), callbacks)
+        result = engine.run(
+            ExecutionPlan.from_entries((item,)),
+            ExecutionControl(),
+            callbacks,
+        )
 
         self.assertFalse(result.success)
         self.assertEqual(
@@ -419,6 +453,101 @@ class ActionControlPreflightTests(unittest.TestCase):
             ActionResultCode.CONTROL_POLICY_MISMATCH,
             failures[0].code,
         )
+
+
+class ActionParallelExecutionTests(unittest.TestCase):
+    def test_parallel_wait_branches_join_and_report_stable_branch_states(self):
+        engine = _create_engine(DeviceRuntime())
+        parallel = ParallelBlock(
+            uuid="parallel-waits",
+            branches=[
+                ParallelBranch("left", [_wait_item("left", 0.01)]),
+                ParallelBranch("right", [_wait_item("right", 0.01)]),
+            ],
+        )
+        branch_states: list[tuple[str, str, str]] = []
+        step_paths: list[str] = []
+
+        result = engine.run(
+            ExecutionPlan.from_entries((parallel,)),
+            ExecutionControl(),
+            _callbacks(branch_states, step_paths),
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            {
+                ("parallel-waits", "left", "started"),
+                ("parallel-waits", "left", "completed"),
+                ("parallel-waits", "right", "started"),
+                ("parallel-waits", "right", "completed"),
+            },
+            set(branch_states),
+        )
+        self.assertEqual(2, len(step_paths))
+        self.assertTrue(any("/branch/left/" in path for path in step_paths))
+        self.assertTrue(any("/branch/right/" in path for path in step_paths))
+
+    def test_parallel_failure_cancels_and_joins_sibling_branch(self):
+        engine = _create_engine(DeviceRuntime())
+        failed = _wait_item("failed", "not-a-number")
+        sibling = _wait_item("sibling", 2.0)
+        parallel = ParallelBlock(
+            uuid="parallel-failure",
+            branches=[
+                ParallelBranch("failed", [failed]),
+                ParallelBranch("sibling", [sibling]),
+            ],
+        )
+        branch_states: list[tuple[str, str, str]] = []
+
+        result = engine.run(
+            ExecutionPlan.from_entries((parallel,)),
+            ExecutionControl(),
+            _callbacks(branch_states, []),
+        )
+
+        self.assertFalse(result.success)
+        self.assertFalse(result.cancelled)
+        self.assertEqual(ActionResultCode.INVALID_PARAMETERS.value, result.error_code)
+        self.assertIn(
+            ("parallel-failure", "failed", "failed"),
+            branch_states,
+        )
+        self.assertIn(
+            ("parallel-failure", "sibling", "cancelled"),
+            branch_states,
+        )
+        self.assertEqual(SequenceItemStatus.PENDING, sibling.status)
+
+
+def _wait_item(item_id: str, wait_seconds: object) -> SequenceItem:
+    return SequenceItem.from_definition(ActionDefinition(
+        item_id,
+        item_id,
+        ActionType.WAIT,
+        {"wait_seconds": wait_seconds},
+    ))
+
+
+def _callbacks(
+    branch_states: list[tuple[str, str, str]],
+    step_paths: list[str],
+) -> EngineCallbacks:
+    return EngineCallbacks(
+        on_step_started=(
+            lambda identity, _item, _policy: step_paths.append(identity.path)
+        ),
+        on_step_completed=lambda _identity, _item: None,
+        on_step_failed=lambda _identity, _item, _failure: None,
+        on_loop_progress=lambda _uuid, _current, _total: None,
+        on_parallel_branch=(
+            lambda parallel, branch, state, _error: branch_states.append(
+                (parallel, branch, state)
+            )
+        ),
+        on_log=lambda _message, _level: None,
+    )
 
 
 if __name__ == "__main__":
