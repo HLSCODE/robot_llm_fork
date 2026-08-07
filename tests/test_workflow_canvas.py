@@ -6,7 +6,13 @@ import unittest
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QColor, QHelpEvent, QPalette, QWheelEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QFrame, QGraphicsProxyWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QGraphicsProxyWidget,
+    QGraphicsScene,
+    QGraphicsView,
+)
 
 from src.application import WorkflowCompiler
 from src.domain.models import (
@@ -23,6 +29,7 @@ from src.domain.workflow import WorkflowDocument
 from src.gui.views import WorkflowCanvasWidget
 from src.gui.views.workflow_canvas.items import (
     InsertionItem,
+    NodeDragPreviewItem,
     StartEndItem,
     WorkflowNodeItem,
 )
@@ -91,11 +98,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.canvas.render_entries(())
         self.canvas.view.fit_workflow()
         QApplication.processEvents()
-        endpoints = [
-            item
-            for item in self.canvas.scene.items()
-            if isinstance(item, StartEndItem)
-        ]
+        endpoints = [item for item in self.canvas.scene.items() if isinstance(item, StartEndItem)]
 
         self.assertEqual(2, len(endpoints))
         endpoint_identities = {id(endpoint) for endpoint in endpoints}
@@ -109,9 +112,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         )
         background = self.canvas.scene.backgroundBrush().color()
         for endpoint in endpoints:
-            position = self.canvas.view.mapFromScene(
-                endpoint.sceneBoundingRect().center()
-            )
+            position = self.canvas.view.mapFromScene(endpoint.sceneBoundingRect().center())
             QTest.mouseMove(self.canvas.view.viewport(), position)
             QApplication.processEvents()
             tooltip_event = QHelpEvent(
@@ -157,18 +158,12 @@ class WorkflowCanvasTests(unittest.TestCase):
         requested: list[int] = []
         self.canvas.insert_action_requested.connect(requested.append)
         insertions = sorted(
-            (
-                item
-                for item in self.canvas.scene.items()
-                if isinstance(item, InsertionItem)
-            ),
+            (item for item in self.canvas.scene.items() if isinstance(item, InsertionItem)),
             key=lambda item: item.scenePos().y(),
         )
 
         for insertion in insertions:
-            view_position = self.canvas.view.mapFromScene(
-                insertion.sceneBoundingRect().center()
-            )
+            view_position = self.canvas.view.mapFromScene(insertion.sceneBoundingRect().center())
             QTest.mouseClick(
                 self.canvas.view.viewport(),
                 Qt.MouseButton.LeftButton,
@@ -204,9 +199,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         )
         self.canvas.render_entries((loop,))
         node = next(
-            item
-            for item in self.canvas.scene.items()
-            if isinstance(item, WorkflowNodeItem)
+            item for item in self.canvas.scene.items() if isinstance(item, WorkflowNodeItem)
         )
 
         self.assertGreater(node.node_width, 300)
@@ -312,9 +305,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertIsInstance(self.canvas.get_entries()[0], ParallelBlock)
 
     def test_parallel_wrap_enforces_runtime_branch_limit(self) -> None:
-        self.canvas.render_entries(tuple(
-            _item(f"branch-{index}") for index in range(9)
-        ))
+        self.canvas.render_entries(tuple(_item(f"branch-{index}") for index in range(9)))
         self.canvas.set_selected_entry_rows(tuple(range(9)))
 
         with self.assertRaisesRegex(ValueError, "最多支持 8 个分支"):
@@ -328,9 +319,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         node = self.canvas._node_items[parallel.uuid]  # noqa: SLF001
         requested: list[tuple[str, str, int]] = []
         self.canvas.insert_parallel_action_requested.connect(
-            lambda parallel_id, branch_id, index: requested.append(
-                (parallel_id, branch_id, index)
-            )
+            lambda parallel_id, branch_id, index: requested.append((parallel_id, branch_id, index))
         )
         marker = QPointF(
             PARALLEL_BRANCH_PADDING + PARALLEL_BRANCH_WIDTH / 2.0,
@@ -351,10 +340,12 @@ class WorkflowCanvasTests(unittest.TestCase):
             [(parallel.uuid, parallel.branches[0].branch_id, 0)],
             requested,
         )
-        second_branch_point = node.mapToScene(QPointF(
-            node.node_width - PARALLEL_BRANCH_PADDING - PARALLEL_BRANCH_WIDTH / 2.0,
-            marker.y() + 70.0,
-        ))
+        second_branch_point = node.mapToScene(
+            QPointF(
+                node.node_width - PARALLEL_BRANCH_PADDING - PARALLEL_BRANCH_WIDTH / 2.0,
+                marker.y() + 70.0,
+            )
+        )
         self.canvas._on_action_dropped(  # noqa: SLF001
             _action("dropped"),
             second_branch_point.x(),
@@ -404,12 +395,14 @@ class WorkflowCanvasTests(unittest.TestCase):
 
     def test_parallel_execution_updates_branch_and_nested_action_state(self) -> None:
         parallel = _parallel()
-        compiled = WorkflowCompiler().compile(WorkflowDocument.from_entries(
-            workflow_id="parallel-workflow",
-            name="Parallel",
-            revision=1,
-            entries=(parallel,),
-        ))
+        compiled = WorkflowCompiler().compile(
+            WorkflowDocument.from_entries(
+                workflow_id="parallel-workflow",
+                name="Parallel",
+                revision=1,
+                entries=(parallel,),
+            )
+        )
         self.canvas.begin_execution(compiled)
         running = _item("left")
         running.status = SequenceItemStatus.RUNNING
@@ -471,12 +464,11 @@ class WorkflowCanvasTests(unittest.TestCase):
             tuple(node.node_id for node in document.root.children),
         )
         self.assertFalse(
-            any(
-                isinstance(item, QGraphicsProxyWidget)
-                for item in self.canvas.scene.items()
-            )
+            any(isinstance(item, QGraphicsProxyWidget) for item in self.canvas.scene.items())
         )
-        self.assertGreaterEqual(self.canvas.fit_button.minimumHeight(), 44)
+        self.assertEqual("", self.canvas.fit_button.text())
+        self.assertFalse(self.canvas.fit_button.icon().isNull())
+        self.assertEqual("画布适合内容", self.canvas.fit_button.toolTip())
 
     def test_canvas_follows_light_and_dark_system_palettes(self) -> None:
         original = QApplication.palette()
@@ -507,7 +499,7 @@ class WorkflowCanvasTests(unittest.TestCase):
             QApplication.setPalette(original)
             QApplication.processEvents()
 
-    def test_offscreen_size_matrix_preserves_accessible_touch_controls(self) -> None:
+    def test_offscreen_size_matrix_preserves_accessible_canvas_controls(self) -> None:
         self.canvas.render_entries(tuple(_item(f"node-{index}") for index in range(20)))
 
         for width, height in ((360, 640), (720, 1280), (1280, 720)):
@@ -515,7 +507,8 @@ class WorkflowCanvasTests(unittest.TestCase):
             QApplication.processEvents()
             self.assertEqual("任务工作流画布", self.canvas.view.accessibleName())
             self.assertTrue(self.canvas.view.accessibleDescription())
-            self.assertGreaterEqual(self.canvas.fit_button.height(), 44)
+            self.assertGreaterEqual(self.canvas.fit_button.height(), 32)
+            self.assertFalse(self.canvas.zoom_button.icon().isNull())
             self.assertGreater(self.canvas.scene.itemsBoundingRect().height(), 0)
 
     def test_ctrl_left_drag_pans_while_plain_left_drag_does_not(self) -> None:
@@ -568,8 +561,7 @@ class WorkflowCanvasTests(unittest.TestCase):
             for node_id in ("first", "second", "third")
         ]
         positions = [
-            self.canvas.view.mapFromScene(node.sceneBoundingRect().center())
-            for node in nodes
+            self.canvas.view.mapFromScene(node.sceneBoundingRect().center()) for node in nodes
         ]
         initial_item_ids = [id(node) for node in nodes]
         initial_positions = [node.scenePos() for node in nodes]
@@ -591,11 +583,14 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertEqual([0, 1], self.canvas.selected_entry_rows())
         self.assertEqual(
             initial_item_ids,
-            [id(self.canvas._node_items[node_id]) for node_id in (  # noqa: SLF001
-                "first",
-                "second",
-                "third",
-            )],
+            [
+                id(self.canvas._node_items[node_id])
+                for node_id in (  # noqa: SLF001
+                    "first",
+                    "second",
+                    "third",
+                )
+            ],
         )
         self.assertEqual(
             initial_positions,
@@ -681,6 +676,329 @@ class WorkflowCanvasTests(unittest.TestCase):
             tuple(entry.uuid for entry in self.canvas.get_entries()),
         )
 
+    def test_node_drag_uses_preview_and_pulsing_insertion_target(self) -> None:
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((_item("first"), _item("second"), _item("third")))
+        QApplication.processEvents()
+        first = self.canvas._node_items["first"]  # noqa: SLF001
+        original_position = QPointF(first.scenePos())
+        insertion = self.canvas._insertion_items[-1]  # noqa: SLF001
+        insertion_center = insertion.scenePos() + QPointF(22.0, 22.0)
+        start = self.canvas.view.mapFromScene(first.sceneBoundingRect().center())
+        target = self.canvas.view.mapFromScene(insertion_center)
+
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=start,
+        )
+        QTest.mouseMove(self.canvas.view.viewport(), target, delay=20)
+        QApplication.processEvents()
+
+        preview = first.drag_preview
+        self.assertIsInstance(preview, NodeDragPreviewItem)
+        assert preview is not None
+        self.assertIs(self.canvas.scene, preview.scene())
+        self.assertEqual(original_position, first.scenePos())
+        self.assertLess(first.opacity(), 0.5)
+        self.assertAlmostEqual(
+            insertion_center.y(),
+            preview.sceneBoundingRect().center().y(),
+            delta=2.0,
+        )
+        self.assertTrue(insertion.is_drop_target_active)
+        self.assertTrue(insertion.is_pulsing)
+        self.assertEqual("移动到第 3 位", insertion.target_label)
+        self.assertEqual(
+            1,
+            sum(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            ),
+        )
+
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=target,
+        )
+        QApplication.processEvents()
+
+        self.assertEqual(
+            ("second", "third", "first"),
+            tuple(entry.uuid for entry in self.canvas.get_entries()),
+        )
+        self.assertFalse(
+            any(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            )
+        )
+
+    def test_node_drag_cancel_restores_stationary_node_and_clears_target(self) -> None:
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((_item("first"), _item("second")))
+        QApplication.processEvents()
+        first = self.canvas._node_items["first"]  # noqa: SLF001
+        original_position = QPointF(first.scenePos())
+        insertion = self.canvas._insertion_items[-1]  # noqa: SLF001
+        start = self.canvas.view.mapFromScene(first.sceneBoundingRect().center())
+        target = self.canvas.view.mapFromScene(insertion.scenePos() + QPointF(22.0, 22.0))
+
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=start,
+        )
+        QTest.mouseMove(self.canvas.view.viewport(), target, delay=20)
+        QApplication.processEvents()
+        self.assertTrue(first.is_dragging)
+        self.assertIsNotNone(first.drag_preview)
+
+        QApplication.sendEvent(
+            self.canvas.view,
+            QEvent(QEvent.Type.WindowDeactivate),
+        )
+        QApplication.processEvents()
+
+        self.assertFalse(first.is_dragging)
+        self.assertIsNone(first.drag_preview)
+        self.assertEqual(original_position, first.scenePos())
+        self.assertEqual(1.0, first.opacity())
+        self.assertEqual(
+            ("first", "second"),
+            tuple(entry.uuid for entry in self.canvas.get_entries()),
+        )
+        self.assertFalse(
+            any(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            )
+        )
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=target,
+        )
+
+    def test_node_drag_only_activates_an_insertion_target_when_pointer_is_nearby(
+        self,
+    ) -> None:
+        self.canvas.render_entries((_item("first"), _item("second")))
+        first = self.canvas._node_items["first"]  # noqa: SLF001
+        insertion = self.canvas._insertion_items[-1]  # noqa: SLF001
+        center = insertion.scenePos() + QPointF(22.0, 22.0)
+
+        first.drag_position_changed.emit(
+            first.node_id,
+            center.x() + 10_000.0,
+            center.y(),
+        )
+
+        self.assertFalse(
+            any(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            )
+        )
+        first.drag_ended.emit(first.node_id, False)
+
+    def test_node_drag_release_away_from_insertions_keeps_original_order(self) -> None:
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((_item("first"), _item("second"), _item("third")))
+        QApplication.processEvents()
+        first = self.canvas._node_items["first"]  # noqa: SLF001
+        insertion = self.canvas._insertion_items[-1]  # noqa: SLF001
+        start = self.canvas.view.mapFromScene(first.sceneBoundingRect().center())
+        insertion_center = insertion.scenePos() + QPointF(22.0, 22.0)
+        target = self.canvas.view.mapFromScene(
+            QPointF(insertion_center.x() - 200.0, insertion_center.y())
+        )
+
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=start,
+        )
+        QTest.mouseMove(self.canvas.view.viewport(), target, delay=20)
+        QApplication.processEvents()
+        self.assertTrue(first.is_dragging)
+        self.assertFalse(
+            any(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            )
+        )
+
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=target,
+        )
+        QApplication.processEvents()
+
+        self.assertEqual(
+            ("first", "second", "third"),
+            tuple(entry.uuid for entry in self.canvas.get_entries()),
+        )
+
+    def test_node_drag_lost_mouse_grab_clears_all_transient_feedback(self) -> None:
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((_item("first"), _item("second")))
+        QApplication.processEvents()
+        first = self.canvas._node_items["first"]  # noqa: SLF001
+        insertion = self.canvas._insertion_items[-1]  # noqa: SLF001
+        start = self.canvas.view.mapFromScene(first.sceneBoundingRect().center())
+        target = self.canvas.view.mapFromScene(insertion.scenePos() + QPointF(22.0, 22.0))
+
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=start,
+        )
+        QTest.mouseMove(self.canvas.view.viewport(), target, delay=20)
+        QApplication.processEvents()
+        self.assertTrue(first.is_dragging)
+
+        first.ungrabMouse()
+        QApplication.processEvents()
+
+        self.assertFalse(first.is_dragging)
+        self.assertIsNone(first.drag_preview)
+        self.assertEqual(1.0, first.opacity())
+        self.assertFalse(insertion.is_drop_target_active)
+        self.assertFalse(insertion.is_pulsing)
+
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=target,
+        )
+
+    def test_external_drag_highlights_nearest_target_and_clears_on_leave(self) -> None:
+        self.canvas.render_entries((_item("first"), _item("second")))
+        insertion = self.canvas._insertion_items[1]  # noqa: SLF001
+        scene_position = insertion.scenePos() + QPointF(22.0, 22.0)
+
+        self.canvas.view.external_drag_moved.emit(
+            scene_position.x(),
+            scene_position.y(),
+        )
+
+        self.assertTrue(insertion.is_drop_target_active)
+        self.assertTrue(insertion.is_pulsing)
+        self.assertEqual("插入到第 2 位", insertion.target_label)
+
+        self.canvas.view.external_drag_finished.emit()
+
+        self.assertFalse(insertion.is_drop_target_active)
+        self.assertFalse(insertion.is_pulsing)
+        self.assertEqual("", insertion.target_label)
+
+        self.canvas.view.external_drag_moved.emit(
+            scene_position.x(),
+            scene_position.y() + 10_000.0,
+        )
+
+        self.assertFalse(
+            any(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            )
+        )
+
+        self.canvas.view.external_drag_moved.emit(
+            scene_position.x() + 10_000.0,
+            scene_position.y(),
+        )
+
+        self.assertFalse(
+            any(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            )
+        )
+
+    def test_external_action_drop_commits_to_the_highlighted_top_level_target(
+        self,
+    ) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("child")],
+            repeat_count=2,
+        )
+        self.canvas.render_entries((loop,))
+        insertion = self.canvas._insertion_items[0]  # noqa: SLF001
+        marker = insertion.scenePos() + QPointF(22.0, 22.0)
+
+        self.canvas.view.external_drag_moved.emit(marker.x(), marker.y())
+        self.assertTrue(insertion.is_drop_target_active)
+        self.canvas.view.action_dropped.emit(
+            _action("top-level"),
+            marker.x(),
+            marker.y(),
+        )
+
+        entries = self.canvas.get_entries()
+        self.assertEqual(2, len(entries))
+        self.assertIsInstance(entries[0], SequenceItem)
+        assert isinstance(entries[0], SequenceItem)
+        self.assertEqual("top-level", entries[0].definition.id)
+        self.assertIsInstance(entries[1], LoopBlock)
+        assert isinstance(entries[1], LoopBlock)
+        self.assertEqual(["child"], [item.uuid for item in entries[1].items])
+
+        self.canvas.render_entries((loop,))
+        node = self.canvas._node_items["loop"]  # noqa: SLF001
+        deep_inside_loop = node.mapToScene(QPointF(node.node_width / 2.0, 190.0))
+        self.canvas.view.external_drag_moved.emit(
+            deep_inside_loop.x(),
+            deep_inside_loop.y(),
+        )
+        self.assertFalse(
+            any(
+                item.is_drop_target_active
+                for item in self.canvas._insertion_items  # noqa: SLF001
+            )
+        )
+        self.canvas.view.action_dropped.emit(
+            _action("loop-child"),
+            deep_inside_loop.x(),
+            deep_inside_loop.y(),
+        )
+        entries = self.canvas.get_entries()
+        self.assertEqual(1, len(entries))
+        self.assertIsInstance(entries[0], LoopBlock)
+        assert isinstance(entries[0], LoopBlock)
+        self.assertEqual(
+            ["child", "loop-child"],
+            [item.definition.id for item in entries[0].items],
+        )
+
+    def test_insertion_target_release_outside_circle_does_not_insert(self) -> None:
+        scene = QGraphicsScene()
+        scene.setSceneRect(-250.0, -80.0, 500.0, 160.0)
+        insertion = InsertionItem(3)
+        insertion.setPos(-22.0, -22.0)
+        scene.addItem(insertion)
+        view = QGraphicsView(scene)
+        view.resize(600, 220)
+        view.show()
+        QApplication.processEvents()
+        insertions: list[int] = []
+        insertion.insert_requested.connect(insertions.append)
+        press = view.mapFromScene(QPointF(0.0, 0.0))
+        release = view.mapFromScene(QPointF(120.0, 0.0))
+
+        QTest.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=press)
+        QTest.mouseMove(view.viewport(), release, delay=20)
+        QTest.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=release)
+        QApplication.processEvents()
+
+        self.assertEqual([], insertions)
+        view.close()
+        view.deleteLater()
+
     def test_plain_wheel_scrolls_and_ctrl_wheel_zooms(self) -> None:
         self.canvas.resize(420, 360)
         self.canvas.view.setFixedHeight(220)
@@ -692,9 +1010,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         initial_scroll = scrollbar.value()
         initial_scale = self.canvas.view.transform().m11()
 
-        self.canvas.view.wheelEvent(
-            _wheel_event(self.canvas, -120, Qt.KeyboardModifier.NoModifier)
-        )
+        self.canvas.view.wheelEvent(_wheel_event(self.canvas, -120, Qt.KeyboardModifier.NoModifier))
         self.assertGreater(scrollbar.value(), initial_scroll)
         self.assertEqual(initial_scale, self.canvas.view.transform().m11())
 
@@ -724,11 +1040,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertNotIn("编辑参数", multiple_labels)
         self.assertIn("创建循环", multiple_labels)
         self.assertIn("删除所选", multiple_labels)
-        next(
-            action
-            for action in multiple_menu.actions()
-            if action.text() == "删除所选"
-        ).trigger()
+        next(action for action in multiple_menu.actions() if action.text() == "删除所选").trigger()
         self.assertEqual(0, self.canvas.entry_count())
 
     def test_semantic_status_text_uses_contrasting_foreground(self) -> None:

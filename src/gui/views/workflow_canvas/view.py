@@ -7,6 +7,7 @@ import json
 from PySide6.QtCore import QEvent, QPoint, Qt, Signal
 from PySide6.QtGui import (
     QDragEnterEvent,
+    QDragLeaveEvent,
     QDragMoveEvent,
     QDropEvent,
     QKeyEvent,
@@ -35,6 +36,9 @@ class WorkflowCanvasView(QGraphicsView):
     redo_requested = Signal()
     select_all_requested = Signal()
     clear_selection_requested = Signal()
+    drag_cancel_requested = Signal()
+    external_drag_moved = Signal(float, float)
+    external_drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -48,14 +52,11 @@ class WorkflowCanvasView(QGraphicsView):
         self.setDragMode(self.DragMode.RubberBandDrag)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleDescription(
-            "左键选择，Shift 左键多选，Ctrl 左键拖动画布，"
-            "滚轮滚动，Ctrl 滚轮缩放，右键打开操作菜单"
+            "左键选择，Shift 左键多选，Ctrl 左键拖动画布，滚轮滚动，Ctrl 滚轮缩放，右键打开操作菜单"
         )
         self._is_panning = False
         self._last_pan_position: QPoint | None = None
-        self.setViewportUpdateMode(
-            self.ViewportUpdateMode.FullViewportUpdate
-        )
+        self.setViewportUpdateMode(self.ViewportUpdateMode.FullViewportUpdate)
         self.setTransformationAnchor(self.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(self.ViewportAnchor.AnchorViewCenter)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -68,36 +69,64 @@ class WorkflowCanvasView(QGraphicsView):
         self.grabGesture(Qt.GestureType.PinchGesture)
 
     def dragEnterEvent(self, event: QDragEnterEvent | None) -> None:  # noqa: N802
-        self._accept_action_drop(event)
+        if self._accept_action_drop(event) and event is not None:
+            self._publish_external_drag_position(event.position().toPoint())
+        else:
+            self.external_drag_finished.emit()
 
     def dragMoveEvent(self, event: QDragMoveEvent | None) -> None:  # noqa: N802
-        self._accept_action_drop(event)
+        if self._accept_action_drop(event) and event is not None:
+            self._publish_external_drag_position(event.position().toPoint())
+        else:
+            self.external_drag_finished.emit()
+
+    def dragLeaveEvent(self, event: QDragLeaveEvent | None) -> None:  # noqa: N802
+        self.external_drag_finished.emit()
+        if event is not None:
+            event.accept()
 
     def dropEvent(self, event: QDropEvent | None) -> None:  # noqa: N802
-        if event is None or event.mimeData() is None:
-            return
-        mime = event.mimeData()
-        scene_position = self.mapToScene(event.position().toPoint())
-        if mime.hasFormat("application/x-task-name"):
-            try:
-                task_name = bytes(mime.data("application/x-task-name")).decode("utf-8")
-            except UnicodeDecodeError:
+        try:
+            if event is None or event.mimeData() is None:
+                return
+            mime = event.mimeData()
+            scene_position = self.mapToScene(event.position().toPoint())
+            if mime.hasFormat("application/x-task-name"):
+                try:
+                    task_name = bytes(mime.data("application/x-task-name")).decode("utf-8")
+                except UnicodeDecodeError:
+                    event.ignore()
+                    return
+                self.task_dropped.emit(
+                    task_name,
+                    scene_position.x(),
+                    scene_position.y(),
+                )
+                event.acceptProposedAction()
+                return
+            if not mime.hasFormat("application/x-action"):
                 event.ignore()
                 return
-            self.task_dropped.emit(task_name, scene_position.x(), scene_position.y())
+            try:
+                payload = bytes(mime.data("application/x-action")).decode("utf-8")
+                action = ActionDefinition.from_dict(json.loads(payload))
+            except (
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ):
+                event.ignore()
+                return
+            self.action_dropped.emit(
+                action,
+                scene_position.x(),
+                scene_position.y(),
+            )
             event.acceptProposedAction()
-            return
-        if not mime.hasFormat("application/x-action"):
-            event.ignore()
-            return
-        try:
-            payload = bytes(mime.data("application/x-action")).decode("utf-8")
-            action = ActionDefinition.from_dict(json.loads(payload))
-        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
-            event.ignore()
-            return
-        self.action_dropped.emit(action, scene_position.x(), scene_position.y())
-        event.acceptProposedAction()
+        finally:
+            self.external_drag_finished.emit()
 
     def wheelEvent(self, event: QWheelEvent | None) -> None:  # noqa: N802
         if event is None:
@@ -167,15 +196,13 @@ class WorkflowCanvasView(QGraphicsView):
             self.select_all_requested.emit()
             event.accept()
             return
-        if event.key() is Qt.Key.Key_Escape:
+        if event.key() == Qt.Key.Key_Escape:
             self._stop_panning()
+            self.drag_cancel_requested.emit()
             self.clear_selection_requested.emit()
             event.accept()
             return
-        if (
-            event.modifiers() & Qt.KeyboardModifier.ControlModifier
-            and event.key() == Qt.Key.Key_0
-        ):
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier and event.key() == Qt.Key.Key_0:
             self.reset_zoom()
             event.accept()
             return
@@ -191,6 +218,8 @@ class WorkflowCanvasView(QGraphicsView):
         self.viewport().unsetCursor()
 
     def event(self, event: QEvent | None) -> bool:
+        if event is not None and event.type() is QEvent.Type.WindowDeactivate:
+            self._cancel_transient_interactions()
         if isinstance(event, QGestureEvent):
             pinch = event.gesture(Qt.GestureType.PinchGesture)
             if pinch is not None:
@@ -199,6 +228,11 @@ class WorkflowCanvasView(QGraphicsView):
                     self._scale_by(float(pinch.scaleFactor()))
                 return True
         return super().event(event)
+
+    def _cancel_transient_interactions(self) -> None:
+        self._stop_panning()
+        self.drag_cancel_requested.emit()
+        self.external_drag_finished.emit()
 
     def fit_workflow(self) -> None:
         scene = self.scene()
@@ -220,15 +254,24 @@ class WorkflowCanvasView(QGraphicsView):
     @staticmethod
     def _accept_action_drop(
         event: QDragEnterEvent | QDragMoveEvent | None,
-    ) -> None:
+    ) -> bool:
         if event is None or event.mimeData() is None:
-            return
-        if event.mimeData().hasFormat(
-            "application/x-action"
-        ) or event.mimeData().hasFormat("application/x-task-name"):
+            return False
+        if event.mimeData().hasFormat("application/x-action") or event.mimeData().hasFormat(
+            "application/x-task-name"
+        ):
             event.acceptProposedAction()
+            return True
         else:
             event.ignore()
+            return False
+
+    def _publish_external_drag_position(self, view_position: QPoint) -> None:
+        scene_position = self.mapToScene(view_position)
+        self.external_drag_moved.emit(
+            scene_position.x(),
+            scene_position.y(),
+        )
 
     def _scale_by(self, factor: float) -> None:
         current = self.transform().m11()

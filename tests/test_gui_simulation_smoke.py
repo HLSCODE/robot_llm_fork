@@ -271,7 +271,10 @@ class GuiSimulationSmokeTests(unittest.TestCase):
                 is ExecutionState.PAUSED
             )
         )
-        self.assertIn("继续", self.window.workflow_view.control_panel.pause_btn.text())
+        self.assertIn(
+            "继续",
+            self.window.workflow_view.control_panel.pause_btn.toolTip(),
+        )
 
         self.window.workflow_view.control_panel.pause_btn.click()
         self.assertTrue(
@@ -294,7 +297,10 @@ class GuiSimulationSmokeTests(unittest.TestCase):
                 in self.window.log_widget.toPlainText()
             )
         )
-        self.assertEqual("暂停", self.window.workflow_view.control_panel.pause_btn.text())
+        self.assertEqual(
+            "暂停",
+            self.window.workflow_view.control_panel.pause_btn.toolTip(),
+        )
         self.assertEqual({}, self.services.resources.snapshot())
 
     def test_saved_task_can_be_inserted_as_editable_subworkflow(self) -> None:

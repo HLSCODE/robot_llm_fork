@@ -24,9 +24,8 @@ class WorkbenchLayoutStoreTests(unittest.TestCase):
                 side_page="assistant",
                 side_visible=True,
                 side_width=340,
-                bottom_page="logs",
-                bottom_visible=True,
-                bottom_height=210,
+                panel_page="logs",
+                panel_visible=True,
             )
 
             store.save(expected)
@@ -64,9 +63,8 @@ class WorkbenchLayoutStoreTests(unittest.TestCase):
                         "side_page": "tasks",
                         "side_visible": True,
                         "side_width": 280,
-                        "bottom_page": "devices",
-                        "bottom_visible": False,
-                        "bottom_height": 220,
+                        "panel_page": "devices",
+                        "panel_visible": False,
                         "unexpected": True,
                     }
                 ),
@@ -80,9 +78,7 @@ class WorkbenchLayoutStoreTests(unittest.TestCase):
 
 
 def _store(path: Path) -> QSettingsWorkbenchLayoutStore:
-    return QSettingsWorkbenchLayoutStore(
-        QSettings(str(path), QSettings.Format.IniFormat)
-    )
+    return QSettingsWorkbenchLayoutStore(QSettings(str(path), QSettings.Format.IniFormat))
 
 
 if __name__ == "__main__":

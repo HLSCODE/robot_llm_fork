@@ -10,13 +10,14 @@ GUI 是应用的表现层，不拥有设备、执行线程、任务持久化或�
 所有可被 WebSocket、HTTP、语音或其他入口复用的能力必须位于应用层；Qt
 组件只负责采集用户输入、显示不可变快照和把跨线程事件送回 GUI 线程。
 
-当前实现（D-030 完成后）：
+当前实现（D-031 完成后）：
 
 ```text
 MainWindow / Dialogs
         |
 WorkbenchView
-  | Activity Bar / Side Bar / Editor / Bottom Panel / Status Bar
+  | Activity Bar / Side Bar / Editor / Status Bar
+  |                           \ Floating Detail Panel
   |
 TaskLibraryView / ActionLibraryView / AIAssistantWidget
 WorkflowEditorView / DeviceHealthView / DevicePoseView / DeviceControlView
@@ -44,32 +45,40 @@ GuiNotificationCenter: operational message -> history/log/status/modal
 - 不保存设备连接或暂停状态的平行布尔值。
 - 不创建设备实例，不创建序列执行 worker，不直接访问 JSON 仓储。
 - 将唯一 `WorkbenchView` 设为中央控件；MainWindow 不再拥有 Splitter 尺寸、
-  Side Bar/Bottom Panel 当前页或展开状态。
+  Side Bar 或详情浮层的当前页与展开状态。
 
 ### 2.2 稳定视图域
 
-- `WorkbenchView` 只拥有 Activity Bar、Side Bar、Editor、Bottom Panel、Status Bar
-  的布局状态；Side Bar 二次点击收起，Bottom Panel 非模态切换，两个方向均使用
-  视觉 1 px、实际命中 7 px 的可拖动分隔条。
-- `WorkbenchLayoutState` 是 schema v1 不可变布局偏好；组合根注入
-  `QSettingsWorkbenchLayoutStore`，保存 Side/Bottom 当前页、可见性和尺寸。未知版本、
-  字段、类型、范围或已删除页面会清理损坏值并恢复默认布局；“视图 → 恢复默认布局”
-  提供显式恢复入口。
-- Activity Bar 与 Status Bar 图标使用 `IconName` 和编译后的 Qt Resource SVG；图标
-  随 Palette 变化重绘并覆盖 1x/2x/3x，不从文件系统动态查找资源。
+- `WorkbenchView` 只拥有 Activity Bar、Side Bar、Editor、Status Bar 和右下锚定详情
+  浮层的表现状态。Side Bar 二次点击收起并继续使用视觉 1 px、实际命中 7 px 的
+  水平 `QSplitter`；原画布/Bottom Panel 垂直 Splitter 已删除，详情不再改变画布尺寸。
+- `WorkbenchLayoutState` 是 schema v2 不可变布局偏好；组合根注入
+  `QSettingsWorkbenchLayoutStore`，保存 `side_page`、`side_visible`、`side_width`、
+  `panel_page` 和 `panel_visible`。v2 直接替代 v1，不提供 v1 兼容读取；未知版本、字段、
+  类型、范围或已删除页面会清理损坏值并恢复默认布局，“视图 → 恢复默认布局”提供
+  显式恢复入口。
+- Activity Bar、Status Bar、Task/Action/Workflow 面板工具栏图标统一使用 `IconName`
+  和编译后的 Qt Resource 单色 SVG；图标随 Palette 变化重绘并覆盖 1x/2x/3x，
+  不从文件系统动态查找资源。所有 icon-only 命令都有 Tooltip 和可访问名称。
 - `TaskLibraryView` 只展示 `CompositionService` 的已保存任务投影，并发出打开或作为
   Subworkflow 插入当前文档的意图；`ActionLibraryView` 只展示按类型分类的基础动作并发出增删改、插入和相机测试意图。
 - `AIAssistantWidget` 是独立资源页，继续复用唯一 LLM/CommandRuntime，不嵌入动作库，
   也不反向持有 MainWindow。
 - `WorkflowEditorView` 只负责动作序列画布及其控制区；执行按钮状态通过单一
-  `render_execution_controls()` 接口更新；两行紧凑命令区保持停止任务、快速停止和
-  设备急停常驻可见，不再包含任务组合 Tab 或第二套暂停/停止控件。
+  `render_execution_controls()` 接口更新。编辑、执行、适合内容和 100% 缩放命令
+  已收敛为面板顶部 icon-only 工具栏：普通编辑命令使用 32 px 命中区，停止任务、
+  快速停止和设备急停保持 44 px 命中区与既有语义色，并始终常驻可见。该视图不再
+  包含任务组合 Tab 或第二套暂停/停止控件。
 - `DeviceHealthView` 负责设备状态灯，只接收 `DeviceViewState`；`DevicePoseView`
-  负责机械臂位姿、外部定位、刷新和复制意图。两者作为独立 Bottom Panel 页面按需显示。
+  负责机械臂位姿、外部定位、刷新和复制意图。两者作为独立详情页在状态栏浮层中
+  按需显示。
 - `DeviceControlView` 负责夹爪、继电器和移液枪手动操作入口，只发出参数化意图信号，
-  不持有设备实例或调用 Application Service，并作为 Bottom Panel 页面按需显示。
-- `LogWidget` 作为 Bottom Panel 页面，不再用固定高度常驻挤压画布；Workbench
-  Status Bar 保持设备摘要和通知出口，详细信息由对应页面展示。
+  不持有设备实例或调用 Application Service，并作为状态栏详情浮层页面按需显示。
+- `LogWidget` 作为状态栏详情浮层页面，不再用固定高度或 Bottom Panel 常驻挤压画布；
+  Workbench Status Bar 保持设备摘要和通知出口，详细信息由对应页面展示。
+- 同一个状态栏按钮再次点击、浮层关闭按钮或 Escape 都会关闭浮层；窗口 resize 时
+  浮层重新锚定到右下角，窄窗口下限制在可用区域内且不越界。浮层非模态，不阻塞
+  画布编辑和安全命令。
 - `MainWindow` 直接持有上述组件，不再提供旧按钮、列表和状态标签属性别名。
 
 ### 2.3 WorkflowEditingSession
@@ -156,6 +165,26 @@ Canvas + Breadcrumb      JSON repository       ExecutionPlan
 - 保存提交完整 WorkflowDocument 和 expected revision，执行编译当前会话快照；禁止通过
   `flattened_task()` 创建组合执行输入。
 
+### 2.9 当前工作台交互架构（D-031 已完成）
+
+- Task/Action 的高频命令由 `PaneHeader` 承载，Workflow 编辑/执行命令由顶部命令栏
+  承载；二者统一使用 `IconToolButton`、Qt Resource SVG、Tooltip 和可访问名称，
+  不再在页面底部重复占用整行按钮。
+- 节点拖动超过阈值后创建轻量 ghost 缩略图并跟随指针，原节点位置保留占位，避免拖动
+  过程中整个主序列跳动。ghost 只表达本次交互，不进入 WorkflowDocument。
+- 画布以指针与“+”中心的二维距离解析最近合法主序列插入点；只有进入激活半径的目标
+  才使用主题化发光、克制的循环脉冲和位置标签提供插入预览。没有目标进入脉冲状态时，
+  释放节点只恢复原位，不按单独的纵坐标隐式重排。
+- 节点重排与 Action/Task 外部拖入在提交时重新使用同一个二维目标解析器，避免陈旧
+  active index 或“提示顶层、实际进入 Loop/Parallel”的分叉；未命中顶层插入点的
+  Action 才继续解析复合容器落点。
+- Escape、窗口失焦、鼠标抓取丢失、离开画布或完成都会进入同一个幂等清理路径，移除
+  ghost、恢复原节点透明度并停止目标动画；有效放置只提交一次 `UndoCommand`，没有
+  第二份临时文档或中间持久化状态。
+- 顶部菜单保留在原生标题栏下方的客户区。没有为追求与程序 icon 同行而接管 Windows/
+  Linux/macOS 非客户区，因为那会引入窗口拖动、缩放、最大化、DPI、系统菜单和无障碍
+  行为的跨平台维护风险；这是批准的实现取舍，不是待修复缺陷。
+
 ## 3. 状态所有权
 
 | 状态 | 唯一所有者 | GUI 获取方式 |
@@ -166,7 +195,7 @@ Canvas + Breadcrumb      JSON repository       ExecutionPlan
 | 当前编辑文档 | `WorkflowEditingSession` | 不可变 WorkflowDocument 快照 + 窄事件 |
 | GUI 启动阶段 | `GuiStartupLifecycle` | `GuiStartupState` |
 | 动作参数定义 | canonical action schema | `SchemaActionForm` |
-| Workbench 布局偏好 | `QSettingsWorkbenchLayoutStore` | schema v1 `WorkbenchLayoutState` |
+| Workbench 布局偏好 | `QSettingsWorkbenchLayoutStore` | schema v2 `WorkbenchLayoutState`（`panel_page` / `panel_visible`） |
 
 ## 4. 扩展规则
 
@@ -206,5 +235,7 @@ AI Assistant 不获取 MainWindow 对象。它通过以下窄信号协作：
 - ActionConfigDialog 内部的表单校验提示仍属于对话框局部交互；如后续需要统一
   非模态体验，应通过注入 presenter 实现，不得引入全局 UI 单例。
 - 真实设备的逐项验收、RealMan 停止延迟和恢复条件仍按总计划执行。
-- GUI 工作台 M7 已完成；后续视觉调整不得重新引入 Unicode/Emoji 导航图标、裸资源
-  相对路径或第二套布局状态源。
+- GUI 工作台 D-031 已完成；后续视觉调整不得重新引入 Unicode/Emoji 导航图标、裸资源
+  相对路径、Bottom Panel 垂直 Splitter 或第二套布局状态源。
+- Action 从资源库直接拖入 Loop/Parallel 时，当前会正确提交到容器且不会显示错误的
+  顶层提示；容器内部插入点的专用脉冲动画可作为后续独立视觉增强，不得另建 drop 状态源。

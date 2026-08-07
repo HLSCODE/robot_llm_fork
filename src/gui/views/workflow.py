@@ -3,11 +3,8 @@ from __future__ import annotations
 from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
     QListWidget,
     QMenu,
-    QPushButton,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -18,7 +15,8 @@ from ...devices import StopMode
 from .action_list import ActionListWidget
 from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
-from ..theme import set_theme_role
+from ..icons import IconName
+from ..toolbars import PaneHeader
 
 
 class TaskLibraryListWidget(QListWidget):
@@ -57,8 +55,31 @@ class ActionLibraryView(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
+
+        header = PaneHeader("基础动作")
+        self.create_button = header.add_action(
+            IconName.ADD,
+            "新建动作",
+            self.create_requested.emit,
+        )
+        self.edit_button = header.add_action(
+            IconName.EDIT,
+            "修改选中动作",
+            self.edit_requested.emit,
+        )
+        self.delete_button = header.add_action(
+            IconName.DELETE,
+            "删除选中动作",
+            self.delete_requested.emit,
+        )
+        self.camera_test_button = header.add_action(
+            IconName.CAMERA,
+            "测试相机",
+            self.camera_test_requested.emit,
+        )
+        layout.addWidget(header)
 
         self.action_tabs = QTabWidget()
         self.action_tabs.setTabPosition(QTabWidget.TabPosition.North)
@@ -86,31 +107,14 @@ class ActionLibraryView(QWidget):
         self.action_tabs.addTab(self.action_lists[ActionType.TRAJECTORY], "轨迹类")
         layout.addWidget(self.action_tabs, stretch=1)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(4)
-        for text, signal in (
-            ("新建动作", self.create_requested),
-            ("修改动作", self.edit_requested),
-            ("删除动作", self.delete_requested),
-        ):
-            button = QPushButton(text)
-            button.setMinimumHeight(32)
-            button.clicked.connect(lambda _checked=False, target=signal: target.emit())
-            buttons.addWidget(button)
-        layout.addLayout(buttons)
-
-        self.camera_test_button = QPushButton("测试相机")
-        self.camera_test_button.setMinimumHeight(32)
-        set_theme_role(self.camera_test_button, "success")
-        self.camera_test_button.clicked.connect(lambda: self.camera_test_requested.emit())
-        layout.addWidget(self.camera_test_button)
-
     def action_list(self, action_type: ActionType) -> ActionListWidget:
         return self.action_lists[action_type]
 
     def set_camera_test_running(self, running: bool) -> None:
         self.camera_test_button.setEnabled(not running)
-        self.camera_test_button.setText("测试中..." if running else "测试相机")
+        label = "相机测试运行中" if running else "测试相机"
+        self.camera_test_button.setToolTip(label)
+        self.camera_test_button.setAccessibleName(label)
 
 
 class TaskLibraryView(QWidget):
@@ -120,13 +124,20 @@ class TaskLibraryView(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
-        title = QLabel("已保存任务")
-        title_font = title.font()
-        title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        header = PaneHeader("已保存任务")
+        self.open_button = header.add_action(
+            IconName.OPEN,
+            "打开选中任务",
+            self.task_open_requested.emit,
+        )
+        self.insert_button = header.add_action(
+            IconName.INSERT,
+            "插入到当前任务",
+            self.task_insert_requested.emit,
+        )
+        layout.addWidget(header)
         self.task_library_list = TaskLibraryListWidget()
         self.task_library_list.setMinimumHeight(140)
         self.task_library_list.itemDoubleClicked.connect(
@@ -139,17 +150,6 @@ class TaskLibraryView(QWidget):
             self._show_context_menu
         )
         layout.addWidget(self.task_library_list, stretch=1)
-        buttons = QHBoxLayout()
-        buttons.setSpacing(4)
-        open_button = QPushButton("打开")
-        insert_button = QPushButton("插入到当前任务")
-        for button in (open_button, insert_button):
-            button.setMinimumHeight(32)
-            buttons.addWidget(button)
-        open_button.clicked.connect(lambda: self.task_open_requested.emit())
-        insert_button.clicked.connect(lambda: self.task_insert_requested.emit())
-        set_theme_role(insert_button, "primary")
-        layout.addLayout(buttons)
 
     def _show_context_menu(self, position: QPoint) -> None:
         if self.task_library_list.itemAt(position) is None:
@@ -181,8 +181,11 @@ class WorkflowEditorView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
+        self.control_panel = ControlPanel()
         self.sequence_list = WorkflowCanvasWidget()
         self.sequence_list.setMinimumHeight(140)
+        self._connect_control_panel()
+        layout.addWidget(self.control_panel)
         layout.addWidget(self.sequence_list, stretch=1)
         self.sequence_list.edit_requested.connect(self.edit_requested)
         self.sequence_list.insert_action_requested.connect(
@@ -203,9 +206,6 @@ class WorkflowEditorView(QWidget):
         self.sequence_list.wrap_selection_requested.connect(
             self.repeat_requested.emit
         )
-        self.control_panel = ControlPanel()
-        self._connect_control_panel()
-        layout.addWidget(self.control_panel)
 
     def _connect_control_panel(self) -> None:
         controls = self.control_panel
@@ -240,6 +240,4 @@ class WorkflowEditorView(QWidget):
         )
 
     def render_execution_controls(self, text: str, can_toggle: bool, can_cancel: bool) -> None:
-        self.control_panel.pause_btn.setText(text)
-        self.control_panel.pause_btn.setEnabled(can_toggle)
-        self.control_panel.stop_btn.setEnabled(can_cancel)
+        self.control_panel.render_execution_state(text, can_toggle, can_cancel)

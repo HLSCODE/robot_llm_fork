@@ -275,6 +275,29 @@ QSplitter::handle:hover {{ background: {colors.accent}; }}
 QSplitter#workbenchSideSplitter::handle, QSplitter#workbenchBottomSplitter::handle {{ background: transparent; }}
 QFrame#workbenchActivityBar {{ background: {colors.surface_subtle}; border: none; }}
 QStackedWidget#workbenchSideBar, QStackedWidget#workbenchBottomPanel {{ background: {colors.surface}; }}
+QWidget#paneHeader, QWidget#workflowCommandBar {{ background: {colors.surface}; border: none; }}
+QLabel#paneHeaderTitle {{ color: {colors.text}; font-weight: 700; padding-left: 2px; }}
+QToolButton#paneToolButton {{
+    background: transparent; border: none; border-radius: 5px;
+    color: {colors.text}; padding: 4px;
+}}
+QToolButton#paneToolButton:hover {{ background: {colors.selection}; }}
+QToolButton#paneToolButton:pressed, QToolButton#paneToolButton:checked {{ background: {colors.border}; }}
+QToolButton#paneToolButton:disabled {{ background: transparent; color: {colors.disabled_text}; }}
+QToolButton#paneToolButton[themeRole="primary"] {{ background: {colors.selection}; }}
+QToolButton#paneToolButton[themeRole="success"] {{ background: {colors.success}; }}
+QToolButton#paneToolButton[themeRole="warning"] {{ background: {colors.warning}; }}
+QToolButton#paneToolButton[themeRole="danger"] {{ background: {colors.danger}; }}
+QToolButton#paneToolButton[themeRole="dangerStrong"] {{ background: {colors.danger_strong}; }}
+QToolButton#paneToolButton[themeRole]:disabled {{ background: {colors.disabled_surface}; }}
+QFrame#workbenchFloatingPanel {{
+    background: {colors.surface}; color: {colors.text};
+    border: 1px solid {colors.border}; border-radius: 10px;
+}}
+QLabel#workbenchFloatingPanelTitle {{
+    background: transparent; border: none; color: {colors.text}; font-weight: 600;
+}}
+QStackedWidget#workbenchDetailStack {{ background: transparent; border: none; }}
 QToolButton#activityButton {{ background: transparent; border: none; border-radius: 6px; color: {colors.text_muted}; font-size: 22px; }}
 QToolButton#activityButton:hover {{ background: {colors.selection}; color: {colors.text}; }}
 QToolButton#activityButton:checked {{ background: {colors.selection}; color: {colors.accent}; }}

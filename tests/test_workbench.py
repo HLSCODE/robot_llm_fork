@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import ClassVar
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QHelpEvent, QPalette
@@ -16,14 +17,17 @@ from src.gui.workbench_layout import (
     WorkbenchLayoutState,
 )
 from src.gui.views.workbench import WorkbenchPage, WorkbenchView
+from src.gui.views.workflow_canvas.view import WorkflowCanvasView
 from src.gui.views.workbench.shell import (
-    BOTTOM_PANEL_MINIMUM_HEIGHT,
+    DETAIL_PANEL_MARGIN,
     SIDE_BAR_MINIMUM_WIDTH,
     SPLITTER_HIT_WIDTH,
 )
 
 
 class WorkbenchViewTests(unittest.TestCase):
+    application: ClassVar[QApplication]
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
@@ -34,11 +38,10 @@ class WorkbenchViewTests(unittest.TestCase):
         self.resource_page = QWidget()
         self.device_page = QWidget()
         self.log_page = QWidget()
+        self.editor = WorkflowCanvasView()
         self.workbench = WorkbenchView(
-            side_pages=(
-                WorkbenchPage("resources", "资源", IconName.TASKS, self.resource_page),
-            ),
-            editor=QWidget(),
+            side_pages=(WorkbenchPage("resources", "资源", IconName.TASKS, self.resource_page),),
+            editor=self.editor,
             bottom_pages=(
                 WorkbenchPage("devices", "设备", IconName.DEVICES, self.device_page),
                 WorkbenchPage("logs", "日志", IconName.LOGS, self.log_page),
@@ -111,19 +114,24 @@ class WorkbenchViewTests(unittest.TestCase):
         QApplication.processEvents()
         self.assertFalse(tooltip.isVisible())
 
-    def test_status_buttons_switch_and_toggle_the_resizable_bottom_panel(self) -> None:
+    def test_status_buttons_switch_and_toggle_the_floating_detail_panel(self) -> None:
         device_button = self.workbench.status_bar.buttons["devices"]
         log_button = self.workbench.status_bar.buttons["logs"]
+        editor_size_before = self.editor.size()
 
         QTest.mouseClick(device_button, Qt.MouseButton.LeftButton)
         QApplication.processEvents()
         self.assertEqual("devices", self.workbench.active_bottom_page)
-        self.assertEqual("设备", device_button.text())
+        self.assertEqual("", device_button.text())
+        self.assertEqual(QPoint(28, 28), QPoint(device_button.width(), device_button.height()))
         self.assertFalse(device_button.icon().isNull())
         self.assertIs(self.device_page, self.workbench.bottom_stack.currentWidget())
-        self.assertGreaterEqual(
-            self.workbench.bottom_splitter.sizes()[1],
-            BOTTOM_PANEL_MINIMUM_HEIGHT,
+        self.assertTrue(self.workbench.detail_panel.isVisible())
+        self.assertEqual("设备", self.workbench.detail_panel.title_label.text())
+        self.assertEqual(editor_size_before, self.editor.size())
+        self.assertLessEqual(
+            self.workbench.detail_panel.geometry().bottom(),
+            self.workbench.status_bar.geometry().top() - DETAIL_PANEL_MARGIN,
         )
 
         QTest.mouseClick(log_button, Qt.MouseButton.LeftButton)
@@ -136,7 +144,73 @@ class WorkbenchViewTests(unittest.TestCase):
         QTest.mouseClick(log_button, Qt.MouseButton.LeftButton)
         QApplication.processEvents()
         self.assertIsNone(self.workbench.active_bottom_page)
-        self.assertFalse(self.workbench.bottom_stack.isVisible())
+        self.assertFalse(self.workbench.detail_panel.isVisible())
+
+    def test_floating_panel_closes_with_escape_and_stays_in_narrow_bounds(self) -> None:
+        QTest.mouseClick(
+            self.workbench.status_bar.buttons["devices"],
+            Qt.MouseButton.LeftButton,
+        )
+        self.workbench.resize(360, 420)
+        QApplication.processEvents()
+
+        panel_geometry = self.workbench.detail_panel.geometry()
+        self.assertGreaterEqual(panel_geometry.left(), DETAIL_PANEL_MARGIN)
+        self.assertLessEqual(
+            panel_geometry.right(),
+            self.workbench.width() - DETAIL_PANEL_MARGIN,
+        )
+        self.assertLessEqual(
+            panel_geometry.bottom(),
+            self.workbench.status_bar.geometry().top() - DETAIL_PANEL_MARGIN,
+        )
+
+        QTest.keyClick(self.workbench, Qt.Key.Key_Escape)
+        QApplication.processEvents()
+        self.assertIsNone(self.workbench.active_bottom_page)
+        self.assertFalse(self.workbench.detail_panel.isVisible())
+
+    def test_escape_reaches_canvas_unless_detail_panel_is_visible(self) -> None:
+        cancellations: list[bool] = []
+        self.editor.drag_cancel_requested.connect(lambda: cancellations.append(True))
+
+        self.workbench.activateWindow()
+        self.editor.setFocus()
+        QApplication.processEvents()
+        self.assertTrue(self.editor.hasFocus())
+        focus_widget = QApplication.focusWidget()
+        self.assertIsNotNone(focus_widget)
+        assert focus_widget is not None
+        QTest.keyClick(focus_widget, Qt.Key.Key_Escape)
+        QApplication.processEvents()
+        self.assertEqual([True], cancellations)
+
+        self.workbench.toggle_bottom_page("devices")
+        self.editor.setFocus()
+        QApplication.processEvents()
+        focus_widget = QApplication.focusWidget()
+        self.assertIsNotNone(focus_widget)
+        assert focus_widget is not None
+        QTest.keyClick(focus_widget, Qt.Key.Key_Escape)
+        QApplication.processEvents()
+        self.assertEqual([True], cancellations)
+        self.assertIsNone(self.workbench.active_bottom_page)
+
+    def test_detail_pages_keep_one_widget_instance_and_one_stack_owner(self) -> None:
+        QTest.mouseClick(
+            self.workbench.status_bar.buttons["devices"],
+            Qt.MouseButton.LeftButton,
+        )
+        QTest.mouseClick(
+            self.workbench.status_bar.buttons["logs"],
+            Qt.MouseButton.LeftButton,
+        )
+        QApplication.processEvents()
+
+        self.assertEqual(0, self.workbench.bottom_stack.indexOf(self.device_page))
+        self.assertEqual(1, self.workbench.bottom_stack.indexOf(self.log_page))
+        self.assertIs(self.workbench.bottom_stack, self.device_page.parentWidget())
+        self.assertIs(self.workbench.bottom_stack, self.log_page.parentWidget())
 
     def test_status_bar_renders_device_summary_from_view_state(self) -> None:
         self.workbench.status_bar.render_device_state(
@@ -162,16 +236,13 @@ class WorkbenchViewTests(unittest.TestCase):
                     side_page="resources",
                     side_visible=False,
                     side_width=360,
-                    bottom_page="logs",
-                    bottom_visible=True,
-                    bottom_height=180,
+                    panel_page="logs",
+                    panel_visible=True,
                 )
             )
         )
         workbench = WorkbenchView(
-            side_pages=(
-                WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),
-            ),
+            side_pages=(WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),),
             editor=QWidget(),
             bottom_pages=(
                 WorkbenchPage("devices", "设备", IconName.DEVICES, QWidget()),
@@ -190,7 +261,7 @@ class WorkbenchViewTests(unittest.TestCase):
         assert store.saved is not None
         self.assertTrue(store.saved.side_visible)
         self.assertEqual("resources", store.saved.side_page)
-        self.assertEqual("logs", store.saved.bottom_page)
+        self.assertEqual("logs", store.saved.panel_page)
         workbench.close()
 
     def test_unknown_persisted_page_recovers_default_layout(self) -> None:
@@ -201,20 +272,15 @@ class WorkbenchViewTests(unittest.TestCase):
                     side_page="removed",
                     side_visible=True,
                     side_width=300,
-                    bottom_page="devices",
-                    bottom_visible=False,
-                    bottom_height=180,
+                    panel_page="devices",
+                    panel_visible=False,
                 )
             )
         )
         workbench = WorkbenchView(
-            side_pages=(
-                WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),
-            ),
+            side_pages=(WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),),
             editor=QWidget(),
-            bottom_pages=(
-                WorkbenchPage("devices", "设备", IconName.DEVICES, QWidget()),
-            ),
+            bottom_pages=(WorkbenchPage("devices", "设备", IconName.DEVICES, QWidget()),),
             layout_store=store,
         )
 
@@ -226,9 +292,7 @@ class WorkbenchViewTests(unittest.TestCase):
     def test_reset_layout_restores_default_pages_and_sizes(self) -> None:
         store = _MemoryLayoutStore(LayoutLoadResult(None))
         workbench = WorkbenchView(
-            side_pages=(
-                WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),
-            ),
+            side_pages=(WorkbenchPage("resources", "资源", IconName.TASKS, QWidget()),),
             editor=QWidget(),
             bottom_pages=(
                 WorkbenchPage("devices", "设备", IconName.DEVICES, QWidget()),
@@ -245,9 +309,8 @@ class WorkbenchViewTests(unittest.TestCase):
         self.assertEqual("resources", workbench.active_side_page)
         self.assertIsNone(workbench.active_bottom_page)
         self.assertTrue(state.side_visible)
-        self.assertFalse(state.bottom_visible)
+        self.assertFalse(state.panel_visible)
         self.assertEqual(280, state.side_width)
-        self.assertEqual(220, state.bottom_height)
         self.assertEqual(state, store.saved)
         workbench.close()
 

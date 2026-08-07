@@ -5,7 +5,7 @@
 > 最近更新：2026-08-07
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：154/159（152 DONE + 2 DROPPED，96.9%）
+> 计划进度：155/160（153 DONE + 2 DROPPED，96.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -538,16 +538,18 @@ src/
   不再持有或调用 MainWindow。
 - `closeEvent` 只发出执行取消、相机中断和交互停止请求；可阻塞的有界等待在
   Qt 事件循环退出后执行，再由应用宿主统一关闭附加服务和设备。
-- 动作库/任务库、序列/任务组合器、设备状态/位姿和手动控制已拆成稳定视图组件；
+- 动作库/任务库、唯一工作流画布、设备状态/位姿和手动控制已拆成稳定视图组件；
   `MainWindow` 只组合组件、连接意图信号并调用渲染接口，不保留旧控件属性别名。
 - 新一轮 GUI 评审确认：列表式编排区域仍需升级为受约束的工作流画布；原 GUI 草案中
   新建 `WorkflowExecutor`/节点 Handler、首版移除循环及 Qt/领域模型混合等方案已废止，
   统一改为复用 `CompositionService`、规范 `SequenceEntry`、`ExecutionBridge`、
   `ExecutionManager` 和唯一 `ActionHandlerRegistry`。
-- M6 已完成受约束画布与旧编辑器切换，但当前主窗口仍把设备状态/位姿、动作与任务库、
-  执行按钮、基础控制和日志同时常驻，竖屏下画布被压缩；`ActionLibraryView` 同时组合
-  动作分类、任务和 AI，资源导航层级不清。下一阶段只重组 GUI 工作台壳层，不改动
-  Application Service、DeviceRuntime、ExecutionManager 或现有领域模型。
+- M7 已完成 Workbench 壳层与资源页拆分；D-031 进一步删除原 Bottom Panel 垂直
+  Splitter，将设备、位姿、控制和日志改为 Status Bar 图标打开的右下锚定非模态浮层，
+  详情不再压缩画布。Task/Action/Workflow 高频命令、fit/zoom 已统一为 Qt Resource
+  SVG icon-only 工具栏，节点拖动具备 ghost、原位占位和最近合法插入点反馈；这些变更
+  只涉及 GUI 表现层，不改动 Application Service、DeviceRuntime、ExecutionManager
+  或现有领域模型。
 
 ### 9.2 目标
 
@@ -557,10 +559,11 @@ src/
 - 动作表单由统一 action schema 驱动。
 - AI、语音、手工控制共享同一状态源。
 - 启动和关闭流程可观测、有超时、可取消。
-- 主窗口采用 Top Menu、Activity Bar、Side Bar、Editor、Bottom Panel 和 Status Bar
-  的工作台信息架构，使画布成为默认主区域。
+- 主窗口采用原生标题栏、客户区 Top Menu、Activity Bar、Side Bar、Editor 和 Status Bar
+  的工作台信息架构；低频详情使用右下锚定非模态浮层，使画布成为默认主区域。
 - 资源、持续状态与操作命令分层展示；低频详情按需展开，关键故障与安全停止始终可见。
-- 统一 SVG/Qt Resource 图标、布局偏好持久化和深浅主题状态，不以 Emoji 作为主导航体系。
+- 统一 SVG/Qt Resource 图标、icon-only Tooltip/可访问性、schema v2 布局偏好和深浅主题
+  状态，不以 Emoji 作为主导航体系。
 
 ### 9.3 工作项
 
@@ -596,6 +599,7 @@ src/
 | D-028 | P1 | DONE | WorkflowDocument/Schema 已直接升级 v4，新增自包含、可递归 `SubworkflowBlock`，保存名称、来源 workflow ID/revision 与 body；Validator/ExecutionPlan/Compiler/Engine 透明递归处理并保留 subworkflow path；插入时递归重建 Action/Loop/Parallel/Subworkflow UUID 与 branch ID；17 个活动 v3 文档一次迁移到 v4，runtime 不双读 |
 | D-029 | P1 | DONE | 新增唯一 `WorkflowEditingSession`，独占当前 WorkflowDocument、文件名、revision、dirty 与草稿边界；画布变更发布完整根文档快照，保存使用完整 document + expected revision，执行只编译当前会话快照；CompositionService 继续作为目录/Repository 与外部入口边界，不再持有 GUI 组合草稿 |
 | D-030 | P1 | DONE | 已删除 `TaskComposerService`、`TaskComposerView`、`TaskComposerListWidget`、组合 Activity 入口及 MainWindow 全部组合控制路径；任务库支持双击/按钮打开，按钮、右键或拖入创建内嵌 Subworkflow；画布提供折叠子流程卡片、双击/右键进入、逐级返回、多层内部编辑与整棵文档 Undo/Redo；组合执行不再调用 `flattened_task()` |
+| D-031 | P1 | DONE | Task/Action/Workflow 功能命令及 fit/zoom 已迁至对应面板顶部的 Qt Resource 单色 SVG icon-only 工具栏，统一 Tooltip 与可访问名称；编辑工具使用 32 px 命中区，停止/快停/急停保持 44 px 与语义色。删除 Bottom Panel 垂直 Splitter，Status Bar 设备/位姿/控制/日志图标打开右下锚定非模态详情浮层，同键/Escape/关闭图标可关闭且 resize/窄屏不越界；布局 schema 直接升级 v2（`panel_page`/`panel_visible`），不兼容读取 v1。节点拖动显示跟随鼠标的 ghost 并保留原位占位，二维激活半径内的合法主序列“+”以主题化发光/脉冲/位置标签预告插入；无目标释放恢复原位，Action/Task 提交复用相同 resolver，Esc/失焦/失去鼠标抓取统一清理且有效放置只提交一次 UndoCommand；保留原生标题栏及其下客户区菜单，不接管跨平台非客户区 |
 
 ### 9.4 完成标准
 
@@ -610,8 +614,12 @@ src/
   组合不得拍平或改变控制流语义。
 - 新编辑器满足目标分辨率、DPI、纯触控、可访问性和性能预算，切换后旧编辑器已删除。
 - 画布在默认布局中占据主要空间，资源页与持续详情不再同时常驻挤压画布。
-- Side Bar 分隔线保持 1 px 视觉样式并提供足够透明命中区；Bottom Panel 可调整且非模态。
-- SVG 导航在主题、DPI、wheel 打包和无工作目录假设下可用；布局偏好损坏时可恢复。
+- Side Bar 分隔线保持 1 px 视觉样式并提供足够透明命中区；详情浮层右下锚定、非模态、
+  不压缩画布，并可由同键、Escape 或关闭图标关闭。
+- SVG 导航、面板工具栏及 fit/zoom 在主题、DPI、wheel 打包和无工作目录假设下可用；
+  schema v2 布局偏好损坏或版本不匹配时可恢复。
+- 节点拖动 ghost、原位占位、二维合法插入点动画、无目标原位恢复、外部拖入与
+  Esc/失焦/失去鼠标抓取清理行为一致，有效放置最终只产生一条撤销命令。
 - 安全停止与关键故障在所有页面、抽屉和面板状态下保持可见、可理解和可操作。
 
 ## 10. Track E：LLM、语音交互与技能系统
@@ -939,7 +947,7 @@ src/
 | ADR-M-012 | Accepted | MVC 适用范围 | MVC/MVVM 只用于 GUI、WebSocket/HTTP 表现层；执行与硬件采用 Application Service + Ports/Adapters |
 | ADR-M-013 | Accepted | 硬件实现角色 | Service 编排用例，Provider 创建产品，Adapter 实现能力，Driver 封装厂商协议，Transport 负责通信；禁止用 `XxxService` 混称底层驱动 |
 | ADR-M-014 | Accepted | GUI 工作流画布边界 | 使用受约束画布和纯 WorkflowDocument；复用 CompositionService、SequenceEntry、ExecutionManager 与 ActionHandlerRegistry，不新增 GUI 执行器、Handler 或持久化仓库 |
-| ADR-M-015 | Accepted | GUI 工作台信息架构 | 只借鉴 VS Code 的 Top Menu/Activity Bar/Side Bar/Editor/Bottom Panel/Status Bar 分区；保持工业控制的触控尺寸、常驻安全命令和单一应用状态源，不引入扩展宿主或通用多编辑器框架 |
+| ADR-M-015 | Accepted | GUI 工作台信息架构 | 只借鉴 VS Code 的 Top Menu/Activity Bar/Side Bar/Editor/Status Bar 分区和面板内 icon-only 工具栏；低频详情使用右下锚定非模态浮层，不用垂直 Bottom Panel 压缩画布。保留原生标题栏及其下客户区菜单，不接管跨平台非客户区；保持工业控制的触控尺寸、常驻安全命令和单一应用状态源，不引入扩展宿主或通用多编辑器框架 |
 | ADR-M-016 | Accepted | 用户编排数据格式 | 用户可见“任务”以 `*.workflow.json`/WorkflowDocument 作为唯一可编辑源；`.task` 线性快照不再作为并行持久化格式，执行计划由 Compiler 派生。动作、技能、工作流分别使用版本化 JSON Schema；迁移采用离线一次切换，不在读取时写盘或长期双读 |
 | ADR-M-017 | Accepted | 自然语言命令分类 | Command 是交互请求，Action 是原子操作，Skill 是可复用领域能力，Workflow 是保存的任务；Planner 产出四类 typed command，单步语音控制不机械包装成 Skill，所有物理命令仍经 CommandRuntime 审批和唯一执行运行时 |
 | ADR-M-018 | Accepted | 工作流组合与子流程编辑 | 删除独立任务组合器，组合统一为在 WorkflowEditingSession 中插入 Subworkflow；默认保存带来源元数据的自包含快照，不使用隐式实时引用。双击进入子流程作用域并由面包屑导航，Compiler 透明递归编译为唯一 ExecutionPlan；WorkflowDocument 直接升级 v4 并一次迁移，不长期双读 |
@@ -1112,6 +1120,8 @@ M7 GUI 工作台信息架构与空间收敛
 - 动作 ID 全局唯一，持久化参数使用规范机器字段和 JSON 类型，ActionSchema 继续是 UI/API/Skill/Planner 的唯一字段定义。
 - 每个 Skill 独立保存为 `*.skill.json`，跨文件 ID/动作引用/参数绑定严格校验，Python 内不存在第二份完整技能目录。
 - Planner 可区分 Action、Skill、Workflow 和 ExecutionControl；夹爪、相对移动等单步语音指令经过消歧、限幅、预览和风险确认后进入唯一 ExecutionManager。
+- Workbench 不再保留 Bottom Panel 垂直 Splitter；详情浮层、icon-only 工具栏、拖动 ghost/
+  插入点反馈与 schema v2 布局偏好已完成回归，旧布局版本不保留兼容读取。
 - 迁移报告、JSON Schema、配置、示例、golden、契约、GUI smoke、性能和 wheel 内容门禁全部同步；旧入口直接删除，不设置兼容开关。
 
 ## 15. 质量门禁
@@ -1363,6 +1373,7 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-07 | M8 | D/G | 任务组合与画布单一化评审 | D-028～D-030 新增为 TODO；ADR-M-018 → Accepted | 确认 TaskComposer 与画布形成双编辑模型，且 flattened_task 会展开 Loop、顺序拼接 Parallel 分支；决定删除组合页面/服务，以 WorkflowDocument v4 内嵌 Subworkflow、唯一 WorkflowEditingSession、折叠卡片和面包屑作用域编辑承接“流程 + Action + 流程”及递归子流程；默认快照隔离源任务变化，插入时递归重建身份，不引入 GUI 调度器 | 文档架构评审；本次未修改 runtime 或活动数据，实施完成前当前组合器风险仍存在 |
 | 2026-08-07 | M8 | D/G | Subworkflow v4 与组合编辑单一化 | D-028～D-030 TODO → DONE | WorkflowDocument/Schema、Validator、Compiler、ExecutionPlan 与 Engine 直接支持递归 Subworkflow；新增 WorkflowEditingSession；17 个活动文档一次迁移 v4；删除独立组合页面/服务/Activity 入口，任务库打开或插入统一进入唯一画布，子流程作用域编辑和整棵文档 Undo/Redo 保留 Loop/Parallel 语义 | Compile、Ruff、项目 Mypy（84 files）、Pytest 506 passed + 48 subtests、LLM golden 14/14、性能 9/9、wheel 构建与隔离安装 smoke 全通过；活动数据 46 actions / 17 workflows（272 顶层节点）/ 13 skills 可直接加载 |
 | 2026-08-07 | M8 | G | 全仓手写 Python 静态门禁收口 | G-034 → DONE | 从 Mypy 初始基线 570 errors / 72 files 逐模块收窄动态与第三方边界，默认门禁扩展为全部手写 `src/` 与 `scripts/`；唯一排除 Qt 自动生成的 `resources_rc.py`；Ruff 同步覆盖 `src/`、`scripts/`、`tests/`；新增视觉算法 4 项回归以及 DI 加载协议、深度 PNG、确定性超时回归 | 默认 Mypy 286 个 `src` + `scripts` 文件、0 errors；Ruff 全通过；统一门禁 514 passed + 48 subtests，coverage 65.71%，LLM golden 14/14，性能 9/9，Wheel smoke 及 GUI/Server/Hardware optional import smoke 全通过；真实硬件验收仍独立跟踪 |
+| 2026-08-07 | M8 | D/G | GUI icon-only 工具栏、详情浮层与拖放反馈收口 | D-031 → DONE | Task/Action/Workflow 命令与 fit/zoom 统一迁至 Qt Resource SVG 工具栏，区分 32 px 编辑与 44 px 安全命中区；删除 Bottom Panel 垂直 Splitter，以 Status Bar 入口打开右下锚定非模态浮层并直接升级布局 schema v2；节点拖动新增 ghost、原位占位及二维合法插入点发光/脉冲/位置标签，无目标释放恢复原位，外部拖入提交复用相同 resolver，Esc/失焦/失去抓取统一清理且有效放置只提交一次 UndoCommand；批准保留原生标题栏及其下客户区菜单 | 本批 5 个 GUI 变更测试文件 63 passed + 26 subtests；完整门禁 Compile/Ruff 通过，Mypy 287 source files / 0 errors，Pytest 529 passed + 74 subtests，coverage 66.09%，LLM golden 14/14，performance 9/9，wheel smoke 通过 |
 
 ## 22. 建议的首批实施顺序
 

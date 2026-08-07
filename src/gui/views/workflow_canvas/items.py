@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from math import ceil
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QEvent,
+    QPointF,
+    QRectF,
+    Qt,
+    QVariantAnimation,
+    Signal,
+)
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsObject,
+    QGraphicsPixmapItem,
     QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
     QStyleOptionGraphicsItem,
@@ -24,7 +35,13 @@ from ....domain.models import (
 )
 from .tokens import (
     ACTION_COLORS,
+    DRAG_PREVIEW_MAX_HEIGHT,
+    DRAG_PREVIEW_MAX_WIDTH,
+    DRAG_PREVIEW_OPACITY,
+    DRAG_SOURCE_OPACITY,
     INSERT_TARGET_SIZE,
+    INSERT_TARGET_HINT_WIDTH,
+    INSERT_TARGET_PULSE_DURATION_MS,
     LOOP_CHILD_HEIGHT,
     LOOP_CHILD_GAP,
     LOOP_FOOTER_HEIGHT,
@@ -54,12 +71,26 @@ from .tokens import (
 )
 
 
+class NodeDragPreviewItem(QGraphicsPixmapItem):
+    """Non-interactive thumbnail used while a workflow node is dragged."""
+
+    def __init__(self, node_id: str, pixmap: QPixmap) -> None:
+        super().__init__(pixmap)
+        self.node_id = node_id
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setOpacity(DRAG_PREVIEW_OPACITY)
+        self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        self.setZValue(100.0)
+
+
 class WorkflowNodeItem(QGraphicsObject):
     focused = Signal(str, str, bool)
     edit_requested = Signal(str, str)
     loop_insert_requested = Signal(str, int)
     parallel_insert_requested = Signal(str, str, int)
     move_requested = Signal(str, float)
+    drag_position_changed = Signal(str, float, float)
+    drag_ended = Signal(str, bool)
     subworkflow_open_requested = Signal(str)
 
     def __init__(
@@ -84,8 +115,20 @@ class WorkflowNodeItem(QGraphicsObject):
         self._pressed_loop_insert_index: int | None = None
         self._pressed_parallel_insert: tuple[str, int] | None = None
         self._press_scene_y: float | None = None
+        self._press_local_position: QPointF | None = None
         self._drag_origin_y = 0.0
+        self._drag_target_center_y = 0.0
         self._is_dragging = False
+        self._drag_preview: NodeDragPreviewItem | None = None
+        self._drag_preview_anchor = QPointF()
+
+    @property
+    def drag_preview(self) -> NodeDragPreviewItem | None:
+        return self._drag_preview
+
+    @property
+    def is_dragging(self) -> bool:
+        return self._is_dragging
 
     @property
     def node_height(self) -> float:
@@ -191,12 +234,11 @@ class WorkflowNodeItem(QGraphicsObject):
             event.accept()
             return
         item_uuid = self._item_uuid_at(event.pos())
-        additive = bool(
-            event.modifiers() & Qt.KeyboardModifier.ShiftModifier
-        )
+        additive = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         self.focused.emit(self.node_id, item_uuid, additive)
         if self._editing_enabled and not additive:
             self._press_scene_y = event.scenePos().y()
+            self._press_local_position = QPointF(event.pos())
             self._drag_origin_y = self.scenePos().y()
         event.accept()
 
@@ -213,11 +255,15 @@ class WorkflowNodeItem(QGraphicsObject):
         if not self._is_dragging and abs(delta_y) < NODE_DRAG_THRESHOLD:
             event.accept()
             return
-        self._is_dragging = True
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        self.setOpacity(0.88)
-        self.setZValue(20.0)
-        self.setY(self._drag_origin_y + delta_y)
+        if not self._is_dragging:
+            self._begin_drag_preview(event.scenePos())
+        self._drag_target_center_y = self._drag_origin_y + delta_y + self.node_height / 2.0
+        self._position_drag_preview(event.scenePos())
+        self.drag_position_changed.emit(
+            self.node_id,
+            event.scenePos().x(),
+            event.scenePos().y(),
+        )
         event.accept()
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
@@ -241,9 +287,10 @@ class WorkflowNodeItem(QGraphicsObject):
             event.accept()
             return
         was_dragging = self._is_dragging
-        target_center_y = self.scenePos().y() + self.node_height / 2.0
+        target_center_y = self._drag_target_center_y
         self._reset_drag_state()
         if was_dragging:
+            self.drag_ended.emit(self.node_id, True)
             self.move_requested.emit(self.node_id, target_center_y)
         event.accept()
 
@@ -259,10 +306,69 @@ class WorkflowNodeItem(QGraphicsObject):
 
     def _reset_drag_state(self) -> None:
         self._press_scene_y = None
+        self._press_local_position = None
         self._is_dragging = False
+        preview = self._drag_preview
+        if preview is not None:
+            preview_scene = preview.scene()
+            if preview_scene is not None:
+                preview_scene.removeItem(preview)
+        self._drag_preview = None
+        self._drag_preview_anchor = QPointF()
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setOpacity(1.0)
         self.setZValue(0.0)
+
+    def cancel_drag(self) -> None:
+        """Restore the stationary node and discard transient drag feedback."""
+        was_dragging = self._is_dragging
+        self._reset_drag_state()
+        if was_dragging:
+            self.drag_ended.emit(self.node_id, False)
+
+    def sceneEvent(self, event: QEvent) -> bool:  # noqa: N802
+        if event.type() is QEvent.Type.UngrabMouse:
+            self.cancel_drag()
+        return super().sceneEvent(event)
+
+    def _begin_drag_preview(self, scene_position: QPointF) -> None:
+        preview_scale = min(
+            1.0,
+            DRAG_PREVIEW_MAX_WIDTH / self.node_width,
+            DRAG_PREVIEW_MAX_HEIGHT / self.node_height,
+        )
+        preview_width = max(1, ceil(self.node_width * preview_scale))
+        preview_height = max(1, ceil(self.node_height * preview_scale))
+        pixmap = QPixmap(preview_width, preview_height)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+            painter.scale(preview_scale, preview_scale)
+            self.paint(painter, QStyleOptionGraphicsItem(), None)
+        finally:
+            painter.end()
+
+        preview = NodeDragPreviewItem(self.node_id, pixmap)
+        scene = self.scene()
+        if scene is not None:
+            scene.addItem(preview)
+        self._drag_preview = preview
+        press_position = self._press_local_position or self.boundingRect().center()
+        self._drag_preview_anchor = QPointF(
+            press_position.x() * preview_scale,
+            press_position.y() * preview_scale,
+        )
+        self._is_dragging = True
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.setOpacity(DRAG_SOURCE_OPACITY)
+        self._position_drag_preview(scene_position)
+
+    def _position_drag_preview(self, scene_position: QPointF) -> None:
+        if self._drag_preview is None:
+            return
+        self._drag_preview.setPos(scene_position - self._drag_preview_anchor)
 
     def _paint_action(
         self,
@@ -330,7 +436,9 @@ class WorkflowNodeItem(QGraphicsObject):
     ) -> None:
         colors = canvas_colors()
         painter.setBrush(QBrush(colors.surface))
-        painter.setPen(QPen(colors.accent if emphasized else colors.border, 2.5 if emphasized else 1.5))
+        painter.setPen(
+            QPen(colors.accent if emphasized else colors.border, 2.5 if emphasized else 1.5)
+        )
         painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         color = ACTION_COLORS.get(item.definition.type, QColor("#64748b"))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -464,10 +572,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 + len(visible_children) * LOOP_CHILD_HEIGHT
                 + max(0, len(visible_children) - 1) * LOOP_CHILD_GAP
             )
-            if (
-                self._editing_enabled
-                and len(loop.items) <= MAX_VISIBLE_LOOP_CHILDREN
-            ):
+            if self._editing_enabled and len(loop.items) <= MAX_VISIBLE_LOOP_CHILDREN:
                 self._paint_insert_marker(
                     painter,
                     children_bottom + LOOP_SECTION_GAP / 2.0,
@@ -603,9 +708,7 @@ class WorkflowNodeItem(QGraphicsObject):
                     center_x=branch_left + PARALLEL_BRANCH_WIDTH / 2.0,
                 )
             for child_index, child in enumerate(branch.items):
-                child_top = body_top + child_index * (
-                    PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP
-                )
+                child_top = body_top + child_index * (PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP)
                 if self._editing_enabled and child_index > 0:
                     self._paint_insert_marker(
                         painter,
@@ -703,10 +806,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor("#a78bfa"), 2.0))
         for branch_index, _branch in enumerate(parallel.branches):
-            branch_center = (
-                self._parallel_branch_left(branch_index)
-                + PARALLEL_BRANCH_WIDTH / 2.0
-            )
+            branch_center = self._parallel_branch_left(branch_index) + PARALLEL_BRANCH_WIDTH / 2.0
             painter.drawLine(
                 QPointF(header_rect.center().x(), header_rect.bottom()),
                 QPointF(branch_center, branch_top),
@@ -797,9 +897,7 @@ class WorkflowNodeItem(QGraphicsObject):
         if not isinstance(self.entry, LoopBlock):
             return self.entry.uuid
         body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
-        for index, child in enumerate(
-            self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]
-        ):
+        for index, child in enumerate(self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]):
             child_top = body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP)
             if child_top <= position.y() <= child_top + LOOP_CHILD_HEIGHT:
                 return child.uuid
@@ -816,16 +914,10 @@ class WorkflowNodeItem(QGraphicsObject):
         branch_index = self._parallel_branch_index_at(position.x())
         if branch_index is None:
             return None
-        body_top = (
-            PARALLEL_HEADER_HEIGHT
-            + PARALLEL_SECTION_GAP
-            + PARALLEL_BRANCH_HEADER_HEIGHT
-        )
+        body_top = PARALLEL_HEADER_HEIGHT + PARALLEL_SECTION_GAP + PARALLEL_BRANCH_HEADER_HEIGHT
         branch = parallel.branches[branch_index]
         for child_index, child in enumerate(branch.items):
-            child_top = body_top + child_index * (
-                PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP
-            )
+            child_top = body_top + child_index * (PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP)
             if child_top <= position.y() <= child_top + PARALLEL_CHILD_HEIGHT:
                 return branch.branch_id, child.uuid
         return None
@@ -838,11 +930,7 @@ class WorkflowNodeItem(QGraphicsObject):
         if branch_index is None:
             return None
         branch = parallel.branches[branch_index]
-        body_top = (
-            PARALLEL_HEADER_HEIGHT
-            + PARALLEL_SECTION_GAP
-            + PARALLEL_BRANCH_HEADER_HEIGHT
-        )
+        body_top = PARALLEL_HEADER_HEIGHT + PARALLEL_SECTION_GAP + PARALLEL_BRANCH_HEADER_HEIGHT
         insertion_index = 0
         for child_index in range(len(branch.items)):
             child_center = (
@@ -865,11 +953,7 @@ class WorkflowNodeItem(QGraphicsObject):
         if target is None:
             return None
         _branch_id, insertion_index = target
-        body_top = (
-            PARALLEL_HEADER_HEIGHT
-            + PARALLEL_SECTION_GAP
-            + PARALLEL_BRANCH_HEADER_HEIGHT
-        )
+        body_top = PARALLEL_HEADER_HEIGHT + PARALLEL_SECTION_GAP + PARALLEL_BRANCH_HEADER_HEIGHT
         center_y = body_top - PARALLEL_CHILD_GAP / 2.0
         if insertion_index > 0:
             center_y = (
@@ -891,9 +975,8 @@ class WorkflowNodeItem(QGraphicsObject):
 
     @staticmethod
     def _parallel_branch_left(branch_index: int) -> float:
-        return (
-            PARALLEL_BRANCH_PADDING
-            + branch_index * (PARALLEL_BRANCH_WIDTH + PARALLEL_BRANCH_GAP)
+        return PARALLEL_BRANCH_PADDING + branch_index * (
+            PARALLEL_BRANCH_WIDTH + PARALLEL_BRANCH_GAP
         )
 
     def _loop_insertion_index_at(self, position: QPointF) -> int | None:
@@ -904,9 +987,7 @@ class WorkflowNodeItem(QGraphicsObject):
         body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
         insertion_centers = [body_top - LOOP_SECTION_GAP / 2.0]
         insertion_centers.extend(
-            body_top
-            + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP)
-            - LOOP_CHILD_GAP / 2.0
+            body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP) - LOOP_CHILD_GAP / 2.0
             for index in range(1, min(len(self.entry.items), MAX_VISIBLE_LOOP_CHILDREN))
         )
         if 0 < len(self.entry.items) <= MAX_VISIBLE_LOOP_CHILDREN:
@@ -923,10 +1004,7 @@ class WorkflowNodeItem(QGraphicsObject):
 
     def _tooltip(self) -> str:
         if isinstance(self.entry, SubworkflowBlock):
-            return (
-                f"子流程: {self.entry.name}\n"
-                f"{len(self.entry.items)} 个节点，双击进入编辑"
-            )
+            return f"子流程: {self.entry.name}\n{len(self.entry.items)} 个节点，双击进入编辑"
         if isinstance(self.entry, LoopBlock):
             return (
                 f"循环 {self.entry.repeat_count} 次\n"
@@ -934,13 +1012,9 @@ class WorkflowNodeItem(QGraphicsObject):
             )
         if isinstance(self.entry, ParallelBlock):
             action_count = sum(len(branch.items) for branch in self.entry.branches)
-            return (
-                f"并行 · {len(self.entry.branches)} 个分支\n"
-                f"共 {action_count} 个控制流节点"
-            )
+            return f"并行 · {len(self.entry.branches)} 个分支\n共 {action_count} 个控制流节点"
         parameters = ", ".join(
-            f"{name}={value}"
-            for name, value in list(self.entry.definition.parameters.items())[:5]
+            f"{name}={value}" for name, value in list(self.entry.definition.parameters.items())[:5]
         )
         return f"{self.entry.definition.name}\n{parameters or '无参数'}"
 
@@ -1001,12 +1075,51 @@ class InsertionItem(QGraphicsObject):
         super().__init__()
         self._index = index
         self._is_pressed = False
+        self._is_drop_target_active = False
+        self._target_label = ""
+        self._pulse_phase = 0.0
+        self._pulse_animation = QVariantAnimation(self)
+        self._pulse_animation.setDuration(INSERT_TARGET_PULSE_DURATION_MS)
+        self._pulse_animation.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._pulse_animation.setKeyValueAt(0.0, 0.0)
+        self._pulse_animation.setKeyValueAt(0.5, 1.0)
+        self._pulse_animation.setKeyValueAt(1.0, 0.0)
+        self._pulse_animation.setLoopCount(-1)
+        self._pulse_animation.valueChanged.connect(self._on_pulse_value_changed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
         self.setToolTip("在此处插入动作")
 
+    @property
+    def index(self) -> int:
+        return self._index
+
+    @property
+    def is_drop_target_active(self) -> bool:
+        return self._is_drop_target_active
+
+    @property
+    def target_label(self) -> str:
+        return self._target_label
+
+    @property
+    def is_pulsing(self) -> bool:
+        return self._pulse_animation.state() == QAbstractAnimation.State.Running
+
     def boundingRect(self) -> QRectF:  # noqa: N802
-        return QRectF(0.0, 0.0, INSERT_TARGET_SIZE, INSERT_TARGET_SIZE)
+        right_edge = INSERT_TARGET_SIZE + INSERT_TARGET_HINT_WIDTH + 16.0
+        total_width = 2.0 * (right_edge - INSERT_TARGET_SIZE / 2.0)
+        return QRectF(
+            (INSERT_TARGET_SIZE - total_width) / 2.0,
+            -8.0,
+            total_width,
+            INSERT_TARGET_SIZE + 16.0,
+        )
+
+    def shape(self) -> QPainterPath:
+        path = QPainterPath()
+        path.addEllipse(QRectF(0.0, 0.0, INSERT_TARGET_SIZE, INSERT_TARGET_SIZE))
+        return path
 
     def paint(
         self,
@@ -1016,13 +1129,68 @@ class InsertionItem(QGraphicsObject):
     ) -> None:
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(canvas_colors().accent)
+        colors = canvas_colors()
+        center = QPointF(INSERT_TARGET_SIZE / 2.0, INSERT_TARGET_SIZE / 2.0)
+        if self._is_drop_target_active:
+            glow = QColor(colors.accent)
+            glow.setAlphaF(0.20 + self._pulse_phase * 0.16)
+            glow_radius = 20.0 + self._pulse_phase * 3.0
+            painter.setBrush(glow)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(center, glow_radius, glow_radius)
+
+        core_radius = 15.0
+        if self._is_drop_target_active:
+            core_radius += 1.5 + self._pulse_phase * 1.5
+        painter.setBrush(colors.accent)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(self.boundingRect().adjusted(7.0, 7.0, -7.0, -7.0))
+        painter.drawEllipse(center, core_radius, core_radius)
         painter.setPen(QPen(QColor("#ffffff"), 2.0))
-        center = self.boundingRect().center()
-        painter.drawLine(center.x() - 6.0, center.y(), center.x() + 6.0, center.y())
-        painter.drawLine(center.x(), center.y() - 6.0, center.x(), center.y() + 6.0)
+        painter.drawLine(
+            QPointF(center.x() - 6.0, center.y()),
+            QPointF(center.x() + 6.0, center.y()),
+        )
+        painter.drawLine(
+            QPointF(center.x(), center.y() - 6.0),
+            QPointF(center.x(), center.y() + 6.0),
+        )
+
+        if self._is_drop_target_active and self._target_label:
+            hint_rect = QRectF(
+                INSERT_TARGET_SIZE + 8.0,
+                7.0,
+                INSERT_TARGET_HINT_WIDTH,
+                30.0,
+            )
+            painter.setBrush(colors.surface)
+            painter.setPen(QPen(colors.accent, 1.25))
+            painter.drawRoundedRect(hint_rect, 8.0, 8.0)
+            painter.setPen(colors.text)
+            painter.setFont(canvas_font(secondary=True))
+            painter.drawText(
+                hint_rect.adjusted(10.0, 0.0, -8.0, 0.0),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                self._target_label,
+            )
+
+    def set_drop_target_active(self, active: bool, label: str = "") -> None:
+        normalized_label = label.strip() if active else ""
+        if self._is_drop_target_active == active and self._target_label == normalized_label:
+            return
+        self._is_drop_target_active = active
+        self._target_label = normalized_label
+        self.setZValue(50.0 if active else 0.0)
+        if active:
+            self._pulse_animation.start()
+        else:
+            self._pulse_animation.stop()
+            self._pulse_phase = 0.0
+        self.update()
+
+    def _on_pulse_value_changed(self, value: object) -> None:
+        if isinstance(value, (int, float)):
+            self._pulse_phase = float(value)
+            self.update()
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
         if event.button() is not Qt.MouseButton.LeftButton:
@@ -1032,9 +1200,7 @@ class InsertionItem(QGraphicsObject):
         event.accept()
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
-        should_insert = self._is_pressed and self.boundingRect().contains(
-            event.pos()
-        )
+        should_insert = self._is_pressed and self.shape().contains(event.pos())
         self._is_pressed = False
         if should_insert:
             self.insert_requested.emit(self._index)

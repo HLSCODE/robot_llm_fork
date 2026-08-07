@@ -9,7 +9,7 @@ from typing import Protocol
 from PySide6.QtCore import QSettings
 
 
-WORKBENCH_LAYOUT_SCHEMA_VERSION = 1
+WORKBENCH_LAYOUT_SCHEMA_VERSION = 2
 WORKBENCH_LAYOUT_SETTINGS_KEY = "workbench/layout"
 
 
@@ -19,9 +19,8 @@ class WorkbenchLayoutState:
     side_page: str
     side_visible: bool
     side_width: int
-    bottom_page: str
-    bottom_visible: bool
-    bottom_height: int
+    panel_page: str
+    panel_visible: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,21 +84,20 @@ def _decode_layout_state(payload: object) -> WorkbenchLayoutState:
         "side_page",
         "side_visible",
         "side_width",
-        "bottom_page",
-        "bottom_visible",
-        "bottom_height",
+        "panel_page",
+        "panel_visible",
     }
     if set(payload) != expected_fields:
         raise ValueError("布局偏好字段不完整或包含未知字段")
     if payload["schema_version"] != WORKBENCH_LAYOUT_SCHEMA_VERSION:
         raise ValueError("布局偏好版本不受支持")
-    for field in ("side_page", "bottom_page"):
+    for field in ("side_page", "panel_page"):
         if not isinstance(payload[field], str) or not payload[field]:
             raise ValueError(f"{field} 必须是非空字符串")
-    for field in ("side_visible", "bottom_visible"):
+    for field in ("side_visible", "panel_visible"):
         if type(payload[field]) is not bool:
             raise ValueError(f"{field} 必须是布尔值")
-    for field in ("side_width", "bottom_height"):
+    for field in ("side_width",):
         value = payload[field]
         if type(value) is not int or not 1 <= value <= 10_000:
             raise ValueError(f"{field} 超出允许范围")

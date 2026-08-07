@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QWidget
 
+from ..icons import IconName
 from ..theme import set_theme_role
+from ..toolbars import IconToolButton
 
 
 class ControlPanel(QWidget):
@@ -26,40 +28,46 @@ class ControlPanel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setSpacing(4)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.setObjectName("workflowCommandBar")
+        layout = QHBoxLayout(self)
+        layout.setSpacing(2)
+        layout.setContentsMargins(6, 4, 6, 4)
 
-        editing_row = QHBoxLayout()
-        editing_row.setSpacing(4)
-        self.undo_btn = self._button("↶ 撤销", self.undo_clicked.emit, compact=True)
-        self.redo_btn = self._button("↷ 重做", self.redo_clicked.emit, compact=True)
+        self.undo_btn = self._button(IconName.UNDO, "撤销", self.undo_clicked.emit)
+        self.redo_btn = self._button(IconName.REDO, "重做", self.redo_clicked.emit)
         self.undo_btn.setEnabled(False)
         self.redo_btn.setEnabled(False)
         for button in (
             self.undo_btn,
             self.redo_btn,
-            self._button("上移", self.move_up_clicked.emit, compact=True),
-            self._button("下移", self.move_down_clicked.emit, compact=True),
-            self._button("修改", self.edit_clicked.emit, compact=True),
-            self._button("循环", self.repeat_clicked.emit, compact=True),
-            self._button("删除", self.delete_clicked.emit, compact=True),
+            self._button(IconName.MOVE_UP, "上移节点", self.move_up_clicked.emit),
+            self._button(IconName.MOVE_DOWN, "下移节点", self.move_down_clicked.emit),
+            self._button(IconName.EDIT, "修改节点", self.edit_clicked.emit),
+            self._button(IconName.LOOP, "将选中节点设为循环", self.repeat_clicked.emit),
+            self._button(IconName.DELETE, "删除选中节点", self.delete_clicked.emit),
         ):
-            editing_row.addWidget(button)
-        layout.addLayout(editing_row)
+            layout.addWidget(button)
 
-        execution_row = QHBoxLayout()
-        execution_row.setSpacing(4)
-        self.start_btn = self._button("开始", self.start_clicked.emit)
-        self.pause_btn = self._button("暂停", self.pause_clicked.emit)
-        self.stop_btn = self._button("■ 停止", self.stop_clicked.emit)
+        layout.addSpacing(8)
+        self.start_btn = self._button(IconName.PLAY, "开始执行", self.start_clicked.emit)
+        self.pause_btn = self._button(IconName.PAUSE, "暂停执行", self.pause_clicked.emit)
+        self.stop_btn = self._button(
+            IconName.STOP,
+            "停止任务",
+            self.stop_clicked.emit,
+            hit_size=44,
+        )
         self.quick_stop_btn = self._button(
+            IconName.QUICK_STOP,
             "快速停止",
             self.quick_stop_clicked.emit,
+            hit_size=44,
         )
         self.emergency_stop_btn = self._button(
+            IconName.EMERGENCY,
             "设备急停",
             self.emergency_stop_clicked.emit,
+            hit_size=44,
         )
         set_theme_role(self.start_btn, "success")
         set_theme_role(self.pause_btn, "warning")
@@ -85,22 +93,41 @@ class ControlPanel(QWidget):
             self.quick_stop_btn,
             self.emergency_stop_btn,
         ):
-            execution_row.addWidget(button)
-        layout.addLayout(execution_row)
+            layout.addWidget(button)
+        layout.addStretch(1)
 
     @staticmethod
     def _button(
-        label: str,
+        icon: IconName,
+        tooltip: str,
         callback: Callable[[], None],
         *,
-        compact: bool = False,
-    ) -> QPushButton:
-        button = QPushButton(label)
-        button.setAccessibleName(label)
-        button.setMinimumHeight(36 if compact else 44)
-        button.clicked.connect(callback)
-        return button
+        hit_size: int = 32,
+    ) -> IconToolButton:
+        return IconToolButton(
+            icon,
+            tooltip,
+            callback=callback,
+            hit_size=hit_size,
+            icon_size=19 if hit_size >= 44 else 17,
+        )
 
     def set_undo_redo_enabled(self, can_undo: bool, can_redo: bool) -> None:
         self.undo_btn.setEnabled(can_undo)
         self.redo_btn.setEnabled(can_redo)
+
+    def render_execution_state(
+        self,
+        toggle_text: str,
+        can_toggle: bool,
+        can_cancel: bool,
+    ) -> None:
+        normalized = toggle_text.strip() or "暂停执行"
+        is_resume = "恢复" in normalized or "继续" in normalized
+        self.pause_btn.set_icon_name(
+            IconName.PLAY if is_resume else IconName.PAUSE
+        )
+        self.pause_btn.setToolTip(normalized)
+        self.pause_btn.setAccessibleName(normalized)
+        self.pause_btn.setEnabled(can_toggle)
+        self.stop_btn.setEnabled(can_cancel)

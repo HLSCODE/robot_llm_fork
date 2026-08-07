@@ -44,6 +44,13 @@ TOUCH_TARGET_SIZE = 44
 TOOLBAR_SPACING = 8
 NODE_RADIUS = 12.0
 NODE_DRAG_THRESHOLD = 8.0
+DRAG_PREVIEW_MAX_WIDTH = 248.0
+DRAG_PREVIEW_MAX_HEIGHT = 160.0
+DRAG_PREVIEW_OPACITY = 0.94
+DRAG_SOURCE_OPACITY = 0.28
+INSERT_TARGET_ACTIVATION_DISTANCE = 88.0
+INSERT_TARGET_HINT_WIDTH = 142.0
+INSERT_TARGET_PULSE_DURATION_MS = 840
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,11 +89,10 @@ def canvas_font(*, emphasis: bool = False, secondary: bool = False) -> QFont:
 def contrasting_text(background: QColor) -> QColor:
     """Return readable black/white text for a semantic background color."""
     linear_luminance = (
-        0.2126 * background.redF()
-        + 0.7152 * background.greenF()
-        + 0.0722 * background.blueF()
+        0.2126 * background.redF() + 0.7152 * background.greenF() + 0.0722 * background.blueF()
     )
     return QColor("#111827") if linear_luminance > 0.58 else QColor("#ffffff")
+
 
 ACTION_COLORS = {
     ActionType.MOVE: QColor("#6366f1"),

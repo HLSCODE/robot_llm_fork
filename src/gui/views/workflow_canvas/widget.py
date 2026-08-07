@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from math import hypot
 from uuid import uuid4
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, Signal
@@ -32,9 +33,13 @@ from ....domain.workflow import (
     WorkflowDocument,
     clone_sequence_entry,
 )
+from ...icons import IconName
+from ...toolbars import IconToolButton
 from .items import InsertionItem, StartEndItem, WorkflowNodeItem
 from .tokens import (
     CANVAS_MARGIN,
+    INSERT_TARGET_ACTIVATION_DISTANCE,
+    INSERT_TARGET_SIZE,
     NODE_GAP,
     NODE_WIDTH,
     LOOP_NODE_WIDTH,
@@ -42,7 +47,6 @@ from .tokens import (
     PARALLEL_BRANCH_PADDING,
     PARALLEL_BRANCH_WIDTH,
     TOOLBAR_SPACING,
-    TOUCH_TARGET_SIZE,
     canvas_colors,
 )
 from .view import WorkflowCanvasView
@@ -92,7 +96,11 @@ class WorkflowCanvasWidget(QWidget):
         self._entries: tuple[SequenceEntry, ...] = ()
         self._scope_path: tuple[str, ...] = ()
         self._node_items: dict[str, WorkflowNodeItem] = {}
+        self._insertion_items: list[InsertionItem] = []
         self._endpoint_items: tuple[StartEndItem, ...] = ()
+        self._active_insertion_index: int | None = None
+        self._active_drag_node_id: str | None = None
+        self._pending_node_drop: tuple[str, int] | None = None
         self._current_item_uuid = ""
         self._compiled: CompiledWorkflow | None = None
         self._parallel_branch_states: dict[tuple[str, str], str] = {}
@@ -105,18 +113,16 @@ class WorkflowCanvasWidget(QWidget):
         layout.setSpacing(TOOLBAR_SPACING)
         toolbar = QHBoxLayout()
         toolbar.setSpacing(TOOLBAR_SPACING)
-        self.fit_button = QPushButton("适合内容")
-        self.zoom_button = QPushButton("100%")
+        self.fit_button = IconToolButton(IconName.FIT, "画布适合内容")
+        self.zoom_button = IconToolButton(
+            IconName.ZOOM_RESET,
+            "恢复 100% 缩放",
+        )
         self.root_scope_button = QPushButton("当前任务")
         self.root_scope_button.setAccessibleName("返回工作流根作用域")
         self.root_scope_button.clicked.connect(self.leave_scope)
         self.root_scope_button.setVisible(False)
-        for button, accessible_name in (
-            (self.fit_button, "画布适合内容"),
-            (self.zoom_button, "画布恢复百分之百缩放"),
-        ):
-            button.setAccessibleName(accessible_name)
-            button.setMinimumSize(96, TOUCH_TARGET_SIZE)
+        for button in (self.fit_button, self.zoom_button):
             toolbar.addWidget(button)
         toolbar.addStretch(1)
         toolbar.insertWidget(0, self.root_scope_button)
@@ -135,17 +141,16 @@ class WorkflowCanvasWidget(QWidget):
         self.zoom_button.clicked.connect(self.view.reset_zoom)
         self.view.action_dropped.connect(self._on_action_dropped)
         self.view.task_dropped.connect(self._on_task_dropped)
+        self.view.external_drag_moved.connect(self._on_external_drag_moved)
+        self.view.external_drag_finished.connect(self._clear_insertion_target)
+        self.view.drag_cancel_requested.connect(self._cancel_active_node_drag)
         self.view.delete_requested.connect(self.delete_selected)
         self.view.undo_requested.connect(self.undo)
         self.view.redo_requested.connect(self.redo)
         self.view.select_all_requested.connect(self._select_all_nodes)
         self.view.clear_selection_requested.connect(self.scene.clearSelection)
-        self.view.setContextMenuPolicy(
-            Qt.ContextMenuPolicy.CustomContextMenu
-        )
-        self.view.customContextMenuRequested.connect(
-            self._show_context_menu
-        )
+        self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.view.customContextMenuRequested.connect(self._show_context_menu)
         self.scene.selectionChanged.connect(self._on_selection_changed)
         self._undo_stack.canUndoChanged.connect(self.can_undo_changed)
         self._undo_stack.canRedoChanged.connect(self.can_redo_changed)
@@ -225,8 +230,7 @@ class WorkflowCanvasWidget(QWidget):
             (
                 entry
                 for entry in self._entries
-                if isinstance(entry, SubworkflowBlock)
-                and entry.uuid == subworkflow_uuid
+                if isinstance(entry, SubworkflowBlock) and entry.uuid == subworkflow_uuid
             ),
             None,
         )
@@ -319,10 +323,12 @@ class WorkflowCanvasWidget(QWidget):
             return False
         if len(parallel.branches) >= 8:
             raise ValueError("并行节点最多支持 8 个分支")
-        parallel.branches.append(ParallelBranch(
-            branch_id=str(uuid4()),
-            items=[SequenceItem.from_definition(action)],
-        ))
+        parallel.branches.append(
+            ParallelBranch(
+                branch_id=str(uuid4()),
+                items=[SequenceItem.from_definition(action)],
+            )
+        )
         self._push(updated, "新增并行分支", (parallel_uuid,))
         return True
 
@@ -334,15 +340,10 @@ class WorkflowCanvasWidget(QWidget):
             raise ValueError("并行节点最多支持 8 个分支")
         if rows != list(range(rows[0], rows[-1] + 1)):
             raise ValueError("只能将连续节点创建为并行分支")
-        selected_entries = [
-            _clone_canvas_entry(self._entries[row]) for row in rows
-        ]
+        selected_entries = [_clone_canvas_entry(self._entries[row]) for row in rows]
         parallel = ParallelBlock(
             uuid=str(uuid4()),
-            branches=[
-                ParallelBranch(str(uuid4()), [entry])
-                for entry in selected_entries
-            ],
+            branches=[ParallelBranch(str(uuid4()), [entry]) for entry in selected_entries],
         )
         updated = list(_clone_entries(self._entries))
         updated[rows[0] : rows[-1] + 1] = [parallel]
@@ -361,9 +362,7 @@ class WorkflowCanvasWidget(QWidget):
         if not isinstance(parallel, ParallelBlock):
             return False
         children = [
-            _clone_canvas_entry(child)
-            for branch in parallel.branches
-            for child in branch.items
+            _clone_canvas_entry(child) for branch in parallel.branches for child in branch.items
         ]
         updated[current_row : current_row + 1] = children
         selected = (children[0].uuid,) if children else ()
@@ -380,9 +379,7 @@ class WorkflowCanvasWidget(QWidget):
         if parallel is None:
             return False
         source = next(
-            index
-            for index, branch in enumerate(parallel.branches)
-            if branch.branch_id == branch_id
+            index for index, branch in enumerate(parallel.branches) if branch.branch_id == branch_id
         )
         destination = source + offset
         if not 0 <= destination < len(parallel.branches):
@@ -402,9 +399,7 @@ class WorkflowCanvasWidget(QWidget):
         if parallel is None:
             return False
         source_index = next(
-            index
-            for index, branch in enumerate(parallel.branches)
-            if branch.branch_id == branch_id
+            index for index, branch in enumerate(parallel.branches) if branch.branch_id == branch_id
         )
         destination_index = source_index + branch_offset
         if not 0 <= destination_index < len(parallel.branches):
@@ -413,9 +408,7 @@ class WorkflowCanvasWidget(QWidget):
         if len(source_branch.items) <= 1:
             raise ValueError("并行分支至少需要保留一个节点")
         item_index = next(
-            index
-            for index, item in enumerate(source_branch.items)
-            if item.uuid == item_uuid
+            index for index, item in enumerate(source_branch.items) if item.uuid == item_uuid
         )
         moved = source_branch.items.pop(item_index)
         parallel.branches[destination_index].items.append(moved)
@@ -431,9 +424,7 @@ class WorkflowCanvasWidget(QWidget):
         parallel = _find_parallel(updated, parallel_uuid)
         if parallel is None:
             return False
-        branch = next(
-            item for item in parallel.branches if item.branch_id == branch_id
-        )
+        branch = next(item for item in parallel.branches if item.branch_id == branch_id)
         if len(branch.items) <= 1:
             raise ValueError("并行分支至少需要保留一个节点")
         branch.items = [item for item in branch.items if item.uuid != item_uuid]
@@ -452,8 +443,7 @@ class WorkflowCanvasWidget(QWidget):
         if len(parallel.branches) <= 2:
             raise ValueError("并行节点至少需要保留两个分支")
         parallel.branches = [
-            branch for branch in parallel.branches
-            if branch.branch_id != branch_id
+            branch for branch in parallel.branches if branch.branch_id != branch_id
         ]
         self._push(updated, "删除并行分支", (parallel_uuid,))
         return True
@@ -594,11 +584,7 @@ class WorkflowCanvasWidget(QWidget):
             for item in self.scene.selectedItems()
             if isinstance(item, WorkflowNodeItem)
         }
-        return [
-            index
-            for index, entry in enumerate(self._entries)
-            if entry.uuid in selected_ids
-        ]
+        return [index for index, entry in enumerate(self._entries) if entry.uuid in selected_ids]
 
     def set_current_entry_row(self, index: int) -> None:
         if not 0 <= index < self.entry_count():
@@ -756,10 +742,14 @@ class WorkflowCanvasWidget(QWidget):
         *,
         selected_node_ids: tuple[str, ...] = (),
     ) -> None:
+        self._clear_insertion_target()
+        self._active_drag_node_id = None
+        self._pending_node_drop = None
         self.scene.blockSignals(True)
         self._endpoint_items = ()
         self.scene.clear()
         self._node_items.clear()
+        self._insertion_items.clear()
         content_widths = (
             LOOP_NODE_WIDTH,
             *(_entry_node_width(entry) for entry in self._entries),
@@ -777,10 +767,9 @@ class WorkflowCanvasWidget(QWidget):
             if self._editing_enabled:
                 insertion = InsertionItem(index)
                 insertion.setPos(center_x - 22.0, y - 22.0)
-                insertion.insert_requested.connect(
-                    self.insert_action_requested.emit
-                )
+                insertion.insert_requested.connect(self.insert_action_requested.emit)
                 self.scene.addItem(insertion)
+                self._insertion_items.append(insertion)
             node_y = y + NODE_GAP / 2.0
             node = WorkflowNodeItem(
                 entry.uuid,
@@ -788,8 +777,7 @@ class WorkflowCanvasWidget(QWidget):
                 editing_enabled=self._editing_enabled,
                 parallel_branch_states={
                     branch_id: state
-                    for (parallel_id, branch_id), state
-                    in self._parallel_branch_states.items()
+                    for (parallel_id, branch_id), state in self._parallel_branch_states.items()
                     if parallel_id == entry.uuid
                 },
             )
@@ -799,12 +787,10 @@ class WorkflowCanvasWidget(QWidget):
             node.edit_requested.connect(self._on_node_edit_requested)
             node.subworkflow_open_requested.connect(self.enter_subworkflow)
             node.move_requested.connect(self._on_node_moved)
-            node.loop_insert_requested.connect(
-                self.insert_loop_action_requested.emit
-            )
-            node.parallel_insert_requested.connect(
-                self.insert_parallel_action_requested.emit
-            )
+            node.drag_position_changed.connect(self._on_node_drag_position)
+            node.drag_ended.connect(self._on_node_drag_ended)
+            node.loop_insert_requested.connect(self.insert_loop_action_requested.emit)
+            node.parallel_insert_requested.connect(self.insert_parallel_action_requested.emit)
             self.scene.addItem(node)
             self._node_items[entry.uuid] = node
             self._add_edge(previous_bottom, node_y)
@@ -814,10 +800,9 @@ class WorkflowCanvasWidget(QWidget):
         if self._editing_enabled:
             insertion = InsertionItem(len(self._entries))
             insertion.setPos(center_x - 22.0, y - 22.0)
-            insertion.insert_requested.connect(
-                self.insert_action_requested.emit
-            )
+            insertion.insert_requested.connect(self.insert_action_requested.emit)
             self.scene.addItem(insertion)
+            self._insertion_items.append(insertion)
         end_y = y + NODE_GAP / 2.0
         end = StartEndItem("结束", QColor("#64748b"))
         end.setPos(center_x - 60.0, end_y)
@@ -850,22 +835,137 @@ class WorkflowCanvasWidget(QWidget):
     def _apply_palette(self) -> None:
         self.scene.setBackgroundBrush(canvas_colors(self.palette()).canvas)
 
+    def _on_node_drag_position(
+        self,
+        node_id: str,
+        scene_x: float,
+        scene_y: float,
+    ) -> None:
+        source_index = next(
+            (index for index, entry in enumerate(self._entries) if entry.uuid == node_id),
+            None,
+        )
+        if source_index is None:
+            self._clear_insertion_target()
+            return
+        self._active_drag_node_id = node_id
+        insertion = self._nearest_insertion_item(
+            scene_x,
+            scene_y,
+            max_distance=INSERT_TARGET_ACTIVATION_DISTANCE,
+        )
+        if insertion is None:
+            self._clear_insertion_target()
+            return
+        final_index = insertion.index
+        if final_index > source_index:
+            final_index -= 1
+        self._set_active_insertion_target(
+            insertion,
+            f"移动到第 {final_index + 1} 位",
+        )
+
+    def _on_node_drag_ended(self, node_id: str, committed: bool) -> None:
+        if (
+            committed
+            and self._active_drag_node_id == node_id
+            and self._active_insertion_index is not None
+        ):
+            self._pending_node_drop = (
+                node_id,
+                self._active_insertion_index,
+            )
+        else:
+            self._pending_node_drop = None
+        self._active_drag_node_id = None
+        self._clear_insertion_target()
+
+    def _cancel_active_node_drag(self) -> None:
+        node_id = self._active_drag_node_id
+        node = self._node_items.get(node_id) if node_id is not None else None
+        if node is not None:
+            node.cancel_drag()
+            return
+        self._pending_node_drop = None
+        self._clear_insertion_target()
+
+    def _on_external_drag_moved(
+        self,
+        scene_x: float,
+        scene_y: float,
+    ) -> None:
+        insertion = self._nearest_insertion_item(
+            scene_x,
+            scene_y,
+            max_distance=INSERT_TARGET_ACTIVATION_DISTANCE,
+        )
+        if insertion is None:
+            self._clear_insertion_target()
+            return
+        self._set_active_insertion_target(
+            insertion,
+            f"插入到第 {insertion.index + 1} 位",
+        )
+
+    def _nearest_insertion_item(
+        self,
+        scene_x: float,
+        scene_y: float,
+        *,
+        max_distance: float | None = None,
+    ) -> InsertionItem | None:
+        if not self._insertion_items:
+            return None
+
+        def distance_to(item: InsertionItem) -> float:
+            center = item.scenePos() + QPointF(
+                INSERT_TARGET_SIZE / 2.0,
+                INSERT_TARGET_SIZE / 2.0,
+            )
+            return hypot(scene_x - center.x(), scene_y - center.y())
+
+        insertion = min(
+            self._insertion_items,
+            key=distance_to,
+        )
+        distance = distance_to(insertion)
+        if max_distance is not None and distance > max_distance:
+            return None
+        return insertion
+
+    def _set_active_insertion_target(
+        self,
+        insertion: InsertionItem,
+        label: str,
+    ) -> None:
+        for item in self._insertion_items:
+            item.set_drop_target_active(item is insertion, label if item is insertion else "")
+        self._active_insertion_index = insertion.index
+
+    def _clear_insertion_target(self) -> None:
+        for insertion in self._insertion_items:
+            insertion.set_drop_target_active(False)
+        self._active_insertion_index = None
+
     def _on_action_dropped(
         self,
         action: ActionDefinition,
         scene_x: float,
         scene_y: float,
     ) -> None:
+        top_level_insertion = self._nearest_insertion_item(
+            scene_x,
+            scene_y,
+            max_distance=INSERT_TARGET_ACTIVATION_DISTANCE,
+        )
+        if top_level_insertion is not None:
+            self.insert_action(action, top_level_insertion.index)
+            return
         for index, entry in enumerate(self._entries):
             node = self._node_items[entry.uuid]
             top = node.scenePos().y()
-            if (
-                isinstance(entry, ParallelBlock)
-                and top <= scene_y <= top + node.node_height
-            ):
-                target = node.parallel_drop_target(
-                    node.mapFromScene(QPointF(scene_x, scene_y))
-                )
+            if isinstance(entry, ParallelBlock) and top <= scene_y <= top + node.node_height:
+                target = node.parallel_drop_target(node.mapFromScene(QPointF(scene_x, scene_y)))
                 if target is not None:
                     branch_id, child_index = target
                     self.insert_action_into_parallel(
@@ -875,10 +975,7 @@ class WorkflowCanvasWidget(QWidget):
                         action,
                     )
                 return
-            if (
-                isinstance(entry, LoopBlock)
-                and top <= scene_y <= top + node.node_height
-            ):
+            if isinstance(entry, LoopBlock) and top <= scene_y <= top + node.node_height:
                 updated = list(_clone_entries(self._entries))
                 loop = updated[index]
                 if isinstance(loop, LoopBlock):
@@ -893,10 +990,17 @@ class WorkflowCanvasWidget(QWidget):
         scene_x: float,
         scene_y: float,
     ) -> None:
-        del scene_x
+        insertion = self._nearest_insertion_item(
+            scene_x,
+            scene_y,
+            max_distance=INSERT_TARGET_ACTIVATION_DISTANCE,
+        )
+        insertion_index = (
+            insertion.index if insertion is not None else self._insertion_index(scene_y)
+        )
         self.insert_subworkflow_requested.emit(
             task_name,
-            self._insertion_index(scene_y),
+            insertion_index,
         )
 
     def _insertion_index(self, scene_y: float) -> int:
@@ -908,22 +1012,21 @@ class WorkflowCanvasWidget(QWidget):
 
     def _on_node_moved(self, node_id: str, target_center_y: float) -> None:
         source_index = next(
-            (
-                index
-                for index, entry in enumerate(self._entries)
-                if entry.uuid == node_id
-            ),
+            (index for index, entry in enumerate(self._entries) if entry.uuid == node_id),
             None,
         )
         if source_index is None:
+            self._pending_node_drop = None
             return
-        target_index = sum(
-            target_center_y
-            > self._node_items[entry.uuid].scenePos().y()
-            + self._node_items[entry.uuid].node_height / 2.0
-            for entry in self._entries
-            if entry.uuid != node_id
-        )
+        pending_drop = self._pending_node_drop
+        self._pending_node_drop = None
+        if pending_drop is None or pending_drop[0] != node_id:
+            del target_center_y
+            self._rebuild_scene(selected_node_ids=(node_id,))
+            return
+        target_index = pending_drop[1]
+        if target_index > source_index:
+            target_index -= 1
         if target_index == source_index:
             self._rebuild_scene(selected_node_ids=(node_id,))
             return
@@ -966,12 +1069,8 @@ class WorkflowCanvasWidget(QWidget):
             if not pointed_item.isSelected():
                 self.scene.clearSelection()
                 pointed_item.setSelected(True)
-            local_position = pointed_item.mapFromScene(
-                self.view.mapToScene(view_position)
-            )
-            self._current_item_uuid = pointed_item.item_uuid_at(
-                local_position
-            )
+            local_position = pointed_item.mapFromScene(self.view.mapToScene(view_position))
+            self._current_item_uuid = pointed_item.item_uuid_at(local_position)
         menu = self._create_context_menu()
         if menu is None:
             return
@@ -1026,7 +1125,8 @@ class WorkflowCanvasWidget(QWidget):
         if target is not None:
             _parallel_uuid, branch_id, _item_uuid = target
             branch_index = next(
-                index for index, branch in enumerate(parallel.branches)
+                index
+                for index, branch in enumerate(parallel.branches)
                 if branch.branch_id == branch_id
             )
             branch = parallel.branches[branch_index]
@@ -1096,8 +1196,7 @@ class WorkflowCanvasWidget(QWidget):
                 continue
             for branch in entry.branches:
                 if any(
-                    _entry_contains_uuid(child, self._current_item_uuid)
-                    for child in branch.items
+                    _entry_contains_uuid(child, self._current_item_uuid) for child in branch.items
                 ):
                     return entry.uuid, branch.branch_id, self._current_item_uuid
         return None
@@ -1201,11 +1300,7 @@ def _find_loop(entry: SequenceEntry, loop_uuid: str) -> LoopBlock | None:
     else:
         children = [child for branch in entry.branches for child in branch.items]
     return next(
-        (
-            found
-            for child in children
-            if (found := _find_loop(child, loop_uuid)) is not None
-        ),
+        (found for child in children if (found := _find_loop(child, loop_uuid)) is not None),
         None,
     )
 
@@ -1245,8 +1340,7 @@ def _scope_entries(
             (
                 entry
                 for entry in current
-                if isinstance(entry, SubworkflowBlock)
-                and entry.uuid == subworkflow_uuid
+                if isinstance(entry, SubworkflowBlock) and entry.uuid == subworkflow_uuid
             ),
             None,
         )
@@ -1266,8 +1360,7 @@ def _scope_exists(
             (
                 entry
                 for entry in current
-                if isinstance(entry, SubworkflowBlock)
-                and entry.uuid == subworkflow_uuid
+                if isinstance(entry, SubworkflowBlock) and entry.uuid == subworkflow_uuid
             ),
             None,
         )

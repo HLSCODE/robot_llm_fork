@@ -8,6 +8,25 @@
     <file alias="poses.svg">assets/icons/poses.svg</file>
     <file alias="controls.svg">assets/icons/controls.svg</file>
     <file alias="logs.svg">assets/icons/logs.svg</file>
+    <file alias="open.svg">assets/icons/open.svg</file>
+    <file alias="insert.svg">assets/icons/insert.svg</file>
+    <file alias="add.svg">assets/icons/add.svg</file>
+    <file alias="edit.svg">assets/icons/edit.svg</file>
+    <file alias="delete.svg">assets/icons/delete.svg</file>
+    <file alias="camera.svg">assets/icons/camera.svg</file>
+    <file alias="fit.svg">assets/icons/fit.svg</file>
+    <file alias="zoom-reset.svg">assets/icons/zoom-reset.svg</file>
+    <file alias="undo.svg">assets/icons/undo.svg</file>
+    <file alias="redo.svg">assets/icons/redo.svg</file>
+    <file alias="move-up.svg">assets/icons/move-up.svg</file>
+    <file alias="move-down.svg">assets/icons/move-down.svg</file>
+    <file alias="loop.svg">assets/icons/loop.svg</file>
+    <file alias="play.svg">assets/icons/play.svg</file>
+    <file alias="pause.svg">assets/icons/pause.svg</file>
+    <file alias="stop.svg">assets/icons/stop.svg</file>
+    <file alias="quick-stop.svg">assets/icons/quick-stop.svg</file>
+    <file alias="emergency.svg">assets/icons/emergency.svg</file>
+    <file alias="close.svg">assets/icons/close.svg</file>
     <file alias="chevron-down-on-light.svg">assets/icons/chevron-down-on-light.svg</file>
     <file alias="chevron-down-on-dark.svg">assets/icons/chevron-down-on-dark.svg</file>
   </qresource>

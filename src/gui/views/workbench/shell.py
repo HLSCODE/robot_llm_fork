@@ -1,13 +1,14 @@
-"""Canvas-first workbench shell with optional side and bottom panels."""
+"""Canvas-first workbench shell with side pages and status-bar detail popovers."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QResizeEvent, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QSplitter,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from ...view_models.models import DeviceViewState
 from ...icons import IconName, themed_icon
+from ...toolbars import IconToolButton
 from ...workbench_layout import (
     WORKBENCH_LAYOUT_SCHEMA_VERSION,
     WorkbenchLayoutState,
@@ -32,9 +34,9 @@ SPLITTER_HIT_WIDTH = 7
 SIDE_BAR_DEFAULT_WIDTH = 280
 SIDE_BAR_MINIMUM_WIDTH = 220
 SIDE_BAR_MAXIMUM_WIDTH = 440
-BOTTOM_PANEL_DEFAULT_HEIGHT = 220
-BOTTOM_PANEL_MINIMUM_HEIGHT = 120
-BOTTOM_PANEL_MAXIMUM_HEIGHT = 600
+DETAIL_PANEL_DEFAULT_WIDTH = 460
+DETAIL_PANEL_DEFAULT_HEIGHT = 300
+DETAIL_PANEL_MARGIN = 8
 LAYOUT_SAVE_DELAY_MS = 250
 STATUS_ICON_COLOR = QColor("#ffffff")
 
@@ -156,12 +158,12 @@ class WorkbenchStatusBar(QFrame):
         for page in pages:
             button = QToolButton()
             button.setObjectName("statusPanelButton")
-            button.setText(page.title)
+            button.setText("")
             button.setToolTip(f"显示或隐藏{page.title}")
             button.setAccessibleName(f"显示或隐藏{page.title}")
-            button.setAccessibleDescription(f"切换底部{page.title}面板")
+            button.setAccessibleDescription(f"切换状态栏{page.title}详情浮层")
             button.setCheckable(True)
-            button.setMinimumHeight(28)
+            button.setFixedSize(28, 28)
             button.setIconSize(QSize(16, 16))
             button.clicked.connect(
                 lambda _checked=False, key=page.key: self.panel_requested.emit(key)
@@ -218,6 +220,60 @@ class WorkbenchStatusBar(QFrame):
         style.polish(self.device_summary)
 
 
+class _FloatingDetailPanel(QFrame):
+    """Own one reusable detail-page stack without participating in body layout."""
+
+    close_requested = Signal()
+
+    def __init__(
+        self,
+        pages: tuple[WorkbenchPage, ...],
+        parent: QWidget,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("workbenchFloatingPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 88))
+        self.setGraphicsEffect(shadow)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 12)
+        layout.setSpacing(6)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+        self.title_label = QLabel()
+        self.title_label.setObjectName("workbenchFloatingPanelTitle")
+        header.addWidget(self.title_label)
+        header.addStretch(1)
+        close_button = IconToolButton(
+            IconName.CLOSE,
+            "关闭详情",
+            callback=self.close_requested.emit,
+            parent=self,
+            hit_size=28,
+            icon_size=14,
+        )
+        header.addWidget(close_button)
+        layout.addLayout(header)
+
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("workbenchDetailStack")
+        self._pages = {page.key: page for page in pages}
+        for page in pages:
+            self.stack.addWidget(page.widget)
+        layout.addWidget(self.stack, stretch=1)
+        self.hide()
+
+    def select_page(self, page_key: str) -> None:
+        page = self._pages[page_key]
+        self.title_label.setText(page.title)
+        self.stack.setCurrentWidget(page.widget)
+
+
 class WorkbenchView(QWidget):
     """Own the presentation-only layout state for the main workbench."""
 
@@ -244,7 +300,6 @@ class WorkbenchView(QWidget):
         self._active_side_page: str | None = side_pages[0].key
         self._active_bottom_page: str | None = None
         self._last_side_width = SIDE_BAR_DEFAULT_WIDTH
-        self._last_bottom_height = BOTTOM_PANEL_DEFAULT_HEIGHT
         self._layout_store = layout_store
         self.layout_recovery_reason: str | None = None
         self._layout_save_timer = QTimer(self)
@@ -270,37 +325,30 @@ class WorkbenchView(QWidget):
         for page in side_pages:
             self.side_stack.addWidget(page.widget)
 
-        self.bottom_stack = QStackedWidget()
-        self.bottom_stack.setObjectName("workbenchBottomPanel")
-        self.bottom_stack.setMinimumHeight(BOTTOM_PANEL_MINIMUM_HEIGHT)
-        self.bottom_stack.setMaximumHeight(BOTTOM_PANEL_MAXIMUM_HEIGHT)
-        for page in bottom_pages:
-            self.bottom_stack.addWidget(page.widget)
-        self.bottom_stack.hide()
-
-        self.bottom_splitter = _ThinLineSplitter(Qt.Orientation.Vertical)
-        self.bottom_splitter.setObjectName("workbenchBottomSplitter")
-        self.bottom_splitter.addWidget(editor)
-        self.bottom_splitter.addWidget(self.bottom_stack)
-        self.bottom_splitter.setStretchFactor(0, 1)
-        self.bottom_splitter.setStretchFactor(1, 0)
-        self.bottom_splitter.setSizes((640, BOTTOM_PANEL_DEFAULT_HEIGHT))
-
         self.side_splitter = _ThinLineSplitter(Qt.Orientation.Horizontal)
         self.side_splitter.setObjectName("workbenchSideSplitter")
         self.side_splitter.addWidget(self.side_stack)
-        self.side_splitter.addWidget(self.bottom_splitter)
+        self.side_splitter.addWidget(editor)
         self.side_splitter.setStretchFactor(0, 0)
         self.side_splitter.setStretchFactor(1, 1)
         self.side_splitter.setSizes((SIDE_BAR_DEFAULT_WIDTH, 640))
         self.side_splitter.splitterMoved.connect(self._remember_side_width)
-        self.bottom_splitter.splitterMoved.connect(self._remember_bottom_height)
         body_layout.addWidget(self.side_splitter, stretch=1)
         root.addWidget(body, stretch=1)
 
         self.status_bar = WorkbenchStatusBar(bottom_pages)
         self.status_bar.panel_requested.connect(self.toggle_bottom_page)
         root.addWidget(self.status_bar)
+        self.detail_panel = _FloatingDetailPanel(bottom_pages, self)
+        self.detail_panel.close_requested.connect(self.close_bottom_page)
+        self.bottom_stack = self.detail_panel.stack
+        self._close_panel_shortcut = QShortcut(
+            QKeySequence(Qt.Key.Key_Escape),
+            self,
+        )
+        self._close_panel_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._close_panel_shortcut.activated.connect(self.close_bottom_page)
+        self._close_panel_shortcut.setEnabled(False)
         self._restore_layout()
 
     @property
@@ -330,24 +378,26 @@ class WorkbenchView(QWidget):
 
     def toggle_bottom_page(self, page_key: str) -> None:
         self._require_page(page_key, self._bottom_pages, "bottom")
-        if self._active_bottom_page == page_key and self.bottom_stack.isVisible():
-            self._last_bottom_height = max(
-                BOTTOM_PANEL_MINIMUM_HEIGHT,
-                self.bottom_splitter.sizes()[1],
-            )
-            self.bottom_stack.hide()
-            self._active_bottom_page = None
-            self.status_bar.render_active_panel(None)
-            self._schedule_layout_save()
+        if self._active_bottom_page == page_key:
+            self.close_bottom_page()
             return
         self._show_bottom_page(page_key)
+
+    def close_bottom_page(self) -> None:
+        self._close_panel_shortcut.setEnabled(False)
+        if self._active_bottom_page is None:
+            return
+        self.detail_panel.hide()
+        self._active_bottom_page = None
+        self.status_bar.render_active_panel(None)
+        self._schedule_layout_save()
 
     def reset_layout(self) -> None:
         self._selected_side_page = self._default_side_page
         self._selected_bottom_page = self._default_bottom_page
         self._last_side_width = SIDE_BAR_DEFAULT_WIDTH
-        self._last_bottom_height = BOTTOM_PANEL_DEFAULT_HEIGHT
-        self.bottom_stack.hide()
+        self.detail_panel.hide()
+        self._close_panel_shortcut.setEnabled(False)
         self._active_bottom_page = None
         self.status_bar.render_active_panel(None)
         self._show_side_page(self._default_side_page)
@@ -365,9 +415,8 @@ class WorkbenchView(QWidget):
             side_page=self._selected_side_page,
             side_visible=self._active_side_page is not None,
             side_width=self._last_side_width,
-            bottom_page=self._selected_bottom_page,
-            bottom_visible=self._active_bottom_page is not None,
-            bottom_height=self._last_bottom_height,
+            panel_page=self._selected_bottom_page,
+            panel_visible=self._active_bottom_page is not None,
         )
 
     def _show_side_page(self, page_key: str) -> None:
@@ -387,15 +436,11 @@ class WorkbenchView(QWidget):
         self._schedule_layout_save()
 
     def _show_bottom_page(self, page_key: str) -> None:
-        page = self._bottom_pages[page_key]
-        self.bottom_stack.setCurrentWidget(page.widget)
-        self.bottom_stack.show()
-        available = max(1, sum(self.bottom_splitter.sizes()))
-        height = min(
-            max(self._last_bottom_height, BOTTOM_PANEL_MINIMUM_HEIGHT),
-            max(1, available // 2),
-        )
-        self.bottom_splitter.setSizes((available - height, height))
+        self.detail_panel.select_page(page_key)
+        self._position_detail_panel()
+        self.detail_panel.show()
+        self.detail_panel.raise_()
+        self._close_panel_shortcut.setEnabled(True)
         self._selected_bottom_page = page_key
         self._active_bottom_page = page_key
         self.status_bar.render_active_panel(page_key)
@@ -409,17 +454,6 @@ class WorkbenchView(QWidget):
             )
             self._schedule_layout_save()
 
-    def _remember_bottom_height(self, _position: int, _index: int) -> None:
-        if self.bottom_stack.isVisible():
-            self._last_bottom_height = max(
-                min(
-                    self.bottom_splitter.sizes()[1],
-                    BOTTOM_PANEL_MAXIMUM_HEIGHT,
-                ),
-                BOTTOM_PANEL_MINIMUM_HEIGHT,
-            )
-            self._schedule_layout_save()
-
     def _restore_layout(self) -> None:
         if self._layout_store is None:
             self._show_side_page(self._default_side_page)
@@ -430,23 +464,16 @@ class WorkbenchView(QWidget):
         if state is None:
             self._show_side_page(self._default_side_page)
             return
-        if (
-            state.side_page not in self._side_pages
-            or state.bottom_page not in self._bottom_pages
-        ):
+        if state.side_page not in self._side_pages or state.panel_page not in self._bottom_pages:
             self.layout_recovery_reason = "布局偏好引用了已不存在的页面"
             self._layout_store.clear()
             self._show_side_page(self._default_side_page)
             return
         self._selected_side_page = state.side_page
-        self._selected_bottom_page = state.bottom_page
+        self._selected_bottom_page = state.panel_page
         self._last_side_width = min(
             max(state.side_width, SIDE_BAR_MINIMUM_WIDTH),
             SIDE_BAR_MAXIMUM_WIDTH,
-        )
-        self._last_bottom_height = max(
-            min(state.bottom_height, BOTTOM_PANEL_MAXIMUM_HEIGHT),
-            BOTTOM_PANEL_MINIMUM_HEIGHT,
         )
         if state.side_visible:
             self._show_side_page(state.side_page)
@@ -455,15 +482,33 @@ class WorkbenchView(QWidget):
             self.side_stack.hide()
             self._active_side_page = None
             self.activity_bar.render_active_page(None)
-        if state.bottom_visible:
-            self._show_bottom_page(state.bottom_page)
+        if state.panel_visible:
+            self._show_bottom_page(state.panel_page)
         else:
-            self.bottom_stack.setCurrentWidget(
-                self._bottom_pages[state.bottom_page].widget
-            )
-            self.bottom_stack.hide()
+            self.detail_panel.select_page(state.panel_page)
+            self.detail_panel.hide()
+            self._close_panel_shortcut.setEnabled(False)
             self._active_bottom_page = None
             self.status_bar.render_active_panel(None)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._position_detail_panel()
+
+    def _position_detail_panel(self) -> None:
+        available_width = max(1, self.width() - (2 * DETAIL_PANEL_MARGIN))
+        available_height = max(
+            1,
+            self.height() - self.status_bar.height() - (2 * DETAIL_PANEL_MARGIN),
+        )
+        width = min(DETAIL_PANEL_DEFAULT_WIDTH, available_width)
+        height = min(DETAIL_PANEL_DEFAULT_HEIGHT, available_height)
+        x = max(DETAIL_PANEL_MARGIN, self.width() - DETAIL_PANEL_MARGIN - width)
+        y = max(
+            DETAIL_PANEL_MARGIN,
+            self.height() - self.status_bar.height() - DETAIL_PANEL_MARGIN - height,
+        )
+        self.detail_panel.setGeometry(x, y, width, height)
 
     def _schedule_layout_save(self) -> None:
         if self._layout_store is not None:
