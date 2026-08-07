@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import gc
 import unittest
 
-from PySide6.QtCore import QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QPalette, QWheelEvent
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+from PySide6.QtGui import QColor, QHelpEvent, QPalette, QWheelEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFrame, QGraphicsProxyWidget
 
@@ -17,7 +18,11 @@ from src.domain.models import (
 )
 from src.domain.workflow import WorkflowDocument
 from src.gui.views import WorkflowCanvasWidget
-from src.gui.views.workflow_canvas.items import InsertionItem, WorkflowNodeItem
+from src.gui.views.workflow_canvas.items import (
+    InsertionItem,
+    StartEndItem,
+    WorkflowNodeItem,
+)
 from src.gui.views.workflow_canvas.tokens import contrasting_text
 
 
@@ -38,6 +43,53 @@ class WorkflowCanvasTests(unittest.TestCase):
 
     def test_canvas_view_uses_background_separation_without_outer_frame(self) -> None:
         self.assertEqual(QFrame.Shape.NoFrame, self.canvas.view.frameShape())
+        self.assertEqual(
+            self.canvas.view.ViewportUpdateMode.FullViewportUpdate,
+            self.canvas.view.viewportUpdateMode(),
+        )
+        self.assertFalse(
+            self.canvas.view.optimizationFlags()
+            & self.canvas.view.OptimizationFlag.DontSavePainterState
+        )
+
+    def test_start_and_end_nodes_remain_visible_when_hovered(self) -> None:
+        self.canvas.render_entries(())
+        self.canvas.view.fit_workflow()
+        QApplication.processEvents()
+        endpoints = [
+            item
+            for item in self.canvas.scene.items()
+            if isinstance(item, StartEndItem)
+        ]
+
+        self.assertEqual(2, len(endpoints))
+        endpoint_identities = {id(endpoint) for endpoint in endpoints}
+        gc.collect()
+        self.assertEqual(
+            endpoint_identities,
+            {
+                id(endpoint)
+                for endpoint in self.canvas._endpoint_items  # noqa: SLF001
+            },
+        )
+        background = self.canvas.scene.backgroundBrush().color()
+        for endpoint in endpoints:
+            position = self.canvas.view.mapFromScene(
+                endpoint.sceneBoundingRect().center()
+            )
+            QTest.mouseMove(self.canvas.view.viewport(), position)
+            QApplication.processEvents()
+            tooltip_event = QHelpEvent(
+                QEvent.Type.ToolTip,
+                position,
+                self.canvas.view.viewport().mapToGlobal(position),
+            )
+            QApplication.sendEvent(self.canvas.view.viewport(), tooltip_event)
+            QTest.qWait(50)
+            QApplication.processEvents()
+            rendered = self.canvas.view.viewport().grab().toImage()
+            self.assertTrue(endpoint.isVisible())
+            self.assertNotEqual(background, rendered.pixelColor(position))
 
     def test_insert_move_and_undo_redo_publish_canonical_entries(self) -> None:
         changes = []

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter, QPalette, QPen
+from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -36,7 +36,6 @@ BOTTOM_PANEL_DEFAULT_HEIGHT = 220
 BOTTOM_PANEL_MINIMUM_HEIGHT = 120
 BOTTOM_PANEL_MAXIMUM_HEIGHT = 600
 LAYOUT_SAVE_DELAY_MS = 250
-ACTIVITY_TOOLTIP_DELAY_MS = 350
 STATUS_ICON_COLOR = QColor("#ffffff")
 
 
@@ -83,64 +82,6 @@ class _ThinLineSplitter(QSplitter):
         return _ThinLineSplitterHandle(self.orientation(), self)
 
 
-class _ActivityToolTip(QLabel):
-    """Compact, reliably opaque tooltip for the Activity Bar."""
-
-    _HORIZONTAL_PADDING = 9
-    _VERTICAL_PADDING = 5
-    _CORNER_RADIUS = 6.0
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(
-            parent,
-            Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint,
-        )
-        self.setObjectName("activityToolTip")
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setWordWrap(False)
-        self.hide()
-
-    def sizeHint(self) -> QSize:  # noqa: N802
-        metrics = self.fontMetrics()
-        return QSize(
-            metrics.horizontalAdvance(self.text()) + 2 * self._HORIZONTAL_PADDING,
-            metrics.height() + 2 * self._VERTICAL_PADDING,
-        )
-
-    def paintEvent(self, event: object) -> None:  # noqa: N802
-        del event
-        palette = self.palette()
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        background = palette.color(QPalette.ColorRole.ToolTipBase)
-        background.setAlpha(255)
-        border = palette.color(QPalette.ColorRole.Mid)
-        border.setAlpha(180)
-        bubble_rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(QPen(border, 1.0))
-        painter.setBrush(background)
-        painter.drawRoundedRect(
-            bubble_rect,
-            self._CORNER_RADIUS,
-            self._CORNER_RADIUS,
-        )
-
-        text_rect = self.rect().adjusted(
-            self._HORIZONTAL_PADDING,
-            0,
-            -self._HORIZONTAL_PADDING,
-            0,
-        )
-        painter.setPen(palette.color(QPalette.ColorRole.ToolTipText))
-        painter.drawText(
-            text_rect,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            self.text(),
-        )
-
-
 class _ActivityBar(QFrame):
     page_requested = Signal(str)
 
@@ -155,18 +96,13 @@ class _ActivityBar(QFrame):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(4)
-        self._hovered_button: QToolButton | None = None
-        self._tooltip_timer = QTimer(self)
-        self._tooltip_timer.setSingleShot(True)
-        self._tooltip_timer.timeout.connect(self._show_hover_tooltip)
-        self._hover_tooltip = _ActivityToolTip(self)
         self.buttons: dict[str, QToolButton] = {}
         for page in pages:
             button = QToolButton()
             button.setObjectName("activityButton")
             button.setAccessibleName(page.title)
             button.setAccessibleDescription(f"显示或收起{page.title}资源页")
-            button.setProperty("hoverLabel", page.title)
+            button.setToolTip(page.title)
             button.setCheckable(True)
             button.setFixedSize(44, 44)
             button.setIconSize(QSize(22, 22))
@@ -175,7 +111,6 @@ class _ActivityBar(QFrame):
             )
             layout.addWidget(button)
             self.buttons[page.key] = button
-            button.installEventFilter(self)
         self._pages = {page.key: page for page in pages}
         layout.addStretch(1)
         self._refresh_icons()
@@ -191,42 +126,6 @@ class _ActivityBar(QFrame):
             QEvent.Type.ApplicationPaletteChange,
         }:
             self._refresh_icons()
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if not isinstance(watched, QToolButton):
-            return super().eventFilter(watched, event)
-        if event.type() is QEvent.Type.Enter:
-            self._hovered_button = watched
-            self._tooltip_timer.start(ACTIVITY_TOOLTIP_DELAY_MS)
-        elif event.type() in {
-            QEvent.Type.Leave,
-            QEvent.Type.MouseButtonPress,
-        }:
-            self._hide_hover_tooltip()
-        elif event.type() is QEvent.Type.ToolTip:
-            return True
-        return super().eventFilter(watched, event)
-
-    def _show_hover_tooltip(self) -> None:
-        button = self._hovered_button
-        if button is None:
-            return
-        self._hover_tooltip.setText(str(button.property("hoverLabel")))
-        self._hover_tooltip.ensurePolished()
-        self._hover_tooltip.adjustSize()
-        position = button.mapToGlobal(
-            QPoint(
-                button.width() + 8,
-                (button.height() - self._hover_tooltip.height()) // 2,
-            )
-        )
-        self._hover_tooltip.move(position)
-        self._hover_tooltip.show()
-
-    def _hide_hover_tooltip(self) -> None:
-        self._tooltip_timer.stop()
-        self._hovered_button = None
-        self._hover_tooltip.hide()
 
     def _refresh_icons(self) -> None:
         for key, button in self.buttons.items():

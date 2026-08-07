@@ -7,6 +7,7 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsObject,
+    QGraphicsSceneHoverEvent,
     QGraphicsSceneMouseEvent,
     QStyleOptionGraphicsItem,
     QWidget,
@@ -519,7 +520,9 @@ class StartEndItem(QGraphicsObject):
         super().__init__()
         self._label = label
         self._color = color
+        self._is_hovered = False
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setAcceptHoverEvents(True)
 
     def boundingRect(self) -> QRectF:  # noqa: N802
         return QRectF(0.0, 0.0, 120.0, 42.0)
@@ -532,12 +535,23 @@ class StartEndItem(QGraphicsObject):
     ) -> None:
         del option, widget
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(self._color)
+        fill = self._color.lighter(108) if self._is_hovered else self._color
+        painter.setBrush(fill)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.boundingRect(), 20.0, 20.0)
         painter.setPen(QColor("#ffffff"))
         painter.setFont(canvas_font(emphasis=True))
         painter.drawText(self.boundingRect(), Qt.AlignmentFlag.AlignCenter, self._label)
+
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        self._is_hovered = True
+        self.update()
+        event.accept()
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        self._is_hovered = False
+        self.update()
+        event.accept()
 
 
 class InsertionItem(QGraphicsObject):

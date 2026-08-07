@@ -2,10 +2,19 @@ from __future__ import annotations
 
 import unittest
 
+from PySide6.QtCore import QFile, QPoint
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QComboBox, QStyle
 
-from src.gui.theme import DARK_COLORS, LIGHT_COLORS, ThemeController, ThemeMode
+from src.gui.theme import (
+    DARK_COLORS,
+    LIGHT_COLORS,
+    ThemeController,
+    ThemeMode,
+    apply_consistent_base_style,
+)
+from src.gui.tooltips import TOOLTIP_SERVICE_OBJECT_NAME, ToolTipService
+from src.gui.widget_style import COMBO_POPUP_GAP, QT_BASE_STYLE_NAME
 
 
 class GuiThemeTests(unittest.TestCase):
@@ -48,6 +57,70 @@ class GuiThemeTests(unittest.TestCase):
             self.application.styleSheet(),
         )
 
+    def test_theme_uses_fusion_before_stylesheet_decorates_the_style(self) -> None:
+        self.application.setStyleSheet("")
+        apply_consistent_base_style(self.application)
+
+        self.assertEqual(
+            QT_BASE_STYLE_NAME.casefold(),
+            self.application.style().objectName().casefold(),
+        )
+
+    def test_dropdowns_and_menus_share_complete_subcontrol_styles(self) -> None:
+        ThemeController(self.application, ThemeMode.LIGHT)
+        light_stylesheet = self.application.styleSheet()
+
+        for selector in (
+            "QComboBox::drop-down",
+            "QComboBox::down-arrow",
+            "QComboBoxPrivateContainer",
+            "QComboBox QAbstractItemView::item",
+            "QMenuBar::item:pressed",
+            "QMenu::separator",
+            "QMenu::right-arrow",
+            "QToolButton::menu-indicator",
+        ):
+            self.assertIn(selector, light_stylesheet)
+        self.assertIn(f"border: 1px solid {LIGHT_COLORS.border}", light_stylesheet)
+        self.assertIn(":/icons/chevron-down-on-light.svg", light_stylesheet)
+        self.assertTrue(QFile.exists(":/icons/chevron-down-on-light.svg"))
+
+        ThemeController(self.application, ThemeMode.DARK)
+        dark_stylesheet = self.application.styleSheet()
+        self.assertIn(f"background: {DARK_COLORS.surface}", dark_stylesheet)
+        self.assertIn(f"border: 1px solid {DARK_COLORS.border}", dark_stylesheet)
+        self.assertIn(":/icons/chevron-down-on-dark.svg", dark_stylesheet)
+        self.assertTrue(QFile.exists(":/icons/chevron-down-on-dark.svg"))
+
+    def test_combo_popup_uses_dropdown_behavior_below_the_input(self) -> None:
+        ThemeController(self.application, ThemeMode.LIGHT)
+        combo = QComboBox()
+        combo.addItems(["选项一", "选项二", "选项三"])
+        combo.resize(240, 32)
+        combo.move(100, 100)
+        combo.show()
+        QApplication.processEvents()
+
+        self.assertEqual(
+            0,
+            combo.style().styleHint(QStyle.StyleHint.SH_ComboBox_Popup, None, combo),
+        )
+        combo.showPopup()
+        QApplication.processEvents()
+        input_bottom = combo.mapToGlobal(QPoint(0, combo.height())).y()
+        popup = combo.view().window()
+        self.assertGreaterEqual(
+            popup.geometry().top(),
+            input_bottom + COMBO_POPUP_GAP - 1,
+        )
+        self.assertFalse(popup.mask().isEmpty())
+        self.assertFalse(popup.mask().contains(QPoint(0, 0)))
+        self.assertTrue(popup.mask().contains(popup.rect().center()))
+
+        combo.hidePopup()
+        combo.close()
+        combo.deleteLater()
+
     def test_tooltips_are_compact_rounded_and_follow_each_theme(self) -> None:
         controller = ThemeController(self.application, ThemeMode.LIGHT)
         light_stylesheet = self.application.styleSheet()
@@ -56,15 +129,22 @@ class GuiThemeTests(unittest.TestCase):
             QColor(LIGHT_COLORS.tooltip),
             QApplication.palette().color(QPalette.ColorRole.ToolTipBase),
         )
-        self.assertIn("QToolTip {", light_stylesheet)
-        self.assertNotIn("QLabel#activityToolTip", light_stylesheet)
-        self.assertIn("border-radius: 6px; padding: 3px 7px", light_stylesheet)
-        self.assertIn(f"background: {LIGHT_COLORS.tooltip}", light_stylesheet)
+        self.assertNotIn("QToolTip", light_stylesheet)
+        tooltip_service = self.application.findChild(
+            ToolTipService,
+            TOOLTIP_SERVICE_OBJECT_NAME,
+        )
+        self.assertIsNotNone(tooltip_service)
 
         controller.set_mode(ThemeMode.DARK)
-        dark_stylesheet = self.application.styleSheet()
-        self.assertIn(f"background: {DARK_COLORS.tooltip}", dark_stylesheet)
-        self.assertIn(f"color: {DARK_COLORS.tooltip_text}", dark_stylesheet)
+        self.assertEqual(
+            QColor(DARK_COLORS.tooltip),
+            QApplication.palette().color(QPalette.ColorRole.ToolTipBase),
+        )
+        self.assertEqual(
+            QColor(DARK_COLORS.tooltip_text),
+            QApplication.palette().color(QPalette.ColorRole.ToolTipText),
+        )
 
     def test_surface_hierarchy_avoids_repeated_decorative_borders(self) -> None:
         ThemeController(self.application, ThemeMode.DARK)

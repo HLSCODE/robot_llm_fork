@@ -8,5 +8,7 @@
     <file alias="poses.svg">assets/icons/poses.svg</file>
     <file alias="controls.svg">assets/icons/controls.svg</file>
     <file alias="logs.svg">assets/icons/logs.svg</file>
+    <file alias="chevron-down-on-light.svg">assets/icons/chevron-down-on-light.svg</file>
+    <file alias="chevron-down-on-dark.svg">assets/icons/chevron-down-on-dark.svg</file>
   </qresource>
 </RCC>

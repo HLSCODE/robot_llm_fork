@@ -3,12 +3,13 @@ from __future__ import annotations
 import unittest
 
 from PySide6.QtCore import QEvent, QPoint, Qt
-from PySide6.QtGui import QPalette
+from PySide6.QtGui import QHelpEvent, QPalette
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from src.gui.view_models.models import DeviceViewState
 from src.gui.icons import IconName
+from src.gui.tooltips import install_tooltip_service
 from src.gui.workbench_layout import (
     LayoutLoadResult,
     WORKBENCH_LAYOUT_SCHEMA_VERSION,
@@ -16,7 +17,6 @@ from src.gui.workbench_layout import (
 )
 from src.gui.views.workbench import WorkbenchPage, WorkbenchView
 from src.gui.views.workbench.shell import (
-    ACTIVITY_TOOLTIP_DELAY_MS,
     BOTTOM_PANEL_MINIMUM_HEIGHT,
     SIDE_BAR_MINIMUM_WIDTH,
     SPLITTER_HIT_WIDTH,
@@ -29,6 +29,8 @@ class WorkbenchViewTests(unittest.TestCase):
         cls.application = QApplication.instance() or QApplication([])
 
     def setUp(self) -> None:
+        self.tooltip_service = install_tooltip_service(self.application)
+        self.tooltip_service.hide()
         self.resource_page = QWidget()
         self.device_page = QWidget()
         self.log_page = QWidget()
@@ -47,6 +49,7 @@ class WorkbenchViewTests(unittest.TestCase):
         QApplication.processEvents()
 
     def tearDown(self) -> None:
+        self.tooltip_service.hide()
         self.workbench.close()
         self.workbench.deleteLater()
         QApplication.processEvents()
@@ -81,21 +84,20 @@ class WorkbenchViewTests(unittest.TestCase):
 
     def test_activity_hover_uses_compact_custom_tooltip(self) -> None:
         button = self.workbench.activity_bar.buttons["resources"]
-        tooltip = self.workbench.activity_bar.findChild(
-            QLabel,
-            "activityToolTip",
+        tooltip = self.tooltip_service.bubble
+        event = QHelpEvent(
+            QEvent.Type.ToolTip,
+            QPoint(20, 20),
+            button.mapToGlobal(QPoint(20, 20)),
         )
-        assert tooltip is not None
-
-        QApplication.sendEvent(button, QEvent(QEvent.Type.Enter))
-        QTest.qWait(ACTIVITY_TOOLTIP_DELAY_MS + 30)
+        QApplication.sendEvent(button, event)
         QApplication.processEvents()
 
         self.assertTrue(tooltip.isVisible())
-        self.assertEqual("资源", tooltip.text())
+        self.assertEqual("资源", tooltip.text)
         self.assertLessEqual(tooltip.height(), 36)
         self.assertLessEqual(tooltip.width(), 96)
-        self.assertEqual("", button.toolTip())
+        self.assertEqual("资源", button.toolTip())
         rendered = tooltip.grab().toImage()
         background = rendered.pixelColor(
             tooltip.width() - 5,

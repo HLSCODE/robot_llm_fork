@@ -52,8 +52,9 @@ class WorkflowCanvasView(QGraphicsView):
         )
         self._is_panning = False
         self._last_pan_position: QPoint | None = None
-        self.setViewportUpdateMode(self.ViewportUpdateMode.MinimalViewportUpdate)
-        self.setOptimizationFlag(self.OptimizationFlag.DontSavePainterState, True)
+        self.setViewportUpdateMode(
+            self.ViewportUpdateMode.FullViewportUpdate
+        )
         self.setTransformationAnchor(self.ViewportAnchor.AnchorUnderMouse)
         self.setResizeAnchor(self.ViewportAnchor.AnchorViewCenter)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)

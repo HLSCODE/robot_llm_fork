@@ -9,6 +9,13 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
+from . import resources_rc as _resources_rc  # noqa: F401
+from .tooltips import ToolTipService, install_tooltip_service
+from .widget_style import (
+    create_consistent_widget_style,
+    install_combo_box_popup_coordinator,
+)
+
 
 class ThemeMode(str, Enum):
     SYSTEM = "system"
@@ -22,6 +29,9 @@ class ThemeMode(str, Enum):
         except ValueError as exc:
             supported = ", ".join(mode.value for mode in cls)
             raise ValueError(f"GUI theme must be one of: {supported}") from exc
+
+
+_BASE_STYLE_INSTALLED_PROPERTY = "robotLlmConsistentWidgetStyle"
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +112,8 @@ class ThemeController(QObject):
     ) -> None:
         super().__init__(parent)
         self._application = application
+        apply_consistent_base_style(application)
+        self._tooltip_service: ToolTipService = install_tooltip_service(application)
         self._mode = mode
         self._application.styleHints().colorSchemeChanged.connect(
             self._on_system_color_scheme_changed
@@ -146,6 +158,15 @@ def colors_for_mode(mode: ThemeMode) -> ThemeColors:
     return LIGHT_COLORS
 
 
+def apply_consistent_base_style(application: QApplication) -> None:
+    """Use one Qt renderer so platform-native subcontrols cannot leak through."""
+    install_combo_box_popup_coordinator(application)
+    if application.property(_BASE_STYLE_INSTALLED_PROPERTY) is True:
+        return
+    application.setStyle(create_consistent_widget_style())
+    application.setProperty(_BASE_STYLE_INSTALLED_PROPERTY, True)
+
+
 def build_palette(colors: ThemeColors) -> QPalette:
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor(colors.window))
@@ -171,6 +192,11 @@ def build_palette(colors: ThemeColors) -> QPalette:
 
 
 def build_stylesheet(colors: ThemeColors) -> str:
+    combo_arrow = (
+        ":/icons/chevron-down-on-dark.svg"
+        if colors == DARK_COLORS
+        else ":/icons/chevron-down-on-light.svg"
+    )
     return f"""
 QWidget {{ color: {colors.text}; }}
 QMainWindow, QDialog {{ background: {colors.window}; }}
@@ -207,9 +233,32 @@ QGroupBox {{ font-weight: 700; border: none; margin-top: 14px; padding: 14px 8px
 QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {colors.accent}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {colors.surface_subtle}; color: {colors.text}; border: 1px solid transparent; border-radius: 6px; }}
 QTextEdit, QListWidget {{ background: {colors.surface}; color: {colors.text}; border: none; border-radius: 6px; }}
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ padding: 5px 8px; }}
-QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:hover {{ border-color: {colors.accent}; }}
-QComboBox QAbstractItemView {{ background: {colors.surface}; color: {colors.text}; selection-background-color: {colors.selection}; selection-color: {colors.text}; }}
+QLineEdit, QSpinBox, QDoubleSpinBox {{ padding: 5px 8px; }}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {colors.accent}; }}
+QComboBox {{ padding: 6px 34px 6px 10px; min-height: 18px; }}
+QComboBox:hover, QComboBox:focus, QComboBox:on {{ background: {colors.surface}; border-color: {colors.accent}; }}
+QComboBox:disabled {{ background: {colors.disabled_surface}; color: {colors.disabled_text}; }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding; subcontrol-position: top right;
+    width: 30px; background: transparent; border: none;
+    border-top-right-radius: 6px; border-bottom-right-radius: 6px;
+}}
+QComboBox::drop-down:hover {{ background: {colors.selection}; }}
+QComboBox::down-arrow {{ image: url({combo_arrow}); width: 12px; height: 8px; }}
+QComboBoxPrivateContainer, QWidget#comboBoxPopup {{
+    background: {colors.surface}; border: 1px solid {colors.border};
+    border-radius: 8px; padding: 4px;
+}}
+QComboBox QAbstractItemView {{
+    background: {colors.surface}; color: {colors.text};
+    border: none; border-radius: 5px; padding: 0; outline: 0;
+    selection-background-color: {colors.selection};
+    selection-color: {colors.text};
+}}
+QComboBox QAbstractItemView::item {{ min-height: 28px; padding: 3px 8px; border: none; border-radius: 4px; }}
+QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected {{
+    background: {colors.selection}; color: {colors.text}; border: none; outline: none;
+}}
 QListWidget::item {{ padding: 6px 10px; border-radius: 4px; }}
 QListWidget::item:hover {{ background: {colors.surface_subtle}; }}
 QListWidget::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
@@ -235,11 +284,20 @@ QFrame#workbenchStatusBar QLabel[themeRole="success"] {{ color: #ffffff; }}
 QFrame#workbenchStatusBar QLabel[themeRole="danger"] {{ color: #ffffff; font-weight: 700; }}
 QToolButton#statusPanelButton {{ background: transparent; border: none; border-radius: 4px; color: #ffffff; padding: 3px 8px; }}
 QToolButton#statusPanelButton:hover, QToolButton#statusPanelButton:checked {{ background: rgba(255, 255, 255, 38); }}
-QMenuBar, QMenu {{ background: {colors.surface}; color: {colors.text}; }}
-QMenuBar {{ border: none; padding: 2px; }}
-QMenuBar::item, QMenu::item {{ padding: 6px 12px; border-radius: 4px; }}
-QMenuBar::item:selected, QMenu::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
-QToolTip {{ background: {colors.tooltip}; color: {colors.tooltip_text}; border: 1px solid {colors.border}; border-radius: 6px; padding: 3px 7px; font-size: 12px; }}
+QMenuBar {{ background: {colors.surface}; color: {colors.text}; border: none; padding: 2px 4px; spacing: 2px; }}
+QMenuBar::item {{ background: transparent; padding: 6px 10px; margin: 1px; border-radius: 5px; }}
+QMenuBar::item:selected, QMenuBar::item:pressed {{ background: {colors.selection}; color: {colors.text}; }}
+QMenu {{
+    background: {colors.surface}; color: {colors.text};
+    border: 1px solid {colors.border}; border-radius: 8px; padding: 6px;
+}}
+QMenu::item {{ min-width: 150px; padding: 7px 28px; margin: 1px 0; border-radius: 5px; }}
+QMenu::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
+QMenu::item:disabled {{ color: {colors.disabled_text}; }}
+QMenu::separator {{ height: 1px; background: {colors.border}; margin: 5px 8px; }}
+QMenu::indicator {{ width: 14px; height: 14px; left: 8px; }}
+QMenu::right-arrow {{ width: 9px; height: 9px; margin-right: 8px; }}
+QToolButton::menu-indicator {{ width: 9px; height: 9px; subcontrol-position: bottom right; }}
 QWidget#aiStatusCard {{ background: {colors.surface_subtle}; border: none; border-radius: 8px; }}
 QWidget#startupProgressWindow {{ background: transparent; }}
 QFrame#startupCard {{ background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 16px; }}

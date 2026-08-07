@@ -80,6 +80,7 @@ class WorkflowCanvasWidget(QWidget):
         super().__init__(parent)
         self._entries: tuple[SequenceEntry, ...] = ()
         self._node_items: dict[str, WorkflowNodeItem] = {}
+        self._endpoint_items: tuple[StartEndItem, ...] = ()
         self._current_item_uuid = ""
         self._compiled: CompiledWorkflow | None = None
         self._editing_enabled = True
@@ -504,6 +505,7 @@ class WorkflowCanvasWidget(QWidget):
         selected_node_ids: tuple[str, ...] = (),
     ) -> None:
         self.scene.blockSignals(True)
+        self._endpoint_items = ()
         self.scene.clear()
         self._node_items.clear()
         center_x = LOOP_NODE_WIDTH / 2.0
@@ -553,6 +555,7 @@ class WorkflowCanvasWidget(QWidget):
         end = StartEndItem("结束", QColor("#64748b"))
         end.setPos(center_x - 60.0, end_y)
         self.scene.addItem(end)
+        self._endpoint_items = (start, end)
         self._add_edge(previous_bottom, end_y)
         bounds = self.scene.itemsBoundingRect().adjusted(
             -CANVAS_MARGIN,
