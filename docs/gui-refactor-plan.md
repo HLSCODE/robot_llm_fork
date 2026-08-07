@@ -2,9 +2,9 @@
 
 > 适用场景：竖屏、窄窗口、触控操作、机器人动作编排与任务执行  
 > 推荐技术栈：Python + PySide6 + QGraphicsView/QGraphicsScene  
-> 文档版本：V2.0
+> 文档版本：V2.1
 > 文档性质：目标架构、实施记录与后续验收约束
-> 最近更新：2026-08-06
+> 最近更新：2026-08-07
 
 > 实施进度：D-015～D-025 已完成，M6/M7 软件重构项全部关闭。纯 WorkflowDocument、版本化 `.workflow`
 > 持久化与草稿恢复、Validator/Preflight/Compiler、稳定节点映射、受约束
@@ -42,6 +42,12 @@
 > 已删除普通按钮、Tab Pane/Tab、GroupBox、列表选中项、StyledPanel、菜单栏、
 > Activity Bar 和画布外框的重复线条。仅输入焦点、可拖动分隔、工作流节点边界及
 > 安全/状态语义保留必要描边。
+
+> 2026-08-07 M8 数据模型复核：M6 已落地的 `.workflow` 与历史 `.task` 双格式
+> 仅作为当前实现状态，不再是目标架构。后续以 `*.workflow.json`/WorkflowDocument
+> v2 作为用户可见“任务”的唯一源文档，执行计划由 Compiler 派生；动作、技能和
+> 工作流分别提供 JSON Schema。迁移完成后删除 `.task`、旧 `.workflow`、读取时
+> 隐式迁移和双格式入口，不保留兼容开关。
 
 ## 1. 结论
 
@@ -107,7 +113,7 @@ DeviceRuntime / Application Service
 | Loop block | 带重复次数和子项的 `LoopBlock` |
 | Sequence entry | `SequenceItem | LoopBlock`，是运行时输入元素 |
 | Workflow document | GUI 编辑期纯 Python 文档，包含节点、顺序和布局元数据 |
-| Task | 由 `CompositionService` 保存的可复用 `SequenceEntry` 集合 |
+| Task | 用户可见概念；持久化为唯一 `*.workflow.json`/WorkflowDocument，运行时计划由 Compiler 派生 |
 | Node | Action、Loop、Start 或 End 的画布表现，不是新的业务动作类型 |
 | Compile | 将合法编辑文档转换为规范 `SequenceEntry`，不执行设备动作 |
 | Preflight | 执行前检查设备在线、能力、资源和停止能力等瞬时条件 |
@@ -268,6 +274,24 @@ class WorkflowDocument:
 - 运行状态不写入持久化任务；由 Execution ViewModel 根据运行事件派生。
 - 布局、缩放和折叠状态是表现元数据，不能改变执行语义。
 
+### 7.1 M8 目标模型
+
+现有 `nodes + order` 足以承载顺序和单层 Loop，但不能表达并行、条件或嵌套控制流。
+M8 将在保持纯 Python/Qt 无关边界的前提下升级为结构化控制流：
+
+```text
+WorkflowDocument
+├─ metadata: workflow_id/name/revision
+├─ root: Sequence | Action | Loop | Parallel | Condition
+└─ presentation: positions/collapsed/viewport
+```
+
+- 首批 schema v2 必须完整支持可嵌套 Sequence/Action/Loop；Parallel 只有在
+  A-014/A-015 的编译、资源、失败、取消和调度语义同时完成后才可写入生产任务。
+- `presentation` 不参与执行语义，运行状态和执行历史不得写回 WorkflowDocument。
+- Action 节点保存规范化可复现快照及来源 action ID/revision，不按显示名称解析。
+- 不实现任意连线图或通用 BPMN；Condition 不执行任意代码，表达式模型另行评审。
+
 Qt 边界拆分为：
 
 - `WorkflowEditorService`：修改、版本、撤销命令所需的纯应用行为。
@@ -341,6 +365,14 @@ Preflight 单独检查瞬时条件：
 - 编辑中的未保存内容使用独立草稿和自动保存，启动时提供崩溃恢复选择。
 - 剪贴板、导入和 AI 生成内容必须经过大小限制、Schema 校验和结构校验。
 - 保存采用 revision/乐观并发检查，冲突必须显式提示，不能静默覆盖。
+- 正式任务统一保存为 `workflows/<name>.workflow.json`；草稿保存到独立
+  `drafts/<workflow-id>.draft.workflow.json`，不得与正式任务混放。
+- `*.workflow.json` 通过最后一级 `.json` 自动获得通用编辑器语法高亮，并使用
+  `$schema` 提供补全与字段错误提示。
+- 历史 `.task` 和 `.workflow` 只由显式迁移 CLI 读取；正常 Repository 查询不得
+  触发备份、迁移或任何写盘。
+- 迁移必须先 dry-run，再备份、转换、重新加载并比较任务数量、稳定 ID、步骤、
+  参数和语义指纹；全部成功后一次切换并删除旧运行时读取分支。
 
 ## 11. 日志与可观测性
 
@@ -482,11 +514,22 @@ src/
 - 已持久化 Side Bar/Bottom Panel 尺寸、可见性和当前页面，损坏状态安全恢复默认布局。
 - 已完成尺寸矩阵、键盘、读屏、功能等价和安全回归并直接切换；真实触控屏继续随设备验收确认。
 
+### 阶段 11：任务数据模型 v2 与格式单一化
+
+- 先修复启动时已保存任务未刷新的回归，并以现有任务建立迁移前行为基线。
+- 冻结 WorkflowDocument v2、`*.workflow.json`、presentation 和结构化控制流 Schema。
+- 通过显式迁移工具将 `.task`/`.workflow` 一次转换，完成后删除双格式 Repository API、
+  读取时隐式迁移和旧路径配置。
+- GUI 资源页、保存/加载、任务组合、AI/语音导入和 WebSocket 全部使用同一
+  Workflow 摘要与 Repository 查询，不在 View 中直接枚举文件。
+
 ## 15. 测试与验收
 
 ### 15.1 自动化测试
 
 - Workflow 文档序列化 round-trip、Schema 升级和损坏数据拒绝。
+- `.task`/`.workflow` 到 `*.workflow.json` 的 dry-run、备份、语义指纹和失败不切换测试。
+- 主窗口启动时已有任务立即显示，首屏加载与保存/删除事件刷新结果一致。
 - Validator、Compiler 与 `SequenceEntry` 的确定性和 Loop 覆盖。
 - 每种 Undo/Redo 命令及连续拖动合并。
 - UUID 到执行事件/节点状态的映射。

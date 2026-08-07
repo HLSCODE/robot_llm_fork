@@ -1,7 +1,7 @@
 # 依赖、配置与用户数据治理
 
-> 状态：当前实现  
-> 最近更新：2026-07-30
+> 状态：当前实现 + M8 目标迁移
+> 最近更新：2026-08-07
 
 ## 1. 依赖单一事实来源
 
@@ -95,7 +95,56 @@ SKILL_LIBRARY_PATH=
 不会覆盖原文件。需要人工恢复时，先停止应用，保留故障文件，再从 `.v0.bak` 复制恢复并
 根据错误信息处理。
 
-## 5. 启动配置校验
+> M8 修订：上述“首次读取时迁移”是当前 schema v1 实现记录，不再作为目标策略。
+> 查询任务摘要可能因此产生写盘副作用。G-032 完成后，所有迁移只能由显式 CLI 执行，
+> Repository 的 list/load 操作必须保持只读。
+
+## 5. M8 目标用户数据结构
+
+M8 将用户数据直接切换为以下结构：
+
+```text
+data/
+├── actions/
+│   └── library.json
+├── workflows/
+│   └── <name>.workflow.json
+├── drafts/
+│   └── <workflow-id>.draft.workflow.json
+└── skills/
+    ├── manipulation/
+    │   └── <name>.skill.json
+    └── <domain>/
+        └── <name>.skill.json
+```
+
+约束：
+
+- 用户可见“任务”只有 `*.workflow.json` 一种正式格式；`.task` 不再保存派生执行快照。
+- WorkflowDocument 区分结构化控制流与 presentation 元数据，执行状态不写入定义。
+- 动作 ID 全局唯一，参数使用稳定机器字段和规范 JSON 类型；中文标签由 ActionSchema 派生。
+- 每个 `*.skill.json` 只定义一个 Skill；目录只用于组织，skill category 仍由文档字段声明。
+- Skill Registry 递归、确定性扫描文件，并在全部文件、跨文件 ID、动作引用和参数绑定
+  校验成功后一次替换内存目录；不维护手写 index。
+- Python 源码不再维护完整动作/技能数据副本；内置示例同样由版本化 JSON 资源交付。
+- `*.workflow.json`/`*.skill.json` 使用 `$schema` 关联版本控制内 JSON Schema，获得编辑器
+  高亮、补全和校验。
+
+目标配置使用目录而非集合文件：
+
+```env
+ROBOT_DATA_DIR=data
+ACTIONS_LIBRARY_DIRECTORY=
+WORKFLOWS_DIRECTORY=
+WORKFLOW_DRAFTS_DIRECTORY=
+SKILL_LIBRARY_DIRECTORY=
+```
+
+切换步骤固定为 dry-run、备份、转换、重新加载、数量/ID/参数/语义指纹比对、原子发布。
+只有全部验证成功才能更新活动配置；随后删除旧路径配置、旧格式读取和隐式迁移，不设置
+兼容开关。
+
+## 6. 启动配置校验
 
 可以在不启动 Qt、网络服务和硬件的情况下检查配置：
 
@@ -111,7 +160,7 @@ uv run robot-llm --check-config --simulation --disable-websocket
 当前集中检查日志级别、日志目录与保留周期、有效端口、正数超时和容量、数据路径冲突、活动硬件端口、
 WebSocket 暴露方式以及示例占位凭据。配置解析错误不会回显被拒绝的原始值。
 
-## 6. 敏感信息策略
+## 7. 敏感信息策略
 
 - `config.env` 仅属于本机环境并被版本库忽略。
 - 密钥、token、password、secret 和 credential 字段在诊断映射中统一显示为
