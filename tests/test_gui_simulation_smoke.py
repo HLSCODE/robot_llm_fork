@@ -72,6 +72,17 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             ApplicationSettings.defaults(),
             simulation=True,
         )
+        startup_action = ActionDefinition(
+            id="startup-task-action",
+            name="启动任务动作",
+            type=ActionType.WAIT,
+            parameters={"wait_seconds": 1.0},
+        )
+        self.services.composition.save_task(
+            "startup-visible",
+            (SequenceItem.from_definition(startup_action),),
+            origin="test",
+        )
         self.window = MainWindow(
             self.services,
             ThemeController(self.application, ThemeMode.SYSTEM),
@@ -117,6 +128,16 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertIsNotNone(self.window.workflow_view.sequence_list)
         self.assertIsNotNone(self.window.device_status_view)
         self.assertIsNotNone(self.window.device_control_view)
+        self.assertEqual(
+            1,
+            self.window.task_library_view.task_library_list.count(),
+        )
+        self.assertEqual(
+            "startup-visible.task",
+            self.window.task_library_view.task_library_list.item(0).data(
+                Qt.ItemDataRole.UserRole
+            ),
+        )
         for removed_alias in (
             "sequence_list",
             "control_panel",

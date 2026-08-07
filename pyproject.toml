@@ -79,6 +79,7 @@ full = [
 robot-llm = "src.bootstrap.launcher:main"
 t5l-dgus = "src.devices.displays.t5l_dgusii.cli:main"
 robot-data-validate = "src.data_collection.validation:main"
+robot-library-data = "src.persistence.cli:main"
 robot-llm-regression = "src.llm.regression:main"
 
 [build-system]

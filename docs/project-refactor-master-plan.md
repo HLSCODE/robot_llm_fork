@@ -4,8 +4,8 @@
 > 创建日期：2026-07-27  
 > 最近更新：2026-08-07
 >
-> 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（已规划）
-> 计划进度：138/154（136 DONE + 2 DROPPED，89.6%）
+> 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
+> 计划进度：139/154（137 DONE + 2 DROPPED，90.3%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -589,7 +589,7 @@ src/
 | D-023 | P1 | DONE | 已将聚合资源区拆为 `TaskLibraryView`、`ActionLibraryView`、独立 AI Assistant 和 `TaskComposerView` 四个 Side Bar 页面；Activity Bar 直接切换/收起页面，中央 Editor 删除任务组合 Tab；所有列表继续渲染 CompositionService/TaskComposerService 状态，未增加 GUI 业务状态源或兼容路径 |
 | D-024 | P0 | DONE | 设备详情、位姿、日志和基础控制已迁入非模态 Bottom Panel，Status Bar 展示同源设备摘要和通知；执行/编辑控制由五行大按钮收敛为两行命令区，停止任务、快速停止和设备急停在 Side/Bottom Panel 任意状态下常驻可见 |
 | D-025 | P2 | DONE | 已建立项目自制 CC0 单色 SVG + 编译 Qt Resource 图标体系，Activity/Status 入口按 Palette 与 1x/2x/3x 渲染，主要命令区删除 Emoji 装饰；schema v1 QSettings 偏好持久化 Side/Bottom 当前页、可见性与尺寸，严格拒绝损坏/未知版本/已删除页面并恢复默认，提供显式恢复默认布局命令和 wheel 内容门禁 |
-| D-026 | P0 | TODO | 修复主窗口初始化只加载动作而未刷新已保存任务的功能回归；启动后必须通过 `CompositionService.list_tasks()` 填充 TaskLibraryView，并增加“磁盘已有任务时首屏非空”的真实 MainWindow offscreen 回归 |
+| D-026 | P0 | DONE | 主窗口在首次渲染前通过 `CompositionService.list_tasks()` 刷新 TaskLibraryView；真实 MainWindow offscreen 回归预置磁盘任务并验证首屏条目名称，避免已保存任务再次显示为空 |
 
 ### 9.4 完成标准
 
@@ -1342,12 +1342,12 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-06 | M7 | D/G | GUI SVG 资产与布局偏好收口 | D-025 TODO → DONE；M7 完成 | 新增 8 个项目自制 CC0 单色 SVG、Qt Resource 清单及编译资源模块，Activity/Status 入口按 Palette 和 1x/2x/3x 渲染，主要命令区删除 Emoji 装饰；新增 schema v1 WorkbenchLayoutState 与 QSettings 存储，持久化 Side/Bottom 页、可见性和尺寸，严格拒绝损坏/未知版本/已删除页面并恢复默认；视图菜单提供恢复默认布局，wheel 强制包含源 SVG、许可证、qrc 与编译资源 | Compile、Ruff、Mypy（83 files）、Pytest（460 passed + 43 subtests，63.41%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过 |
 | 2026-08-06 | M7 | D/G | GUI Tooltip 与低描边视觉层级复核 | D-020/D-025 能力增强 | Activity Bar 原生大 Tooltip 替换为 350 ms 延迟的紧凑圆角主题气泡；浅色气泡使用浅色表面，深色气泡使用深色表面；全局 QSS 从重复容器描边改为背景层级，删除普通按钮、Tab、GroupBox、列表、StyledPanel、菜单栏、Activity Bar 和画布外框的装饰线，仅保留输入焦点、Splitter、节点与安全状态的必要边界 | Compile、Ruff、Mypy（83 files）、Pytest（464 passed + 43 subtests，63.47%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过 |
 | 2026-08-07 | M8 | A/D/E/G | 用户数据模型与自然语言命令重构立项 | A-014/A-015、D-026、E-014～E-016、G-029～G-033 新增为 TODO；ADR-M-016/ADR-M-017 → Accepted | 确认任务列表首屏漏刷新；确立唯一 `*.workflow.json`、WorkflowDocument v2 结构化控制流、动作库强类型/唯一 ID、按文件拆分 Skill、显式一次性迁移及 Action/Skill/Workflow/ExecutionControl typed command；不把单步设备命令机械包装成 Skill，不保留双格式或读取时迁移 | 文档评审；未执行代码和数据迁移 |
+| 2026-08-07 | M8 | D/G | 任务首屏回归与读取副作用清理 | D-026 TODO → DONE；G-030/G-032 前置能力完成 | 主窗口首次渲染前刷新已保存任务；Action/Task/Skill 的普通 load/list 不再迁移或写盘，新增 `robot-library-data validate|migrate` 显式入口与机器可读报告；动作加载增加重复 ID 拒绝，并修复活动数据中的 2 个冲突 ID | Ruff（src/tests）通过；聚焦 Pytest 27 passed；真实 `data/` 只读校验为 46 actions / 17 tasks / 11 skills；相关目录 Mypy 暴露既有 MainWindow/SkillRegistry 历史注解问题，本批未扩大范围清理 |
 
 ## 22. 建议的首批实施顺序
 
-1. **D-026**：先恢复已保存任务首屏加载并锁定 GUI 回归基线。
-2. **G-029/G-030/G-031**：同批冻结 Workflow、Action 和 Skill 新 Schema、目录边界及 JSON Schema，不先修改运行时数据。
-3. **G-032/G-033**：实现可重复、可预演、带备份和机器报告的一次性迁移；在 fixture 副本验证后迁移用户数据并直接删除旧格式入口。
+1. **G-029/G-030/G-031**：同批冻结并实现 Workflow、Action 和 Skill 新 Schema、目录边界及 JSON Schema。
+2. **G-032/G-033**：将现有显式 v0→v1 校验/迁移入口扩展为可重复、可预演、带备份和语义指纹的新目录迁移；在 fixture 副本验证后迁移用户数据并直接删除旧格式入口。
 4. **E-014/E-015/E-016**：在新目录模型上实现 typed command 和高频单步语音动作，保持统一预览、确认、资源租约与执行入口。
 5. **A-014/A-015**：在已有顺序/Loop 语义稳定后扩展结构化控制流 Compiler 与并行调度，先完成无硬件资源冲突、失败传播和取消测试，再进入真实设备验收。
 6. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。

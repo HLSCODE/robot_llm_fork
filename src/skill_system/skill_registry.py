@@ -125,33 +125,26 @@ class SkillRegistry:
             if document.requires_migration
             else document.collection
         )
-        parsed_skills: dict[str, Skill] = {}
-        for index, skill_data in enumerate(skills_data):
-            if not isinstance(skill_data, dict):
-                raise JsonDocumentSchemaError(
-                    f"{json_path.name} skill at index {index} must be a JSON object"
-                )
-            try:
-                skill = Skill.from_dict(skill_data)
-            except (KeyError, TypeError, ValueError) as exc:
-                raise JsonDocumentSchemaError(
-                    f"{json_path.name} skill at index {index} is invalid"
-                ) from exc
-            if skill.id in parsed_skills:
-                raise JsonDocumentSchemaError(
-                    f"{json_path.name} contains duplicate skill id {skill.id!r}"
-                )
-            parsed_skills[skill.id] = skill
+        parsed_skills = _parse_skills(json_path, skills_data)
 
-        if document.requires_migration:
-            migrate_collection_document(
-                json_path,
-                SKILL_LIBRARY_DOCUMENT,
-                [skill.to_dict() for skill in parsed_skills.values()],
-            )
         self._skills = parsed_skills
         logger.info("从 %s 加载了 %d 个技能", json_path, len(parsed_skills))
         return len(parsed_skills)
+
+    def migrate_json(self, json_path: str | Path) -> bool:
+        """Explicitly migrate one legacy skill document after validation."""
+        json_path = Path(json_path)
+        document = load_collection_document(json_path, SKILL_LIBRARY_DOCUMENT)
+        if not document.requires_migration:
+            return False
+        skills_data = _normalize_legacy_skills(document.collection)
+        parsed_skills = _parse_skills(json_path, skills_data)
+        migrate_collection_document(
+            json_path,
+            SKILL_LIBRARY_DOCUMENT,
+            [skill.to_dict() for skill in parsed_skills.values()],
+        )
+        return True
 
     def save_to_json(self, json_path: str | Path) -> None:
         """Persist the current registry as one versioned atomic document."""
@@ -264,3 +257,27 @@ def _normalize_legacy_skills(skills_data: list[Any]) -> list[Any]:
             if isinstance(step, dict):
                 step.setdefault("parameter_bindings", {})
     return normalized_skills
+
+
+def _parse_skills(
+    json_path: Path,
+    skills_data: list[Any],
+) -> dict[str, Skill]:
+    parsed_skills: dict[str, Skill] = {}
+    for index, skill_data in enumerate(skills_data):
+        if not isinstance(skill_data, dict):
+            raise JsonDocumentSchemaError(
+                f"{json_path.name} skill at index {index} must be a JSON object"
+            )
+        try:
+            skill = Skill.from_dict(skill_data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise JsonDocumentSchemaError(
+                f"{json_path.name} skill at index {index} is invalid"
+            ) from exc
+        if skill.id in parsed_skills:
+            raise JsonDocumentSchemaError(
+                f"{json_path.name} contains duplicate skill id {skill.id!r}"
+            )
+        parsed_skills[skill.id] = skill
+    return parsed_skills

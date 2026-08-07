@@ -13,6 +13,7 @@ from src.persistence.json_documents import (
 )
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.persistence.storage import JsonCompositionRepository
+from src.persistence.cli import run_data_operation
 from src.skill_system.default_skills import get_default_skills
 from src.skill_system.skill_registry import SkillRegistry
 
@@ -49,7 +50,7 @@ class CompositionDocumentTests(unittest.TestCase):
         self.assertEqual(1, task_document["schema_version"])
         self.assertEqual(1, len(task_document["entries"]))
 
-    def test_legacy_documents_migrate_once_and_preserve_exact_backup(self) -> None:
+    def test_legacy_document_reads_do_not_mutate_source_files(self) -> None:
         action = _action()
         legacy_actions = [action.to_dict()]
         self.actions_file.write_text(
@@ -69,6 +70,29 @@ class CompositionDocumentTests(unittest.TestCase):
 
         self.assertEqual([action.id], [item.id for item in loaded_actions])
         self.assertEqual(1, len(loaded_task or ()))
+        self.assertEqual(legacy_actions, _read_json(self.actions_file))
+        self.assertEqual(legacy_task, _read_json(task_path))
+        self.assertFalse(self.actions_file.with_name("actions.json.v0.bak").exists())
+        self.assertFalse(task_path.with_name("legacy.task.v0.bak").exists())
+
+    def test_explicit_legacy_migration_preserves_exact_backups(self) -> None:
+        action = _action()
+        legacy_actions = [action.to_dict()]
+        self.actions_file.write_text(
+            json.dumps(legacy_actions, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        task_path = self.tasks_directory / "legacy.task"
+        task_path.parent.mkdir(parents=True)
+        legacy_task = [SequenceItem.from_definition(action).to_dict()]
+        task_path.write_text(
+            json.dumps(legacy_task, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        self.assertTrue(self.repository.migrate_legacy_actions())
+        self.assertEqual(("legacy.task",), self.repository.migrate_legacy_tasks())
+
         self.assertEqual(
             legacy_actions,
             _read_json(self.actions_file.with_name("actions.json.v0.bak")),
@@ -165,7 +189,7 @@ class BuiltinDataTests(unittest.TestCase):
             registry.load_from_json(self.paths.skills_file),
         )
 
-    def test_legacy_skill_library_migrates_and_keeps_backup(self) -> None:
+    def test_legacy_skill_read_does_not_mutate_source_file(self) -> None:
         skill = get_default_skills()[0]
         legacy_document = {"skills": [skill.to_dict()]}
         self.paths.skills_file.write_text(
@@ -176,6 +200,21 @@ class BuiltinDataTests(unittest.TestCase):
         count = SkillRegistry().load_from_json(self.paths.skills_file)
 
         self.assertEqual(1, count)
+        self.assertEqual(legacy_document, _read_json(self.paths.skills_file))
+        self.assertFalse(
+            self.paths.skills_file.with_name("skills.json.v0.bak").exists()
+        )
+
+    def test_explicit_skill_migration_keeps_backup(self) -> None:
+        skill = get_default_skills()[0]
+        legacy_document = {"skills": [skill.to_dict()]}
+        self.paths.skills_file.write_text(
+            json.dumps(legacy_document, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        self.assertTrue(SkillRegistry().migrate_json(self.paths.skills_file))
+
         self.assertEqual(
             legacy_document,
             _read_json(self.paths.skills_file.with_name("skills.json.v0.bak")),
@@ -201,9 +240,8 @@ class BuiltinDataTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        count = SkillRegistry().load_from_json(self.paths.skills_file)
+        self.assertTrue(SkillRegistry().migrate_json(self.paths.skills_file))
 
-        self.assertEqual(1, count)
         migrated_skill = _read_json(self.paths.skills_file)["skills"][0]
         self.assertEqual("", migrated_skill["parameters"][0]["unit"])
         self.assertEqual({}, migrated_skill["steps"][0]["parameter_bindings"])
@@ -235,6 +273,50 @@ class BuiltinDataTests(unittest.TestCase):
             SkillRegistry().load_from_json(self.paths.skills_file)
 
         self.assertEqual([], SkillRegistry().list_skills())
+
+    def test_validate_operation_is_read_only_and_migrate_is_explicit(self) -> None:
+        action = _action()
+        legacy_actions = json.dumps([action.to_dict()], ensure_ascii=False)
+        legacy_task = json.dumps(
+            [SequenceItem.from_definition(action).to_dict()],
+            ensure_ascii=False,
+        )
+        skill = get_default_skills()[0]
+        legacy_skills = json.dumps(
+            {"skills": [skill.to_dict()]},
+            ensure_ascii=False,
+        )
+        self.paths.actions_file.write_text(legacy_actions, encoding="utf-8")
+        self.paths.tasks_directory.mkdir(parents=True)
+        (self.paths.tasks_directory / "demo.task").write_text(
+            legacy_task,
+            encoding="utf-8",
+        )
+        self.paths.skills_file.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.skills_file.write_text(legacy_skills, encoding="utf-8")
+
+        validated = run_data_operation(
+            actions_file=self.paths.actions_file,
+            tasks_directory=self.paths.tasks_directory,
+            skills_file=self.paths.skills_file,
+            migrate=False,
+        )
+
+        self.assertEqual((1, 1, 1), (
+            validated.action_count,
+            validated.task_count,
+            validated.skill_count,
+        ))
+        self.assertEqual(legacy_actions, self.paths.actions_file.read_text(encoding="utf-8"))
+        migrated = run_data_operation(
+            actions_file=self.paths.actions_file,
+            tasks_directory=self.paths.tasks_directory,
+            skills_file=self.paths.skills_file,
+            migrate=True,
+        )
+        self.assertTrue(migrated.migrated_actions)
+        self.assertEqual(("demo.task",), migrated.migrated_tasks)
+        self.assertTrue(migrated.migrated_skills)
 
 
 def _action() -> ActionDefinition:

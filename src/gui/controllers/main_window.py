@@ -131,6 +131,7 @@ class MainWindow(QMainWindow):
             self._publish_current_sequence
         )
         self.load_actions()
+        self.refresh_task_library()
         self._render_sequence(
             self._services.composition.sequence_entries()
         )

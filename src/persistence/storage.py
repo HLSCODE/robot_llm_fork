@@ -68,30 +68,26 @@ class JsonCompositionRepository:
                 self._actions_file,
                 ACTION_LIBRARY_DOCUMENT,
             )
-            actions = []
-            for index, raw_action in enumerate(document.collection):
-                if not isinstance(raw_action, dict):
-                    raise JsonDocumentSchemaError(
-                        f"{self._actions_file.name} action at index {index} must be a JSON object"
-                    )
-                if not raw_action.get("id"):
-                    raise JsonDocumentSchemaError(
-                        f"{self._actions_file.name} action at index {index} "
-                        "must declare a stable id"
-                    )
-                try:
-                    actions.append(ActionDefinition.from_dict(raw_action))
-                except (KeyError, TypeError, ValueError) as exc:
-                    raise JsonDocumentSchemaError(
-                        f"{self._actions_file.name} action at index {index} is invalid"
-                    ) from exc
-            if document.requires_migration:
-                migrate_collection_document(
-                    self._actions_file,
-                    ACTION_LIBRARY_DOCUMENT,
-                    [action.to_dict() for action in actions],
-                )
-            return actions
+            return self._parse_actions(document.collection)
+
+    def migrate_legacy_actions(self) -> bool:
+        """Explicitly migrate the action catalog; ordinary reads stay pure."""
+        with self._lock:
+            if not self._actions_file.is_file():
+                return False
+            document = load_collection_document(
+                self._actions_file,
+                ACTION_LIBRARY_DOCUMENT,
+            )
+            actions = self._parse_actions(document.collection)
+            if not document.requires_migration:
+                return False
+            migrate_collection_document(
+                self._actions_file,
+                ACTION_LIBRARY_DOCUMENT,
+                [action.to_dict() for action in actions],
+            )
+            return True
 
     def save_actions(
         self,
@@ -196,30 +192,25 @@ class JsonCompositionRepository:
             if not path.is_file():
                 return None
             document = load_collection_document(path, TASK_DOCUMENT)
-            entries: list[SequenceEntry] = []
-            for index, raw_entry in enumerate(document.collection):
-                if not isinstance(raw_entry, dict):
-                    raise JsonDocumentSchemaError(
-                        f"{path.name} entry at index {index} must be a JSON object"
-                    )
-                try:
-                    entry = (
-                        LoopBlock.from_dict(raw_entry)
-                        if raw_entry.get("kind") == "loop"
-                        else SequenceItem.from_dict(raw_entry)
-                    )
-                except (KeyError, TypeError, ValueError) as exc:
-                    raise JsonDocumentSchemaError(
-                        f"{path.name} entry at index {index} is invalid"
-                    ) from exc
-                entries.append(entry)
-            if document.requires_migration:
+            return self._parse_task_entries(path, document.collection)
+
+    def migrate_legacy_tasks(self) -> tuple[str, ...]:
+        """Explicitly migrate every legacy task after validating the full file."""
+        migrated: list[str] = []
+        with self._lock:
+            for task_name in self.list_task_names():
+                path = self._task_path(task_name)
+                document = load_collection_document(path, TASK_DOCUMENT)
+                entries = self._parse_task_entries(path, document.collection)
+                if not document.requires_migration:
+                    continue
                 migrate_collection_document(
                     path,
                     TASK_DOCUMENT,
                     [entry.to_dict() for entry in entries],
                 )
-            return entries
+                migrated.append(path.name)
+        return tuple(migrated)
 
     def save_task(
         self,
@@ -272,6 +263,60 @@ class JsonCompositionRepository:
 
     def _workflow_draft_path(self) -> Path:
         return self._tasks_directory / WORKFLOW_DRAFT_FILE_NAME
+
+    def _parse_actions(
+        self,
+        raw_actions: Sequence[object],
+    ) -> list[ActionDefinition]:
+        actions: list[ActionDefinition] = []
+        action_ids: set[str] = set()
+        for index, raw_action in enumerate(raw_actions):
+            if not isinstance(raw_action, dict):
+                raise JsonDocumentSchemaError(
+                    f"{self._actions_file.name} action at index {index} must be a JSON object"
+                )
+            if not raw_action.get("id"):
+                raise JsonDocumentSchemaError(
+                    f"{self._actions_file.name} action at index {index} "
+                    "must declare a stable id"
+                )
+            try:
+                action = ActionDefinition.from_dict(raw_action)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise JsonDocumentSchemaError(
+                    f"{self._actions_file.name} action at index {index} is invalid"
+                ) from exc
+            if action.id in action_ids:
+                raise JsonDocumentSchemaError(
+                    f"{self._actions_file.name} contains duplicate action id {action.id!r}"
+                )
+            action_ids.add(action.id)
+            actions.append(action)
+        return actions
+
+    @staticmethod
+    def _parse_task_entries(
+        path: Path,
+        raw_entries: Sequence[object],
+    ) -> list[SequenceEntry]:
+        entries: list[SequenceEntry] = []
+        for index, raw_entry in enumerate(raw_entries):
+            if not isinstance(raw_entry, dict):
+                raise JsonDocumentSchemaError(
+                    f"{path.name} entry at index {index} must be a JSON object"
+                )
+            try:
+                entry = (
+                    LoopBlock.from_dict(raw_entry)
+                    if raw_entry.get("kind") == "loop"
+                    else SequenceItem.from_dict(raw_entry)
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise JsonDocumentSchemaError(
+                    f"{path.name} entry at index {index} is invalid"
+                ) from exc
+            entries.append(entry)
+        return entries
 
     @staticmethod
     def _plain_name(value: str, label: str) -> str:
