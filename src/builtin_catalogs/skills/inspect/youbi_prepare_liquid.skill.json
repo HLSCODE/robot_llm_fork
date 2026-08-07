@@ -1,0 +1,427 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "youbi_prepare_liquid",
+    "name": "右臂双枪吸液",
+    "category": "检测",
+    "description": "右臂使用双枪交替从副杯吸取液体并吐入主杯，完成液体准备工作",
+    "icon": "💉",
+    "parameters": [],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "qu1",
+        "action_type": "CHANGE_GUN",
+        "parameters": {
+          "Gun_Position": 1,
+          "Operation": "取"
+        },
+        "parameter_bindings": {},
+        "description": "从枪位1取枪头",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "2",
+        "action_name": "beizi_temp",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.105176,
+            -0.251429,
+            -0.279415,
+            3.139,
+            0.017,
+            -2.902
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子中间点",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "3",
+        "action_name": "beizi_shangmian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207854,
+            -0.421895,
+            -0.230171,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "4",
+        "action_name": "beizi_limian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207839,
+            -0.421905,
+            -0.273585,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯内吸液位",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "5",
+        "action_name": "xiye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吸",
+          "容量": 500
+        },
+        "parameter_bindings": {},
+        "description": "吸取500ul液体",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "6",
+        "action_name": "beizi_shangmian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207854,
+            -0.421895,
+            -0.230171,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "7",
+        "action_name": "zhuye_temp",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.065727,
+            -0.425093,
+            -0.081294,
+            -3.005,
+            0.142,
+            -2.844
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到主杯中间点",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "8",
+        "action_name": "zhuye",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.058275,
+            -0.41235,
+            -0.15365,
+            -2.934,
+            0.428,
+            -2.722
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到主杯吐液位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "9",
+        "action_name": "tuye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吐",
+          "容量": 500
+        },
+        "parameter_bindings": {},
+        "description": "吐出500ul液体到主杯",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "10",
+        "action_name": "zhuye_temp",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.065727,
+            -0.425093,
+            -0.081294,
+            -3.005,
+            0.142,
+            -2.844
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动回中间点",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "11",
+        "action_name": "beizi_shangmian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207854,
+            -0.421895,
+            -0.230171,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "12",
+        "action_name": "fang1",
+        "action_type": "CHANGE_GUN",
+        "parameters": {
+          "Gun_Position": 1,
+          "Operation": "放"
+        },
+        "parameter_bindings": {},
+        "description": "将枪头1放回枪位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "13",
+        "action_name": "qu2",
+        "action_type": "CHANGE_GUN",
+        "parameters": {
+          "Gun_Position": 2,
+          "Operation": "取"
+        },
+        "parameter_bindings": {},
+        "description": "从枪位2取枪头",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "14",
+        "action_name": "beizi_temp",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.105176,
+            -0.251429,
+            -0.279415,
+            3.139,
+            0.017,
+            -2.902
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子中间点",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "15",
+        "action_name": "beizi_shangmian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207854,
+            -0.421895,
+            -0.230171,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "16",
+        "action_name": "beizi_limian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207839,
+            -0.421905,
+            -0.273585,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯内吸液位",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "17",
+        "action_name": "xiye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吸",
+          "容量": 500
+        },
+        "parameter_bindings": {},
+        "description": "吸取500ul液体",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "18",
+        "action_name": "beizi_shangmian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207854,
+            -0.421895,
+            -0.230171,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "19",
+        "action_name": "zhuye_temp",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.065727,
+            -0.425093,
+            -0.081294,
+            -3.005,
+            0.142,
+            -2.844
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到主杯中间点",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "20",
+        "action_name": "zhuye",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.058275,
+            -0.41235,
+            -0.15365,
+            -2.934,
+            0.428,
+            -2.722
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到主杯吐液位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "21",
+        "action_name": "tuye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吐",
+          "容量": 500
+        },
+        "parameter_bindings": {},
+        "description": "吐出500ul液体到主杯",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "22",
+        "action_name": "beizi_shangmian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207854,
+            -0.421895,
+            -0.230171,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到杯子上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "23",
+        "action_name": "fang2",
+        "action_type": "CHANGE_GUN",
+        "parameters": {
+          "Gun_Position": 2,
+          "Operation": "放"
+        },
+        "parameter_bindings": {},
+        "description": "将枪头2放回枪位",
+        "estimated_time": 3.0
+      }
+    ],
+    "examples": [
+      "右臂双枪吸液",
+      "吸取液体到主杯",
+      "双枪交替吸吐"
+    ],
+    "tags": [
+      "右臂",
+      "双枪",
+      "吸液",
+      "吐液",
+      "youbi"
+    ]
+  }
+}

@@ -1,24 +1,24 @@
 """Skill registry and versioned user skill-library persistence."""
 
-from copy import deepcopy
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from ..persistence.json_documents import (
-    CollectionDocumentSpec,
     JsonDocumentSchemaError,
-    load_collection_document,
-    migrate_collection_document,
-    write_collection_document,
+    SingleDocumentSpec,
+    load_single_document,
 )
 from .models import Skill, SkillCategory
+from ..domain.action_schema import validate_action_parameters
+from ..domain.models import ActionType
 
 logger = logging.getLogger(__name__)
-SKILL_LIBRARY_DOCUMENT = CollectionDocumentSpec(
-    schema="robot_llm.skills",
-    collection_key="skills",
-    legacy_kind="mapping",
+SKILL_DOCUMENT = SingleDocumentSpec(
+    schema="robot_llm.skill",
+    content_key="skill",
+    current_version=2,
+    schema_reference="../../schemas/skill.schema.json",
 )
 
 
@@ -111,50 +111,21 @@ class SkillRegistry:
 
     # ==================== 加载与保存 ====================
 
-    def load_from_json(self, json_path: str | Path) -> int:
-        """Load and atomically replace the registry from a versioned file."""
-        json_path = Path(json_path)
-        if not json_path.is_file():
-            raise FileNotFoundError(json_path)
-        document = load_collection_document(
-            json_path,
-            SKILL_LIBRARY_DOCUMENT,
-        )
-        skills_data = (
-            _normalize_legacy_skills(document.collection)
-            if document.requires_migration
-            else document.collection
-        )
-        parsed_skills = _parse_skills(json_path, skills_data)
+    def load_directory(self, directory: str | Path) -> int:
+        """Validate all skill files, then atomically replace the registry."""
+        directory = Path(directory)
+        skills = load_skill_documents(directory)
+        parsed_skills: dict[str, Skill] = {}
+        for skill in skills:
+            if skill.id in parsed_skills:
+                raise JsonDocumentSchemaError(
+                    f"skill directory duplicates skill id {skill.id!r}"
+                )
+            parsed_skills[skill.id] = skill
 
         self._skills = parsed_skills
-        logger.info("从 %s 加载了 %d 个技能", json_path, len(parsed_skills))
+        logger.info("从 %s 加载了 %d 个技能", directory, len(parsed_skills))
         return len(parsed_skills)
-
-    def migrate_json(self, json_path: str | Path) -> bool:
-        """Explicitly migrate one legacy skill document after validation."""
-        json_path = Path(json_path)
-        document = load_collection_document(json_path, SKILL_LIBRARY_DOCUMENT)
-        if not document.requires_migration:
-            return False
-        skills_data = _normalize_legacy_skills(document.collection)
-        parsed_skills = _parse_skills(json_path, skills_data)
-        migrate_collection_document(
-            json_path,
-            SKILL_LIBRARY_DOCUMENT,
-            [skill.to_dict() for skill in parsed_skills.values()],
-        )
-        return True
-
-    def save_to_json(self, json_path: str | Path) -> None:
-        """Persist the current registry as one versioned atomic document."""
-        json_path = Path(json_path)
-        write_collection_document(
-            json_path,
-            SKILL_LIBRARY_DOCUMENT,
-            [skill.to_dict() for skill in self._skills.values()],
-        )
-        logger.info("技能库已保存到 %s", json_path)
 
     # ==================== 查询方法 ====================
 
@@ -244,40 +215,69 @@ class SkillRegistry:
         SkillRegistry._instance = None
 
 
-def _normalize_legacy_skills(skills_data: list[Any]) -> list[Any]:
-    """Add fields introduced before schema v1, without relaxing schema v1."""
-    normalized_skills = deepcopy(skills_data)
-    for skill_data in normalized_skills:
-        if not isinstance(skill_data, dict):
-            continue
-        for parameter in skill_data.get("parameters", []):
-            if isinstance(parameter, dict):
-                parameter.setdefault("unit", "")
-        for step in skill_data.get("steps", []):
-            if isinstance(step, dict):
-                step.setdefault("parameter_bindings", {})
-    return normalized_skills
+def _parse_skill(path: Path, skill_data: dict[str, Any]) -> Skill:
+    try:
+        skill = Skill.from_dict(skill_data)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise JsonDocumentSchemaError(f"{path.name} contains an invalid skill") from exc
+    _validate_skill(path, skill)
+    return skill
 
 
-def _parse_skills(
-    json_path: Path,
-    skills_data: list[Any],
-) -> dict[str, Skill]:
-    parsed_skills: dict[str, Skill] = {}
-    for index, skill_data in enumerate(skills_data):
-        if not isinstance(skill_data, dict):
+def _validate_skill(path: Path, skill: Skill) -> None:
+    parameter_names = [parameter.name for parameter in skill.parameters]
+    if len(parameter_names) != len(set(parameter_names)):
+        raise JsonDocumentSchemaError(f"{path.name} contains duplicate parameter names")
+    step_ids = [step.step_id for step in skill.steps]
+    if not step_ids or len(step_ids) != len(set(step_ids)):
+        raise JsonDocumentSchemaError(f"{path.name} requires unique non-empty step ids")
+    for step in skill.steps:
+        action_type = _resolve_action_type(path, step.action_type)
+        validation = validate_action_parameters(action_type, step.parameters)
+        if not validation.is_valid:
             raise JsonDocumentSchemaError(
-                f"{json_path.name} skill at index {index} must be a JSON object"
+                f"{path.name} step {step.step_id!r} has invalid parameters: "
+                f"{validation.message}"
             )
-        try:
-            skill = Skill.from_dict(skill_data)
-        except (KeyError, TypeError, ValueError) as exc:
+        for parameter_name, action_field in step.parameter_bindings.items():
+            if parameter_name not in parameter_names:
+                raise JsonDocumentSchemaError(
+                    f"{path.name} step {step.step_id!r} binds unknown skill parameter "
+                    f"{parameter_name!r}"
+                )
+            if action_field not in step.parameters:
+                raise JsonDocumentSchemaError(
+                    f"{path.name} step {step.step_id!r} binds missing action field "
+                    f"{action_field!r}"
+                )
+
+
+def _resolve_action_type(path: Path, value: str) -> ActionType:
+    normalized = value.strip().upper()
+    for action_type in ActionType:
+        if normalized in {action_type.name, action_type.value.upper()}:
+            return action_type
+    raise JsonDocumentSchemaError(
+        f"{path.name} declares unsupported action type {value!r}"
+    )
+
+
+def load_skill_documents(directory: Path) -> tuple[Skill, ...]:
+    """Read a directory deterministically without changing a registry."""
+    if not directory.is_dir():
+        raise FileNotFoundError(directory)
+    paths = sorted(
+        directory.rglob("*.skill.json"),
+        key=lambda path: path.relative_to(directory).as_posix(),
+    )
+    skills: list[Skill] = []
+    ids: set[str] = set()
+    for path in paths:
+        skill = _parse_skill(path, load_single_document(path, SKILL_DOCUMENT))
+        if skill.id in ids:
             raise JsonDocumentSchemaError(
-                f"{json_path.name} skill at index {index} is invalid"
-            ) from exc
-        if skill.id in parsed_skills:
-            raise JsonDocumentSchemaError(
-                f"{json_path.name} contains duplicate skill id {skill.id!r}"
+                f"{path.name} duplicates skill id {skill.id!r}"
             )
-        parsed_skills[skill.id] = skill
-    return parsed_skills
+        ids.add(skill.id)
+        skills.append(skill)
+    return tuple(skills)

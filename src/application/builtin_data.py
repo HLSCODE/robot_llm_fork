@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..configuration.data_paths import ApplicationDataPaths
-from ..persistence.json_documents import write_collection_document
-from ..domain.models import ActionDefinition, ActionType
-from ..persistence.storage import ACTION_LIBRARY_DOCUMENT
-from ..skill_system.default_skills import get_default_skills
-from ..skill_system.skill_registry import SKILL_LIBRARY_DOCUMENT
+from ..persistence.json_documents import read_json_document, write_json_atomic
+from ..persistence.storage import ACTION_LIBRARY_FILE_NAME
+
+
+_BUILTIN_CATALOG_ROOT = Path(__file__).resolve().parents[1] / "builtin_catalogs"
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,37 +28,46 @@ class BuiltinDataInstaller:
         created_files: list[Path] = []
         self._paths.tasks_directory.mkdir(parents=True, exist_ok=True)
 
-        if not self._paths.actions_file.exists():
-            write_collection_document(
-                self._paths.actions_file,
-                ACTION_LIBRARY_DOCUMENT,
-                [action.to_dict() for action in _builtin_actions()],
-            )
-            created_files.append(self._paths.actions_file)
+        for source in sorted((_BUILTIN_CATALOG_ROOT / "schemas").glob("*.json")):
+            destination = self._paths.root / "schemas" / source.name
+            if not destination.exists():
+                _copy_json(source, destination)
+                created_files.append(destination)
 
-        if not self._paths.skills_file.exists():
-            write_collection_document(
-                self._paths.skills_file,
-                SKILL_LIBRARY_DOCUMENT,
-                [skill.to_dict() for skill in get_default_skills()],
+        actions_file = (
+            self._paths.actions_directory / ACTION_LIBRARY_FILE_NAME
+        )
+        if not actions_file.exists():
+            _copy_json(
+                _BUILTIN_CATALOG_ROOT / "actions" / ACTION_LIBRARY_FILE_NAME,
+                actions_file,
             )
-            created_files.append(self._paths.skills_file)
+            created_files.append(actions_file)
+
+        if not any(self._paths.skills_directory.rglob("*.skill.json")):
+            source_directory = _BUILTIN_CATALOG_ROOT / "skills"
+            for source in sorted(source_directory.rglob("*.skill.json")):
+                destination = (
+                    self._paths.skills_directory
+                    / source.relative_to(source_directory)
+                )
+                _copy_json(source, destination)
+                created_files.append(destination)
 
         return BuiltinDataInstallResult(tuple(created_files))
 
 
-def _builtin_actions() -> tuple[ActionDefinition, ...]:
-    return (
-        ActionDefinition(
-            id="builtin.wait.1s",
-            name="等待 1 秒",
-            type=ActionType.WAIT,
-            parameters={"wait_seconds": 1.0},
-        ),
-        ActionDefinition(
-            id="builtin.wait.3s",
-            name="等待 3 秒",
-            type=ActionType.WAIT,
-            parameters={"wait_seconds": 3.0},
-        ),
-    )
+def _copy_json(source: Path, destination: Path) -> None:
+    if not source.is_file():
+        raise FileNotFoundError(source)
+    document = read_json_document(source)
+    if isinstance(document, dict):
+        schema_references = {
+            "robot_llm.actions": "../schemas/action-library.schema.json",
+            "robot_llm.skill": "../../schemas/skill.schema.json",
+        }
+        schema = document.get("schema")
+        reference = schema_references.get(schema) if isinstance(schema, str) else None
+        if reference is not None:
+            document["$schema"] = reference
+    write_json_atomic(destination, document)

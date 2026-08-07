@@ -14,9 +14,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 @dataclass(frozen=True, slots=True)
 class ApplicationDataPaths:
     root: Path
-    actions_file: Path
+    actions_directory: Path
     tasks_directory: Path
-    skills_file: Path
+    skills_directory: Path
 
     @classmethod
     def from_settings(cls, settings: DataSettings) -> ApplicationDataPaths:
@@ -26,17 +26,17 @@ class ApplicationDataPaths:
         )
         return cls(
             root=root,
-            actions_file=_resolve_override(
-                settings.actions_library_path,
-                default=root / "actions_library.json",
+            actions_directory=_resolve_override(
+                settings.actions_library_directory,
+                default=root / "actions",
             ),
             tasks_directory=_resolve_override(
                 settings.tasks_directory,
                 default=root / "tasks",
             ),
-            skills_file=_resolve_override(
-                settings.skill_library_path,
-                default=root / "skills" / "skill_library.json",
+            skills_directory=_resolve_override(
+                settings.skill_library_directory,
+                default=root / "skills",
             ),
         )
 

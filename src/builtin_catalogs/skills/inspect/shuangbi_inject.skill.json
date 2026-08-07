@@ -1,0 +1,235 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "shuangbi_inject",
+    "name": "双臂注入液体",
+    "category": "检测",
+    "description": "双臂协同操作，左臂持瓶悬空，右臂从主杯吸液后注入瓶中",
+    "icon": "🤝",
+    "parameters": [],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "hengzhejia",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "左",
+          "模式": "move_j",
+          "点位": [
+            0.277553,
+            -0.002143,
+            -0.436172,
+            2.441,
+            1.486,
+            -0.628
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "左臂移动到横折叠位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "2",
+        "action_name": "30",
+        "action_type": "MOVE",
+        "parameters": {
+          "目标": "身体",
+          "位置": 300000
+        },
+        "parameter_bindings": {},
+        "description": "身体移动到30位",
+        "estimated_time": 5.0
+      },
+      {
+        "step_id": "3",
+        "action_name": "jiazhua guan",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "夹爪",
+          "编号": 1,
+          "操作": "关"
+        },
+        "parameter_bindings": {},
+        "description": "关闭夹爪抓取瓶子",
+        "estimated_time": 1.0
+      },
+      {
+        "step_id": "4",
+        "action_name": "5",
+        "action_type": "MOVE",
+        "parameters": {
+          "目标": "身体",
+          "位置": 50000
+        },
+        "parameter_bindings": {},
+        "description": "身体移动到工位",
+        "estimated_time": 5.0
+      },
+      {
+        "step_id": "5",
+        "action_name": "kongzhongpingzi",
+        "action_type": "MOVE",
+        "parameters": {
+          "目标": "机械臂",
+          "臂": "左",
+          "模式": "move_j",
+          "点位": [
+            -0.105254,
+            -0.192894,
+            -0.383207,
+            1.98,
+            1.478,
+            -1.067
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "左臂移动到悬空持瓶位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "6",
+        "action_name": "xiye_kongzhong",
+        "action_type": "MOVE",
+        "parameters": {
+          "目标": "机械臂",
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.220717,
+            -0.171187,
+            0.015838,
+            -3.114,
+            0.0,
+            1.905
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "右臂移动到吸液准备位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "7",
+        "action_name": "xiye1_kongzhong",
+        "action_type": "MOVE",
+        "parameters": {
+          "目标": "机械臂",
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.220717,
+            -0.171187,
+            -0.025838,
+            -3.114,
+            0.0,
+            1.905
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "右臂下降到吸液位",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "8",
+        "action_name": "xiye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吸",
+          "容量": 500
+        },
+        "parameter_bindings": {},
+        "description": "吸取500ul液体",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "9",
+        "action_name": "xiye_kongzhong",
+        "action_type": "MOVE",
+        "parameters": {
+          "目标": "机械臂",
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.220717,
+            -0.171187,
+            0.015838,
+            -3.114,
+            0.0,
+            1.905
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "右臂移动到吐液准备位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "10",
+        "action_name": "hengzhejia",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "左",
+          "模式": "move_j",
+          "点位": [
+            0.277553,
+            -0.002143,
+            -0.436172,
+            2.441,
+            1.486,
+            -0.628
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "左臂移动到瓶口对准位",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "11",
+        "action_name": "beizi_shangmian",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "右",
+          "模式": "move_l",
+          "点位": [
+            -0.207854,
+            -0.421895,
+            -0.230171,
+            -3.09,
+            0.005,
+            -2.858
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "右臂移动到瓶口上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "12",
+        "action_name": "tuye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吐",
+          "容量": 500
+        },
+        "parameter_bindings": {},
+        "description": "吐出液体注入瓶中",
+        "estimated_time": 2.0
+      }
+    ],
+    "examples": [
+      "双臂协同注入液体",
+      "左臂持瓶右臂吸液",
+      "双臂操作注入"
+    ],
+    "tags": [
+      "双臂",
+      "协同",
+      "持瓶",
+      "吸液",
+      "注入",
+      "shuangbi"
+    ]
+  }
+}

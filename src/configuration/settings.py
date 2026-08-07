@@ -33,9 +33,9 @@ class LoggingSettings:
 @dataclass(frozen=True, slots=True)
 class DataSettings:
     robot_data_dir: str = "data"
-    actions_library_path: str = ""
+    actions_library_directory: str = ""
     tasks_directory: str = ""
-    skill_library_path: str = ""
+    skill_library_directory: str = ""
 
 
 @dataclass(frozen=True, slots=True)

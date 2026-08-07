@@ -27,7 +27,7 @@ class CompositionServiceTests(unittest.TestCase):
         self._temporary_directory = TemporaryDirectory()
         root = Path(self._temporary_directory.name)
         self.repository = JsonCompositionRepository(
-            actions_file=root / "actions.json",
+            actions_directory=root / "actions",
             tasks_directory=root / "tasks",
         )
         self.service = CompositionService(self.repository)
@@ -43,10 +43,10 @@ class CompositionServiceTests(unittest.TestCase):
             origin="test",
         )
 
-        created.parameters["nested"]["value"] = 99
+        created.parameters["补偿"]["value"] = 99
         stored = self.service.get_action("action-1")
 
-        self.assertEqual(1, stored.parameters["nested"]["value"])
+        self.assertEqual(1, stored.parameters["补偿"]["value"])
         self.service.append_action_ids(
             ("action-1",),
             origin="test",
@@ -200,7 +200,7 @@ class CompositionWebSocketTests(unittest.TestCase):
             root = Path(temporary_directory)
             composition = CompositionService(
                 JsonCompositionRepository(
-                    actions_file=root / "actions.json",
+                    actions_directory=root / "actions",
                     tasks_directory=root / "tasks",
                 )
             )
@@ -259,7 +259,7 @@ class CompositionWebSocketTests(unittest.TestCase):
             root = Path(temporary_directory)
             composition = CompositionService(
                 JsonCompositionRepository(
-                    actions_file=root / "actions.json",
+                    actions_directory=root / "actions",
                     tasks_directory=root / "tasks",
                 )
             )
@@ -316,10 +316,13 @@ def _action(
     return ActionDefinition(
         id=action_id,
         name=f"Action {action_id}",
-        type=ActionType.WAIT,
+        type=ActionType.MOVE,
         parameters={
-            "duration": 0,
-            "nested": {"value": nested_value},
+            "目标": "机械臂",
+            "臂": "左",
+            "模式": "move_j",
+            "点位": [0, 0, 0, 0, 0, 0],
+            "补偿": {"value": nested_value},
         },
     )
 

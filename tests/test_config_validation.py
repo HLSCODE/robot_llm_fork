@@ -21,9 +21,9 @@ from src.configuration.settings import ApplicationSettings
 def _config(root: Path, **overrides):
     values = {
         "ROBOT_DATA_DIR": str(root),
-        "ACTIONS_LIBRARY_PATH": "",
+        "ACTIONS_LIBRARY_DIRECTORY": "",
         "TASKS_DIRECTORY": "",
-        "SKILL_LIBRARY_PATH": "",
+        "SKILL_LIBRARY_DIRECTORY": "",
         "LOG_LEVEL": "INFO",
         "LLM_DEFAULT_PROVIDER": "minicpm",
         "OPENAI_API_KEY": "",
@@ -303,8 +303,8 @@ class ConfigurationValidationTests(unittest.TestCase):
             report = validate_startup_configuration(
                 _config(
                     root,
-                    ACTIONS_LIBRARY_PATH="same.json",
-                    SKILL_LIBRARY_PATH="same.json",
+                    ACTIONS_LIBRARY_DIRECTORY="same",
+                    SKILL_LIBRARY_DIRECTORY="same",
                 ),
                 _options(websocket_enabled=False),
             )
@@ -367,8 +367,8 @@ class ConfigurationValidationTests(unittest.TestCase):
             )
 
         self.assertEqual(root.resolve(), paths.root)
-        self.assertEqual(root.resolve() / "actions_library.json", paths.actions_file)
-        self.assertEqual(root.resolve() / "skills" / "skill_library.json", paths.skills_file)
+        self.assertEqual(root.resolve() / "actions", paths.actions_directory)
+        self.assertEqual(root.resolve() / "skills", paths.skills_directory)
         self.assertEqual(
             Path.cwd().resolve() / "custom" / "tasks",
             paths.tasks_directory,

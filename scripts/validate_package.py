@@ -17,6 +17,10 @@ REQUIRED_WHEEL_MEMBERS = {
     "src/__init__.py",
     "src/__main__.py",
     "src/bootstrap/launcher.py",
+    "src/builtin_catalogs/actions/library.json",
+    "src/builtin_catalogs/schemas/action-library.schema.json",
+    "src/builtin_catalogs/schemas/skill.schema.json",
+    "src/builtin_catalogs/skills/inspect/absorb_liquid.skill.json",
     "src/configuration/settings.py",
     "src/domain/models.py",
     "src/execution/workflows/powder_dispense.py",
@@ -33,6 +37,7 @@ REQUIRED_WHEEL_MEMBERS = {
     "src/gui/assets/icons/controls.svg",
     "src/gui/assets/icons/logs.svg",
     "src/persistence/storage.py",
+    "src/skill_system/builtin_catalog.py",
 }
 FORBIDDEN_WHEEL_PREFIXES = (
     "src/actions/",
@@ -43,7 +48,9 @@ FORBIDDEN_WHEEL_PREFIXES = (
     "src/vision/pictures/",
     "src/widgets/",
 )
-FORBIDDEN_WHEEL_MEMBERS: set[str] = set()
+FORBIDDEN_WHEEL_MEMBERS = {
+    "src/skill_system/default_skills.py",
+}
 
 
 def main(argv: list[str] | None = None) -> int:

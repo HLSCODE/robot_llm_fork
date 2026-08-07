@@ -94,9 +94,9 @@ class _EnvironmentConfig:
     SIMULATION_MODE: bool = False
     GUI_THEME: str = "system"
     ROBOT_DATA_DIR: str = "data"
-    ACTIONS_LIBRARY_PATH: str = ""
+    ACTIONS_LIBRARY_DIRECTORY: str = ""
     TASKS_DIRECTORY: str = ""
-    SKILL_LIBRARY_PATH: str = ""
+    SKILL_LIBRARY_DIRECTORY: str = ""
     DATA_COLLECTION_FPS: int = 30
     DATA_COLLECTION_CAMERA_INDEX: int = 0
     DATA_COLLECTION_ARMS: tuple[str, ...] = ("left", "right")
@@ -516,9 +516,13 @@ class _EnvironmentConfig:
             "yes",
         )
         instance.ROBOT_DATA_DIR = os.getenv("ROBOT_DATA_DIR", "data")
-        instance.ACTIONS_LIBRARY_PATH = os.getenv("ACTIONS_LIBRARY_PATH", "")
+        instance.ACTIONS_LIBRARY_DIRECTORY = os.getenv(
+            "ACTIONS_LIBRARY_DIRECTORY", ""
+        )
         instance.TASKS_DIRECTORY = os.getenv("TASKS_DIRECTORY", "")
-        instance.SKILL_LIBRARY_PATH = os.getenv("SKILL_LIBRARY_PATH", "")
+        instance.SKILL_LIBRARY_DIRECTORY = os.getenv(
+            "SKILL_LIBRARY_DIRECTORY", ""
+        )
         instance.DATA_COLLECTION_FPS = int(os.getenv("DATA_COLLECTION_FPS", "30"))
         instance.DATA_COLLECTION_CAMERA_INDEX = int(os.getenv("DATA_COLLECTION_CAMERA_INDEX", "0"))
         instance.DATA_COLLECTION_ARMS = tuple(

@@ -55,6 +55,7 @@ REMOVED_ARCHITECTURE_PATHS = (
     "src/vision/balance_reader_simple.py",
     "src/vision/pictures",
     "src/widgets",
+    "src/skill_system/default_skills.py",
 )
 STABLE_LAYER_DEPENDENCIES = {
     "src/domain": ("src.domain",),

@@ -34,7 +34,7 @@ class ActionSchemaTests(unittest.TestCase):
             {
                 "臂": "左",
                 "模式": "move_j",
-                "点位": "[0, 0, 0, 0, 0, 0]",
+                "点位": [0, 0, 0, 0, 0, 0],
             },
         )
 
@@ -68,7 +68,7 @@ class ActionSchemaTests(unittest.TestCase):
                 "目标": "机械臂",
                 "臂": "左",
                 "模式": "move_j",
-                "点位": "[0, 0, 0, 0, 0, 0]",
+                "点位": [0, 0, 0, 0, 0, 0],
                 "定位补偿": {"enabled": True},
             },
         )

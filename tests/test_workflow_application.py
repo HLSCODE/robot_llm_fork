@@ -92,7 +92,7 @@ class WorkflowPersistenceTests(unittest.TestCase):
             root = Path(temporary_directory)
             service = CompositionService(
                 JsonCompositionRepository(
-                    actions_file=root / "actions.json",
+                    actions_directory=root / "actions",
                     tasks_directory=root / "tasks",
                 )
             )
@@ -123,7 +123,7 @@ class WorkflowPersistenceTests(unittest.TestCase):
             root = Path(temporary_directory)
             service = CompositionService(
                 JsonCompositionRepository(
-                    actions_file=root / "actions.json",
+                    actions_directory=root / "actions",
                     tasks_directory=root / "tasks",
                 )
             )

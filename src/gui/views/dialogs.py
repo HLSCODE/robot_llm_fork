@@ -265,9 +265,13 @@ class SchemaActionForm(QWidget):
             widget.setValue(float(value or 0.0))
         else:
             widget = QLineEdit()
-            if field_type == "object":
+            if field_type in {"object", "pose"}:
                 widget.setText("" if value is None else json.dumps(value, ensure_ascii=False))
-                widget.setPlaceholderText("JSON 对象，例如：{}")
+                widget.setPlaceholderText(
+                    "JSON 对象，例如：{}"
+                    if field_type == "object"
+                    else "JSON 数组，例如：[x, y, z, rx, ry, rz]"
+                )
             else:
                 widget.setText("" if value is None else str(value))
                 widget.setPlaceholderText(schema.get("placeholder", ""))
@@ -293,6 +297,23 @@ class SchemaActionForm(QWidget):
             if not isinstance(value, dict):
                 raise ValueError(f"{schema.get('label', '对象字段')} 必须是 JSON 对象")
             return value
+        if schema["type"] == "pose":
+            if not text:
+                return []
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError("点位必须是合法 JSON 数组") from exc
+            if (
+                not isinstance(value, list)
+                or len(value) != 6
+                or any(
+                    not isinstance(item, (int, float)) or isinstance(item, bool)
+                    for item in value
+                )
+            ):
+                raise ValueError("点位必须包含 6 个数值")
+            return [float(item) for item in value]
         if not text and not schema.get("required") and "default" not in schema:
             return None
         return text

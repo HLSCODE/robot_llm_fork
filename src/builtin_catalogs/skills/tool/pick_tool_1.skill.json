@@ -1,0 +1,38 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "pick_tool_1",
+    "name": "换枪头1",
+    "category": "工具",
+    "description": "从枪位1取下枪头并安装到快换手上",
+    "icon": "🔧",
+    "parameters": [],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "qu1",
+        "action_type": "CHANGE_GUN",
+        "parameters": {
+          "Gun_Position": 1,
+          "Operation": "取"
+        },
+        "parameter_bindings": {},
+        "description": "从枪位1取枪头",
+        "estimated_time": 3.0
+      }
+    ],
+    "examples": [
+      "取枪头1",
+      "更换到枪头1",
+      "装上枪头1"
+    ],
+    "tags": [
+      "枪头",
+      "更换",
+      "取",
+      "gun"
+    ]
+  }
+}

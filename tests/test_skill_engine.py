@@ -15,7 +15,7 @@ from src.skill_system import (
     SkillStep,
     ValidationCode,
 )
-from src.skill_system.default_skills import get_default_skills
+from src.skill_system.builtin_catalog import get_builtin_skills
 
 
 class _SkillRegistry:
@@ -44,7 +44,7 @@ def _skill_with_action_types(*action_types: object) -> Skill:
                 "目标": "机械臂",
                 "臂": "左",
                 "模式": "move_j",
-                "点位": "[0, 0, 0, 0, 0, 0]",
+                "点位": [0, 0, 0, 0, 0, 0],
             },
             ActionType.BASE_MOVE: {"move_mode": "position"},
             ActionType.MANIPULATE: {
@@ -149,7 +149,7 @@ class SkillEngineParameterTests(unittest.TestCase):
     def _default_skill(skill_id: str) -> Skill:
         return next(
             skill
-            for skill in get_default_skills()
+            for skill in get_builtin_skills()
             if skill.id == skill_id
         )
 
@@ -166,7 +166,7 @@ class SkillEngineParameterTests(unittest.TestCase):
         self.assertEqual(750, sequence[1].definition.parameters["容量"])
 
     def test_every_default_skill_expands_through_action_schema(self):
-        for skill in get_default_skills():
+        for skill in get_builtin_skills():
             with self.subTest(skill_id=skill.id):
                 engine = SkillEngine(
                     cast(SkillRegistry, _SkillRegistry(skill))

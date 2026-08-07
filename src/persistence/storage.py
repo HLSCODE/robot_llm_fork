@@ -19,6 +19,7 @@ from ..domain.models import (
     SequenceEntry,
     SequenceItem,
 )
+from ..domain.action_schema import validate_action_parameters
 from ..domain.workflow import WorkflowDocument, WorkflowDocumentError
 
 
@@ -27,7 +28,10 @@ ACTION_LIBRARY_DOCUMENT = CollectionDocumentSpec(
     schema="robot_llm.actions",
     collection_key="actions",
     legacy_kind="list",
+    current_version=2,
+    schema_reference="../schemas/action-library.schema.json",
 )
+ACTION_LIBRARY_FILE_NAME = "library.json"
 TASK_DOCUMENT = CollectionDocumentSpec(
     schema="robot_llm.task",
     collection_key="entries",
@@ -43,13 +47,13 @@ class JsonCompositionRepository:
     def __init__(
         self,
         *,
-        actions_file: Path | None = None,
+        actions_directory: Path | None = None,
         tasks_directory: Path | None = None,
     ) -> None:
-        self._actions_file = (
-            actions_file
-            if actions_file is not None
-            else _PROJECT_ROOT / "data" / "actions_library.json"
+        self._actions_directory = (
+            actions_directory
+            if actions_directory is not None
+            else _PROJECT_ROOT / "data" / "actions"
         )
         self._tasks_directory = (
             tasks_directory if tasks_directory is not None else _PROJECT_ROOT / "data" / "tasks"
@@ -62,32 +66,18 @@ class JsonCompositionRepository:
 
     def load_actions(self) -> list[ActionDefinition]:
         with self._lock:
-            if not self._actions_file.is_file():
+            actions_file = self._actions_path()
+            if not actions_file.is_file():
                 return []
             document = load_collection_document(
-                self._actions_file,
+                actions_file,
                 ACTION_LIBRARY_DOCUMENT,
             )
-            return self._parse_actions(document.collection)
-
-    def migrate_legacy_actions(self) -> bool:
-        """Explicitly migrate the action catalog; ordinary reads stay pure."""
-        with self._lock:
-            if not self._actions_file.is_file():
-                return False
-            document = load_collection_document(
-                self._actions_file,
-                ACTION_LIBRARY_DOCUMENT,
-            )
-            actions = self._parse_actions(document.collection)
-            if not document.requires_migration:
-                return False
-            migrate_collection_document(
-                self._actions_file,
-                ACTION_LIBRARY_DOCUMENT,
-                [action.to_dict() for action in actions],
-            )
-            return True
+            if document.requires_migration:
+                raise JsonDocumentSchemaError(
+                    f"{actions_file.name} must use the versioned action-library schema"
+                )
+            return self._parse_actions(actions_file, document.collection)
 
     def save_actions(
         self,
@@ -96,7 +86,7 @@ class JsonCompositionRepository:
         payload = [action.to_dict() for action in actions]
         with self._lock:
             write_collection_document(
-                self._actions_file,
+                self._actions_path(),
                 ACTION_LIBRARY_DOCUMENT,
                 payload,
             )
@@ -266,33 +256,52 @@ class JsonCompositionRepository:
 
     def _parse_actions(
         self,
+        actions_file: Path,
         raw_actions: Sequence[object],
     ) -> list[ActionDefinition]:
         actions: list[ActionDefinition] = []
         action_ids: set[str] = set()
+        action_names: set[str] = set()
         for index, raw_action in enumerate(raw_actions):
             if not isinstance(raw_action, dict):
                 raise JsonDocumentSchemaError(
-                    f"{self._actions_file.name} action at index {index} must be a JSON object"
+                    f"{actions_file.name} action at index {index} must be a JSON object"
                 )
             if not raw_action.get("id"):
                 raise JsonDocumentSchemaError(
-                    f"{self._actions_file.name} action at index {index} "
+                    f"{actions_file.name} action at index {index} "
                     "must declare a stable id"
                 )
             try:
                 action = ActionDefinition.from_dict(raw_action)
             except (KeyError, TypeError, ValueError) as exc:
                 raise JsonDocumentSchemaError(
-                    f"{self._actions_file.name} action at index {index} is invalid"
+                    f"{actions_file.name} action at index {index} is invalid"
                 ) from exc
             if action.id in action_ids:
                 raise JsonDocumentSchemaError(
-                    f"{self._actions_file.name} contains duplicate action id {action.id!r}"
+                    f"{actions_file.name} contains duplicate action id {action.id!r}"
+                )
+            if action.name in action_names:
+                raise JsonDocumentSchemaError(
+                    f"{actions_file.name} contains duplicate action name {action.name!r}"
+                )
+            validation = validate_action_parameters(
+                action.type,
+                action.parameters,
+            )
+            if not validation.is_valid:
+                raise JsonDocumentSchemaError(
+                    f"{actions_file.name} action {action.name!r} has invalid parameters: "
+                    f"{validation.message}"
                 )
             action_ids.add(action.id)
+            action_names.add(action.name)
             actions.append(action)
         return actions
+
+    def _actions_path(self) -> Path:
+        return self._actions_directory / ACTION_LIBRARY_FILE_NAME
 
     @staticmethod
     def _parse_task_entries(

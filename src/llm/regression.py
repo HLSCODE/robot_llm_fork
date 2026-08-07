@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..skill_system.default_skills import get_default_skills
+from ..skill_system.builtin_catalog import get_builtin_skills
 from ..skill_system.models import SkillMatchResult
 from ..skill_system.skill_engine import SkillEngine
 from .fingerprints import fingerprint_json
@@ -71,7 +71,7 @@ class _SkillCatalog:
     def __init__(self) -> None:
         self._skills = {
             skill.id: skill
-            for skill in get_default_skills()
+            for skill in get_builtin_skills()
         }
 
     def get_skill(self, skill_id: str):

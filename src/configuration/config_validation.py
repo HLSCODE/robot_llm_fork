@@ -276,33 +276,20 @@ def _validate_data_paths(
         )
         return
 
-    files = {
-        "ACTIONS_LIBRARY_PATH": paths.actions_file,
-        "SKILL_LIBRARY_PATH": paths.skills_file,
+    directories = {
+        "ACTIONS_LIBRARY_DIRECTORY": paths.actions_directory,
+        "TASKS_DIRECTORY": paths.tasks_directory,
+        "SKILL_LIBRARY_DIRECTORY": paths.skills_directory,
     }
-    if len(set(files.values())) != len(files):
+    if len(set(directories.values())) != len(directories):
         _error(
             issues,
             "colliding_data_paths",
             "ROBOT_DATA_DIR",
-            "动作库和技能库不能指向同一文件",
+            "动作、任务和技能目录不能使用同一路径",
         )
-    if paths.tasks_directory in files.values():
-        _error(
-            issues,
-            "colliding_data_paths",
-            "TASKS_DIRECTORY",
-            "任务目录不能与数据文件使用同一路径",
-        )
-    for field, path in files.items():
-        _reject_existing_directory(path, field, issues)
-    if paths.tasks_directory.exists() and not paths.tasks_directory.is_dir():
-        _error(
-            issues,
-            "data_directory_is_file",
-            "TASKS_DIRECTORY",
-            "任务目录路径已被普通文件占用",
-        )
+    for field, path in directories.items():
+        _reject_existing_file(path, field, issues)
 
 
 def _validate_data_collection(
@@ -411,17 +398,17 @@ def _validate_data_collection(
         )
 
 
-def _reject_existing_directory(
+def _reject_existing_file(
     path: Path,
     field: str,
     issues: list[ConfigurationIssue],
 ) -> None:
-    if path.exists() and path.is_dir():
+    if path.exists() and not path.is_dir():
         _error(
             issues,
-            "data_file_is_directory",
+            "data_directory_is_file",
             field,
-            "数据文件路径已被目录占用",
+            "数据目录路径已被普通文件占用",
         )
 
 

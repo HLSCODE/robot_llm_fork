@@ -52,17 +52,17 @@ class SkillEngine:
         self._registry = registry or SkillRegistry()
         logger.info("SkillEngine 初始化完成")
 
-    def load_skills(self, json_path: str) -> int:
+    def load_skills(self, directory: str) -> int:
         """
-        从 JSON 文件加载技能库
+        从目录递归加载技能库
 
         Args:
-            json_path: JSON 文件路径，默认为 config 中的路径
+            directory: 技能目录
 
         Returns:
             加载的技能数量
         """
-        return self._registry.load_from_json(json_path)
+        return self._registry.load_directory(directory)
 
     def parse_and_expand(
         self,

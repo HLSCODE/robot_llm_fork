@@ -156,7 +156,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         default="move_j",
                     ),
                     "点位": _field(
-                        "text",
+                        "pose",
                         "点位",
                         required=True,
                         placeholder=("例如: [-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]"),
@@ -1023,6 +1023,15 @@ def _matches_field_type(value: Any, field_type: str) -> bool:
         return isinstance(value, bool)
     if field_type == "object":
         return isinstance(value, dict)
+    if field_type == "pose":
+        return (
+            isinstance(value, list)
+            and len(value) == 6
+            and all(
+                isinstance(item, (int, float)) and not isinstance(item, bool)
+                for item in value
+            )
+        )
     return False
 
 

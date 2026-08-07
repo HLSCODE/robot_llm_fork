@@ -32,6 +32,7 @@ class CollectionDocumentSpec:
     collection_key: str
     legacy_kind: str
     current_version: int = CURRENT_DOCUMENT_VERSION
+    schema_reference: str | None = None
 
     def __post_init__(self) -> None:
         if self.legacy_kind not in {"list", "mapping"}:
@@ -99,14 +100,63 @@ def write_collection_document(
 ) -> None:
     if not isinstance(collection, list):
         raise TypeError("collection must be a list")
-    write_json_atomic(
-        path,
-        {
-            "schema": spec.schema,
-            "schema_version": spec.current_version,
-            spec.collection_key: collection,
-        },
-    )
+    payload = {
+        "schema": spec.schema,
+        "schema_version": spec.current_version,
+        spec.collection_key: collection,
+    }
+    if spec.schema_reference is not None:
+        payload = {"$schema": spec.schema_reference, **payload}
+    write_json_atomic(path, payload)
+
+
+@dataclass(frozen=True, slots=True)
+class SingleDocumentSpec:
+    schema: str
+    content_key: str
+    current_version: int
+    schema_reference: str | None = None
+
+
+def load_single_document(path: Path, spec: SingleDocumentSpec) -> dict[str, Any]:
+    """Read one strictly versioned object document."""
+    document = _read_json(path)
+    if not isinstance(document, dict):
+        raise JsonDocumentSchemaError(f"{path.name} must contain a JSON object")
+    if document.get("schema") != spec.schema:
+        raise JsonDocumentSchemaError(
+            f"{path.name} declares schema {document.get('schema')!r}; "
+            f"expected {spec.schema!r}"
+        )
+    version = document.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise JsonDocumentSchemaError(f"{path.name} schema_version must be an integer")
+    if version != spec.current_version:
+        raise UnsupportedJsonDocumentVersion(
+            f"{path.name} schema version {version} is unsupported; "
+            f"expected {spec.current_version}"
+        )
+    content = document.get(spec.content_key)
+    if not isinstance(content, dict):
+        raise JsonDocumentSchemaError(
+            f"{path.name} field {spec.content_key!r} must be a JSON object"
+        )
+    return content
+
+
+def write_single_document(
+    path: Path,
+    spec: SingleDocumentSpec,
+    content: dict[str, Any],
+) -> None:
+    payload: dict[str, Any] = {
+        "schema": spec.schema,
+        "schema_version": spec.current_version,
+        spec.content_key: content,
+    }
+    if spec.schema_reference is not None:
+        payload = {"$schema": spec.schema_reference, **payload}
+    write_json_atomic(path, payload)
 
 
 def write_json_atomic(path: Path, payload: Any) -> None:

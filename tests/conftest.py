@@ -29,9 +29,9 @@ def isolate_default_application_data(
                 return original_resolver(settings)
             return ApplicationDataPaths(
                 root=root,
-                actions_file=root / "actions_library.json",
+                actions_directory=root / "actions",
                 tasks_directory=root / "tasks",
-                skills_file=root / "skills" / "skill_library.json",
+                skills_directory=root / "skills",
             )
 
         monkeypatch.setattr(

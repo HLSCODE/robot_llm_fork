@@ -56,7 +56,7 @@ def create_application_services(
     BuiltinDataInstaller(data_paths).install_missing()
     composition = CompositionService(
         JsonCompositionRepository(
-            actions_file=data_paths.actions_file,
+            actions_directory=data_paths.actions_directory,
             tasks_directory=data_paths.tasks_directory,
         )
     )
@@ -104,7 +104,7 @@ def create_application_services(
     )
     execution = ExecutionService(manager)
     skill_engine = SkillEngine()
-    skill_engine.load_skills(str(data_paths.skills_file))
+    skill_engine.load_skills(str(data_paths.skills_directory))
     commands = CommandRuntime(
         execution=execution,
         skill_engine=skill_engine,

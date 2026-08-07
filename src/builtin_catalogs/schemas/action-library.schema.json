@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robot-llm.local/schemas/action-library.schema.json",
+  "title": "Robot LLM Action Library",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema", "schema_version", "actions"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema": {"const": "robot_llm.actions"},
+    "schema_version": {"const": 2},
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "type", "parameters"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "name": {"type": "string", "minLength": 1},
+          "type": {"enum": ["MOVE_TO_POINT", "BASE_MOVE", "ARM_ACTION", "INSPECT_AND_OUTPUT", "WAIT", "CHANGE_GUN", "VISION_CAPTURE", "VISION_RELOCALIZE", "TRAJECTORY"]},
+          "parameters": {"type": "object"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robot-llm.local/schemas/skill.schema.json",
+  "title": "Robot LLM Skill",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema", "schema_version", "skill"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema": {"const": "robot_llm.skill"},
+    "schema_version": {"const": 2},
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "category", "description", "icon", "parameters", "steps", "examples", "tags"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+        "name": {"type": "string", "minLength": 1},
+        "category": {"enum": ["抓取", "移动", "检测", "工具", "复合"]},
+        "description": {"type": "string"},
+        "icon": {"type": "string"},
+        "parameters": {"type": "array"},
+        "steps": {"type": "array", "minItems": 1},
+        "examples": {"type": "array", "items": {"type": "string"}},
+        "tags": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

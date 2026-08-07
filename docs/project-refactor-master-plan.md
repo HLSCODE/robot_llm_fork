@@ -5,7 +5,7 @@
 > 最近更新：2026-08-07
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：139/154（137 DONE + 2 DROPPED，90.3%）
+> 计划进度：141/154（139 DONE + 2 DROPPED，91.6%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -636,8 +636,8 @@ src/
 - 命令 Planner 只能返回 `skill_id`，原子设备命令、复合 Skill、已保存 Workflow
   和执行控制尚未形成类型化联合模型；若继续把“打开夹爪”“向前一点”等单步
   指令包装成 Skill，会造成目录膨胀、参数重复和安全语义混淆。
-- `skill_library.json` 集中保存全部技能，同时 `default_skills.py` 维护另一份内置
-  定义；当前 11 个 Skill/68 个步骤已出现双事实源和单文件评审冲突。
+- Skill 已切换为按领域拆分的 schema v2 单文件，内置数据也来自相同 JSON 资源；当前
+  剩余问题是 Planner 尚未区分原子命令、复合 Skill 和 Workflow，而不是数据双事实源。
 
 ### 10.3 目标
 
@@ -896,10 +896,10 @@ src/
 | G-027 | P3 | DONE | 删除混合职责的 `execution/action_handlers.py`，结果/上下文/Protocol 迁入 `handler_api.py`，分派迁入 `handler_registry.py`，无设备核心 handler 迁入 `handlers/core.py`；README 项目结构、动作模型路径和相机 Provider 说明已更新，旧 application/vision/execution 路径加入禁止回归清单，Mypy 同步覆盖新边界 |
 | G-028 | P0 | DONE | GUI Qt binding 一次性直切 PySide6；生产代码、测试、可选依赖、锁文件、打包 smoke 和文档同步迁移，使用原生 `Signal`/`Slot`，不保留兼容层；附加服务结果通过 GUI 线程 QObject receiver 驱动启动卡片到主窗口的过渡；架构测试禁止旧 binding 再次进入源码、脚本、测试或 `pyproject.toml` |
 | G-029 | P1 | TODO | 建立 `WorkflowDocument` schema v2 和唯一 `*.workflow.json` 任务格式；以结构化 `Sequence/Action/Loop` 控制流根节点替代线性 `order` 的长期语义，布局进入独立 presentation 字段，运行状态不得持久化；为后续 Parallel/Condition 留出可验证的节点联合类型而不预建通用 BPMN |
-| G-030 | P1 | TODO | 将 `actions_library.json` 升级为版本化动作目录：修复重复 ID，强制 ID/机器字段唯一，点位等值使用规范 JSON 类型，UI 中文标签只来自 ActionSchema；明确 action revision 与 Workflow 中可复现快照/来源引用的语义 |
-| G-031 | P1 | TODO | 将集中式 `skill_library.json` 拆为按领域组织的 `*.skill.json`；SkillRegistry 确定性递归加载、逐文件 Schema 校验、跨文件 ID 唯一校验并在全部成功后原子替换；删除 `default_skills.py` 数据副本和手写索引 |
-| G-032 | P1 | TODO | 提供显式一次性数据迁移 CLI：备份并把旧 `.task`/`.workflow` 转为 `*.workflow.json`、动作库转为新 schema、技能集合拆分为独立文件；输出机器可读报告并校验数量、ID、步骤、参数和语义指纹，成功切换后删除运行时 legacy 读取、隐式迁移和双格式配置 |
-| G-033 | P2 | TODO | 统一用户数据目录为 `actions/`、`workflows/`、`skills/`、`drafts/`，提供版本控制内 JSON Schema 和 `$schema` 关联，使 VS Code/PyCharm 获得语法高亮、补全和错误提示；配置改为目录级路径并同步 wheel、示例、配置校验和文档 |
+| G-030 | P1 | DONE | Action 已直切 `actions/library.json` schema v2；拒绝重复 ID/名称并逐项执行 ActionSchema 参数校验，34 个机械臂点位由字符串迁移为 6 元素 JSON 数组；Workflow 当前保存完整 ActionDefinition 快照以保证可复现，ID 仅用于来源追踪，不在执行时动态解析最新目录版本 |
+| G-031 | P1 | DONE | 集中式技能集合已拆为 `skills/<domain>/<id>.skill.json`；SkillRegistry 确定性递归加载、逐文件 schema/动作类型/参数/绑定校验、跨文件 ID 唯一校验并在全部成功后替换内存目录；`default_skills.py` 和手写索引已删除，内置与用户数据共享 JSON 格式 |
+| G-032 | P1 | DOING | Action/Skill 显式迁移已完成：临时目录生成、重新加载、数量/参数/SHA-256 语义指纹比对、机器报告、可恢复 legacy 归档和 runtime 旧集合入口删除均已落地；剩余 `.task`/`.workflow` 到唯一 `*.workflow.json` 的同等级迁移 |
+| G-033 | P2 | DOING | `actions/`、`skills/`、目录级配置、版本控制内 JSON Schema、`$schema`、内置资源和 wheel package-data 已落地；剩余 `workflows/`、`drafts/` 目录及 Workflow Schema/编辑器关联随 G-029 同批完成 |
 
 完成标准：
 
@@ -1343,13 +1343,13 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-06 | M7 | D/G | GUI Tooltip 与低描边视觉层级复核 | D-020/D-025 能力增强 | Activity Bar 原生大 Tooltip 替换为 350 ms 延迟的紧凑圆角主题气泡；浅色气泡使用浅色表面，深色气泡使用深色表面；全局 QSS 从重复容器描边改为背景层级，删除普通按钮、Tab、GroupBox、列表、StyledPanel、菜单栏、Activity Bar 和画布外框的装饰线，仅保留输入焦点、Splitter、节点与安全状态的必要边界 | Compile、Ruff、Mypy（83 files）、Pytest（464 passed + 43 subtests，63.47%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过 |
 | 2026-08-07 | M8 | A/D/E/G | 用户数据模型与自然语言命令重构立项 | A-014/A-015、D-026、E-014～E-016、G-029～G-033 新增为 TODO；ADR-M-016/ADR-M-017 → Accepted | 确认任务列表首屏漏刷新；确立唯一 `*.workflow.json`、WorkflowDocument v2 结构化控制流、动作库强类型/唯一 ID、按文件拆分 Skill、显式一次性迁移及 Action/Skill/Workflow/ExecutionControl typed command；不把单步设备命令机械包装成 Skill，不保留双格式或读取时迁移 | 文档评审；未执行代码和数据迁移 |
 | 2026-08-07 | M8 | D/G | 任务首屏回归与读取副作用清理 | D-026 TODO → DONE；G-030/G-032 前置能力完成 | 主窗口首次渲染前刷新已保存任务；Action/Task/Skill 的普通 load/list 不再迁移或写盘，新增 `robot-library-data validate|migrate` 显式入口与机器可读报告；动作加载增加重复 ID 拒绝，并修复活动数据中的 2 个冲突 ID | Ruff（src/tests）通过；聚焦 Pytest 27 passed；真实 `data/` 只读校验为 46 actions / 17 tasks / 11 skills；相关目录 Mypy 暴露既有 MainWindow/SkillRegistry 历史注解问题，本批未扩大范围清理 |
+| 2026-08-07 | M8 | E/G | Action/Skill schema v2 与目录化整批切换 | G-030/G-031 TODO → DONE；G-032/G-033 TODO → DOING | Action 切换为目录集合并强制 ID/名称/参数唯一有效，34 个点位规范化为数组；13 个 Skill 按领域拆分、确定性加载和原子 Registry 替换，合并旧 Python/用户双事实源差异后删除 `default_skills.py`；配置直切目录变量，内置 JSON/Schema 纳入 package-data；活动旧集合移动到可恢复备份，runtime 不保留旧入口 | 活动目录只读校验 46 actions / 13 skills，数量与语义指纹稳定；Ruff、相关 Mypy、Pytest 471 passed + 48 subtests、LLM golden 14/14、wheel 构建与隔离安装 smoke 全通过 |
 
 ## 22. 建议的首批实施顺序
 
-1. **G-029/G-030/G-031**：同批冻结并实现 Workflow、Action 和 Skill 新 Schema、目录边界及 JSON Schema。
-2. **G-032/G-033**：将现有显式 v0→v1 校验/迁移入口扩展为可重复、可预演、带备份和语义指纹的新目录迁移；在 fixture 副本验证后迁移用户数据并直接删除旧格式入口。
-4. **E-014/E-015/E-016**：在新目录模型上实现 typed command 和高频单步语音动作，保持统一预览、确认、资源租约与执行入口。
-5. **A-014/A-015**：在已有顺序/Loop 语义稳定后扩展结构化控制流 Compiler 与并行调度，先完成无硬件资源冲突、失败传播和取消测试，再进入真实设备验收。
-6. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-7. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-8. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+1. **G-029/G-032/G-033**：整批完成 WorkflowDocument v2、唯一 `*.workflow.json`、`workflows/`/`drafts/`、显式迁移和旧 Task/Workflow 入口删除。
+2. **E-014/E-015/E-016**：在新目录模型上实现 typed command 和高频单步语音动作，保持统一预览、确认、资源租约与执行入口。
+3. **A-014/A-015**：在已有顺序/Loop 语义稳定后扩展结构化控制流 Compiler 与并行调度，先完成无硬件资源冲突、失败传播和取消测试，再进入真实设备验收。
+4. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+5. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+6. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。

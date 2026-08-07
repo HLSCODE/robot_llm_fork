@@ -25,23 +25,29 @@ uv sync --frozen --extra voice --extra kws
 
 ```text
 data/
-├── actions_library.json
+├── actions/
+│   └── library.json
 ├── tasks/
-└── skills/
-    └── skill_library.json
+├── skills/
+│   └── <domain>/
+│       └── <id>.skill.json
+└── schemas/
+    ├── action-library.schema.json
+    └── skill.schema.json
 ```
 
-应用组合根启动时只安装缺失的动作库或技能库；已存在的用户文件永不被内置目录覆盖。
-内置动作仅包含可在 simulation 中安全执行的等待动作，内置技能继续经过统一 action schema
-验证。自动化测试使用独立临时数据根，不读取或迁移工作站的真实 `data/`。
+应用组合根启动时只安装完全缺失的动作库或空技能目录；已存在的用户文件永不被内置目录
+覆盖。内置 Action/Skill 和编辑器 JSON Schema 均来自 `src/builtin_catalogs/` 的版本化 JSON
+资源，Python 不再维护第二份完整技能数据。自动化测试使用独立临时数据根，不读取或迁移
+工作站的真实 `data/`。
 
 数据路径配置：
 
 ```env
 ROBOT_DATA_DIR=data
-ACTIONS_LIBRARY_PATH=
+ACTIONS_LIBRARY_DIRECTORY=
 TASKS_DIRECTORY=
-SKILL_LIBRARY_PATH=
+SKILL_LIBRARY_DIRECTORY=
 ```
 
 后三项留空时从 `ROBOT_DATA_DIR` 推导。显式相对路径以项目根目录为基准；生产部署可以使用
@@ -53,8 +59,9 @@ SKILL_LIBRARY_PATH=
 
 ```json
 {
+  "$schema": "../schemas/action-library.schema.json",
   "schema": "robot_llm.actions",
-  "schema_version": 1,
+  "schema_version": 2,
   "actions": []
 }
 ```
@@ -69,46 +76,51 @@ SKILL_LIBRARY_PATH=
 }
 ```
 
-技能库：
+单个技能文件：
 
 ```json
 {
-  "schema": "robot_llm.skills",
-  "schema_version": 1,
-  "skills": []
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {}
 }
 ```
 
-所有新写入均使用 schema v1。未知 schema、未来版本、缺失稳定 ID、损坏条目和非法任务路径
-会被显式拒绝，不会被当成空库或自动回退成内置数据。
+Action/Skill 新写入使用 schema v2，Task 暂时仍为 schema v1。未知 schema、未来版本、
+重复/缺失稳定 ID、重复动作名称、损坏条目和非法任务路径会被显式拒绝，不会被当成空库
+或自动回退成内置数据。
 
 ## 4. 一次性前向迁移
 
-普通 Repository/Registry 的 `load`、`list` 操作保持只读。旧版动作/任务裸数组和旧版
-`{"skills": [...]}` 当前可通过以下显式命令完成 v0 → v1 前向迁移：
+普通 Repository/Registry 的 `load`、`list` 操作保持只读。旧版 Action schema v1 集合和
+`robot_llm.skills` 集合只允许由显式工具迁移为 v2 目录：
 
 ```powershell
 robot-library-data validate
 robot-library-data migrate
 ```
 
-`validate` 只解析和校验并输出机器可读 JSON，不创建目录、备份或改写源文件；`migrate`
-先验证动作、全部任务和技能，全部成功后才分别执行迁移：
+`validate` 只校验活动 v2 目录并输出数量和 SHA-256 语义指纹，不创建目录、备份或改写源
+文件；`migrate` 读取显式 legacy 输入，在临时目录生成并重新加载全部 v2 文件，指纹一致后
+才发布。增加 `--archive-legacy` 时，旧集合文件移动到
+`data/migration-backups/catalog-v1/`：
 
-1. 在内存中补齐 v1 新增字段，并完整解析、校验全部领域对象。
-2. 校验成功后在同目录保存原始字节副本 `<文件名>.v0.bak`。
-3. 刷新临时文件并使用同目录原子替换发布。
-4. 后续读取当前 schema 时不运行迁移分支。
+1. 在内存中补齐旧技能缺失的 v1 字段，并完整解析、校验全部领域对象。
+2. 在临时目录生成 Action 集合和按领域拆分的 Skill 单文件。
+3. 重新加载并比较数量、稳定 ID、完整参数及规范 JSON 语义指纹。
+4. 逐文件原子发布；可选移动旧源到可恢复备份目录。
+5. runtime 只扫描 v2 目录，不包含 v0/v1 集合解析分支。
 
 迁移不是长期兼容双栈。未来版本高于当前程序时直接失败，必须先升级应用；迁移或解析失败
 不会覆盖原文件。需要人工恢复时，先停止应用，保留故障文件，再从 `.v0.bak` 复制恢复并
 根据错误信息处理。
 
-> M8 当前进度：读取副作用已经移除，显式 `validate/migrate` 入口已经建立。G-032
-> 仍需把该入口升级为 v2 新目录迁移，加入 dry-run 语义指纹比对，并在数据切换后删除
-> runtime 对 v0/v1 旧格式的解析分支。
+> M8 当前进度：Action/Skill v2 目录迁移已经完成；活动数据为 46 actions / 13 skills，
+> 两个旧集中式文件仅保留在迁移备份中。G-032 剩余范围是 `.task`/`.workflow` 到唯一
+> `*.workflow.json` 的迁移。
 
-## 5. M8 目标用户数据结构
+## 5. M8 剩余目标用户数据结构
 
 M8 将用户数据直接切换为以下结构：
 
@@ -120,11 +132,15 @@ data/
 │   └── <name>.workflow.json
 ├── drafts/
 │   └── <workflow-id>.draft.workflow.json
-└── skills/
+├── skills/
     ├── manipulation/
     │   └── <name>.skill.json
     └── <domain>/
         └── <name>.skill.json
+└── schemas/
+    ├── action-library.schema.json
+    ├── skill.schema.json
+    └── workflow.schema.json
 ```
 
 约束：
@@ -133,8 +149,9 @@ data/
 - WorkflowDocument 区分结构化控制流与 presentation 元数据，执行状态不写入定义。
 - 动作 ID 全局唯一，参数使用稳定机器字段和规范 JSON 类型；中文标签由 ActionSchema 派生。
 - 每个 `*.skill.json` 只定义一个 Skill；目录只用于组织，skill category 仍由文档字段声明。
-- Skill Registry 递归、确定性扫描文件，并在全部文件、跨文件 ID、动作引用和参数绑定
-  校验成功后一次替换内存目录；不维护手写 index。
+- Skill Registry 递归、确定性扫描文件，并在全部文件、跨文件 ID、动作类型和参数绑定
+  校验成功后一次替换内存目录；SkillStep 保存可执行快照，`action_name` 是展示名称而非
+  Action Catalog 外键；不维护手写 index。
 - Python 源码不再维护完整动作/技能数据副本；内置示例同样由版本化 JSON 资源交付。
 - `*.workflow.json`/`*.skill.json` 使用 `$schema` 关联版本控制内 JSON Schema，获得编辑器
   高亮、补全和校验。

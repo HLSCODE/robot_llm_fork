@@ -237,7 +237,9 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 
 ## AI 与技能
 
-技能系统位于 `src/skill_system/`。启动时会读取 `SKILL_LIBRARY_PATH` 指向的技能库；如果技能库不存在，则使用 `src/skill_system/default_skills.py` 中的默认技能。
+技能系统位于 `src/skill_system/`。启动时从 `SKILL_LIBRARY_DIRECTORY` 确定性递归加载
+`<domain>/*.skill.json`；目录为空时，安装器从 `src/builtin_catalogs/skills/` 复制版本化
+JSON 资源。每个文件只定义一个 Skill，跨文件 ID 重复会使整个目录加载失败。
 
 AI 规划流程：
 
