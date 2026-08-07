@@ -8,17 +8,11 @@ from .json_documents import (
     CollectionDocumentSpec,
     JsonDocumentSchemaError,
     load_collection_document,
-    migrate_collection_document,
     read_json_document,
     write_collection_document,
     write_json_atomic,
 )
-from ..domain.models import (
-    ActionDefinition,
-    LoopBlock,
-    SequenceEntry,
-    SequenceItem,
-)
+from ..domain.models import ActionDefinition
 from ..domain.action_schema import validate_action_parameters
 from ..domain.workflow import WorkflowDocument, WorkflowDocumentError
 
@@ -32,37 +26,41 @@ ACTION_LIBRARY_DOCUMENT = CollectionDocumentSpec(
     schema_reference="../schemas/action-library.schema.json",
 )
 ACTION_LIBRARY_FILE_NAME = "library.json"
-TASK_DOCUMENT = CollectionDocumentSpec(
-    schema="robot_llm.task",
-    collection_key="entries",
-    legacy_kind="list",
-)
-WORKFLOW_FILE_SUFFIX = ".workflow"
-WORKFLOW_DRAFT_FILE_NAME = ".workflow-draft"
+WORKFLOW_FILE_SUFFIX = ".workflow.json"
+WORKFLOW_DRAFT_FILE_SUFFIX = ".draft.workflow.json"
+CURRENT_DRAFT_NAME = f"current{WORKFLOW_DRAFT_FILE_SUFFIX}"
 
 
 class JsonCompositionRepository:
-    """Persist actions and tasks as atomically replaced JSON documents."""
+    """Persist action catalogs and canonical workflows atomically."""
 
     def __init__(
         self,
         *,
         actions_directory: Path | None = None,
-        tasks_directory: Path | None = None,
+        workflows_directory: Path | None = None,
+        workflow_drafts_directory: Path | None = None,
     ) -> None:
         self._actions_directory = (
             actions_directory
             if actions_directory is not None
             else _PROJECT_ROOT / "data" / "actions"
         )
-        self._tasks_directory = (
-            tasks_directory if tasks_directory is not None else _PROJECT_ROOT / "data" / "tasks"
+        self._workflows_directory = (
+            workflows_directory
+            if workflows_directory is not None
+            else _PROJECT_ROOT / "data" / "workflows"
+        )
+        self._workflow_drafts_directory = (
+            workflow_drafts_directory
+            if workflow_drafts_directory is not None
+            else _PROJECT_ROOT / "data" / "drafts"
         )
         self._lock = RLock()
 
     @property
-    def tasks_directory(self) -> Path:
-        return self._tasks_directory
+    def workflows_directory(self) -> Path:
+        return self._workflows_directory
 
     def load_actions(self) -> list[ActionDefinition]:
         with self._lock:
@@ -91,22 +89,14 @@ class JsonCompositionRepository:
                 payload,
             )
 
-    def list_task_names(self) -> tuple[str, ...]:
-        with self._lock:
-            if not self._tasks_directory.is_dir():
-                return ()
-            return tuple(
-                sorted(path.name for path in self._tasks_directory.glob("*.task") if path.is_file())
-            )
-
     def list_workflow_names(self) -> tuple[str, ...]:
         with self._lock:
-            if not self._tasks_directory.is_dir():
+            if not self._workflows_directory.is_dir():
                 return ()
             return tuple(
                 sorted(
                     path.name
-                    for path in self._tasks_directory.glob(
+                    for path in self._workflows_directory.glob(
                         f"*{WORKFLOW_FILE_SUFFIX}"
                     )
                     if path.is_file()
@@ -146,8 +136,8 @@ class JsonCompositionRepository:
             path.unlink()
             return True
 
-    def load_workflow_draft(self) -> WorkflowDocument | None:
-        path = self._workflow_draft_path()
+    def load_workflow_draft(self, draft_name: str = CURRENT_DRAFT_NAME) -> WorkflowDocument | None:
+        path = self._workflow_draft_path(draft_name)
         with self._lock:
             if not path.is_file():
                 return None
@@ -158,76 +148,32 @@ class JsonCompositionRepository:
                     f"{path.name} is not a valid workflow draft"
                 ) from exc
 
-    def save_workflow_draft(self, document: WorkflowDocument) -> None:
+    def save_workflow_draft(
+        self,
+        document: WorkflowDocument,
+        draft_name: str = CURRENT_DRAFT_NAME,
+    ) -> None:
         with self._lock:
             write_json_atomic(
-                self._workflow_draft_path(),
+                self._workflow_draft_path(draft_name),
                 document.to_dict(),
             )
 
-    def delete_workflow_draft(self) -> bool:
-        path = self._workflow_draft_path()
+    def delete_workflow_draft(self, draft_name: str = CURRENT_DRAFT_NAME) -> bool:
+        path = self._workflow_draft_path(draft_name)
         with self._lock:
             if not path.is_file():
                 return False
             path.unlink()
             return True
 
-    def load_task(
+    def rename_workflow(
         self,
-        task_name: str,
-    ) -> list[SequenceEntry] | None:
-        path = self._task_path(task_name)
-        with self._lock:
-            if not path.is_file():
-                return None
-            document = load_collection_document(path, TASK_DOCUMENT)
-            return self._parse_task_entries(path, document.collection)
-
-    def migrate_legacy_tasks(self) -> tuple[str, ...]:
-        """Explicitly migrate every legacy task after validating the full file."""
-        migrated: list[str] = []
-        with self._lock:
-            for task_name in self.list_task_names():
-                path = self._task_path(task_name)
-                document = load_collection_document(path, TASK_DOCUMENT)
-                entries = self._parse_task_entries(path, document.collection)
-                if not document.requires_migration:
-                    continue
-                migrate_collection_document(
-                    path,
-                    TASK_DOCUMENT,
-                    [entry.to_dict() for entry in entries],
-                )
-                migrated.append(path.name)
-        return tuple(migrated)
-
-    def save_task(
-        self,
-        task_name: str,
-        entries: Sequence[SequenceEntry],
-    ) -> str:
-        path = self._task_path(task_name)
-        payload = [entry.to_dict() for entry in entries]
-        with self._lock:
-            write_collection_document(path, TASK_DOCUMENT, payload)
-        return path.name
-
-    def delete_task(self, task_name: str) -> bool:
-        path = self._task_path(task_name)
-        with self._lock:
-            if not path.is_file():
-                return False
-            path.unlink()
-            return True
-
-    def rename_task(
-        self,
-        task_name: str,
-        new_task_name: str,
+        workflow_name: str,
+        new_workflow_name: str,
     ) -> tuple[str, str]:
-        old_path = self._task_path(task_name)
-        new_path = self._task_path(new_task_name)
+        old_path = self._workflow_path(workflow_name)
+        new_path = self._workflow_path(new_workflow_name)
         with self._lock:
             if not old_path.is_file():
                 raise FileNotFoundError(old_path.name)
@@ -237,22 +183,17 @@ class JsonCompositionRepository:
             old_path.replace(new_path)
             return old_name, new_path.name
 
-    def _task_path(self, task_name: str) -> Path:
-        requested_name = self._plain_name(task_name, "task")
-        path = self._tasks_directory / requested_name
-        if path.suffix != ".task":
-            path = path.with_suffix(".task")
-        return path
-
     def _workflow_path(self, workflow_name: str) -> Path:
         requested_name = self._plain_name(workflow_name, "workflow")
-        path = self._tasks_directory / requested_name
-        if path.suffix != WORKFLOW_FILE_SUFFIX:
-            path = path.with_suffix(WORKFLOW_FILE_SUFFIX)
-        return path
+        if not requested_name.endswith(WORKFLOW_FILE_SUFFIX):
+            requested_name = f"{requested_name}{WORKFLOW_FILE_SUFFIX}"
+        return self._workflows_directory / requested_name
 
-    def _workflow_draft_path(self) -> Path:
-        return self._tasks_directory / WORKFLOW_DRAFT_FILE_NAME
+    def _workflow_draft_path(self, draft_name: str) -> Path:
+        requested_name = self._plain_name(draft_name, "workflow draft")
+        if not requested_name.endswith(WORKFLOW_DRAFT_FILE_SUFFIX):
+            requested_name = f"{requested_name}{WORKFLOW_DRAFT_FILE_SUFFIX}"
+        return self._workflow_drafts_directory / requested_name
 
     def _parse_actions(
         self,
@@ -302,30 +243,6 @@ class JsonCompositionRepository:
 
     def _actions_path(self) -> Path:
         return self._actions_directory / ACTION_LIBRARY_FILE_NAME
-
-    @staticmethod
-    def _parse_task_entries(
-        path: Path,
-        raw_entries: Sequence[object],
-    ) -> list[SequenceEntry]:
-        entries: list[SequenceEntry] = []
-        for index, raw_entry in enumerate(raw_entries):
-            if not isinstance(raw_entry, dict):
-                raise JsonDocumentSchemaError(
-                    f"{path.name} entry at index {index} must be a JSON object"
-                )
-            try:
-                entry = (
-                    LoopBlock.from_dict(raw_entry)
-                    if raw_entry.get("kind") == "loop"
-                    else SequenceItem.from_dict(raw_entry)
-                )
-            except (KeyError, TypeError, ValueError) as exc:
-                raise JsonDocumentSchemaError(
-                    f"{path.name} entry at index {index} is invalid"
-                ) from exc
-            entries.append(entry)
-        return entries
 
     @staticmethod
     def _plain_name(value: str, label: str) -> str:

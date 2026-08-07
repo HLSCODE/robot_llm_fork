@@ -26,7 +26,8 @@ class BuiltinDataInstaller:
 
     def install_missing(self) -> BuiltinDataInstallResult:
         created_files: list[Path] = []
-        self._paths.tasks_directory.mkdir(parents=True, exist_ok=True)
+        self._paths.workflows_directory.mkdir(parents=True, exist_ok=True)
+        self._paths.workflow_drafts_directory.mkdir(parents=True, exist_ok=True)
 
         for source in sorted((_BUILTIN_CATALOG_ROOT / "schemas").glob("*.json")):
             destination = self._paths.root / "schemas" / source.name

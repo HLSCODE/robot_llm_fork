@@ -43,11 +43,10 @@
 > Activity Bar 和画布外框的重复线条。仅输入焦点、可拖动分隔、工作流节点边界及
 > 安全/状态语义保留必要描边。
 
-> 2026-08-07 M8 数据模型复核：M6 已落地的 `.workflow` 与历史 `.task` 双格式
-> 仅作为当前实现状态，不再是目标架构。后续以 `*.workflow.json`/WorkflowDocument
-> v2 作为用户可见“任务”的唯一源文档，执行计划由 Compiler 派生；动作、技能和
-> 工作流分别提供 JSON Schema。迁移完成后删除 `.task`、旧 `.workflow`、读取时
-> 隐式迁移和双格式入口，不保留兼容开关。
+> 2026-08-07 M8 数据模型切换已完成：`*.workflow.json`/WorkflowDocument v2 已成为
+> 用户可见“任务”的唯一源文档，执行计划由 Compiler 派生；控制流与 presentation
+> 分离，运行状态不落盘。17 个旧任务已由显式 CLI 转换并归档，`.task`、旧
+> `.workflow`、读取时隐式迁移、双格式 Repository API 和旧目录配置已从 runtime 删除。
 
 ## 1. 结论
 
@@ -516,12 +515,12 @@ src/
 
 ### 阶段 11：任务数据模型 v2 与格式单一化
 
-- 先修复启动时已保存任务未刷新的回归，并以现有任务建立迁移前行为基线。
-- 冻结 WorkflowDocument v2、`*.workflow.json`、presentation 和结构化控制流 Schema。
-- 通过显式迁移工具将 `.task`/`.workflow` 一次转换，完成后删除双格式 Repository API、
-  读取时隐式迁移和旧路径配置。
-- GUI 资源页、保存/加载、任务组合、AI/语音导入和 WebSocket 全部使用同一
-  Workflow 摘要与 Repository 查询，不在 View 中直接枚举文件。
+- 已修复启动时已保存任务未刷新的回归，并完成迁移前行为基线。
+- 已冻结 WorkflowDocument v2、`*.workflow.json`、presentation 和结构化控制流 Schema。
+- 已通过 `robot-workflow-data` 将 `.task`/旧 `.workflow` 一次转换，并删除双格式
+  Repository API、读取时隐式迁移和旧路径配置。
+- GUI 资源页、保存/加载、任务组合和 WebSocket 已统一使用 Workflow Repository；
+  AI/语音后续 typed command 继续复用该入口，不在 View 中直接枚举文件。
 
 ## 15. 测试与验收
 

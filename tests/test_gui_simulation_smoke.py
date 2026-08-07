@@ -133,7 +133,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             self.window.task_library_view.task_library_list.count(),
         )
         self.assertEqual(
-            "startup-visible.task",
+            "startup-visible.workflow.json",
             self.window.task_library_view.task_library_list.item(0).data(
                 Qt.ItemDataRole.UserRole
             ),

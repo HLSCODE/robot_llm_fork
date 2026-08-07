@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 from uuid import uuid4
 
 from ...domain.action_schema import get_action_schema
@@ -45,7 +44,6 @@ class CompositionWebSocketHandler:
                 }
             )
         )
-
     async def _handle_get_action_schema(
         self, websocket, data: WebSocketRequest
     ) -> None:
@@ -417,7 +415,7 @@ class CompositionWebSocketHandler:
     async def _handle_save_task(self, websocket, data: WebSocketRequest) -> None:
         """
         保存当前序列为任务文件
-        请求: {"action": "save_task", "name": "xxx.task"}
+        请求: {"action": "save_task", "name": "xxx.workflow.json"}
         """
         task_name = data.get("name", "").strip()
         if not task_name:
@@ -454,7 +452,7 @@ class CompositionWebSocketHandler:
     async def _handle_load_task(self, websocket, data: WebSocketRequest) -> None:
         """
         加载任务到当前序列（不执行）
-        请求: {"action": "load_task", "name": "xxx.task"}
+        请求: {"action": "load_task", "name": "xxx.workflow.json"}
         """
         task_name = data.get("name", "").strip()
         if not task_name:
@@ -495,7 +493,7 @@ class CompositionWebSocketHandler:
     async def _handle_delete_task(self, websocket, data: WebSocketRequest) -> None:
         """
         删除任务文件
-        请求: {"action": "delete_task", "name": "xxx.task"}
+        请求: {"action": "delete_task", "name": "xxx.workflow.json"}
         """
         task_name = data.get("name", "").strip()
         if not task_name:
@@ -533,7 +531,7 @@ class CompositionWebSocketHandler:
     async def _handle_get_task_detail(self, websocket, data: WebSocketRequest) -> None:
         """
         读取任务文件内容，但不影响当前序列
-        请求: {"action": "get_task_detail", "name": "xxx.task"}
+        请求: {"action": "get_task_detail", "name": "xxx.workflow.json"}
         """
         task_name = data.get("name", "").strip()
         if not task_name:
@@ -563,7 +561,7 @@ class CompositionWebSocketHandler:
             self._server._json_msg(
                 {
                     "event": "task_detail",
-                    "name": Path(task_name).with_suffix(".task").name,
+                    "name": _workflow_file_name(task_name),
                     "sequence": [entry.to_dict() for entry in entries],
                 }
             )
@@ -572,7 +570,7 @@ class CompositionWebSocketHandler:
     async def _handle_rename_task(self, websocket, data: WebSocketRequest) -> None:
         """
         重命名任务文件
-        请求: {"action": "rename_task", "name": "old.task", "new_name": "new.task"}
+        请求: {"action": "rename_task", "name": "old.workflow.json", "new_name": "new.workflow.json"}
         """
         task_name = data.get("name", "").strip()
         new_name = data.get("new_name", "").strip()
@@ -620,8 +618,8 @@ class CompositionWebSocketHandler:
         """
         直接向任务文件追加/插入动作
         请求:
-          {"action": "add_to_task", "name": "x.task", "items": [...], "index": 0}
-          {"action": "add_to_task", "name": "x.task", "action_ids": ["..."], "index": 0}
+          {"action": "add_to_task", "name": "x.workflow.json", "items": [...], "index": 0}
+          {"action": "add_to_task", "name": "x.workflow.json", "action_ids": ["..."], "index": 0}
         """
         task_name = data.get("name", "").strip()
         if not task_name:
@@ -695,16 +693,15 @@ class CompositionWebSocketHandler:
             self._server._json_msg(
                 {
                     "event": "task_updated",
-                    "name": Path(task_name).with_suffix(".task").name,
+                    "name": _workflow_file_name(task_name),
                     "sequence": [entry.to_dict() for entry in sequence],
                 }
             )
         )
-
     async def _handle_remove_from_task(self, websocket, data: WebSocketRequest) -> None:
         """
         直接删除任务文件中的某一步
-        请求: {"action": "remove_from_task", "name": "x.task", "index": 0}
+        请求: {"action": "remove_from_task", "name": "x.workflow.json", "index": 0}
         """
         task_name = data.get("name", "").strip()
         index = data.get("index")
@@ -743,7 +740,7 @@ class CompositionWebSocketHandler:
             self._server._json_msg(
                 {
                     "event": "task_updated",
-                    "name": Path(task_name).with_suffix(".task").name,
+                    "name": _workflow_file_name(task_name),
                     "removed": removed.to_dict(),
                     "sequence": [entry.to_dict() for entry in sequence],
                 }
@@ -753,7 +750,7 @@ class CompositionWebSocketHandler:
     async def _handle_move_in_task(self, websocket, data: WebSocketRequest) -> None:
         """
         直接调整任务文件内部顺序
-        请求: {"action": "move_in_task", "name": "x.task", "from": 0, "to": 1}
+        请求: {"action": "move_in_task", "name": "x.workflow.json", "from": 0, "to": 1}
         """
         task_name = data.get("name", "").strip()
         from_idx = data.get("from")
@@ -794,8 +791,13 @@ class CompositionWebSocketHandler:
             self._server._json_msg(
                 {
                     "event": "task_updated",
-                    "name": Path(task_name).with_suffix(".task").name,
+                    "name": _workflow_file_name(task_name),
                     "sequence": [entry.to_dict() for entry in sequence],
                 }
             )
         )
+
+
+def _workflow_file_name(value: str) -> str:
+    name = str(value).strip()
+    return name if name.endswith(".workflow.json") else f"{name}.workflow.json"

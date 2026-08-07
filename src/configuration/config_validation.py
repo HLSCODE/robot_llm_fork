@@ -278,7 +278,8 @@ def _validate_data_paths(
 
     directories = {
         "ACTIONS_LIBRARY_DIRECTORY": paths.actions_directory,
-        "TASKS_DIRECTORY": paths.tasks_directory,
+        "WORKFLOWS_DIRECTORY": paths.workflows_directory,
+        "WORKFLOW_DRAFTS_DIRECTORY": paths.workflow_drafts_directory,
         "SKILL_LIBRARY_DIRECTORY": paths.skills_directory,
     }
     if len(set(directories.values())) != len(directories):
@@ -286,7 +287,7 @@ def _validate_data_paths(
             issues,
             "colliding_data_paths",
             "ROBOT_DATA_DIR",
-            "动作、任务和技能目录不能使用同一路径",
+            "动作、工作流、草稿和技能目录不能使用同一路径",
         )
     for field, path in directories.items():
         _reject_existing_file(path, field, issues)

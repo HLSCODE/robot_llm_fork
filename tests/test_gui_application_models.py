@@ -60,7 +60,8 @@ class TaskComposerServiceTests(unittest.TestCase):
         composition = CompositionService(
             JsonCompositionRepository(
                 actions_directory=root / "actions",
-                tasks_directory=root / "tasks",
+                workflows_directory=root / "workflows",
+                workflow_drafts_directory=root / "drafts",
             )
         )
         composition.save_task(

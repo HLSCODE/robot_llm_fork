@@ -26,7 +26,6 @@ from ....domain.models import (
 from ....domain.workflow import (
     CanvasPosition,
     WorkflowDocument,
-    WorkflowNode,
     clone_sequence_entry,
 )
 from .items import InsertionItem, StartEndItem, WorkflowNodeItem
@@ -162,23 +161,18 @@ class WorkflowCanvasWidget(QWidget):
         name: str,
         revision: int,
     ) -> WorkflowDocument:
-        nodes = tuple(
-            WorkflowNode(
-                node_id=entry.uuid,
-                entry=_clone_canvas_entry(entry),
-                position=CanvasPosition(
-                    0.0,
-                    self._node_items[entry.uuid].scenePos().y(),
-                ),
-            )
-            for entry in self._entries
-        )
-        return WorkflowDocument(
+        return WorkflowDocument.from_entries(
             workflow_id=workflow_id,
             name=name,
             revision=revision,
-            nodes=nodes,
-            order=tuple(entry.uuid for entry in self._entries),
+            entries=self._entries,
+            positions={
+                entry.uuid: CanvasPosition(
+                    0.0,
+                    self._node_items[entry.uuid].scenePos().y(),
+                )
+                for entry in self._entries
+            },
         )
 
     def insert_action(

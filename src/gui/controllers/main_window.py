@@ -1479,7 +1479,7 @@ class MainWindow(QMainWindow):
             return
 
         filename, _ = QFileDialog.getSaveFileName(
-            self, "保存组合任务", "", "任务文件 (*.task)"
+            self, "保存组合任务", "", "工作流文件 (*.workflow.json)"
         )
         if not filename:
             return
@@ -1570,7 +1570,7 @@ class MainWindow(QMainWindow):
         font.setPointSize(11)
         font.setBold(True)
         painter.setFont(font)
-        display = task_name[:-5] if task_name.endswith(".task") else task_name
+        display = task_name.removesuffix(".workflow.json")
         truncated = display[:14] + "…" if len(display) > 14 else display
         painter.drawText(QRectF(8, 30, width - 16, 24), Qt.AlignmentFlag.AlignLeft, truncated)
 
@@ -1679,7 +1679,7 @@ class MainWindow(QMainWindow):
             return
 
         filename, _ = QFileDialog.getSaveFileName(
-            self, "保存任务序列", "", "任务文件 (*.task)"
+            self, "保存任务序列", "", "工作流文件 (*.workflow.json)"
         )
         if filename:
             task_name = Path(filename).name
@@ -1695,8 +1695,8 @@ class MainWindow(QMainWindow):
         filename, _ = QFileDialog.getOpenFileName(
             self,
             "加载任务序列",
-            str(self._services.composition.tasks_directory),
-            "任务文件 (*.task)",
+            str(self._services.composition.workflows_directory),
+            "工作流文件 (*.workflow.json)",
         )
         if filename:
             task_name = Path(filename).name

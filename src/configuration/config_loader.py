@@ -95,7 +95,8 @@ class _EnvironmentConfig:
     GUI_THEME: str = "system"
     ROBOT_DATA_DIR: str = "data"
     ACTIONS_LIBRARY_DIRECTORY: str = ""
-    TASKS_DIRECTORY: str = ""
+    WORKFLOWS_DIRECTORY: str = ""
+    WORKFLOW_DRAFTS_DIRECTORY: str = ""
     SKILL_LIBRARY_DIRECTORY: str = ""
     DATA_COLLECTION_FPS: int = 30
     DATA_COLLECTION_CAMERA_INDEX: int = 0
@@ -519,7 +520,10 @@ class _EnvironmentConfig:
         instance.ACTIONS_LIBRARY_DIRECTORY = os.getenv(
             "ACTIONS_LIBRARY_DIRECTORY", ""
         )
-        instance.TASKS_DIRECTORY = os.getenv("TASKS_DIRECTORY", "")
+        instance.WORKFLOWS_DIRECTORY = os.getenv("WORKFLOWS_DIRECTORY", "")
+        instance.WORKFLOW_DRAFTS_DIRECTORY = os.getenv(
+            "WORKFLOW_DRAFTS_DIRECTORY", ""
+        )
         instance.SKILL_LIBRARY_DIRECTORY = os.getenv(
             "SKILL_LIBRARY_DIRECTORY", ""
         )

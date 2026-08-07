@@ -1282,7 +1282,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "execute_task",
-  "name": "demo.task"
+  "name": "demo.workflow.json"
 }
 ```
 
@@ -1796,7 +1796,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 
 ## 10. 任务管理接口
 
-任务本质上是把“当前序列”保存为 `.task` 文件。
+任务是以 WorkflowDocument v2 保存的 `*.workflow.json`，执行序列由 Compiler 派生。
 
 ### 10.1 获取任务列表 `list_tasks`
 
@@ -1813,7 +1813,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "tasks_list",
-  "tasks": ["demo.task", "pick.task"]
+  "tasks": ["demo.workflow.json", "pick.workflow.json"]
 }
 ```
 
@@ -1824,7 +1824,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "save_task",
-  "name": "demo.task"
+  "name": "demo.workflow.json"
 }
 ```
 
@@ -1833,7 +1833,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_saved",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "steps": 3
 }
 ```
@@ -1845,7 +1845,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "load_task",
-  "name": "demo.task"
+  "name": "demo.workflow.json"
 }
 ```
 
@@ -1854,7 +1854,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_loaded",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "sequence": []
 }
 ```
@@ -1877,7 +1877,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "get_task_detail",
-  "name": "demo.task"
+  "name": "demo.workflow.json"
 }
 ```
 
@@ -1893,7 +1893,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_detail",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "sequence": [
     {
       "uuid": "seq-item-id",
@@ -1921,8 +1921,8 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "rename_task",
-  "name": "demo.task",
-  "new_name": "demo-v2.task"
+  "name": "demo.workflow.json",
+  "new_name": "demo-v2.workflow.json"
 }
 ```
 
@@ -1939,8 +1939,8 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_renamed",
-  "name": "demo.task",
-  "new_name": "demo-v2.task"
+  "name": "demo.workflow.json",
+  "new_name": "demo-v2.workflow.json"
 }
 ```
 
@@ -1954,7 +1954,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 用途：
 
 - 不需要先 `load_task`
-- 直接对某个 `.task` 文件追加或插入动作
+- 直接对某个 `*.workflow.json` 工作流追加或插入动作
 
 支持两种方式：
 
@@ -1966,7 +1966,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "add_to_task",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "items": [
     {
       "name": "移动到A点",
@@ -1987,7 +1987,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "add_to_task",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "action_ids": ["action-id-1", "action-id-2"],
   "index": 0
 }
@@ -2008,7 +2008,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_updated",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "sequence": []
 }
 ```
@@ -2020,7 +2020,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "remove_from_task",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "index": 0
 }
 ```
@@ -2038,7 +2038,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_updated",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "removed": {},
   "sequence": []
 }
@@ -2051,7 +2051,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "move_in_task",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "from": 0,
   "to": 2
 }
@@ -2071,7 +2071,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_updated",
-  "name": "demo.task",
+  "name": "demo.workflow.json",
   "sequence": []
 }
 ```
@@ -2083,7 +2083,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "action": "delete_task",
-  "name": "demo.task"
+  "name": "demo.workflow.json"
 }
 ```
 
@@ -2092,7 +2092,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "task_deleted",
-  "name": "demo.task"
+  "name": "demo.workflow.json"
 }
 ```
 

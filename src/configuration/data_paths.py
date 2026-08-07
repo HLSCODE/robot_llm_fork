@@ -15,7 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class ApplicationDataPaths:
     root: Path
     actions_directory: Path
-    tasks_directory: Path
+    workflows_directory: Path
+    workflow_drafts_directory: Path
     skills_directory: Path
 
     @classmethod
@@ -30,9 +31,13 @@ class ApplicationDataPaths:
                 settings.actions_library_directory,
                 default=root / "actions",
             ),
-            tasks_directory=_resolve_override(
-                settings.tasks_directory,
-                default=root / "tasks",
+            workflows_directory=_resolve_override(
+                settings.workflows_directory,
+                default=root / "workflows",
+            ),
+            workflow_drafts_directory=_resolve_override(
+                settings.workflow_drafts_directory,
+                default=root / "drafts",
             ),
             skills_directory=_resolve_override(
                 settings.skill_library_directory,

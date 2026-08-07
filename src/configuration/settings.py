@@ -34,7 +34,8 @@ class LoggingSettings:
 class DataSettings:
     robot_data_dir: str = "data"
     actions_library_directory: str = ""
-    tasks_directory: str = ""
+    workflows_directory: str = ""
+    workflow_drafts_directory: str = ""
     skill_library_directory: str = ""
 
 

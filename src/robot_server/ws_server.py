@@ -7,7 +7,7 @@ WebSocket 服务端
 
     === 执行控制 ===
         {"action": "execute",       "sequence": [...]}     执行动作序列
-        {"action": "execute_task",  "name": "xxx.task"}    加载并执行已保存的任务
+        {"action": "execute_task",  "name": "xxx.workflow.json"} 加载并执行已保存的任务
         {"action": "stop"}                                 停止当前执行
         {"action": "quick_stop"}                           向支持的运动设备发送软件快停
         {"action": "emergency_stop"}                       向支持的运动设备发送软件急停
@@ -30,9 +30,9 @@ WebSocket 服务端
 
     === 任务持久化 ===
         {"action": "list_tasks"}                           获取已保存的任务列表
-        {"action": "save_task",     "name": "xxx.task"}    保存当前序列为任务文件
-        {"action": "load_task",     "name": "xxx.task"}    加载任务到当前序列（不执行）
-        {"action": "delete_task",   "name": "xxx.task"}    删除任务文件
+        {"action": "save_task",     "name": "xxx.workflow.json"} 保存当前序列为工作流
+        {"action": "load_task",     "name": "xxx.workflow.json"} 加载任务到当前序列（不执行）
+        {"action": "delete_task",   "name": "xxx.workflow.json"} 删除任务文件
 
     === AI 助手 ===
         {"action": "ai_chat",      "text": "帮我抓一个瓶子"}  远程文本意图入口（chat/command/vision/session）

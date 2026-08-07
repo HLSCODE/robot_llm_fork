@@ -28,7 +28,8 @@ class CompositionServiceTests(unittest.TestCase):
         root = Path(self._temporary_directory.name)
         self.repository = JsonCompositionRepository(
             actions_directory=root / "actions",
-            tasks_directory=root / "tasks",
+            workflows_directory=root / "workflows",
+            workflow_drafts_directory=root / "drafts",
         )
         self.service = CompositionService(self.repository)
 
@@ -114,7 +115,7 @@ class CompositionServiceTests(unittest.TestCase):
             stored_ids,
         )
         temporary_files = tuple(
-            self.repository.tasks_directory.parent.glob("*.tmp")
+            self.repository.workflows_directory.parent.glob("*.tmp")
         )
         self.assertEqual((), temporary_files)
 
@@ -144,12 +145,12 @@ class CompositionServiceTests(unittest.TestCase):
             origin="test",
         )
 
-        self.assertEqual("workflow.task", stored_name)
+        self.assertEqual("workflow.workflow.json", stored_name)
         self.assertEqual("first", removed.definition.id)
         self.assertEqual("second", remaining[0].definition.id)
         summaries = self.service.list_tasks()
         self.assertEqual(
-            [("workflow.task", 1)],
+            [("workflow.workflow.json", 1)],
             [(summary.name, summary.step_count) for summary in summaries],
         )
         self.assertEqual(
@@ -172,7 +173,7 @@ class CompositionServiceTests(unittest.TestCase):
                 origin="test",
             )
         with self.assertRaises(FileNotFoundError):
-            self.service.load_task("missing.task")
+            self.service.load_task("missing.workflow.json")
 
         self.assertEqual((), self.service.sequence_entries())
 
@@ -201,7 +202,8 @@ class CompositionWebSocketTests(unittest.TestCase):
             composition = CompositionService(
                 JsonCompositionRepository(
                     actions_directory=root / "actions",
-                    tasks_directory=root / "tasks",
+                    workflows_directory=root / "workflows",
+                    workflow_drafts_directory=root / "drafts",
                 )
             )
             server = RobotWebSocketServer(
@@ -247,7 +249,7 @@ class CompositionWebSocketTests(unittest.TestCase):
                 len(composition.sequence_entries()),
             )
             self.assertEqual(
-                ("shared.task",),
+                ("shared.workflow.json",),
                 tuple(
                     summary.name
                     for summary in composition.list_tasks()
@@ -260,7 +262,8 @@ class CompositionWebSocketTests(unittest.TestCase):
             composition = CompositionService(
                 JsonCompositionRepository(
                     actions_directory=root / "actions",
-                    tasks_directory=root / "tasks",
+                    workflows_directory=root / "workflows",
+                    workflow_drafts_directory=root / "drafts",
                 )
             )
             server = RobotWebSocketServer(

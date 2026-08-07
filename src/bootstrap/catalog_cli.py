@@ -58,7 +58,8 @@ def validate_catalogs(
 ) -> CatalogReport:
     repository = JsonCompositionRepository(
         actions_directory=actions_directory,
-        tasks_directory=actions_directory.parent / "workflows",
+        workflows_directory=actions_directory.parent / "workflows",
+        workflow_drafts_directory=actions_directory.parent / "drafts",
     )
     actions = repository.load_actions()
     registry = SkillRegistry()

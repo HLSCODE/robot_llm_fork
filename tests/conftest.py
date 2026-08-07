@@ -30,7 +30,8 @@ def isolate_default_application_data(
             return ApplicationDataPaths(
                 root=root,
                 actions_directory=root / "actions",
-                tasks_directory=root / "tasks",
+                workflows_directory=root / "workflows",
+                workflow_drafts_directory=root / "drafts",
                 skills_directory=root / "skills",
             )
 

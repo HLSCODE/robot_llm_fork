@@ -57,7 +57,8 @@ def create_application_services(
     composition = CompositionService(
         JsonCompositionRepository(
             actions_directory=data_paths.actions_directory,
-            tasks_directory=data_paths.tasks_directory,
+            workflows_directory=data_paths.workflows_directory,
+            workflow_drafts_directory=data_paths.workflow_drafts_directory,
         )
     )
     task_composer = TaskComposerService(composition)

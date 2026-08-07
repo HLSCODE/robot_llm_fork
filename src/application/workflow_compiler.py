@@ -1,4 +1,4 @@
-"""Compile a validated editor document into the canonical execution sequence."""
+"""Compile a validated workflow document into the execution sequence."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from ..domain.models import (
     SequenceItem,
     SequenceItemStatus,
 )
-from ..domain.workflow import WorkflowDocument, WorkflowNode
+from ..domain.workflow import WorkflowActionNode, WorkflowDocument, WorkflowLoopNode
 from .workflow_validation import WorkflowValidationResult, WorkflowValidator
 
 
@@ -49,18 +49,12 @@ class CompiledWorkflow:
 
     def node_id_for_loop(self, loop_uuid: str) -> str | None:
         return next(
-            (
-                mapping.node_id
-                for mapping in self.loops
-                if mapping.loop_uuid == loop_uuid
-            ),
+            (mapping.node_id for mapping in self.loops if mapping.loop_uuid == loop_uuid),
             None,
         )
 
 
 class WorkflowCompilationError(ValueError):
-    """Raised when a structurally invalid workflow cannot be compiled."""
-
     def __init__(self, validation: WorkflowValidationResult) -> None:
         self.validation = validation
         summary = "; ".join(issue.message for issue in validation.issues)
@@ -77,37 +71,29 @@ class WorkflowCompiler:
         validation = self._validator.validate(document)
         if not validation.valid:
             raise WorkflowCompilationError(validation)
-
-        nodes_by_id = {node.node_id: node for node in document.nodes}
         entries: list[SequenceEntry] = []
         steps: list[CompiledStep] = []
         loops: list[LoopNodeMapping] = []
-        for node_id in document.order:
-            node = nodes_by_id[node_id]
-            entry = self._compile_entry(node)
-            entries.append(entry)
-            if isinstance(entry, LoopBlock):
-                loops.append(LoopNodeMapping(entry.uuid, node_id))
-                for iteration in range(1, entry.repeat_count + 1):
-                    for child in entry.items:
-                        steps.append(
-                            CompiledStep(
-                                runtime_index=len(steps),
-                                node_id=node_id,
-                                item_uuid=child.uuid,
-                                loop_uuid=entry.uuid,
-                                loop_iteration=iteration,
-                            )
+        for node in document.root.children:
+            if isinstance(node, WorkflowActionNode):
+                item = self._compile_item(node)
+                entries.append(item)
+                steps.append(CompiledStep(len(steps), node.node_id, item.uuid))
+                continue
+            loop = self._compile_loop(node)
+            entries.append(loop)
+            loops.append(LoopNodeMapping(loop.uuid, node.node_id))
+            for iteration in range(1, loop.repeat_count + 1):
+                for child in loop.items:
+                    steps.append(
+                        CompiledStep(
+                            len(steps),
+                            node.node_id,
+                            child.uuid,
+                            loop_uuid=loop.uuid,
+                            loop_iteration=iteration,
                         )
-            else:
-                steps.append(
-                    CompiledStep(
-                        runtime_index=len(steps),
-                        node_id=node_id,
-                        item_uuid=entry.uuid,
                     )
-                )
-
         return CompiledWorkflow(
             workflow_id=document.workflow_id,
             revision=document.revision,
@@ -116,23 +102,18 @@ class WorkflowCompiler:
             loops=tuple(loops),
         )
 
-    @staticmethod
-    def _compile_entry(node: WorkflowNode) -> SequenceEntry:
-        if isinstance(node.entry, LoopBlock):
-            return LoopBlock(
-                uuid=node.entry.uuid,
-                items=[
-                    WorkflowCompiler._compile_item(child)
-                    for child in node.entry.items
-                ],
-                repeat_count=node.entry.repeat_count,
-                current_iteration=0,
-            )
-        return WorkflowCompiler._compile_item(node.entry)
+    @classmethod
+    def _compile_loop(cls, node: WorkflowLoopNode) -> LoopBlock:
+        return LoopBlock(
+            uuid=node.loop_uuid,
+            items=[cls._compile_item(child) for child in node.body],
+            repeat_count=node.repeat_count,
+            current_iteration=0,
+        )
 
     @staticmethod
-    def _compile_item(item: SequenceItem) -> SequenceItem:
-        definition = item.definition
+    def _compile_item(node: WorkflowActionNode) -> SequenceItem:
+        definition = node.definition
         validation = validate_action_parameters(
             definition.type,
             definition.parameters,
@@ -142,7 +123,7 @@ class WorkflowCompiler:
         if not validation.is_valid:
             raise AssertionError("validator accepted invalid action parameters")
         return SequenceItem(
-            uuid=item.uuid,
+            uuid=node.item_uuid,
             definition=ActionDefinition(
                 id=definition.id,
                 name=definition.name,

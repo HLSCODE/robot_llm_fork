@@ -30,7 +30,8 @@ class ActionCatalogTests(unittest.TestCase):
         self.actions_directory = self.root / "actions"
         self.repository = JsonCompositionRepository(
             actions_directory=self.actions_directory,
-            tasks_directory=self.root / "tasks",
+            workflows_directory=self.root / "workflows",
+            workflow_drafts_directory=self.root / "drafts",
         )
 
     def tearDown(self) -> None:
@@ -150,7 +151,8 @@ class BuiltinCatalogTests(unittest.TestCase):
         self.paths = ApplicationDataPaths(
             root=root,
             actions_directory=root / "actions",
-            tasks_directory=root / "tasks",
+            workflows_directory=root / "workflows",
+            workflow_drafts_directory=root / "drafts",
             skills_directory=root / "skills",
         )
         SkillRegistry().reset()
@@ -170,7 +172,7 @@ class BuiltinCatalogTests(unittest.TestCase):
             self.paths.skills_directory,
         )
 
-        self.assertEqual(16, len(first.created_files))
+        self.assertEqual(17, len(first.created_files))
         self.assertEqual((), second.created_files)
         self.assertEqual(original, (self.paths.actions_directory / "library.json").read_bytes())
         self.assertEqual(46, report.action_count)

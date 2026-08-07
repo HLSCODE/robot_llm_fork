@@ -259,7 +259,10 @@ class WorkflowCanvasTests(unittest.TestCase):
             revision=2,
         )
 
-        self.assertEqual(("first",), document.order)
+        self.assertEqual(
+            ("first",),
+            tuple(node.node_id for node in document.root.children),
+        )
         self.assertFalse(
             any(
                 isinstance(item, QGraphicsProxyWidget)

@@ -90,7 +90,7 @@ class ExecutionWebSocketHandler:
     async def _handle_execute_task(self, websocket, data: WebSocketRequest) -> None:
         """
         加载并执行已保存的任务
-        请求: {"action": "execute_task", "name": "xxx.task"}
+        请求: {"action": "execute_task", "name": "xxx.workflow.json"}
         """
         if self._server._services.execution.snapshot().active:
             await websocket.send(

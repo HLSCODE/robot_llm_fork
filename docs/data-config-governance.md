@@ -1,6 +1,6 @@
 # 依赖、配置与用户数据治理
 
-> 状态：当前实现 + M8 目标迁移
+> 状态：当前实现（M8 数据格式切换已完成）
 > 最近更新：2026-08-07
 
 ## 1. 依赖单一事实来源
@@ -27,13 +27,17 @@ uv sync --frozen --extra voice --extra kws
 data/
 ├── actions/
 │   └── library.json
-├── tasks/
+├── workflows/
+│   └── <name>.workflow.json
+├── drafts/
+│   └── <workflow-id>.draft.workflow.json
 ├── skills/
 │   └── <domain>/
 │       └── <id>.skill.json
 └── schemas/
     ├── action-library.schema.json
-    └── skill.schema.json
+    ├── skill.schema.json
+    └── workflow.schema.json
 ```
 
 应用组合根启动时只安装完全缺失的动作库或空技能目录；已存在的用户文件永不被内置目录
@@ -46,11 +50,12 @@ data/
 ```env
 ROBOT_DATA_DIR=data
 ACTIONS_LIBRARY_DIRECTORY=
-TASKS_DIRECTORY=
+WORKFLOWS_DIRECTORY=
+WORKFLOW_DRAFTS_DIRECTORY=
 SKILL_LIBRARY_DIRECTORY=
 ```
 
-后三项留空时从 `ROBOT_DATA_DIR` 推导。显式相对路径以项目根目录为基准；生产部署可以使用
+四个覆盖项留空时从 `ROBOT_DATA_DIR` 推导。显式相对路径以项目根目录为基准；生产部署可以使用
 绝对路径将用户数据放在独立持久卷。
 
 ## 3. 文档格式
@@ -66,13 +71,18 @@ SKILL_LIBRARY_DIRECTORY=
 }
 ```
 
-任务文件：
+工作流文件（GUI 中仍称“任务”）：
 
 ```json
 {
-  "schema": "robot_llm.task",
-  "schema_version": 1,
-  "entries": []
+  "$schema": "../schemas/workflow.schema.json",
+  "schema": "robot_llm.workflow",
+  "schema_version": 2,
+  "workflow_id": "demo",
+  "name": "demo",
+  "revision": 1,
+  "root": {"kind": "sequence", "children": []},
+  "presentation": {"positions": {}}
 }
 ```
 
@@ -87,9 +97,10 @@ SKILL_LIBRARY_DIRECTORY=
 }
 ```
 
-Action/Skill 新写入使用 schema v2，Task 暂时仍为 schema v1。未知 schema、未来版本、
-重复/缺失稳定 ID、重复动作名称、损坏条目和非法任务路径会被显式拒绝，不会被当成空库
-或自动回退成内置数据。
+Action/Skill/Workflow 均使用 schema v2。未知 schema、未来版本、重复/缺失稳定 ID、重复
+动作名称、损坏节点和非法文件名会被显式拒绝，不会被当成空库或自动回退成内置数据。
+Workflow 的 `root` 保存结构化 Sequence/Action/Loop，`presentation` 只保存布局；运行状态由
+ExecutionRuntime 持有，不进入定义文件。
 
 ## 4. 一次性前向迁移
 
@@ -99,6 +110,8 @@ Action/Skill 新写入使用 schema v2，Task 暂时仍为 schema v1。未知 sc
 ```powershell
 robot-library-data validate
 robot-library-data migrate
+robot-workflow-data
+robot-workflow-data --apply
 ```
 
 `validate` 只校验活动 v2 目录并输出数量和 SHA-256 语义指纹，不创建目录、备份或改写源
@@ -112,17 +125,21 @@ robot-library-data migrate
 4. 逐文件原子发布；可选移动旧源到可恢复备份目录。
 5. runtime 只扫描 v2 目录，不包含 v0/v1 集合解析分支。
 
+`robot-workflow-data` 默认 dry-run，完整解析 `data/tasks` 中的 `.task`/旧 `.workflow`，检查
+目标冲突；`--apply` 在临时目录生成并重新加载全部 WorkflowDocument v2，验证成功后原子
+发布到 `workflows/`，再把所有旧任务及 `.bak` 移入
+`data/migration-backups/workflow-v1/`。正常 Repository 只认识 `*.workflow.json`。
+
 迁移不是长期兼容双栈。未来版本高于当前程序时直接失败，必须先升级应用；迁移或解析失败
 不会覆盖原文件。需要人工恢复时，先停止应用，保留故障文件，再从 `.v0.bak` 复制恢复并
 根据错误信息处理。
 
-> M8 当前进度：Action/Skill v2 目录迁移已经完成；活动数据为 46 actions / 13 skills，
-> 两个旧集中式文件仅保留在迁移备份中。G-032 剩余范围是 `.task`/`.workflow` 到唯一
-> `*.workflow.json` 的迁移。
+> M8 迁移已完成：活动数据为 46 actions / 13 skills / 17 workflows；旧 Action/Skill
+> 集合和 `.task`/旧 `.workflow` 仅保留在迁移备份中，runtime 不包含旧格式入口。
 
-## 5. M8 剩余目标用户数据结构
+## 5. 当前用户数据结构
 
-M8 将用户数据直接切换为以下结构：
+M8 已将用户数据直接切换为以下结构：
 
 ```text
 data/
@@ -166,9 +183,8 @@ WORKFLOW_DRAFTS_DIRECTORY=
 SKILL_LIBRARY_DIRECTORY=
 ```
 
-切换步骤固定为 dry-run、备份、转换、重新加载、数量/ID/参数/语义指纹比对、原子发布。
-只有全部验证成功才能更新活动配置；随后删除旧路径配置、旧格式读取和隐式迁移，不设置
-兼容开关。
+切换已按 dry-run、备份、转换、重新加载、数量/ID/参数/语义比对和原子发布完成。旧路径
+配置、旧格式读取和隐式迁移均已删除，未设置兼容开关。
 
 ## 6. 启动配置校验
 

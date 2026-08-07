@@ -22,7 +22,8 @@ def _config(root: Path, **overrides):
     values = {
         "ROBOT_DATA_DIR": str(root),
         "ACTIONS_LIBRARY_DIRECTORY": "",
-        "TASKS_DIRECTORY": "",
+        "WORKFLOWS_DIRECTORY": "",
+        "WORKFLOW_DRAFTS_DIRECTORY": "",
         "SKILL_LIBRARY_DIRECTORY": "",
         "LOG_LEVEL": "INFO",
         "LLM_DEFAULT_PROVIDER": "minicpm",
@@ -363,15 +364,23 @@ class ConfigurationValidationTests(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             paths = ApplicationDataPaths.from_settings(
-                _config(root, TASKS_DIRECTORY="custom/tasks").data
+                _config(
+                    root,
+                    WORKFLOWS_DIRECTORY="custom/workflows",
+                    WORKFLOW_DRAFTS_DIRECTORY="custom/drafts",
+                ).data
             )
 
         self.assertEqual(root.resolve(), paths.root)
         self.assertEqual(root.resolve() / "actions", paths.actions_directory)
         self.assertEqual(root.resolve() / "skills", paths.skills_directory)
         self.assertEqual(
-            Path.cwd().resolve() / "custom" / "tasks",
-            paths.tasks_directory,
+            Path.cwd().resolve() / "custom" / "workflows",
+            paths.workflows_directory,
+        )
+        self.assertEqual(
+            Path.cwd().resolve() / "custom" / "drafts",
+            paths.workflow_drafts_directory,
         )
 
     def test_check_config_command_does_not_start_gui(self) -> None:

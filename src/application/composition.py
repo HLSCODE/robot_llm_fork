@@ -50,7 +50,7 @@ class CompositionRevisionConflict(RuntimeError):
 
 class CompositionRepository(Protocol):
     @property
-    def tasks_directory(self) -> Path: ...
+    def workflows_directory(self) -> Path: ...
 
     def load_actions(self) -> list[ActionDefinition]: ...
 
@@ -58,27 +58,6 @@ class CompositionRepository(Protocol):
         self,
         actions: Sequence[ActionDefinition],
     ) -> None: ...
-
-    def list_task_names(self) -> tuple[str, ...]: ...
-
-    def load_task(
-        self,
-        task_name: str,
-    ) -> list[SequenceEntry] | None: ...
-
-    def save_task(
-        self,
-        task_name: str,
-        entries: Sequence[SequenceEntry],
-    ) -> str: ...
-
-    def delete_task(self, task_name: str) -> bool: ...
-
-    def rename_task(
-        self,
-        task_name: str,
-        new_task_name: str,
-    ) -> tuple[str, str]: ...
 
     def list_workflow_names(self) -> tuple[str, ...]: ...
 
@@ -94,6 +73,12 @@ class CompositionRepository(Protocol):
     ) -> str: ...
 
     def delete_workflow(self, workflow_name: str) -> bool: ...
+
+    def rename_workflow(
+        self,
+        workflow_name: str,
+        new_workflow_name: str,
+    ) -> tuple[str, str]: ...
 
     def load_workflow_draft(self) -> WorkflowDocument | None: ...
 
@@ -125,8 +110,8 @@ class CompositionService:
         self._listeners: dict[str, CompositionListener] = {}
 
     @property
-    def tasks_directory(self) -> Path:
-        return self._repository.tasks_directory
+    def workflows_directory(self) -> Path:
+        return self._repository.workflows_directory
 
     @property
     def revision(self) -> int:
@@ -369,10 +354,11 @@ class CompositionService:
     def list_tasks(self) -> tuple[TaskSummary, ...]:
         with self._lock:
             summaries = []
-            for task_name in self._repository.list_task_names():
-                entries = self._repository.load_task(task_name)
-                if entries is None:
+            for task_name in self._repository.list_workflow_names():
+                document = self._repository.load_workflow(task_name)
+                if document is None:
                     continue
+                entries = document.to_entries()
                 summaries.append(
                     TaskSummary(
                         name=task_name,
@@ -432,10 +418,7 @@ class CompositionService:
         if not stored_entries:
             raise ValueError("cannot save an empty task")
         with self._lock:
-            stored_name = self._repository.save_task(
-                task_name,
-                stored_entries,
-            )
+            stored_name = self._save_task_entries_unlocked(task_name, stored_entries)
             event = self._next_event_unlocked(
                 CompositionChangeType.TASKS,
                 origin,
@@ -452,10 +435,7 @@ class CompositionService:
         with self._lock:
             if not self._sequence:
                 raise ValueError("cannot save an empty sequence")
-            stored_name = self._repository.save_task(
-                task_name,
-                self._sequence,
-            )
+            stored_name = self._save_task_entries_unlocked(task_name, self._sequence)
             event = self._next_event_unlocked(
                 CompositionChangeType.TASKS,
                 origin,
@@ -470,9 +450,9 @@ class CompositionService:
         origin: str,
     ) -> str:
         with self._lock:
-            if not self._repository.delete_task(task_name):
+            if not self._repository.delete_workflow(task_name):
                 raise FileNotFoundError(task_name)
-            normalized_name = Path(task_name).with_suffix(".task").name
+            normalized_name = _workflow_file_name(task_name)
             event = self._next_event_unlocked(
                 CompositionChangeType.TASKS,
                 origin,
@@ -488,7 +468,7 @@ class CompositionService:
         origin: str,
     ) -> tuple[str, str]:
         with self._lock:
-            names = self._repository.rename_task(
+            names = self._repository.rename_workflow(
                 task_name,
                 new_task_name,
             )
@@ -554,9 +534,7 @@ class CompositionService:
         with self._lock:
             if not self._repository.delete_workflow(workflow_name):
                 raise FileNotFoundError(workflow_name)
-            normalized_name = Path(workflow_name).with_suffix(
-                ".workflow"
-            ).name
+            normalized_name = _workflow_file_name(workflow_name)
             event = self._next_event_unlocked(
                 CompositionChangeType.TASKS,
                 origin,
@@ -600,7 +578,7 @@ class CompositionService:
                 else _require_insert_index(index, len(task_entries))
             )
             task_entries[insert_index:insert_index] = additions
-            self._repository.save_task(task_name, task_entries)
+            self._save_task_entries_unlocked(task_name, task_entries)
             event = self._next_event_unlocked(
                 CompositionChangeType.TASKS,
                 origin,
@@ -621,7 +599,7 @@ class CompositionService:
             )
             _require_existing_index(index, len(task_entries))
             removed = task_entries.pop(index)
-            self._repository.save_task(task_name, task_entries)
+            self._save_task_entries_unlocked(task_name, task_entries)
             event = self._next_event_unlocked(
                 CompositionChangeType.TASKS,
                 origin,
@@ -648,7 +626,7 @@ class CompositionService:
             _require_existing_index(to_index, len(task_entries))
             entry = task_entries.pop(from_index)
             task_entries.insert(to_index, entry)
-            self._repository.save_task(task_name, task_entries)
+            self._save_task_entries_unlocked(task_name, task_entries)
             event = self._next_event_unlocked(
                 CompositionChangeType.TASKS,
                 origin,
@@ -675,10 +653,32 @@ class CompositionService:
         self,
         task_name: str,
     ) -> list[SequenceEntry]:
-        entries = self._repository.load_task(task_name)
-        if entries is None:
+        document = self._repository.load_workflow(task_name)
+        if document is None:
             raise FileNotFoundError(task_name)
-        return entries
+        return list(document.to_entries())
+
+    def _save_task_entries_unlocked(
+        self,
+        task_name: str,
+        entries: Sequence[SequenceEntry],
+    ) -> str:
+        current = self._repository.load_workflow(task_name)
+        revision = 1 if current is None else current.revision + 1
+        workflow_id = (
+            current.workflow_id
+            if current is not None
+            else Path(_workflow_file_name(task_name)).name.removesuffix(
+                ".workflow.json"
+            )
+        )
+        document = WorkflowDocument.from_entries(
+            workflow_id=workflow_id,
+            name=workflow_id,
+            revision=revision,
+            entries=entries,
+        )
+        return self._repository.save_workflow(task_name, document)
 
     def _next_event_unlocked(
         self,
@@ -751,6 +751,11 @@ def _pending_entry(entry: SequenceEntry) -> SequenceEntry:
 
 def _clone_workflow(document: WorkflowDocument) -> WorkflowDocument:
     return WorkflowDocument.from_dict(deepcopy(document.to_dict()))
+
+
+def _workflow_file_name(value: str) -> str:
+    name = Path(str(value).strip()).name
+    return name if name.endswith(".workflow.json") else f"{name}.workflow.json"
 
 
 def _flatten_entries(

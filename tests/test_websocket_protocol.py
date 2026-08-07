@@ -147,7 +147,7 @@ class WebSocketProtocolContractTests(unittest.TestCase):
 
     def test_request_and_response_dtos_preserve_validated_contract(self):
         request = WebSocketRequest.parse(
-            _request("execute_task", "execute-task-1") | {"name": "demo.task"},
+            _request("execute_task", "execute-task-1") | {"name": "demo.workflow.json"},
             known_actions={"execute_task"},
         )
         response = WebSocketResponse.from_payload(
@@ -158,11 +158,11 @@ class WebSocketProtocolContractTests(unittest.TestCase):
         )
 
         self.assertEqual("execute_task", request.action)
-        self.assertEqual("demo.task", request.payload["name"])
+        self.assertEqual("demo.workflow.json", request.payload["name"])
         self.assertEqual(
             {
                 "event": "task_loaded",
-                "name": "demo.task",
+                "name": "demo.workflow.json",
             },
             response.to_dict(),
         )
