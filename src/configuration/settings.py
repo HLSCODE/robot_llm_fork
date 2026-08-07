@@ -16,6 +16,10 @@ class RuntimeSettings:
     simulation_mode: bool = False
     interaction_turn_timeout_s: float = 90.0
     command_preview_ttl_seconds: float = 120.0
+    command_arm_relative_step_mm: float = 10.0
+    command_arm_relative_max_mm: float = 100.0
+    command_base_relative_step_cm: float = 10.0
+    command_base_relative_max_cm: float = 100.0
 
 
 @dataclass(frozen=True, slots=True)

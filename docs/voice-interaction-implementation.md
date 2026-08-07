@@ -7,7 +7,7 @@
 - `ApplicationServices.llm` 持有唯一 `LLMRegistry`，按配置懒加载不同 provider。
 - `TaskRunner` 负责普通对话。
 - `InstructionClassifier` 负责意图识别。
-- `SkillPlanner` 负责机器人技能规划。
+- `CommandPlanner` 负责将未被确定性目录匹配的自然语言规划为类型化命令。
 - `VisionFusionTask` 负责多摄像头视觉融合问答。
 - `RepeatTask` 负责文本原样返回。
 - `MiniCPMRealtimeClient` 已支持流式文本、音频输入、TTS 音频输出事件。
@@ -21,7 +21,7 @@
 3. 对每句用户输入先做意图识别，区分聊天、命令、视觉问题、会话控制等。
 4. 根据意图调用对应 task：
    - `chat`：普通大模型对话。
-   - `command`：技能规划，生成指令序列。
+   - `command`：解析 Action、Skill、Workflow 或 ExecutionControl，生成可确认预览。
    - `vision_question`：通过 `src/devices/cameras/` 采集相机画面并做视觉融合问答。
    - `session_control`：结束、暂停、取消任务等。
 5. 支持流式文本和语音回复；纯语音对话类 task 使用流式语音响应，结构化 task 使用文本响应。
@@ -93,7 +93,7 @@ classifying
 routing
   |-------------------------|
   | chat                    | -> TaskRunner.stream_chat(voice_response=True)
-  | command                 | -> SkillPlanner.plan() -> skill engine
+  | command                 | -> CommandCatalog -> CommandPlanner fallback -> CommandRuntime
   | vision_question         | -> CamerasModuleProvider.capture_llm_parts() -> VisionFusionTask.stream_observe(voice_response=True)
   | session_control         | -> end / pause / cancel
   |-------------------------|
@@ -254,7 +254,7 @@ async def _route(self, text: str, intent: dict):
 每个 `TaskProfile` 需要声明响应模式：
 
 - `response_mode="voice_stream"`：用户可听见的任务，例如普通聊天、复述、视觉问答。语音会话中传 `voice_response=True` 时，MiniCPM 等支持 TTS 的 provider 会返回 `audio_delta`。
-- `response_mode="text"`：结构化或内部任务，例如 `InstructionClassifier`、`SkillPlanner`。这类任务始终走文本结果，并会剔除误传的 TTS 选项，避免语音模板污染 JSON 或规划格式。
+- `response_mode="text"`：结构化或内部任务，例如 `InstructionClassifier`、`CommandPlanner`。这类任务始终走文本结果，并会剔除误传的 TTS 选项，避免语音模板污染 JSON 或规划格式。
 - `enable_thinking=False`：推荐用于 JSON、原样返回、视觉融合观察等格式敏感任务，避免模型输出推理过程或影响固定响应格式。
 - `command`、`session_control` 和 `execution_control` 仍应返回可理解的控制结果；
   固定反馈文本在启用 TTS 时可通过 `RepeatTask.stream_repeat()` 播报。
@@ -266,7 +266,7 @@ TaskRunner / GENERAL_CHAT_PROFILE       -> voice_stream
 RepeatTask / REPEAT_PROFILE             -> voice_stream
 VisionFusionTask / VISION_FUSION_PROFILE -> voice_stream
 InstructionClassifier                    -> text
-SkillPlanner                             -> text
+CommandPlanner                           -> text
 ```
 
 ## 11. Chat 处理
@@ -293,9 +293,11 @@ async for event in self.llm_registry.task_runner.stream_chat(user_text=text):
 
 命令统一走三层：
 
-1. `SkillPlanner` 只把自然语言转换为 `SkillMatchResult`。
-2. 进程级 `ApplicationServices.commands` 调用唯一 `SkillEngine` 展开和校验动作，
-   并注册版本化预览。
+1. `CommandCatalog` 优先处理无歧义的低延迟命令；只有 `no_match` 才允许
+   `CommandPlanner` 回退，两者都产出 `ActionCommand | SkillCommand |
+   WorkflowCommand | ExecutionControlCommand`。
+2. 进程级 `ApplicationServices.commands` 按命令种类展开 Action、Skill 或 Workflow，
+   统一执行 Action schema 校验并注册版本化预览；执行控制命令不生成动作预览。
 3. GUI 或 WebSocket 使用 `preview_id + version` 显式确认后，才能把一次性
    `ConfirmedCommand` 交给 `ExecutionService`。
 
@@ -304,13 +306,17 @@ async for event in self.llm_registry.task_runner.stream_chat(user_text=text):
 - 唯一 `preview_id` 和单调递增 `version`；
 - `created_at`、`expires_at` 和 `state=pending`；
 - `source`，防止 GUI 与 WebSocket 交叉确认对方的预览；
-- `validation`、`sequence`、`skill_info` 和 `plan`；
+- `validation`、`sequence`、`command_info` 和 `plan`；
 - `risk.level/reasons/requires_acknowledgement`；
 - `requires_confirmation=true`。
 
 执行策略：
 
-- 只有通过技能和动作序列校验的结果才能生成预览。
+- 只有通过命令展开和动作序列校验的结果才能生成预览。
+- “打开夹爪”等未指定左右设备的输入返回 `ambiguous`，机械臂或底盘相对移动
+  越过配置上限返回 `invalid`；这两类结果不会交给 LLM 猜测。
+- “一点”使用 `COMMAND_ARM_RELATIVE_STEP_MM` 或
+  `COMMAND_BASE_RELATIVE_STEP_CM`；最大单次距离分别由对应 `*_MAX_*` 配置限制。
 - 校验结果包含稳定 `code`；未知或非字符串 action type 返回
   `unsupported_action_type`，不会静默转换成 MOVE。
 - Skill 参数声明使用 `str`、`int`、`float`、`bool` 强类型和可选物理单位，
@@ -643,7 +649,7 @@ class FakeClassifier:
 5. GUI 增加手动唤醒和文本输入调试入口。
 6. 接入 `InstructionClassifier` 路由。
 7. 接入 `TaskRunner` 聊天流。
-8. 接入 `SkillPlanner` 命令预览。
+8. 接入 `CommandCatalog`、`CommandPlanner` 和统一 CommandRuntime 命令预览。
 9. 接入 `VisionFusionTask`，相机先 mock。
 10. 增加 session 超时和取消逻辑。
 11. 按需在 GUI 或 WebSocket 服务中启动 `VoiceSpeechRuntime`。
@@ -657,7 +663,7 @@ class FakeClassifier:
 1. 点击唤醒后进入 awake 状态。
 2. 超时后自动回到 sleeping 状态。
 3. 输入“你好”能走 chat 并流式显示回复。
-4. 输入“抓瓶子”能走 command 并生成技能规划或失败说明。
+4. 输入“抓瓶子”能走 command 并生成类型化命令预览或失败说明。
 5. 输入“你看到什么”能走 vision_question。
 6. 输入“没事了”能结束 session。
 7. 输入“取消刚才那个”能触发 execution_control/cancel。

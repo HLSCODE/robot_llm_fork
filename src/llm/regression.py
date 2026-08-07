@@ -17,7 +17,7 @@ from .tasks import (
     ROBOT_PLANNER_PROFILE,
 )
 from .tasks.classifier import parse_instruction_classification
-from .tasks.planner import parse_skill_plan_response
+from .tasks.planner import parse_command_plan_response
 
 REGRESSION_SCHEMA_VERSION = 1
 DEFAULT_DATASET_PATH = (
@@ -144,7 +144,7 @@ def run_regression_suite(
     for case in dataset["planning_cases"]:
         total += 1
         try:
-            plan = parse_skill_plan_response(
+            plan = parse_command_plan_response(
                 json.dumps(case["model_response"], ensure_ascii=False)
             )
         except Exception as exc:
@@ -155,9 +155,7 @@ def run_regression_suite(
             ))
             continue
         actual = {
-            "skill_id": plan.skill_id,
-            "skill_name": plan.skill_name,
-            "parameters": plan.parameters,
+            "command": plan.command.to_dict() if plan.command is not None else None,
             "reasoning": plan.reasoning,
             "confidence": plan.confidence,
             "error": plan.error,

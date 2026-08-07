@@ -656,11 +656,9 @@ class InteractionWebSocketHandler:
             if plan:
                 await self._server._broadcast(
                     {
-                        "event": "ai_skill_matched",
-                        "skill_id": plan.get("skill_id"),
-                        "skill_name": plan.get("skill_name"),
+                        "event": "ai_command_matched",
+                        "command": plan.get("command"),
                         "confidence": plan.get("confidence"),
-                        "params": plan.get("parameters") or {},
                         "reasoning": plan.get("reasoning") or "",
                     }
                 )

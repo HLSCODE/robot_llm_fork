@@ -7,9 +7,9 @@
       "template_sha256": "406386012f912535f28b049092164b55bf058de5534f45b4daf11b57cd26a260"
     },
     {
-      "name": "robot_skill_planner",
-      "version": "1.0.0",
-      "template_sha256": "c5dd1ea52d657175a94ac70bfd832cfb2545c2f032b7e59f89bf90323fee408f"
+      "name": "robot_command_planner",
+      "version": "2.0.0",
+      "template_sha256": "5e590f8b7e65006d78ece67afcc47a290baddf1fcec874fe97b6f93a9d0d6f50"
     }
   ],
   "classification_cases": [
@@ -109,16 +109,20 @@
       "id": "move_home",
       "input": "回到安全位置",
       "model_response": {
-        "skill_id": "move_to_home",
-        "skill_name": "回到安全位置",
-        "parameters": {},
+        "command": {
+          "kind": "skill",
+          "skill_id": "move_to_home",
+          "parameters": {}
+        },
         "reasoning": "用户明确要求机械臂回到安全位置。",
         "confidence": 0.98
       },
       "expected": {
-        "skill_id": "move_to_home",
-        "skill_name": "回到安全位置",
-        "parameters": {},
+        "command": {
+          "kind": "skill",
+          "skill_id": "move_to_home",
+          "parameters": {}
+        },
         "reasoning": "用户明确要求机械臂回到安全位置。",
         "confidence": 0.98,
         "error": null,
@@ -129,19 +133,23 @@
       "id": "absorb_liquid_parameter",
       "input": "吸取5毫升液体",
       "model_response": {
-        "skill_id": "absorb_liquid",
-        "skill_name": "吸取液体",
-        "parameters": {
-          "volume": 5
+        "command": {
+          "kind": "skill",
+          "skill_id": "absorb_liquid",
+          "parameters": {
+            "volume": 5
+          }
         },
         "reasoning": "匹配吸液技能并提取容量。",
         "confidence": 0.96
       },
       "expected": {
-        "skill_id": "absorb_liquid",
-        "skill_name": "吸取液体",
-        "parameters": {
-          "volume": 5
+        "command": {
+          "kind": "skill",
+          "skill_id": "absorb_liquid",
+          "parameters": {
+            "volume": 5
+          }
         },
         "reasoning": "匹配吸液技能并提取容量。",
         "confidence": 0.96,
@@ -153,18 +161,14 @@
       "id": "no_matching_skill",
       "input": "给我讲个笑话",
       "model_response": {
-        "skill_id": null,
-        "skill_name": "",
-        "parameters": {},
+        "command": null,
         "reasoning": "当前技能库没有聊天技能。",
         "confidence": 0.1,
         "error": "未匹配到技能",
         "fallback_suggestion": "作为普通聊天处理"
       },
       "expected": {
-        "skill_id": null,
-        "skill_name": "",
-        "parameters": {},
+        "command": null,
         "reasoning": "当前技能库没有聊天技能。",
         "confidence": 0.1,
         "error": "未匹配到技能",

@@ -83,19 +83,19 @@ TaskRunner / Classifier / SkillPlanner / Vision / Repeat
 所有 `TaskProfile` 必须显式声明非空 `version`。修改 Prompt 的语义或输出契约时，
 必须提升该版本；模板哈希用于发现忘记提升版本的变更。
 
-技能规划会额外记录：
+命令规划会额外记录：
 
 ```json
 {
-  "name": "skill_catalog",
-  "version": "1",
-  "sha256": "<规划时技能摘要的内容指纹>"
+  "name": "command_catalog",
+  "version": "2",
+  "sha256": "<规划时统一命令目录的内容指纹>"
 }
 ```
 
-`SkillEngine.list_all_skills()` 现在向规划器提供参数、单位、步骤摘要、示例和标签，
-因此技能目录指纹与实际进入 Prompt 的能力描述一致。规划结果通过
-`LLMPlanResult.to_dict()` 进入命令预览，避免嵌套 dataclass 无法序列化。
+`CommandCatalog.entries()` 向规划器提供 Action、Skill、Workflow 和
+ExecutionControl 的参数、示例与别名，因此目录指纹与实际进入 Prompt 的描述一致。
+规划结果通过 `CommandPlanResult.to_dict()` 进入命令预览。
 
 ## 5. 运行指标
 
@@ -122,7 +122,7 @@ GUI、WebSocket 和 Voice 看到同一份进程级指标。指标聚合开销进
 `schema_version: 1`。它覆盖：
 
 - classifier 输出枚举和 session/execution 控制归一化；
-- planner JSON 到 `LLMPlanResult` 的解析；
+- planner JSON 到四类 typed command 和 `CommandPlanResult` 的严格解析；
 - classifier/planner Prompt 版本和模板哈希；
 - 默认技能目录内容指纹；
 - 典型技能参数校验和动作序列展开。

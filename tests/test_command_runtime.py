@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from src.application import (
+    CommandValidation,
     CommandRuntime,
     ExecutionControlAction,
     PreviewExpiredError,
@@ -14,8 +15,8 @@ from src.application import (
     RiskAcknowledgementRequiredError,
 )
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.domain.commands import ActionCommand
 from src.execution import ExecutionSnapshot, ExecutionState
-from src.skill_system.models import ValidationResult
 
 
 class _Clock:
@@ -49,6 +50,11 @@ class _SkillEngine:
         return []
 
 
+class _Catalog:
+    def entries(self):
+        return []
+
+
 def _item(action_type: ActionType = ActionType.WAIT) -> SequenceItem:
     return SequenceItem.from_definition(
         ActionDefinition(
@@ -68,6 +74,9 @@ class CommandRuntimeTests(unittest.TestCase):
         self.runtime = CommandRuntime(
             execution=self.execution,
             skill_engine=_SkillEngine(),
+            composition=object(),
+            workflow_compiler=object(),
+            catalog=_Catalog(),
             preview_ttl_s=10,
             clock=self.clock,
             id_factory=lambda: next(ids),
@@ -81,8 +90,8 @@ class CommandRuntimeTests(unittest.TestCase):
             [_item(action_type)],
             source="test",
             plan={},
-            skill_info={},
-            validation=ValidationResult.succeeded("valid"),
+            command_info={},
+            validation=CommandValidation.succeeded("valid"),
         )
 
     def test_new_preview_supersedes_old_version(self):
@@ -94,6 +103,24 @@ class CommandRuntimeTests(unittest.TestCase):
             self.runtime.confirm(first.preview_id, second.version)
         with self.assertRaises(PreviewVersionConflictError):
             self.runtime.confirm(second.preview_id, first.version)
+
+    def test_typed_action_is_validated_and_expanded_by_runtime(self):
+        preparation = self.runtime.prepare(
+            ActionCommand(ActionType.WAIT, {"wait_seconds": 0.1}),
+            source="test",
+            plan={"provenance": "deterministic"},
+        )
+
+        self.assertTrue(preparation.validation.is_valid)
+        assert preparation.preview is not None
+        self.assertEqual(
+            "WAIT",
+            preparation.preview.sequence[0]["definition"]["type"],
+        )
+        self.assertEqual(
+            "action",
+            preparation.preview.command_info["kind"],
+        )
 
     def test_preview_expires_and_cannot_be_confirmed(self):
         preview = self._register()

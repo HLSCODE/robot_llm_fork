@@ -140,6 +140,28 @@ class ConfigurationValidationTests(unittest.TestCase):
             report.errors[0].field,
         )
 
+    def test_relative_command_distance_limits_are_consistent(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            report = validate_startup_configuration(
+                _config(
+                    Path(temporary_directory),
+                    COMMAND_ARM_RELATIVE_STEP_MM=60,
+                    COMMAND_ARM_RELATIVE_MAX_MM=50,
+                    COMMAND_BASE_RELATIVE_STEP_CM=1500,
+                    COMMAND_BASE_RELATIVE_MAX_CM=1200,
+                ),
+                _options(),
+            )
+
+        self.assertEqual(
+            {
+                "command_arm_step_exceeds_maximum",
+                "command_base_step_exceeds_maximum",
+                "command_base_max_exceeds_schema_limit",
+            },
+            {issue.code for issue in report.errors},
+        )
+
     def test_invalid_vision_versions_and_artifact_retention_are_rejected(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(

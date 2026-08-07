@@ -309,6 +309,24 @@ class DiscreteOutputHandlerTests(unittest.TestCase):
 
 
 class GripperActionHandlerTests(unittest.TestCase):
+    def test_gripper_number_selects_the_right_arm(self):
+        gripper = _Gripper()
+        runtime = _runtime_with(
+            ROBOT_SYSTEM,
+            DeviceCapability.GRIPPER,
+            gripper,
+        )
+        handler = GripperActionHandler(
+            runtime,
+            ManipulationHandlerOptions(),
+        )
+        context, _logs = _context()
+
+        self.assertTrue(
+            handler({"编号": 2, "操作": "开"}, context).successful
+        )
+        self.assertEqual([("open", ArmId.RIGHT)], gripper.calls)
+
     def test_gripper_retry_policy_is_bounded_and_configurable(self):
         gripper = _Gripper(failures_before_success=2)
         runtime = _runtime_with(

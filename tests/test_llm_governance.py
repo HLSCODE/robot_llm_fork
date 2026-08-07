@@ -384,12 +384,12 @@ class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class LLMPlanningRegressionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_planner_records_skill_catalog_version(self):
+    async def test_planner_records_command_catalog_version(self):
         provider = _FakeProvider(
             "dashscope",
             chat_text=(
-                '{"skill_id":"move_to_home","skill_name":"回到安全位置",'
-                '"parameters":{},"reasoning":"matched","confidence":0.99}'
+                '{"command":{"kind":"skill","skill_id":"move_to_home",'
+                '"parameters":{}},"reasoning":"matched","confidence":0.99}'
             ),
         )
         registry = LLMRegistry(
@@ -398,7 +398,7 @@ class LLMPlanningRegressionTests(unittest.IsolatedAsyncioTestCase):
             providers={"dashscope": provider},
         )
 
-        plan = await registry.skill_planner.plan(
+        plan = await registry.command_planner.plan(
             "回到安全位置",
             [{
                 "id": "move_to_home",
@@ -416,8 +416,8 @@ class LLMPlanningRegressionTests(unittest.IsolatedAsyncioTestCase):
             artifact.name: artifact
             for artifact in plan.provenance.artifacts
         }
-        self.assertEqual("1", artifacts["skill_catalog"].version)
-        self.assertEqual(64, len(artifacts["skill_catalog"].sha256))
+        self.assertEqual("2", artifacts["command_catalog"].version)
+        self.assertEqual(64, len(artifacts["command_catalog"].sha256))
 
     async def test_classifier_does_not_silently_accept_invalid_json(self):
         classifier = InstructionClassifier(

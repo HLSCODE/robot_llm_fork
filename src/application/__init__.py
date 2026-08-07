@@ -1,10 +1,17 @@
 from .camera_access import CameraAccessService, CameraSession, CameraStatus
+from .command_catalog import (
+    CommandCatalog,
+    CommandResolution,
+    CommandResolutionStatus,
+)
+from ..domain.commands import ExecutionControlAction
 from .command_runtime import (
     CommandPreview,
     CommandRuntime,
     CommandRuntimeError,
+    CommandValidation,
+    CommandValidationCode,
     ConfirmedCommand,
-    ExecutionControlAction,
     PreviewExpiredError,
     PreviewNotFoundError,
     PreviewSourceMismatchError,
@@ -93,8 +100,13 @@ __all__ = [
     "CameraSession",
     "CameraStatus",
     "CommandPreview",
+    "CommandCatalog",
+    "CommandResolution",
+    "CommandResolutionStatus",
     "CommandRuntime",
     "CommandRuntimeError",
+    "CommandValidation",
+    "CommandValidationCode",
     "CompositionChangeType",
     "CompositionEvent",
     "CompositionRevisionConflict",

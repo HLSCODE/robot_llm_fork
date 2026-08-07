@@ -43,27 +43,28 @@ class ActionPreviewDialog(QDialog):
     def __init__(
         self,
         items: list,
-        skill_info: dict,
+        command_info: dict,
         *,
         risk: dict | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._items = items
-        self._skill_info = skill_info
+        self._command_info = command_info
         self._risk = dict(risk or {})
         self._risk_checkbox: QCheckBox | None = None
         self._init_ui()
 
     def _init_ui(self) -> None:
-        skill_name = self._skill_info.get("name", "未知技能")
-        icon = self._skill_info.get("icon", "🤖")
-        estimated_time = self._skill_info.get("estimated_time", 0)
-        self.setWindowTitle(f"动作预览 - {icon} {skill_name} ({len(self._items)}步)")
+        command_name = self._command_info.get("name", "未命名命令")
+        command_kind = self._command_info.get("kind", "command")
+        estimated_time = float(self._command_info.get("estimated_time", 0) or 0)
+        self.setWindowTitle(f"动作预览 - {command_name} ({len(self._items)}步)")
         self.setMinimumSize(500, 420)
 
         layout = QVBoxLayout(self)
-        header = QLabel(f"{icon} {skill_name}\n{self._skill_info.get('description', '')}")
+        description = self._command_info.get("description", "")
+        header = QLabel(f"{command_name}\n类型：{command_kind}\n{description}")
         header.setWordWrap(True)
         header.setObjectName("aiStatusCard")
         layout.addWidget(header)

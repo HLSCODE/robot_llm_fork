@@ -24,6 +24,11 @@ class _SkillEngine:
         return []
 
 
+class _Catalog:
+    def entries(self):
+        return []
+
+
 class _BlockingClassifier:
     def __init__(self) -> None:
         self.started = asyncio.Event()
@@ -77,6 +82,9 @@ def _controller(
     runtime = CommandRuntime(
         execution=_Execution(),
         skill_engine=_SkillEngine(),
+        composition=object(),
+        workflow_compiler=object(),
+        catalog=_Catalog(),
     )
     return VoiceInteractionController(
         registry,

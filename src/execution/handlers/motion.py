@@ -9,6 +9,7 @@ from ...configuration.settings import VisionSettings
 from ...devices import (
     ArmId,
     ArmMotion,
+    ArmStateReader,
     BodyAxis,
     CartesianPose,
     DeviceRuntime,
@@ -58,6 +59,7 @@ class MoveActionHandler:
     ) -> None:
         self._target_handlers: dict[str, ActionHandler] = {
             "机械臂": robot_handler,
+            "机械臂相对": robot_handler,
             "身体": body_handler,
         }
 
@@ -107,6 +109,7 @@ class RobotMoveActionHandler:
         context: ActionExecutionContext,
     ) -> ActionHandlerResult:
         arm_name = str(parameters.get("臂", "左"))
+        target = str(parameters.get("目标", "机械臂"))
         target_pose_text = parameters.get("点位", "")
         mode_name = str(parameters.get("模式", ""))
         context.log(
@@ -116,17 +119,8 @@ class RobotMoveActionHandler:
         )
 
         try:
-            target_pose = resolve_robot_target_pose(
-                dict(parameters),
-                arm_name,
-                self._execution_context,
-                self._vision_settings,
-                self._external_localization_reader,
-                lambda message: context.log(message, "info"),
-            )
             arm = ArmId.parse(arm_name)
             mode = MotionMode.parse(mode_name)
-            pose = CartesianPose.from_iterable(target_pose)
         except Exception as exc:
             message = f"机械臂移动参数错误: {exc}"
             return context.failure(
@@ -150,6 +144,30 @@ class RobotMoveActionHandler:
                 device_id=ROBOT_SYSTEM,
                 error=exc,
             )
+
+        if target == "机械臂相对":
+            pose_result = self._relative_pose(parameters, arm, context)
+            if isinstance(pose_result, ActionHandlerResult):
+                return pose_result
+            pose = pose_result
+        else:
+            try:
+                target_pose = resolve_robot_target_pose(
+                    dict(parameters),
+                    arm_name,
+                    self._execution_context,
+                    self._vision_settings,
+                    self._external_localization_reader,
+                    lambda message: context.log(message, "info"),
+                )
+                pose = CartesianPose.from_iterable(target_pose)
+            except Exception as exc:
+                return context.failure(
+                    ActionResultCode.INVALID_PARAMETERS,
+                    f"机械臂移动参数错误: {exc}",
+                    operation=self._OPERATION,
+                    device_id=ROBOT_SYSTEM,
+                )
 
         last_error: Exception | None = None
         for attempt in range(1, self._options.arm_move_max_attempts + 1):
@@ -186,6 +204,57 @@ class RobotMoveActionHandler:
             operation=self._OPERATION,
             device_id=ROBOT_SYSTEM,
             error=last_error,
+        )
+
+    def _relative_pose(
+        self,
+        parameters: ActionParameters,
+        arm: ArmId,
+        context: ActionExecutionContext,
+    ) -> CartesianPose | ActionHandlerResult:
+        if parameters.get("坐标系") != "base":
+            return context.failure(
+                ActionResultCode.INVALID_PARAMETERS,
+                "机械臂相对移动目前只支持 base 坐标系",
+                operation=self._OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
+        try:
+            offsets_m = tuple(
+                float(parameters.get(field, 0.0)) / 1000.0
+                for field in ("x_mm", "y_mm", "z_mm")
+            )
+        except (TypeError, ValueError) as exc:
+            return context.failure(
+                ActionResultCode.INVALID_PARAMETERS,
+                f"机械臂相对移动偏移无效: {exc}",
+                operation=self._OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
+        try:
+            reader = self._device_runtime.require(ROBOT_SYSTEM, ArmStateReader)
+            state = context.invoke(
+                "robot_system.read_arm_state",
+                lambda: reader.read_arm_state(arm),
+            )
+        except (ActionCancelledError, ActionTimeoutError):
+            raise
+        except Exception as exc:
+            return context.failure(
+                ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"读取机械臂当前位姿失败: {exc}",
+                operation="robot_system.read_arm_state",
+                device_id=ROBOT_SYSTEM,
+                error=exc,
+            )
+        current = state.pose
+        return CartesianPose(
+            current.x_m + offsets_m[0],
+            current.y_m + offsets_m[1],
+            current.z_m + offsets_m[2],
+            current.rx_rad,
+            current.ry_rad,
+            current.rz_rad,
         )
 
 

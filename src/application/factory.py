@@ -26,6 +26,7 @@ from ..vision.service import VisionService
 from ..vision.simulation import VisionPipelineFixture
 from .builtin_data import BuiltinDataInstaller
 from .command_runtime import CommandRuntime
+from .command_catalog import CommandCatalog
 from .composition import CompositionService
 from .data_collection import (
     DataCollectionRecorder,
@@ -106,9 +107,18 @@ def create_application_services(
     execution = ExecutionService(manager)
     skill_engine = SkillEngine()
     skill_engine.load_skills(str(data_paths.skills_directory))
+    workflow_compiler = WorkflowCompiler()
+    command_catalog = CommandCatalog(
+        composition,
+        skill_engine,
+        settings.runtime,
+    )
     commands = CommandRuntime(
         execution=execution,
         skill_engine=skill_engine,
+        composition=composition,
+        workflow_compiler=workflow_compiler,
+        catalog=command_catalog,
         preview_ttl_s=settings.runtime.command_preview_ttl_seconds,
     )
     manual_control = ManualControlService(device_runtime, resources)
@@ -130,7 +140,6 @@ def create_application_services(
         resources,
         safety,
     )
-    workflow_compiler = WorkflowCompiler()
     workflow_preflight = WorkflowPreflightService(execution, devices)
     data_collection = DataCollectionService(
         camera_access=camera_access,

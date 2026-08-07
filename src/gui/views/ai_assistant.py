@@ -913,9 +913,9 @@ class AIAssistantWidget(QWidget):
 
         dialog = ActionPreviewDialog(
             items=self._current_preview.get("sequence") or [],
-            skill_info=self._current_preview.get("skill_info") or {},
+            command_info=self._current_preview.get("command_info") or {},
             risk=self._current_preview.get("risk") or {},
-            parent=self
+            parent=self,
         )
         dialog.confirmed.connect(self._on_preview_confirmed)
         dialog.exec()

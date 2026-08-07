@@ -9,17 +9,17 @@ from typing import Any
 
 from ...application.command_runtime import (
     CommandRuntime,
-    ExecutionControlAction,
 )
+from ...application.command_catalog import CommandResolutionStatus
+from ...domain.commands import ExecutionControlAction, ExecutionControlCommand
 from ...execution import ExecutionStateError
 from ...llm import (
     VOICE_FEEDBACK_PROFILE,
     LLMCapability,
     LLMMessage,
-    LLMPlanResult,
+    CommandPlanResult,
     LLMStreamEvent,
 )
-from ...skill_system.models import SkillMatchResult
 from ..adapters import CameraCaptureError
 from .session import VoiceSession
 from .types import VoiceEvent
@@ -32,11 +32,11 @@ class VoiceIntentRouter:
 
     def __init__(
         self,
-        llm_registry,
+        llm_registry: Any,
         session: VoiceSession,
         command_runtime: CommandRuntime,
         source: str,
-        camera_provider=None,
+        camera_provider: Any | None = None,
         tts_enabled: bool = False,
         history_turns: int = 6,
     ) -> None:
@@ -102,26 +102,53 @@ class VoiceIntentRouter:
     async def _handle_command(self, text: str) -> AsyncIterator[VoiceEvent]:
         self.session.responding()
         try:
-            plan: LLMPlanResult = await self.llm_registry.skill_planner.plan(
-                text,
-                self.command_runtime.list_skills(),
-            )
+            resolution = self.command_runtime.resolve_text(text)
+            if resolution.status in {
+                CommandResolutionStatus.AMBIGUOUS,
+                CommandResolutionStatus.INVALID,
+            }:
+                async for event in self._stream_feedback(
+                    resolution.message,
+                    data={"resolution": resolution.status.value},
+                ):
+                    yield event
+                return
+            if resolution.command is not None:
+                plan = CommandPlanResult(
+                    command=resolution.command,
+                    reasoning="deterministic command catalog match",
+                    confidence=resolution.confidence,
+                )
+            else:
+                plan = await self.llm_registry.command_planner.plan(
+                    text,
+                    self.command_runtime.command_catalog(),
+                )
             if not plan.is_valid():
                 async for event in self._stream_feedback(
-                    plan.error or "没有匹配到可执行技能，请换一种说法。",
+                    plan.error or "没有匹配到可执行命令，请换一种说法。",
                     data={"plan": plan.to_dict()},
                 ):
                     yield event
                 return
 
+            command = plan.command
+            assert command is not None
+            if isinstance(command, ExecutionControlCommand):
+                try:
+                    yield self._execution_control_event(
+                        command.action,
+                        intent={"intent": "execution_control"},
+                    )
+                except (ExecutionStateError, ValueError) as exc:
+                    yield VoiceEvent(
+                        type="error",
+                        text=f"执行控制失败: {exc}",
+                        data={"action": command.action.value},
+                    )
+                return
             preparation = self.command_runtime.prepare(
-                SkillMatchResult(
-                    skill_id=plan.skill_id,
-                    skill_name=plan.skill_name,
-                    confidence=plan.confidence,
-                    extracted_params=plan.parameters,
-                    reasoning=plan.reasoning,
-                ),
+                command,
                 source=self.source,
                 plan=plan.to_dict(),
             )
@@ -268,10 +295,8 @@ class VoiceIntentRouter:
             )
             return
         try:
-            result = self.command_runtime.control_execution(
-                action,
-                expected_source=self.source,
-            )
+            yield self._execution_control_event(action, intent=intent)
+            return
         except (ExecutionStateError, ValueError) as exc:
             yield VoiceEvent(
                 type="error",
@@ -280,12 +305,23 @@ class VoiceIntentRouter:
                 data={"action": action.value},
             )
             return
+
+    def _execution_control_event(
+        self,
+        action: ExecutionControlAction,
+        *,
+        intent: dict[str, Any],
+    ) -> VoiceEvent:
+        result = self.command_runtime.control_execution(
+            action,
+            expected_source=self.source,
+        )
         event_type = (
             "preview_cancelled"
             if result == "preview_cancelled"
             else "execution_controlled"
         )
-        yield VoiceEvent(
+        return VoiceEvent(
             type=event_type,
             text=result,
             intent=intent,

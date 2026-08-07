@@ -5,7 +5,7 @@ This package contains model-usage scenarios built on top of provider
 capabilities, such as generic chat tasks, skill planning, and classification.
 """
 from .classifier import INSTRUCTION_CLASSIFIER_PROFILE, InstructionClassifier
-from .planner import ROBOT_PLANNER_PROFILE, SkillPlanner
+from .planner import CommandPlanner, ROBOT_PLANNER_PROFILE
 from .profiles import (
     GENERAL_CHAT_PROFILE,
     ProviderName,
@@ -31,7 +31,7 @@ __all__ = [
     "BALANCE_READING_PROFILE",
     "REPEAT_PROFILE",
     "TaskRunner",
-    "SkillPlanner",
+    "CommandPlanner",
     "InstructionClassifier",
     "VisionFusionTask",
     "RepeatTask",

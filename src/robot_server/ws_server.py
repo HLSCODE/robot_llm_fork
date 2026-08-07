@@ -70,8 +70,8 @@ WebSocket 路径:
         {"event": "execution_finished"}
         {"event": "error",              "message": "..."}              # 请求参数校验错误
         {"event": "ai_status_changed",  "status": "分析中..."}
-        {"event": "ai_skill_matched",   "skill_id": "...", "skill_name": "...", "params": {...}}
-        {"event": "ai_preview_ready",   "sequence": [...], "skill_info": {...},
+        {"event": "ai_command_matched", "command": {...}, "confidence": 0.9}
+        {"event": "ai_preview_ready",   "sequence": [...], "command_info": {...},
          "validation": {"is_valid": true, "code": "valid"},
          "requires_confirmation": true}
         {"event": "ai_execution_finished", "success": true, "message": "..."}

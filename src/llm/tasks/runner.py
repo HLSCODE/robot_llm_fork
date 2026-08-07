@@ -2,7 +2,7 @@
 Generic LLM task runner.
 
 TaskRunner applies a TaskProfile to normal chat calls. It does not parse
-business results; specialized tasks such as SkillPlanner still own that part.
+business results; specialized tasks such as CommandPlanner still own that part.
 """
 from __future__ import annotations
 

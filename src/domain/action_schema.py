@@ -164,6 +164,44 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                     "补偿": _field("object", "补偿配置"),
                 },
             ),
+            "机械臂相对": _variant(
+                "在基座坐标系中执行有界笛卡尔相对移动",
+                {
+                    "目标": _field(
+                        "select",
+                        "目标",
+                        options=["机械臂相对"],
+                        default="机械臂相对",
+                    ),
+                    "臂": _field(
+                        "select",
+                        "臂",
+                        options=["左", "右"],
+                        required=True,
+                    ),
+                    "坐标系": _field(
+                        "select",
+                        "坐标系",
+                        options=["base"],
+                        default="base",
+                    ),
+                    "模式": _field(
+                        "select",
+                        "运动模式",
+                        options=[{"value": "move_l", "label": "直线运动 (move_l)"}],
+                        default="move_l",
+                    ),
+                    "x_mm": _field(
+                        "number", "X 偏移", default=0.0, minimum=-100, maximum=100, unit="mm"
+                    ),
+                    "y_mm": _field(
+                        "number", "Y 偏移", default=0.0, minimum=-100, maximum=100, unit="mm"
+                    ),
+                    "z_mm": _field(
+                        "number", "Z 偏移", default=0.0, minimum=-100, maximum=100, unit="mm"
+                    ),
+                },
+            ),
             "身体": _variant(
                 "控制升降平台移动到指定位置",
                 {

@@ -115,6 +115,47 @@ def validate_startup_configuration(
             "GUI_THEME",
             f"必须是 {', '.join(sorted(_GUI_THEMES))} 之一",
         )
+    for field, value in (
+        ("COMMAND_ARM_RELATIVE_STEP_MM", settings.runtime.command_arm_relative_step_mm),
+        ("COMMAND_ARM_RELATIVE_MAX_MM", settings.runtime.command_arm_relative_max_mm),
+        ("COMMAND_BASE_RELATIVE_STEP_CM", settings.runtime.command_base_relative_step_cm),
+        ("COMMAND_BASE_RELATIVE_MAX_CM", settings.runtime.command_base_relative_max_cm),
+    ):
+        _positive_value(value, issues, field)
+    if (
+        settings.runtime.command_arm_relative_step_mm
+        > settings.runtime.command_arm_relative_max_mm
+    ):
+        _error(
+            issues,
+            "command_arm_step_exceeds_maximum",
+            "COMMAND_ARM_RELATIVE_STEP_MM",
+            "默认步长不得超过单次移动上限",
+        )
+    if settings.runtime.command_arm_relative_max_mm > 100:
+        _error(
+            issues,
+            "command_arm_max_exceeds_safety_limit",
+            "COMMAND_ARM_RELATIVE_MAX_MM",
+            "机械臂单次相对移动上限不得超过 100 毫米",
+        )
+    if (
+        settings.runtime.command_base_relative_step_cm
+        > settings.runtime.command_base_relative_max_cm
+    ):
+        _error(
+            issues,
+            "command_base_step_exceeds_maximum",
+            "COMMAND_BASE_RELATIVE_STEP_CM",
+            "默认步长不得超过单次移动上限",
+        )
+    if settings.runtime.command_base_relative_max_cm > 1000:
+        _error(
+            issues,
+            "command_base_max_exceeds_schema_limit",
+            "COMMAND_BASE_RELATIVE_MAX_CM",
+            "底盘单次相对移动上限不得超过 1000 厘米",
+        )
 
     _validate_data_paths(settings, issues)
     _validate_data_collection(settings.data_collection, issues)

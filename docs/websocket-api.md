@@ -754,8 +754,7 @@ ws.onmessage = (event) => {
 |---|---|
 | `ai_status` | AI 当前状态 |
 | `ai_status_changed` | AI 状态变化 |
-| `ai_skill_matched` | 匹配到技能 |
-| `ai_skill_not_matched` | 未能匹配到可执行技能 |
+| `ai_command_matched` | 已解析为类型化命令 |
 | `ai_preview_ready` | AI 已生成可执行预览 |
 | `ai_execution_finished` | AI 执行相关流程结束 |
 | `ai_cancelled` | AI 规划已取消 |
@@ -2136,7 +2135,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 成功路径的典型事件顺序如下：
 
 1. `ai_status_changed`
-2. `ai_skill_matched`
+2. `ai_command_matched`
 3. `ai_preview_ready`
 4. `ai_status_changed`
 
@@ -2151,11 +2150,13 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 
 ```json
 {
-  "event": "ai_skill_matched",
-  "skill_id": "grab_bottle",
-  "skill_name": "抓取瓶子",
+  "event": "ai_command_matched",
+  "command": {
+    "kind": "skill",
+    "skill_id": "grab_bottle",
+    "parameters": {}
+  },
   "confidence": 0.91,
-  "params": {},
   "reasoning": "用户表达的是抓取瓶子的动作意图。"
 }
 ```
@@ -2185,7 +2186,8 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
       "status": "PENDING"
     }
   ],
-  "skill_info": {
+  "command_info": {
+    "kind": "skill",
     "id": "grab_bottle",
     "name": "抓取瓶子"
   },
@@ -2241,7 +2243,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 这一步只表示 Ask 分类器认定该输入属于机器人指令。随后如果 AI 规划组件可用，服务端会继续广播与 `ai_chat` 相同的规划事件流：
 
 1. `ai_status_changed`
-2. `ai_skill_matched`
+2. `ai_command_matched`
 3. `ai_preview_ready`
 4. `ai_status_changed`
 
@@ -2254,18 +2256,25 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 
 #### 11.0.3 匹配失败路径
 
-如果模型无法将输入匹配到当前技能库中的某个技能，通常会收到：
+如果确定性目录和模型都无法产生有效命令，通常会收到：
 
 1. `ai_status_changed(status = "分析中...")`
-2. `ai_skill_not_matched`
-3. `ai_status_changed(status = "匹配失败")`
+2. `interaction_event(type = "done")`
+3. 包含用户可理解的未匹配、歧义或越界说明
 
 示例：
 
 ```json
 {
-  "event": "ai_skill_not_matched",
-  "error": "无法理解您的意图（置信度过低）"
+  "event": "interaction_event",
+  "type": "done",
+  "text": "没有匹配到可执行命令，请换一种说法。",
+  "data": {
+    "plan": {
+      "command": null,
+      "confidence": 0.1
+    }
+  }
 }
 ```
 
@@ -2300,17 +2309,17 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 
 - `idle`：空闲，尚未发起规划
 - `planning`：已发起规划，等待模型分析
-- `matched`：已匹配技能，但尚未拿到可执行预览
+- `matched`：已解析为 typed command，但尚未拿到可执行预览
 - `preview_ready`：已拿到 `ai_preview_ready.sequence`，等待用户确认
 - `executing`：用户已确认，正在执行动作序列
 
 推荐状态迁移：
 
 - 发送 `ai_chat` 后进入 `planning`
-- 收到 `ai_skill_matched` 后进入 `matched`
+- 收到 `ai_command_matched` 后进入 `matched`
 - 收到 `ai_preview_ready` 后进入 `preview_ready`
 - 收到 `ai_confirm` 对应的 `accepted` 后进入 `executing`
-- 收到 `ai_skill_not_matched`、`error`、`ai_cancelled`、`ai_execution_finished` 后，根据场景退回 `idle`
+- 收到失败 `interaction_event`、`error`、`ai_cancelled`、`ai_execution_finished` 后，根据场景退回 `idle`
 
 前端务必区分三类数据：
 
@@ -2354,15 +2363,17 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 }
 ```
 
-#### 2. 匹配到技能
+#### 2. 匹配到类型化命令
 
 ```json
 {
-  "event": "ai_skill_matched",
-  "skill_id": "skill-id",
-  "skill_name": "抓取瓶子",
+  "event": "ai_command_matched",
+  "command": {
+    "kind": "skill",
+    "skill_id": "skill-id",
+    "parameters": {}
+  },
   "confidence": 0.91,
-  "params": {},
   "reasoning": "用户表达的是抓取瓶子的动作意图。"
 }
 ```
@@ -2376,7 +2387,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
   "version": 12,
   "expires_at": "2026-07-29T03:22:00Z",
   "sequence": [],
-  "skill_info": {},
+  "command_info": {},
   "validation": {"is_valid": true, "code": "valid"},
   "risk": {
     "level": "low",
@@ -2404,7 +2415,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 - 项目不存在自动执行配置，前端不得将预览事件本身视为执行授权
 - `sequence` 会注册到进程级 `CommandRuntime`，但此时还不会覆盖当前执行序列
 - 前端应以 `ai_preview_ready.sequence` 作为唯一权威预览数据源
-- 如果收到 `ai_skill_not_matched` 或 `error`，则视为本轮规划失败
+- 如果收到带失败说明的 `interaction_event` 或 `error`，则视为本轮规划失败
 
 ### 11.2 确认执行 AI 规划 `ai_confirm`
 
@@ -3152,9 +3163,9 @@ function handleChatData(data) {
 2. 页面初始化时调用 `ai_status`，确认 `llm_available`、`api_key_set`、`processing`、`has_preview`
 3. 用户输入自然语言后调用 `ai_chat`
 4. 收到 `ai_status_changed(status = "分析中...")` 后进入 loading 状态
-5. 收到 `ai_skill_matched` 后展示“已匹配技能”和参数摘要
+5. 收到 `ai_command_matched` 后按 `command.kind` 展示命令类型和参数摘要
 6. 收到 `ai_preview_ready` 后展示任务序列预览，并启用“确认执行”按钮
-7. 若收到 `ai_skill_not_matched` 或 `error`，则结束本轮规划并给出失败提示
+7. 若收到失败 `interaction_event` 或 `error`，则结束本轮规划并给出失败提示
 8. 用户确认后调用 `ai_confirm`
 9. 执行阶段继续监听 `accepted`、`step_started`、`step_completed`、`step_failed`、`ai_execution_finished`、`execution_finished`
 10. 用户取消预览则调用 `ai_cancel`

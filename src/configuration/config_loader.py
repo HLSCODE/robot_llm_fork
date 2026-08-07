@@ -93,6 +93,10 @@ class _EnvironmentConfig:
     LOG_RETENTION_DAYS: int = 14
     SIMULATION_MODE: bool = False
     GUI_THEME: str = "system"
+    COMMAND_ARM_RELATIVE_STEP_MM: float = 10.0
+    COMMAND_ARM_RELATIVE_MAX_MM: float = 100.0
+    COMMAND_BASE_RELATIVE_STEP_CM: float = 10.0
+    COMMAND_BASE_RELATIVE_MAX_CM: float = 100.0
     ROBOT_DATA_DIR: str = "data"
     ACTIONS_LIBRARY_DIRECTORY: str = ""
     WORKFLOWS_DIRECTORY: str = ""
@@ -517,6 +521,18 @@ class _EnvironmentConfig:
             "yes",
         )
         instance.ROBOT_DATA_DIR = os.getenv("ROBOT_DATA_DIR", "data")
+        instance.COMMAND_ARM_RELATIVE_STEP_MM = float(
+            os.getenv("COMMAND_ARM_RELATIVE_STEP_MM", "10")
+        )
+        instance.COMMAND_ARM_RELATIVE_MAX_MM = float(
+            os.getenv("COMMAND_ARM_RELATIVE_MAX_MM", "100")
+        )
+        instance.COMMAND_BASE_RELATIVE_STEP_CM = float(
+            os.getenv("COMMAND_BASE_RELATIVE_STEP_CM", "10")
+        )
+        instance.COMMAND_BASE_RELATIVE_MAX_CM = float(
+            os.getenv("COMMAND_BASE_RELATIVE_MAX_CM", "100")
+        )
         instance.ACTIONS_LIBRARY_DIRECTORY = os.getenv(
             "ACTIONS_LIBRARY_DIRECTORY", ""
         )

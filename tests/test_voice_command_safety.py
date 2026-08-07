@@ -5,10 +5,16 @@ import json
 import unittest
 from types import SimpleNamespace
 
-from src.application import CommandRuntime
+from src.application import (
+    CommandResolution,
+    CommandResolutionStatus,
+    CommandRuntime,
+    CommandValidation,
+)
+from src.domain.commands import SkillCommand
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.execution import ExecutionSnapshot, ExecutionState
-from src.llm import LLMPlanResult
+from src.llm import CommandPlanResult
 from src.robot_server.ws_server import RobotWebSocketServer
 from src.skill_system.models import ValidationCode, ValidationResult
 from src.voice_interaction.core.router import VoiceIntentRouter
@@ -16,11 +22,9 @@ from src.voice_interaction.core.session import VoiceSession
 
 
 class _Planner:
-    async def plan(self, _text, _skills) -> LLMPlanResult:
-        return LLMPlanResult(
-            skill_id="safe-skill",
-            skill_name="safe skill",
-            parameters={},
+    async def plan(self, _text, _commands) -> CommandPlanResult:
+        return CommandPlanResult(
+            command=SkillCommand("safe-skill", {}),
             reasoning="matched",
             confidence=1.0,
         )
@@ -58,6 +62,14 @@ class _Execution:
         return ExecutionSnapshot(None, ExecutionState.IDLE)
 
 
+class _Catalog:
+    def entries(self) -> list[dict]:
+        return []
+
+    def resolve(self, _text: str) -> CommandResolution:
+        return CommandResolution(CommandResolutionStatus.NO_MATCH)
+
+
 class _RecordingWebSocket:
     def __init__(self) -> None:
         self.messages: list[str] = []
@@ -91,13 +103,16 @@ def _runtime(
     return CommandRuntime(
         execution=_Execution(),
         skill_engine=_SkillEngine(item, validation),
+        composition=object(),
+        workflow_compiler=object(),
+        catalog=_Catalog(),
     )
 
 
 class VoiceCommandSafetyTests(unittest.TestCase):
     def test_valid_command_emits_versioned_confirmable_preview(self):
         registry = SimpleNamespace(
-            skill_planner=_Planner(),
+            command_planner=_Planner(),
             task_runner=_TaskRunner(),
         )
         router = VoiceIntentRouter(
@@ -134,7 +149,7 @@ class VoiceCommandSafetyTests(unittest.TestCase):
             "unsupported action type",
         )
         registry = SimpleNamespace(
-            skill_planner=_Planner(),
+            command_planner=_Planner(),
             task_runner=_TaskRunner(),
         )
         router = VoiceIntentRouter(
@@ -161,7 +176,7 @@ class VoiceCommandSafetyTests(unittest.TestCase):
         )
         feedback = next(event for event in events if event.type == "done")
         self.assertEqual(
-            "unsupported_action_type",
+            "invalid_skill",
             feedback.data["validation"]["code"],
         )
 
@@ -201,8 +216,8 @@ class VoiceCommandSafetyTests(unittest.TestCase):
             [_sequence_item(ActionType.MOVE)],
             source="websocket-ai",
             plan={},
-            skill_info={},
-            validation=ValidationResult.succeeded("valid"),
+            command_info={},
+            validation=CommandValidation.succeeded("valid"),
         )
         server = RobotWebSocketServer(
             services=SimpleNamespace(commands=runtime)

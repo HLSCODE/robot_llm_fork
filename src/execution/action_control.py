@@ -292,6 +292,7 @@ def _robot_stoppable_policy(
 MOVE_CONTROL_POLICIES: Mapping[str, ActionControlPolicy] = MappingProxyType(
     {
         "机械臂": _robot_stoppable_policy("robot_system.move_to_pose"),
+        "机械臂相对": _robot_stoppable_policy("robot_system.move_to_pose"),
         "身体": _blocking_policy("body_axis.move_to", BODY_AXIS),
     }
 )

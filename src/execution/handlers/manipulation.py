@@ -338,6 +338,20 @@ class GripperActionHandler:
                 operation=self._OPERATION,
                 device_id=ROBOT_SYSTEM,
             )
+        try:
+            arm_number = int(parameters.get("编号", 1))
+            if arm_number not in {1, 2}:
+                raise ValueError("夹爪编号必须是 1 或 2")
+            arm = ArmId.LEFT if arm_number == 1 else ArmId.RIGHT
+        except (TypeError, ValueError) as exc:
+            return _failed_result(
+                context,
+                ActionResultCode.INVALID_PARAMETERS,
+                f"夹爪编号无效: {exc}",
+                operation=self._OPERATION,
+                device_id=ROBOT_SYSTEM,
+                error=exc,
+            )
 
         try:
             gripper = self._device_runtime.require(
@@ -356,8 +370,8 @@ class GripperActionHandler:
 
         def action() -> object:
             if operation == "开":
-                return gripper.open_gripper(ArmId.LEFT)
-            return gripper.close_gripper(ArmId.LEFT)
+                return gripper.open_gripper(arm)
+            return gripper.close_gripper(arm)
 
         context.log(f"夹爪动作: {operation}", "info")
         last_error: Exception | None = None

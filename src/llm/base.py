@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from ..domain.commands import PlannedCommand
 from .types import (
     LLMCallProvenance,
     LLMCapability,
@@ -17,22 +18,21 @@ from .types import (
 )
 
 
-@dataclass
-class LLMPlanResult:
-    """LLM 返回的规划结果"""
-    skill_id: Optional[str]          # 匹配的技能ID，不匹配则为 None
-    skill_name: str                 # 技能名称
-    parameters: Dict[str, Any]      # 提取的参数
-    reasoning: str                   # 分析过程
-    confidence: float               # 置信度 0.0 ~ 1.0
-    error: Optional[str] = None    # 无法理解时的错误信息
-    fallback_suggestion: Optional[str] = None  # 降级建议
+@dataclass(frozen=True, slots=True)
+class CommandPlanResult:
+    """Validated typed command returned by a deterministic or LLM planner."""
+
+    command: PlannedCommand | None
+    reasoning: str
+    confidence: float
+    error: Optional[str] = None
+    fallback_suggestion: Optional[str] = None
     provenance: Optional[LLMCallProvenance] = None
 
     def is_valid(self) -> bool:
         """是否有效匹配"""
         return (
-            self.skill_id is not None
+            self.command is not None
             and self.confidence >= 0.5
             and self.error is None
         )
@@ -40,9 +40,7 @@ class LLMPlanResult:
     def to_dict(self) -> Dict[str, Any]:
         """Return a transport-safe planning result."""
         return {
-            "skill_id": self.skill_id,
-            "skill_name": self.skill_name,
-            "parameters": dict(self.parameters),
+            "command": self.command.to_dict() if self.command is not None else None,
             "reasoning": self.reasoning,
             "confidence": self.confidence,
             "error": self.error,

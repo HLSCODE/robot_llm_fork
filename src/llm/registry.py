@@ -36,7 +36,7 @@ from .tasks import (
     VOICE_FEEDBACK_PROFILE,
     InstructionClassifier,
     RepeatTask,
-    SkillPlanner,
+    CommandPlanner,
     TaskProfile,
     TaskRunner,
     VisionFusionTask,
@@ -90,7 +90,9 @@ class LLMRegistry:
             client_resolver=self.get_client_for_profile,
             voice_repeater=self.repeat_task,
         )
-        self.skill_planner = SkillPlanner(client_resolver=self.get_client_for_profile)
+        self.command_planner = CommandPlanner(
+            client_resolver=self.get_client_for_profile
+        )
         self.instruction_classifier = InstructionClassifier(
             client_resolver=self.get_client_for_profile
         )

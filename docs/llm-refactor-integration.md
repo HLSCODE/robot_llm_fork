@@ -1,5 +1,12 @@
 # LLM 能力层重构与 MiniCPM Realtime Chat 接入方案
 
+> 历史实施文档：本文保留早期 Provider/Realtime 设计过程，其中
+> `LLMPlanResult`、`SkillPlanner` 和 `registry.skill_planner` 示例不再是现行 API。
+> 当前规划入口为 `CommandPlanner`，产出四类 typed command；现行治理与交互协议以
+> [LLM Provider 治理](llm-provider-governance.md)、
+> [语音交互实现说明](voice-interaction-implementation.md) 和
+> [项目重构总计划](project-refactor-master-plan.md) 为准。
+
 ## 1. 背景
 
 重构前 `src/llm/` 的职责较窄，主要服务于 AI 技能规划：

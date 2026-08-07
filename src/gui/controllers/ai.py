@@ -90,7 +90,11 @@ class AIController(QObject):
         self.status_changed.emit("已取消")
 
     def get_skill_list(self) -> list[dict[str, Any]]:
-        return self._commands.list_skills()
+        return [
+            entry
+            for entry in self._commands.command_catalog()
+            if entry.get("kind") == "skill"
+        ]
 
     def is_llm_available(self) -> bool:
         client = self._get_status_client()

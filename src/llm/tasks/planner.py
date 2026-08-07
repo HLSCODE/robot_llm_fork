@@ -1,5 +1,5 @@
 """
-机器人技能规划器。
+机器人类型化命令规划器。
 
 该模块只负责 prompt 构造和规划结果解析；具体模型调用由注入的 LLM
 client 完成。
@@ -13,7 +13,8 @@ import math
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional
 
-from ..base import BaseLLMClient, LLMPlanResult
+from ...domain.commands import command_from_dict
+from ..base import BaseLLMClient, CommandPlanResult
 from ..errors import LLMError
 from ..fingerprints import fingerprint_json
 from ..types import LLMCapability, LLMMessage
@@ -24,8 +25,8 @@ ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 
 ROBOT_PLANNER_PROFILE = TaskProfile(
-    name="robot_skill_planner",
-    version="1.0.0",
+    name="robot_command_planner",
+    version="2.0.0",
     temperature=0.3,
     max_tokens=800,
     response_format="json",
@@ -35,30 +36,38 @@ ROBOT_PLANNER_PROFILE = TaskProfile(
     enable_thinking=False,
     system_prompt_template="""你是一个机器人动作规划助手。
 
-项目中有以下技能可用（每个技能由多个原子动作步骤组成）：
+项目中有以下可用命令目录：
 
-$skill_desc
+$command_catalog
 
-请分析用户的自然语言输入，返回JSON格式的技能调用参数。
+请分析用户输入并返回一种明确的类型化命令。
 
 返回格式要求（必须严格遵循JSON格式）：
 {
-  "skill_id": "匹配的技能ID，如果无法匹配任何技能则返回null",
-  "skill_name": "技能名称，无法匹配则为空字符串",
-  "parameters": {从用户输入中提取的参数值，如果没有参数则为空对象},
+  "command": {
+    "kind": "action | skill | workflow | execution_control",
+    "action_type": "action 命令使用标准 ActionType，否则省略",
+    "action_id": "已有动作 ID，可选",
+    "action_name": "动作展示名称，可选",
+    "skill_id": "skill 命令使用，否则省略",
+    "workflow_name": "workflow 命令使用，否则省略",
+    "action": "execution_control 使用 cancel | pause | resume，否则省略",
+    "parameters": {"严格使用目录中声明的参数字段": "值"}
+  },
   "reasoning": "你的分析思路（1-2句话）",
   "confidence": 置信度0.0~1.0，低于0.5视为无法匹配
 }
 
 重要规则：
 - 只返回上述JSON格式，不要包含任何其他文字
-- 如果无法匹配任何技能，设置skill_id为null并说明原因
-- parameters中的参数名必须与技能定义中的参数名一致""",
+- 如果无法确定唯一命令，将 command 设置为 null 并说明歧义，不得猜测机械臂或设备
+- parameters 中的字段必须与 Action/Skill 目录一致
+- 只做规划，不得声称已经执行硬件动作""",
 )
 
 
-class SkillPlanner:
-    """使用任意支持 chat 的 LLM 客户端完成机器人技能规划。"""
+class CommandPlanner:
+    """Use a routed LLM client to produce one typed interaction command."""
 
     def __init__(
         self,
@@ -73,27 +82,25 @@ class SkillPlanner:
     async def plan(
         self,
         user_text: str,
-        skill_summaries: List[Dict[str, Any]],
+        command_catalog: List[Dict[str, Any]],
         system_prompt: str | None = None,
         profile: TaskProfile | None = None,
         provider: str | None = None,
         **chat_options: Any,
-    ) -> LLMPlanResult:
+    ) -> CommandPlanResult:
         """异步规划入口。"""
         active_profile = profile or self._profile
         llm = self._resolve_llm(active_profile, provider)
         if not llm.is_available():
-            return LLMPlanResult(
-                skill_id=None,
-                skill_name="",
-                parameters={},
+            return CommandPlanResult(
+                command=None,
                 reasoning="",
                 confidence=0.0,
                 error=f"{llm.get_provider_name()} LLM 不可用，请检查配置",
             )
 
         rendered_system_prompt = system_prompt or active_profile.render_system_prompt(
-            skill_desc=self._build_skill_desc(skill_summaries)
+            command_catalog=self._build_command_catalog(command_catalog)
         )
 
         messages = [
@@ -107,13 +114,13 @@ class SkillPlanner:
                 **active_profile.chat_options(**chat_options),
             )
             logger.debug("LLM 规划原始响应: %s", result.text)
-            parsed = parse_skill_plan_response(result.text)
+            parsed = parse_command_plan_response(result.text)
             if result.provenance is None:
                 return parsed
             provenance = result.provenance.with_artifact(
-                name="skill_catalog",
-                version="1",
-                sha256=fingerprint_json(skill_summaries),
+                name="command_catalog",
+                version="2",
+                sha256=fingerprint_json(command_catalog),
             )
             return replace(parsed, provenance=provenance)
         except asyncio.CancelledError:
@@ -122,20 +129,16 @@ class SkillPlanner:
             raise
         except LLMError as exc:
             logger.error("LLM 规划调用失败: %s", exc)
-            return LLMPlanResult(
-                skill_id=None,
-                skill_name="",
-                parameters={},
+            return CommandPlanResult(
+                command=None,
                 reasoning="",
                 confidence=0.0,
                 error=f"LLM 调用失败: {str(exc)}",
             )
         except Exception as exc:
             logger.error("LLM 规划发生未知错误: %s", exc, exc_info=True)
-            return LLMPlanResult(
-                skill_id=None,
-                skill_name="",
-                parameters={},
+            return CommandPlanResult(
+                command=None,
                 reasoning="",
                 confidence=0.0,
                 error=f"LLM 调用失败: {str(exc)}",
@@ -149,65 +152,44 @@ class SkillPlanner:
         if self._client_resolver is not None:
             return self._client_resolver(profile, provider)
         if self._llm is None:
-            raise ValueError("SkillPlanner 未配置 LLM client")
+            raise ValueError("CommandPlanner 未配置 LLM client")
         return self._llm
 
-    def _build_skill_desc(self, skill_summaries: List[Dict[str, Any]]) -> str:
-        if not skill_summaries:
-            return "（暂无可用技能）"
-
-        lines = []
-        for skill in skill_summaries:
-            param_str = "\n    ".join(skill.get("parameters", [])) or "无"
-            example_str = " / ".join(skill.get("examples", [])[:2])
-
-            lines.append(f"""技能ID: {skill['id']}
-    名称: {skill['name']}
-    分类: {skill['category']}
-    描述: {skill['description']}
-    参数: {param_str}
-    示例: {example_str}""")
-
-        return "\n\n".join(lines)
+    def _build_command_catalog(self, command_catalog: List[Dict[str, Any]]) -> str:
+        if not command_catalog:
+            return "（暂无可用命令）"
+        return json.dumps(command_catalog, ensure_ascii=False, sort_keys=True)
 
     def _build_user_prompt(self, user_text: str) -> str:
         return f"""用户输入："{user_text}"
 
-请分析用户意图并返回技能调用参数（仅返回JSON）："""
+请分析用户意图并返回类型化命令（仅返回JSON）："""
 
 
-def parse_skill_plan_response(text: str) -> LLMPlanResult:
-    """Parse one planner response into the stable planning result."""
+def parse_command_plan_response(text: str) -> CommandPlanResult:
+    """Parse one untrusted planner response into a typed command result."""
     try:
         data = json.loads(_strip_json_text(text))
         if not isinstance(data, dict):
             raise TypeError("规划结果必须是 JSON 对象")
 
-        skill_id = data.get("skill_id")
-        if skill_id is not None:
-            skill_id = str(skill_id)
-        parameters = data.get("parameters", {})
-        if not isinstance(parameters, dict):
-            raise TypeError("parameters 必须是 JSON 对象")
+        raw_command = data.get("command")
+        command = None if raw_command is None else command_from_dict(raw_command)
         confidence = float(data.get("confidence", 0.0))
         if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
             raise ValueError("confidence 必须是 0.0 到 1.0 的有限数值")
 
-        return LLMPlanResult(
-            skill_id=skill_id,
-            skill_name=str(data.get("skill_name", "")),
-            parameters=parameters,
+        return CommandPlanResult(
+            command=command,
             reasoning=str(data.get("reasoning", "")),
             confidence=confidence,
             error=data.get("error"),
             fallback_suggestion=data.get("fallback_suggestion"),
         )
-    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         logger.error("解析 LLM 规划响应失败: %s", exc)
-        return LLMPlanResult(
-            skill_id=None,
-            skill_name="",
-            parameters={},
+        return CommandPlanResult(
+            command=None,
             reasoning="",
             confidence=0.0,
             error=f"无法解析 LLM 返回结果: {str(exc)}",

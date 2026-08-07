@@ -8,6 +8,7 @@ from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.configuration.settings import ApplicationSettings, VisionSettings
 from src.devices import (
     ArmId,
+    ArmState,
     CartesianPose,
     DeviceCapability,
     DeviceRegistration,
@@ -46,6 +47,15 @@ class _RecordingArmMotion:
         self.calls.append((arm, pose, mode))
         if len(self.calls) <= self.failures_before_success:
             raise RuntimeError("transient motion failure")
+
+    def read_arm_state(self, arm: ArmId) -> ArmState:
+        return ArmState(
+            arm=arm,
+            pose=CartesianPose(0.1, 0.2, 0.3, 1.0, 2.0, 3.0),
+        )
+
+    def try_read_arm_state(self, arm: ArmId) -> ArmState:
+        return self.read_arm_state(arm)
 
 
 class _BodyAxis:
@@ -137,6 +147,54 @@ def _action_context(
 
 
 class RobotMoveActionHandlerTests(unittest.TestCase):
+    def test_relative_motion_reads_current_pose_and_preserves_orientation(self):
+        robot = _RecordingArmMotion()
+        runtime = DeviceRuntime()
+        runtime.register(DeviceRegistration(
+            device_id=ROBOT_SYSTEM,
+            capabilities=frozenset({
+                DeviceCapability.MOTION,
+                DeviceCapability.ARM_MOTION,
+                DeviceCapability.ARM_STATE,
+            }),
+            factory=lambda: robot,
+            close=lambda _value: None,
+        ))
+        handler = RobotMoveActionHandler(
+            runtime,
+            ExecutionContext(),
+            MotionHandlerOptions(),
+            VisionSettings(),
+            lambda **_kwargs: None,
+        )
+        context, _logs = _action_context()
+
+        result = handler(
+            {
+                "目标": "机械臂相对",
+                "臂": "右",
+                "坐标系": "base",
+                "模式": "move_l",
+                "x_mm": 10,
+                "y_mm": -20,
+                "z_mm": 5,
+            },
+            context,
+        )
+
+        self.assertTrue(result.successful)
+        arm, pose, mode = robot.calls[-1]
+        self.assertEqual(ArmId.RIGHT, arm)
+        self.assertEqual(MotionMode.LINEAR, mode)
+        self.assertAlmostEqual(0.11, pose.x_m)
+        self.assertAlmostEqual(0.18, pose.y_m)
+        self.assertAlmostEqual(0.305, pose.z_m)
+        self.assertEqual((1.0, 2.0, 3.0), (
+            pose.rx_rad,
+            pose.ry_rad,
+            pose.rz_rad,
+        ))
+
     def test_arm_motion_retries_are_bounded_and_vendor_neutral(self):
         arm_motion = _RecordingArmMotion(failures_before_success=2)
         runtime = _runtime_with(
