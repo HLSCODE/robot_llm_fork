@@ -18,8 +18,6 @@ from PySide6.QtWidgets import (
 from ..bridges.execution import ExecutionBridge
 from ...application import (
     ApplicationServices,
-    ComposedAction,
-    ComposedTask,
     CompositionChangeType,
     CompositionEvent,
     CompositionRevisionConflict,
@@ -33,6 +31,7 @@ from ...domain.models import (
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
 )
 from ...domain.workflow import WorkflowDocument
 from ...devices import StopMode
@@ -47,7 +46,6 @@ from ..views.ai_assistant import AIAssistantWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceHealthView, DevicePoseView
 from ..views.dialogs import ActionConfigDialog
-from ..views.action_list import ACTION_TYPE_LABELS
 from ..views.action_picker import ActionPickerDialog
 from ..bridges.notifications import GuiNotificationCenter
 from .startup import (
@@ -59,7 +57,6 @@ from .startup import (
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import (
     ActionLibraryView,
-    TaskComposerView,
     TaskLibraryView,
     WorkflowEditorView,
 )
@@ -117,24 +114,31 @@ class MainWindow(QMainWindow):
                 "工作台布局偏好已损坏，已恢复默认布局",
                 modal=False,
             )
-        self._sequence_revision = (
-            services.composition.sequence_revision
-        )
         self._composition_bridge = CompositionBridge(
             services.composition,
             self,
         )
         self._composition_bridge.changed.connect(
             self._on_composition_changed,
-            Qt.ConnectionType.QueuedConnection,
+            Qt.ConnectionType.AutoConnection,
         )
         self.workflow_view.sequence_list.sequence_changed.connect(
             self._publish_current_sequence
         )
         self.load_actions()
         self.refresh_task_library()
+        initial_entries = self._services.composition.sequence_entries()
+        if initial_entries:
+            state = self._services.workflow_editing.snapshot()
+            document = WorkflowDocument.from_entries(
+                workflow_id=state.document.workflow_id,
+                name=state.document.name,
+                revision=state.document.revision,
+                entries=initial_entries,
+            )
+            self._services.workflow_editing.replace_document(document)
         self._render_sequence(
-            self._services.composition.sequence_entries()
+            self._services.workflow_editing.snapshot().document.to_entries()
         )
         self._execution_bridge.step_started.connect(self.on_step_started)
         self._execution_bridge.step_completed.connect(self.on_step_completed)
@@ -348,7 +352,6 @@ class MainWindow(QMainWindow):
         self.task_library_view = TaskLibraryView()
         self.action_library_view = ActionLibraryView()
         self.ai_assistant_view = AIAssistantWidget(self._services)
-        self.task_composer_view = TaskComposerView()
         self.workflow_view = WorkflowEditorView()
         self.device_status_view = DeviceHealthView()
         self.device_pose_view = DevicePoseView()
@@ -373,12 +376,6 @@ class MainWindow(QMainWindow):
                     title="AI 助手",
                     icon=IconName.ASSISTANT,
                     widget=self.ai_assistant_view,
-                ),
-                WorkbenchPage(
-                    key="composer",
-                    title="任务组合",
-                    icon=IconName.COMPOSER,
-                    widget=self.task_composer_view,
                 ),
             ),
             editor=self.workflow_view,
@@ -407,8 +404,11 @@ class MainWindow(QMainWindow):
         library.action_insert_requested.connect(
             self._insert_action_from_library
         )
-        self.task_library_view.task_add_requested.connect(
-            self.add_task_to_composer
+        self.task_library_view.task_open_requested.connect(
+            self.open_selected_task
+        )
+        self.task_library_view.task_insert_requested.connect(
+            self.insert_selected_task
         )
 
         workflow = self.workflow_view
@@ -433,21 +433,9 @@ class MainWindow(QMainWindow):
         workflow.add_parallel_branch_requested.connect(
             self._choose_action_for_new_parallel_branch
         )
-        composer = self.task_composer_view
-        composer.remove_requested.connect(self.remove_task_from_composer)
-        composer.move_up_requested.connect(self.move_composed_task_up)
-        composer.move_down_requested.connect(self.move_composed_task_down)
-        composer.repeat_requested.connect(self.repeat_composer_selection)
-        composer.clear_requested.connect(self.clear_task_composer)
-        composer.refresh_requested.connect(self.refresh_task_library)
-        composer.add_task_requested.connect(self.choose_task_for_composer)
-        composer.add_action_requested.connect(self.choose_action_for_composer)
-        composer.execute_requested.connect(self.execute_composed_task)
-        composer.save_requested.connect(self.save_composed_task)
-        composer.task_composer_list.task_dropped.connect(self._add_task_name_to_composer)
-        composer.task_composer_list.action_dropped.connect(self._add_action_to_composer)
-        composer.task_composer_list.order_changed.connect(self._move_composed_task_rows)
-
+        workflow.insert_subworkflow_requested.connect(
+            self._insert_subworkflow_by_name
+        )
         self.device_pose_view.refresh_requested.connect(self.refresh_arm_poses)
         self.device_pose_view.copy_pose_requested.connect(self.copy_robot_pose)
         controls = self.device_control_view
@@ -1151,40 +1139,30 @@ class MainWindow(QMainWindow):
             return
         if event.change_type is CompositionChangeType.TASKS:
             self.refresh_task_library()
-            self._refresh_task_composer_display()
             return
         if event.change_type is CompositionChangeType.SEQUENCE:
-            self._sequence_revision = (
-                self._services.composition.sequence_revision
-            )
             if event.origin == "gui-canvas":
                 return
-            self._render_sequence(
-                self._services.composition.sequence_entries()
+            state = self._services.workflow_editing.snapshot()
+            document = WorkflowDocument.from_entries(
+                workflow_id=state.document.workflow_id,
+                name=state.document.name,
+                revision=state.document.revision,
+                entries=self._services.composition.sequence_entries(),
             )
+            self._services.workflow_editing.replace_document(document)
+            self._render_sequence(document.to_entries())
 
     def _publish_current_sequence(self) -> None:
-        try:
-            self._services.composition.replace_sequence(
-                self.workflow_view.sequence_list.get_entries(),
-                origin="gui-canvas",
-                expected_revision=self._sequence_revision,
-            )
-        except CompositionRevisionConflict:
-            self._sequence_revision = (
-                self._services.composition.sequence_revision
-            )
-            self._render_sequence(
-                self._services.composition.sequence_entries()
-            )
-            self._notifications.warning(
-                "序列已被其他入口修改，本次本地编辑未覆盖远程变更"
-                , modal=False
-            )
-            return
-        self._sequence_revision = (
-            self._services.composition.sequence_revision
+        state = self._services.workflow_editing.snapshot()
+        document = WorkflowDocument.from_entries(
+            workflow_id=state.document.workflow_id,
+            name=state.document.name,
+            revision=state.document.revision,
+            entries=self.workflow_view.sequence_list.get_entries(),
+            positions=state.document.position_map(),
         )
+        self._services.workflow_editing.replace_document(document)
 
     def _render_sequence(
         self,
@@ -1362,367 +1340,74 @@ class MainWindow(QMainWindow):
         painter.end()
         return QIcon(pixmap)
 
-    def add_task_to_composer(self):
-        current_item = self.task_library_view.task_library_list.currentItem()
-        if current_item is None:
-            self._notifications.warning("请先选择一个已保存任务")
-            return
-
-        task_name = current_item.data(Qt.ItemDataRole.UserRole)
-        self._add_task_name_to_composer(
-            task_name,
-            self.task_composer_view.task_composer_list.count(),
-        )
-
-    def choose_task_for_composer(self) -> None:
-        task_names = [
-            summary.name
-            for summary in self._services.composition.list_tasks()
-        ]
-        if not task_names:
-            self._notifications.warning("已保存任务为空")
-            return
-        task_name, accepted = QInputDialog.getItem(
-            self,
-            "添加任务",
-            "选择已保存任务:",
-            task_names,
-            0,
-            False,
-        )
-        if accepted and task_name:
-            self._add_task_name_to_composer(
-                task_name,
-                self.task_composer_view.task_composer_list.count(),
-            )
-
-    def choose_action_for_composer(self) -> None:
-        action = self._choose_action("添加动作到任务组合")
-        if action is not None:
-            self._add_action_to_composer(
-                action,
-                self.task_composer_view.task_composer_list.count(),
-            )
-
-    def _add_task_name_to_composer(self, task_name: str, insert_row: int | None = None):
-        self._services.task_composer.add_task(task_name, index=insert_row)
-        step_count = self._task_step_count(task_name)
-        self._refresh_task_composer_display()
-
-        if hasattr(self, "log_widget"):
-            self._notifications.info(f"已加入任务组合: {task_name} ({step_count} 步)")
-
-    def _add_action_to_composer(self, action: ActionDefinition, insert_row: int | None = None):
-        self._services.task_composer.add_action(action, index=insert_row)
-        self._refresh_task_composer_display()
-
-        if hasattr(self, "log_widget"):
-            self._notifications.info(f"已加入动作组合: {action.name}")
-
-    def remove_task_from_composer(self):
-        row = self.task_composer_view.task_composer_list.currentRow()
-        if row >= 0:
-            self._services.task_composer.remove(row)
-            self._refresh_task_composer_display()
-
-    def move_composed_task_up(self):
-        self._move_composed_task(-1)
-
-    def move_composed_task_down(self):
-        self._move_composed_task(1)
-
-    def _move_composed_task(self, offset: int):
-        composer_list = self.task_composer_view.task_composer_list
-        current_row = composer_list.currentRow()
-        target_row = current_row + offset
-        if current_row < 0 or target_row < 0 or target_row >= composer_list.count():
-            return
-
-        self._services.task_composer.move(current_row, target_row)
-        self._refresh_task_composer_display()
-        composer_list.setCurrentRow(target_row)
-
-    def _move_composed_task_rows(self, source_row: int, target_row: int) -> None:
-        if source_row == target_row:
-            return
-        self._services.task_composer.move(source_row, target_row)
-        self._refresh_task_composer_display()
-        self.task_composer_view.task_composer_list.setCurrentRow(target_row)
-
-    def repeat_composer_selection(self):
-        composer_list = self.task_composer_view.task_composer_list
-        rows = self._selected_contiguous_rows(
-            composer_list,
-            "请选择要循环的连续任务或动作",
-        )
-        if rows is None:
-            return
-
-        repeat_count, ok = QInputDialog.getInt(
-            self,
-            "循环执行",
-            "循环次数 n:",
-            2,
-            1,
-            999,
-            1,
-        )
-        if not ok or repeat_count <= 1:
-            return
-
-        start_row = rows[0]
-        end_row = rows[-1]
-        block_length = end_row - start_row + 1
-        self._services.task_composer.repeat(start_row, end_row, repeat_count)
-        self._refresh_task_composer_display()
-        for row in range(start_row, start_row + block_length * repeat_count):
-            composer_list.item(row).setSelected(True)
-        self._notifications.info(f"组合块已设置为循环 {repeat_count} 次")
-
-    def clear_task_composer(self):
-        self._services.task_composer.clear()
-        self._refresh_task_composer_display()
-
-    def expand_composed_tasks(self, replace: bool):
-        sequence = self._build_composed_task_sequence()
-        if not sequence:
-            self._notifications.warning("请先向组合计划中添加至少一个任务")
-            return
-
-        if replace:
-            self._services.composition.replace_sequence(
-                sequence,
-                origin="gui",
-            )
-        else:
-            self._services.composition.append_sequence(
-                sequence,
-                origin="gui",
-            )
-
-        mode = "替换" if replace else "追加"
-        self._notifications.info(
-            f"任务组合已{mode}到序列，共 {len(sequence)} 个动作"
-        )
-
-    def save_composed_task(self):
-        sequence = self._build_composed_task_sequence()
-        if not sequence:
-            self._notifications.warning("请先向组合计划中添加至少一个任务")
-            return
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "保存组合任务", "", "工作流文件 (*.workflow.json)"
-        )
-        if not filename:
-            return
-
-        task_name = Path(filename).name
-        stored_name = self._services.composition.save_task(
-            task_name,
-            sequence,
-            origin="gui",
-        )
-        self._notifications.info(f"组合任务已保存: {stored_name}")
-
-    def _build_composed_task_sequence(self) -> list[SequenceItem]:
-        return list(self._services.task_composer.build_sequence())
-
-    def _refresh_task_composer_display(self):
-        composer_list = self.task_composer_view.task_composer_list
-        composer_list.clear()
-        for entry in self._services.task_composer.entries():
-            item = QListWidgetItem()
-            if isinstance(entry, ComposedAction):
-                action = entry.action
-                item.setData(Qt.ItemDataRole.UserRole, True)
-                item.setText(f"{action.name} (动作)")
-                item.setIcon(self._create_action_card_icon(action))
-                item.setToolTip(f"{action.name}\n类型: {action.type.value}\n拖动可调整顺序")
-                composer_list.addItem(item)
-                continue
-
-            if not isinstance(entry, ComposedTask):
-                raise TypeError(f"unsupported composer entry: {type(entry).__name__}")
-            task_name = entry.task_name
-            item.setData(Qt.ItemDataRole.UserRole, True)
-            step_count = self._task_step_count(task_name)
-            item.setText(f"{task_name} ({step_count} 步)")
-            item.setIcon(self._create_task_card_icon(task_name, step_count, task_name))
-            item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖动可调整顺序")
-            composer_list.addItem(item)
-
-    def _task_step_count(self, task_name: str) -> int:
-        return self._services.task_composer.step_count(ComposedTask(task_name))
-
-    # ── 动作类型卡片风格（与 widget_components 保持一致）──
-    _CARD_STYLE = {
-        ActionType.MOVE: ("🦾", QColor(99, 102, 241)),
-        ActionType.BASE_MOVE: ("🚗", QColor(239, 68, 68)),
-        ActionType.MANIPULATE: ("⚡", QColor(249, 115, 22)),
-        ActionType.WAIT: ("⏳", QColor(245, 158, 11)),
-        ActionType.INSPECT: ("🔍", QColor(16, 185, 129)),
-        ActionType.CHANGE_GUN: ("🔧", QColor(139, 92, 246)),
-        ActionType.VISION_CAPTURE: ("👁", QColor(14, 165, 233)),
-        ActionType.VISION_RELOCALIZE: ("📍", QColor(6, 182, 212)),
-        ActionType.TRAJECTORY: ("📐", QColor(20, 184, 166)),
-    }
-
-    def _create_task_card_icon(self, task_name: str, step_count: int, title: str | None = None):
-        from PySide6.QtCore import QRectF
-        from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
-
-        width, height = 130, 88
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.GlobalColor.transparent)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # 任务用靛蓝色
-        task_color = QColor(59, 130, 246)
-        painter.setBrush(task_color)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(3, 3, width - 6, height - 6, 10, 10)
-
-        # 顶部高光
-        highlight = QColor(255, 255, 255, 45)
-        painter.setBrush(highlight)
-        painter.drawRoundedRect(QRectF(5, 5, width - 10, 16), 6, 6)
-
-        painter.setPen(QColor(255, 255, 255))
-        font = QFont()
-        font.setBold(True)
-
-        # 右上角 emoji
-        font.setPointSize(14)
-        painter.setFont(font)
-        painter.drawText(QRectF(0, 0, width - 8, 30), Qt.AlignmentFlag.AlignRight, "📋")
-
-        # 标题
-        font.setPointSize(11)
-        font.setBold(True)
-        painter.setFont(font)
-        display = task_name.removesuffix(".workflow.json")
-        truncated = display[:14] + "…" if len(display) > 14 else display
-        painter.drawText(QRectF(8, 30, width - 16, 24), Qt.AlignmentFlag.AlignLeft, truncated)
-
-        # 类型标签
-        font.setPointSize(8)
-        font.setBold(False)
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255, 200))
-        painter.drawText(QRectF(8, 50, width - 16, 16), Qt.AlignmentFlag.AlignLeft, "任务组合")
-
-        # 底部状态条
-        status_bg = QColor(0, 0, 0, 40)
-        painter.setBrush(status_bg)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(QRectF(5, height - 26, width - 10, 22), 6, 6)
-
-        font.setPointSize(9)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255))
-        painter.drawText(
-            QRectF(0, height - 26, width, 22),
-            Qt.AlignmentFlag.AlignCenter,
-            f"{step_count} 步",
-        )
-
-        painter.end()
-        return QIcon(pixmap)
-
-    def _create_action_card_icon(self, action: ActionDefinition):
-        from PySide6.QtCore import QRectF
-        from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
-
-        width, height = 130, 88
-        pixmap = QPixmap(width, height)
-        pixmap.fill(Qt.GlobalColor.transparent)
-
-        emoji, base_color = self._CARD_STYLE.get(
-            action.type, ("📋", QColor(148, 163, 184))
-        )
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # 圆角矩形背景
-        painter.setBrush(base_color)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(3, 3, width - 6, height - 6, 10, 10)
-
-        # 顶部高光条
-        highlight = QColor(255, 255, 255, 45)
-        painter.setBrush(highlight)
-        painter.drawRoundedRect(QRectF(5, 5, width - 10, 16), 6, 6)
-
-        painter.setPen(QColor(255, 255, 255))
-        font = QFont()
-        font.setBold(True)
-
-        # 右上角 emoji
-        font.setPointSize(14)
-        painter.setFont(font)
-        painter.drawText(QRectF(0, 0, width - 8, 30), Qt.AlignmentFlag.AlignRight, emoji)
-
-        # 动作名称
-        font.setPointSize(11)
-        font.setBold(True)
-        painter.setFont(font)
-        truncated = action.name[:14] + "…" if len(action.name) > 14 else action.name
-        painter.drawText(
-            QRectF(8, 30, width - 16, 24),
-            Qt.AlignmentFlag.AlignLeft | Qt.TextFlag.TextWordWrap,
-            truncated,
-        )
-
-        # 类型标签
-        font.setPointSize(8)
-        font.setBold(False)
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255, 200))
-        type_label = ACTION_TYPE_LABELS.get(action.type, action.type.value)
-        painter.drawText(QRectF(8, 50, width - 16, 16), Qt.AlignmentFlag.AlignLeft, type_label)
-
-        # 底部状态条
-        status_bg = QColor(0, 0, 0, 40)
-        painter.setBrush(status_bg)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(QRectF(5, height - 26, width - 10, 22), 6, 6)
-
-        font.setPointSize(9)
-        font.setBold(True)
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255))
-        painter.drawText(
-            QRectF(0, height - 26, width, 22),
-            Qt.AlignmentFlag.AlignCenter,
-            "动作",
-        )
-
-        painter.end()
-        return QIcon(pixmap)
-
     def save_task(self):
-        entries = self.workflow_view.sequence_list.get_entries()
-        if not entries:
+        state = self._services.workflow_editing.snapshot()
+        if not state.document.to_entries():
             self._notifications.warning("序列为空，无需保存")
             return
-
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "保存任务序列", "", "工作流文件 (*.workflow.json)"
-        )
-        if filename:
-            task_name = Path(filename).name
-            stored_name = (
-                self._services.composition.save_current_task(
-                    task_name,
-                    origin="gui",
+        try:
+            if state.workflow_name:
+                stored_name, _ = self._services.workflow_editing.save()
+            else:
+                filename, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "保存任务序列",
+                    "",
+                    "工作流文件 (*.workflow.json)",
                 )
-            )
-            self._notifications.info(f"任务已保存: {stored_name}")
+                if not filename:
+                    return
+                stored_name, _ = self._services.workflow_editing.save_as(
+                    Path(filename).name
+                )
+        except CompositionRevisionConflict:
+            self._notifications.warning("保存失败：该任务已被其他入口修改")
+            return
+        self._notifications.info(f"任务已保存: {stored_name}")
+
+    def open_selected_task(self) -> None:
+        task_name = self._selected_task_name()
+        if task_name is None:
+            return
+        try:
+            state = self._services.workflow_editing.open(task_name)
+        except (FileNotFoundError, ValueError):
+            self._notifications.warning(f"任务不存在: {task_name}")
+            return
+        self._render_sequence(state.document.to_entries())
+        self._notifications.info(f"任务已打开: {task_name}")
+
+    def insert_selected_task(self) -> None:
+        task_name = self._selected_task_name()
+        if task_name is None:
+            return
+        try:
+            subworkflow = self._services.workflow_editing.instantiate(task_name)
+        except (FileNotFoundError, ValueError):
+            self._notifications.warning(f"任务不存在: {task_name}")
+            return
+        current_row = self.workflow_view.sequence_list.current_entry_row()
+        insert_at = (
+            self.workflow_view.sequence_list.entry_count()
+            if current_row < 0
+            else current_row + 1
+        )
+        self.workflow_view.sequence_list.insert_entry(subworkflow, insert_at)
+
+    def _insert_subworkflow_by_name(self, task_name: str, index: int) -> None:
+        try:
+            subworkflow = self._services.workflow_editing.instantiate(task_name)
+        except (FileNotFoundError, ValueError):
+            self._notifications.warning(f"任务不存在: {task_name}")
+            return
+        self.workflow_view.sequence_list.insert_entry(subworkflow, index)
+
+    def _selected_task_name(self) -> str | None:
+        item = self.task_library_view.task_library_list.currentItem()
+        if item is None:
+            self._notifications.warning("请先选择一个已保存任务")
+            return None
+        return str(item.data(Qt.ItemDataRole.UserRole))
 
     def load_task(self):
         filename, _ = QFileDialog.getOpenFileName(
@@ -1732,19 +1417,17 @@ class MainWindow(QMainWindow):
             "工作流文件 (*.workflow.json)",
         )
         if filename:
-            task_name = Path(filename).name
+            item_name = Path(filename).name
             try:
-                self._services.composition.load_task_into_sequence(
-                    task_name,
-                    origin="gui",
-                )
+                state = self._services.workflow_editing.open(item_name)
             except (FileNotFoundError, ValueError):
-                self._notifications.warning(f"任务不存在: {task_name}")
+                self._notifications.warning(f"任务不存在: {item_name}")
                 return
-            self._notifications.info(f"任务已加载: {task_name}")
+            self._render_sequence(state.document.to_entries())
+            self._notifications.info(f"任务已加载: {item_name}")
 
     def start_execution(self):
-        entries = self._services.composition.sequence_entries()
+        entries = self._services.workflow_editing.snapshot().document.to_entries()
         if not entries:
             self._notifications.warning("请先添加动作到序列中")
             return
@@ -1755,18 +1438,8 @@ class MainWindow(QMainWindow):
             label="动作编排序列",
         )
 
-    def execute_composed_task(self):
-        sequence = self._build_composed_task_sequence()
-        if not sequence:
-            self._notifications.warning(
-                "请先向组合计划中添加至少一个任务或动作"
-            )
-            return
-
-        self._start_sequence_execution(sequence, display_list=None, label="任务组合序列")
-
     def execute_wake_welcome_task(self, task_name: str) -> None:
-        """Execute a configured wake lifecycle task without affecting the composer."""
+        """Execute a configured wake lifecycle task without replacing the editor document."""
         if self._execution_view_model.snapshot().active:
             self._notifications.warning(
                 f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}",
@@ -1799,10 +1472,11 @@ class MainWindow(QMainWindow):
 
         if display_list is not None:
             try:
+                state = self._services.workflow_editing.snapshot()
                 document = WorkflowDocument.from_entries(
-                    workflow_id="current-sequence",
-                    name="当前任务",
-                    revision=self._sequence_revision,
+                    workflow_id=state.document.workflow_id,
+                    name=state.document.name,
+                    revision=state.document.revision,
                     entries=sequence,
                 )
                 compiled = self._services.workflow_compiler.compile(document)
@@ -1826,7 +1500,10 @@ class MainWindow(QMainWindow):
             entries = [
                 entry
                 for entry in sequence
-                if isinstance(entry, (SequenceItem, LoopBlock, ParallelBlock))
+                if isinstance(
+                    entry,
+                    (SequenceItem, LoopBlock, ParallelBlock, SubworkflowBlock),
+                )
             ]
             plan = None
 
@@ -1952,13 +1629,14 @@ class MainWindow(QMainWindow):
     def _ensure_canvas_execution_mapping(self, display_list) -> None:
         if display_list.execution_mapping_active:
             return
-        entries = self._services.composition.sequence_entries()
+        state = self._services.workflow_editing.snapshot()
+        entries = state.document.to_entries()
         if not entries:
             return
         document = WorkflowDocument.from_entries(
-            workflow_id="current-sequence",
-            name="当前任务",
-            revision=self._sequence_revision,
+            workflow_id=state.document.workflow_id,
+            name=state.document.name,
+            revision=state.document.revision,
             entries=entries,
         )
         try:
@@ -2102,15 +1780,11 @@ class MainWindow(QMainWindow):
                 normalized.append(raw)
         if stagger_interval_ms <= 0:
             if replace:
-                self._services.composition.replace_sequence(
-                    normalized,
-                    origin="gui-ai",
-                )
+                self.workflow_view.sequence_list.render_entries(normalized)
+                self._publish_current_sequence()
             else:
-                self._services.composition.append_sequence(
-                    normalized,
-                    origin="gui-ai",
-                )
+                for item in normalized:
+                    self.workflow_view.sequence_list.insert_entry(item)
             self._notifications.info(
                 f"已同步执行序列到右侧，共 {len(normalized)} 个动作"
             )
@@ -2119,9 +1793,8 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QTimer
 
         if replace:
-            self._services.composition.clear_sequence(
-                origin="gui-ai",
-            )
+            self.workflow_view.sequence_list.render_entries(())
+            self._publish_current_sequence()
         self._notifications.info(
             f"正在将 {len(normalized)} 个动作载入右侧序列区（逐项显示）..."
         )
@@ -2131,10 +1804,7 @@ class MainWindow(QMainWindow):
 
             def make_add(seq_item: SequenceItem):
                 def _add():
-                    self._services.composition.append_sequence(
-                        (seq_item,),
-                        origin="gui-ai",
-                    )
+                    self.workflow_view.sequence_list.insert_entry(seq_item)
 
                 return _add
 
@@ -2142,9 +1812,8 @@ class MainWindow(QMainWindow):
 
     def clear_sequence(self):
         if self._notifications.confirm("确定要清空所有序列吗？"):
-            self._services.composition.clear_sequence(
-                origin="gui",
-            )
+            self.workflow_view.sequence_list.render_entries(())
+            self._publish_current_sequence()
             self._notifications.info("序列已清空")
 
     def refresh_sequence_numbers(self, selected_row: int | None = None):

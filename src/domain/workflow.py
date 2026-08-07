@@ -5,7 +5,9 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 import math
+from collections.abc import Callable
 from typing import Any, Mapping, Sequence, TypeAlias
+from uuid import uuid4
 
 from .models import (
     ActionDefinition,
@@ -17,11 +19,12 @@ from .models import (
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
 )
 
 
 WORKFLOW_DOCUMENT_SCHEMA = "robot_llm.workflow"
-WORKFLOW_DOCUMENT_VERSION = 3
+WORKFLOW_DOCUMENT_VERSION = 4
 WORKFLOW_SCHEMA_REFERENCE = "../schemas/workflow.schema.json"
 
 
@@ -233,8 +236,68 @@ class WorkflowParallelNode:
             raise WorkflowDocumentError("parallel policy is invalid") from exc
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowSubworkflowNode:
+    """Named self-contained workflow body embedded as an editable snapshot."""
+
+    node_id: str
+    subworkflow_uuid: str
+    name: str
+    body: WorkflowSequence
+    source_workflow_id: str = ""
+    source_revision: int = 0
+
+    def __post_init__(self) -> None:
+        _require_text(self.node_id, "subworkflow node_id")
+        _require_text(self.subworkflow_uuid, "subworkflow_uuid")
+        _require_text(self.name, "subworkflow name")
+        if not isinstance(self.body, WorkflowSequence):
+            raise TypeError("subworkflow body must be a WorkflowSequence")
+        if not isinstance(self.source_workflow_id, str):
+            raise TypeError("source_workflow_id must be a string")
+        if (
+            isinstance(self.source_revision, bool)
+            or not isinstance(self.source_revision, int)
+            or self.source_revision < 0
+        ):
+            raise ValueError("source_revision must be a non-negative integer")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": "subworkflow",
+            "node_id": self.node_id,
+            "subworkflow_uuid": self.subworkflow_uuid,
+            "name": self.name,
+            "source_workflow_id": self.source_workflow_id,
+            "source_revision": self.source_revision,
+            "body": self.body.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> WorkflowSubworkflowNode:
+        try:
+            raw_body = data["body"]
+            if not isinstance(raw_body, Mapping):
+                raise WorkflowDocumentError("subworkflow body must be an object")
+            return cls(
+                node_id=data["node_id"],
+                subworkflow_uuid=data["subworkflow_uuid"],
+                name=data["name"],
+                source_workflow_id=data.get("source_workflow_id", ""),
+                source_revision=data.get("source_revision", 0),
+                body=WorkflowSequence.from_dict(raw_body),
+            )
+        except KeyError as exc:
+            raise WorkflowDocumentError(
+                f"subworkflow node is missing {exc.args[0]!r}"
+            ) from exc
+
+
 WorkflowNode: TypeAlias = (
-    WorkflowActionNode | WorkflowLoopNode | WorkflowParallelNode
+    WorkflowActionNode
+    | WorkflowLoopNode
+    | WorkflowParallelNode
+    | WorkflowSubworkflowNode
 )
 
 
@@ -248,7 +311,12 @@ class WorkflowSequence:
         if not isinstance(self.children, tuple) or not all(
             isinstance(
                 node,
-                (WorkflowActionNode, WorkflowLoopNode, WorkflowParallelNode),
+                (
+                    WorkflowActionNode,
+                    WorkflowLoopNode,
+                    WorkflowParallelNode,
+                    WorkflowSubworkflowNode,
+                ),
             )
             for node in self.children
         ):
@@ -397,6 +465,17 @@ class WorkflowDocument:
                         failure_policy=entry.failure_policy,
                     )
                 )
+            elif isinstance(entry, SubworkflowBlock):
+                nodes.append(
+                    WorkflowSubworkflowNode(
+                        node_id=entry.uuid,
+                        subworkflow_uuid=entry.uuid,
+                        name=entry.name,
+                        source_workflow_id=entry.source_workflow_id,
+                        source_revision=entry.source_revision,
+                        body=_sequence_from_entries(entry.items),
+                    )
+                )
             else:
                 raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
         selected_positions = positions or {}
@@ -426,7 +505,7 @@ class WorkflowDocument:
                         current_iteration=0,
                     )
                 )
-            else:
+            elif isinstance(node, WorkflowParallelNode):
                 entries.append(
                     ParallelBlock(
                         uuid=node.parallel_uuid,
@@ -439,6 +518,16 @@ class WorkflowDocument:
                         ],
                         join_policy=node.join_policy,
                         failure_policy=node.failure_policy,
+                    )
+                )
+            else:
+                entries.append(
+                    SubworkflowBlock(
+                        uuid=node.subworkflow_uuid,
+                        name=node.name,
+                        source_workflow_id=node.source_workflow_id,
+                        source_revision=node.source_revision,
+                        items=list(_entries_from_sequence(node.body)),
                     )
                 )
         return tuple(entries)
@@ -469,11 +558,84 @@ def clone_sequence_entry(entry: SequenceEntry) -> SequenceEntry:
             join_policy=entry.join_policy,
             failure_policy=entry.failure_policy,
         )
+    if isinstance(entry, SubworkflowBlock):
+        return SubworkflowBlock(
+            uuid=entry.uuid,
+            name=entry.name,
+            source_workflow_id=entry.source_workflow_id,
+            source_revision=entry.source_revision,
+            items=[clone_sequence_entry(item) for item in entry.items],
+        )
     if isinstance(entry, SequenceItem):
         return SequenceItem(
             uuid=entry.uuid,
             definition=ActionDefinition.from_dict(deepcopy(entry.definition.to_dict())),
             status=SequenceItemStatus.PENDING,
+        )
+    raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
+
+
+def instantiate_subworkflow(
+    document: WorkflowDocument,
+    *,
+    id_factory: Callable[[], str] | None = None,
+) -> SubworkflowBlock:
+    """Create an isolated editable snapshot with entirely fresh runtime identities."""
+    create_id = id_factory or (lambda: str(uuid4()))
+    return SubworkflowBlock(
+        uuid=create_id(),
+        name=document.name,
+        source_workflow_id=document.workflow_id,
+        source_revision=document.revision,
+        items=[
+            _clone_entry_with_new_ids(entry, create_id)
+            for entry in document.to_entries()
+        ],
+    )
+
+
+def _clone_entry_with_new_ids(
+    entry: SequenceEntry,
+    create_id: Callable[[], str],
+) -> SequenceEntry:
+    if isinstance(entry, SequenceItem):
+        return SequenceItem(
+            uuid=create_id(),
+            definition=ActionDefinition.from_dict(
+                deepcopy(entry.definition.to_dict())
+            ),
+            status=SequenceItemStatus.PENDING,
+        )
+    if isinstance(entry, LoopBlock):
+        return LoopBlock(
+            uuid=create_id(),
+            items=[_clone_entry_with_new_ids(item, create_id) for item in entry.items],
+            repeat_count=entry.repeat_count,
+            current_iteration=0,
+        )
+    if isinstance(entry, ParallelBlock):
+        return ParallelBlock(
+            uuid=create_id(),
+            branches=[
+                ParallelBranch(
+                    create_id(),
+                    [
+                        _clone_entry_with_new_ids(item, create_id)
+                        for item in branch.items
+                    ],
+                )
+                for branch in entry.branches
+            ],
+            join_policy=entry.join_policy,
+            failure_policy=entry.failure_policy,
+        )
+    if isinstance(entry, SubworkflowBlock):
+        return SubworkflowBlock(
+            uuid=create_id(),
+            name=entry.name,
+            source_workflow_id=entry.source_workflow_id,
+            source_revision=entry.source_revision,
+            items=[_clone_entry_with_new_ids(item, create_id) for item in entry.items],
         )
     raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
 
@@ -488,6 +650,8 @@ def _parse_node(data: object) -> WorkflowNode:
         return WorkflowLoopNode.from_dict(data)
     if kind == "parallel":
         return WorkflowParallelNode.from_dict(data)
+    if kind == "subworkflow":
+        return WorkflowSubworkflowNode.from_dict(data)
     raise WorkflowDocumentError(f"unsupported workflow node kind {kind!r}")
 
 

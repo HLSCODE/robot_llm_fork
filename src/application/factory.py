@@ -43,7 +43,7 @@ from .services import (
     TrajectoryTeachingService,
 )
 from .teleoperation import TeleoperationService
-from .task_composer import TaskComposerService
+from .workflow_editing import WorkflowEditingSession
 from .workflow_compiler import WorkflowCompiler
 from .workflow_preflight import WorkflowPreflightService
 
@@ -62,7 +62,7 @@ def create_application_services(
             workflow_drafts_directory=data_paths.workflow_drafts_directory,
         )
     )
-    task_composer = TaskComposerService(composition)
+    workflow_editing = WorkflowEditingSession(composition)
     device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
     llm = LLMRegistry.from_settings(settings.llm, settings.secrets)
@@ -160,7 +160,7 @@ def create_application_services(
         vision=vision,
         external_localization=external_localization,
         composition=composition,
-        task_composer=task_composer,
+        workflow_editing=workflow_editing,
         data_collection=data_collection,
         execution=execution,
         workflow_compiler=workflow_compiler,

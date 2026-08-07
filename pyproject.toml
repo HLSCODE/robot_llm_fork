@@ -179,7 +179,7 @@ files = [
     "src/persistence/vision_station_storage.py",
     "src/application/builtin_data.py",
     "src/application/balance.py",
-    "src/application/task_composer.py",
+    "src/application/workflow_editing.py",
     "src/application/composition.py",
     "src/application/factory.py",
     "src/application/services.py",

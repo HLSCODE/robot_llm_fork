@@ -25,6 +25,7 @@ from ....domain.models import (
     ParallelBranch,
     SequenceEntry,
     SequenceItem,
+    SubworkflowBlock,
 )
 from ....domain.workflow import (
     CanvasPosition,
@@ -80,13 +81,16 @@ class WorkflowCanvasWidget(QWidget):
     insert_loop_action_requested = Signal(str, int)
     insert_parallel_action_requested = Signal(str, str, int)
     add_parallel_branch_requested = Signal(str)
+    insert_subworkflow_requested = Signal(str, int)
     wrap_selection_requested = Signal()
     can_undo_changed = Signal(bool)
     can_redo_changed = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._root_entries: tuple[SequenceEntry, ...] = ()
         self._entries: tuple[SequenceEntry, ...] = ()
+        self._scope_path: tuple[str, ...] = ()
         self._node_items: dict[str, WorkflowNodeItem] = {}
         self._endpoint_items: tuple[StartEndItem, ...] = ()
         self._current_item_uuid = ""
@@ -103,6 +107,10 @@ class WorkflowCanvasWidget(QWidget):
         toolbar.setSpacing(TOOLBAR_SPACING)
         self.fit_button = QPushButton("适合内容")
         self.zoom_button = QPushButton("100%")
+        self.root_scope_button = QPushButton("当前任务")
+        self.root_scope_button.setAccessibleName("返回工作流根作用域")
+        self.root_scope_button.clicked.connect(self.leave_scope)
+        self.root_scope_button.setVisible(False)
         for button, accessible_name in (
             (self.fit_button, "画布适合内容"),
             (self.zoom_button, "画布恢复百分之百缩放"),
@@ -111,6 +119,7 @@ class WorkflowCanvasWidget(QWidget):
             button.setMinimumSize(96, TOUCH_TARGET_SIZE)
             toolbar.addWidget(button)
         toolbar.addStretch(1)
+        toolbar.insertWidget(0, self.root_scope_button)
         layout.addLayout(toolbar)
 
         self.scene = QGraphicsScene(self)
@@ -119,11 +128,13 @@ class WorkflowCanvasWidget(QWidget):
         self.view.setScene(self.scene)
         self.view.setAccessibleName("任务工作流画布")
         self.view.setMinimumHeight(220)
+        self.view.setMinimumWidth(240)
         layout.addWidget(self.view, stretch=1)
 
         self.fit_button.clicked.connect(self.view.fit_workflow)
         self.zoom_button.clicked.connect(self.view.reset_zoom)
         self.view.action_dropped.connect(self._on_action_dropped)
+        self.view.task_dropped.connect(self._on_task_dropped)
         self.view.delete_requested.connect(self.delete_selected)
         self.view.undo_requested.connect(self.undo)
         self.view.redo_requested.connect(self.redo)
@@ -156,7 +167,10 @@ class WorkflowCanvasWidget(QWidget):
         *,
         clear_history: bool = True,
     ) -> None:
-        self._entries = _clone_entries(entries)
+        self._root_entries = _clone_entries(entries)
+        self._scope_path = ()
+        self._entries = self._root_entries
+        self.root_scope_button.setVisible(False)
         self._compiled = None
         self._parallel_branch_states.clear()
         if clear_history:
@@ -164,7 +178,7 @@ class WorkflowCanvasWidget(QWidget):
         self._rebuild_scene()
 
     def get_entries(self) -> list[SequenceEntry]:
-        return list(_clone_entries(self._entries))
+        return list(_clone_entries(self._root_entries))
 
     def document(
         self,
@@ -177,15 +191,63 @@ class WorkflowCanvasWidget(QWidget):
             workflow_id=workflow_id,
             name=name,
             revision=revision,
-            entries=self._entries,
-            positions={
-                entry.uuid: CanvasPosition(
-                    0.0,
-                    self._node_items[entry.uuid].scenePos().y(),
-                )
-                for entry in self._entries
-            },
+            entries=self._root_entries,
+            positions=(
+                {
+                    entry.uuid: CanvasPosition(
+                        0.0,
+                        self._node_items[entry.uuid].scenePos().y(),
+                    )
+                    for entry in self._root_entries
+                }
+                if not self._scope_path
+                else {}
+            ),
         )
+
+    def insert_entry(
+        self,
+        entry: SequenceEntry,
+        index: int | None = None,
+    ) -> None:
+        insertion_index = (
+            self.entry_count()
+            if index is None
+            else _require_insert_index(index, self.entry_count())
+        )
+        updated = list(_clone_entries(self._entries))
+        inserted = _clone_canvas_entry(entry)
+        updated.insert(insertion_index, inserted)
+        self._push(updated, "插入节点", (inserted.uuid,))
+
+    def enter_subworkflow(self, subworkflow_uuid: str) -> bool:
+        subworkflow = next(
+            (
+                entry
+                for entry in self._entries
+                if isinstance(entry, SubworkflowBlock)
+                and entry.uuid == subworkflow_uuid
+            ),
+            None,
+        )
+        if subworkflow is None:
+            return False
+        self._scope_path = (*self._scope_path, subworkflow_uuid)
+        self._entries = _scope_entries(self._root_entries, self._scope_path)
+        self.root_scope_button.setText(f"← {subworkflow.name}")
+        self.root_scope_button.setVisible(True)
+        self._rebuild_scene()
+        return True
+
+    def leave_scope(self) -> None:
+        if not self._scope_path:
+            return
+        self._scope_path = self._scope_path[:-1]
+        self._entries = _scope_entries(self._root_entries, self._scope_path)
+        self.root_scope_button.setVisible(bool(self._scope_path))
+        if self._scope_path:
+            self.root_scope_button.setText(f"← {self._scope_path[-1]}")
+        self._rebuild_scene()
 
     def insert_action(
         self,
@@ -570,7 +632,10 @@ class WorkflowCanvasWidget(QWidget):
         self._compiled = compiled
         self._parallel_branch_states.clear()
         self._editing_enabled = False
-        self._entries = _clone_entries(compiled.entries)
+        self._root_entries = _clone_entries(compiled.entries)
+        self._scope_path = ()
+        self._entries = self._root_entries
+        self.root_scope_button.setVisible(False)
         self.view.setAcceptDrops(False)
         self.can_undo_changed.emit(False)
         self.can_redo_changed.emit(False)
@@ -598,7 +663,8 @@ class WorkflowCanvasWidget(QWidget):
             if rendered_item is not None:
                 rendered_item.status = item.status
             break
-        self._entries = tuple(updated)
+        self._root_entries = tuple(updated)
+        self._entries = self._root_entries
         self._rebuild_scene(selected_node_ids=(node_id,))
         node_item = self._node_items.get(node_id)
         if node_item is not None:
@@ -620,7 +686,8 @@ class WorkflowCanvasWidget(QWidget):
             if loop is not None:
                 loop.current_iteration = current_iteration
                 break
-        self._entries = tuple(updated)
+        self._root_entries = tuple(updated)
+        self._entries = self._root_entries
         self._rebuild_scene(selected_node_ids=(node_id,))
 
     def update_parallel_branch_state(
@@ -656,8 +723,12 @@ class WorkflowCanvasWidget(QWidget):
             return
         command = _ReplaceEntriesCommand(
             self,
-            _clone_entries(self._entries),
-            _clone_entries(entries),
+            _clone_entries(self._root_entries),
+            _replace_scope(
+                self._root_entries,
+                self._scope_path,
+                entries,
+            ),
             text,
             selected_node_ids,
         )
@@ -670,7 +741,11 @@ class WorkflowCanvasWidget(QWidget):
         selected_node_ids: tuple[str, ...] = (),
         publish: bool,
     ) -> None:
-        self._entries = _clone_entries(entries)
+        self._root_entries = _clone_entries(entries)
+        if not _scope_exists(self._root_entries, self._scope_path):
+            self._scope_path = ()
+            self.root_scope_button.setVisible(False)
+        self._entries = _scope_entries(self._root_entries, self._scope_path)
         self._compiled = None
         self._rebuild_scene(selected_node_ids=selected_node_ids)
         if publish:
@@ -722,6 +797,7 @@ class WorkflowCanvasWidget(QWidget):
             node.setSelected(entry.uuid in selected_node_ids)
             node.focused.connect(self._on_node_focused)
             node.edit_requested.connect(self._on_node_edit_requested)
+            node.subworkflow_open_requested.connect(self.enter_subworkflow)
             node.move_requested.connect(self._on_node_moved)
             node.loop_insert_requested.connect(
                 self.insert_loop_action_requested.emit
@@ -810,6 +886,18 @@ class WorkflowCanvasWidget(QWidget):
                     self._push(updated, "向循环添加动作", (loop.uuid,))
                 return
         self.insert_action(action, self._insertion_index(scene_y))
+
+    def _on_task_dropped(
+        self,
+        task_name: str,
+        scene_x: float,
+        scene_y: float,
+    ) -> None:
+        del scene_x
+        self.insert_subworkflow_requested.emit(
+            task_name,
+            self._insertion_index(scene_y),
+        )
 
     def _insertion_index(self, scene_y: float) -> int:
         for index, entry in enumerate(self._entries):
@@ -904,6 +992,12 @@ class WorkflowCanvasWidget(QWidget):
                 self._add_menu_action(menu, "展开循环", self.unwrap_selected_loop)
             if isinstance(entry, ParallelBlock):
                 self._add_parallel_context_actions(menu, entry)
+            if isinstance(entry, SubworkflowBlock):
+                self._add_menu_action(
+                    menu,
+                    "进入子流程",
+                    lambda: self.enter_subworkflow(entry.uuid),
+                )
         selected_entries = [self._entries[row] for row in selected_rows]
         if all(not isinstance(entry, ParallelBlock) for entry in selected_entries):
             self._add_menu_action(
@@ -1037,6 +1131,14 @@ def _clone_canvas_entry(entry: SequenceEntry) -> SequenceEntry:
             join_policy=entry.join_policy,
             failure_policy=entry.failure_policy,
         )
+    if isinstance(entry, SubworkflowBlock):
+        return SubworkflowBlock(
+            uuid=entry.uuid,
+            name=entry.name,
+            items=[_clone_canvas_entry(child) for child in entry.items],
+            source_workflow_id=entry.source_workflow_id,
+            source_revision=entry.source_revision,
+        )
     if isinstance(entry, SequenceItem):
         return SequenceItem.from_dict(entry.to_dict())
     raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
@@ -1064,6 +1166,8 @@ def _entry_contains_uuid(entry: SequenceEntry, item_uuid: str) -> bool:
             for branch in entry.branches
             for child in branch.items
         )
+    if isinstance(entry, SubworkflowBlock):
+        return any(_entry_contains_uuid(child, item_uuid) for child in entry.items)
     return False
 
 
@@ -1073,11 +1177,10 @@ def _find_sequence_item(
 ) -> SequenceItem | None:
     if isinstance(entry, SequenceItem):
         return entry if entry.uuid == item_uuid else None
-    children = (
-        entry.items
-        if isinstance(entry, LoopBlock)
-        else [child for branch in entry.branches for child in branch.items]
-    )
+    if isinstance(entry, (LoopBlock, SubworkflowBlock)):
+        children = entry.items
+    else:
+        children = [child for branch in entry.branches for child in branch.items]
     return next(
         (
             found
@@ -1093,11 +1196,10 @@ def _find_loop(entry: SequenceEntry, loop_uuid: str) -> LoopBlock | None:
         return entry
     if isinstance(entry, SequenceItem):
         return None
-    children = (
-        entry.items
-        if isinstance(entry, LoopBlock)
-        else [child for branch in entry.branches for child in branch.items]
-    )
+    if isinstance(entry, (LoopBlock, SubworkflowBlock)):
+        children = entry.items
+    else:
+        children = [child for branch in entry.branches for child in branch.items]
     return next(
         (
             found
@@ -1126,7 +1228,77 @@ def _find_parallel(
             found = _find_parallel(entry.items, parallel_uuid)
             if found is not None:
                 return found
+        elif isinstance(entry, SubworkflowBlock):
+            found = _find_parallel(entry.items, parallel_uuid)
+            if found is not None:
+                return found
     return None
+
+
+def _scope_entries(
+    root: Sequence[SequenceEntry],
+    path: Sequence[str],
+) -> tuple[SequenceEntry, ...]:
+    current = _clone_entries(root)
+    for subworkflow_uuid in path:
+        subworkflow = next(
+            (
+                entry
+                for entry in current
+                if isinstance(entry, SubworkflowBlock)
+                and entry.uuid == subworkflow_uuid
+            ),
+            None,
+        )
+        if subworkflow is None:
+            return _clone_entries(root)
+        current = _clone_entries(subworkflow.items)
+    return current
+
+
+def _scope_exists(
+    root: Sequence[SequenceEntry],
+    path: Sequence[str],
+) -> bool:
+    current = _clone_entries(root)
+    for subworkflow_uuid in path:
+        subworkflow = next(
+            (
+                entry
+                for entry in current
+                if isinstance(entry, SubworkflowBlock)
+                and entry.uuid == subworkflow_uuid
+            ),
+            None,
+        )
+        if subworkflow is None:
+            return False
+        current = _clone_entries(subworkflow.items)
+    return True
+
+
+def _replace_scope(
+    root: Sequence[SequenceEntry],
+    path: Sequence[str],
+    replacement: Sequence[SequenceEntry],
+) -> tuple[SequenceEntry, ...]:
+    if not path:
+        return _clone_entries(replacement)
+    updated = list(_clone_entries(root))
+    target_uuid = path[0]
+    for index, entry in enumerate(updated):
+        if not isinstance(entry, SubworkflowBlock) or entry.uuid != target_uuid:
+            continue
+        child_items = _replace_scope(entry.items, path[1:], replacement)
+        updated[index] = SubworkflowBlock(
+            uuid=entry.uuid,
+            name=entry.name,
+            items=list(child_items),
+            source_workflow_id=entry.source_workflow_id,
+            source_revision=entry.source_revision,
+        )
+        return tuple(updated)
+    raise ValueError(f"subworkflow scope does not exist: {target_uuid}")
 
 
 def _require_insert_index(index: int, length: int) -> int:

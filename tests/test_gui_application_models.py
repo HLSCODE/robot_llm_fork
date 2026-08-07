@@ -11,10 +11,8 @@ from PySide6.QtCore import QThread, QTimer, Qt
 from PySide6.QtWidgets import QApplication
 
 from src.application import (
-    ComposedAction,
-    ComposedTask,
     CompositionService,
-    TaskComposerService,
+    WorkflowEditingSession,
 )
 from src.domain.action_schema import get_action_schema
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
@@ -54,56 +52,39 @@ def _action(action_id: str) -> ActionDefinition:
     )
 
 
-class TaskComposerServiceTests(unittest.TestCase):
+class WorkflowEditingSessionTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temporary_directory = TemporaryDirectory()
         root = Path(self._temporary_directory.name)
-        composition = CompositionService(
+        self.composition = CompositionService(
             JsonCompositionRepository(
                 actions_directory=root / "actions",
                 workflows_directory=root / "workflows",
                 workflow_drafts_directory=root / "drafts",
             )
         )
-        composition.save_task(
+        self.composition.save_task(
             "task-a",
             (SequenceItem.from_definition(_action("task-step")),),
             origin="test",
         )
-        self.composer = TaskComposerService(composition)
+        self.session = WorkflowEditingSession(self.composition)
 
     def tearDown(self) -> None:
         self._temporary_directory.cleanup()
 
-    def test_draft_operations_and_expansion_are_service_owned(self) -> None:
-        action = _action("direct")
-        self.composer.add_task("task-a")
-        self.composer.add_action(action)
-        action.name = "mutated outside"
+    def test_saved_workflow_is_instantiated_with_fresh_identity(self) -> None:
+        first = self.session.instantiate("task-a")
+        second = self.session.instantiate("task-a")
 
-        self.composer.move(1, 0)
-        self.composer.repeat(0, 1, 2)
+        self.assertNotEqual(first.uuid, second.uuid)
+        self.assertNotEqual(first.items[0].uuid, second.items[0].uuid)
+        self.assertEqual("task-step", first.items[0].definition.id)
+        self.assertTrue(first.source_workflow_id)
 
-        entries = self.composer.entries()
-        self.assertEqual(4, len(entries))
-        self.assertIsInstance(entries[0], ComposedAction)
-        self.assertEqual("Action direct", entries[0].action.name)
-        self.assertIsInstance(entries[1], ComposedTask)
-        sequence = self.composer.build_sequence()
-        self.assertEqual(
-            ["direct", "task-step", "direct", "task-step"],
-            [item.definition.id for item in sequence],
-        )
-        self.assertEqual(4, len({item.uuid for item in sequence}))
-
-    def test_invalid_ranges_and_missing_tasks_are_rejected(self) -> None:
+    def test_missing_workflow_is_rejected(self) -> None:
         with self.assertRaises(FileNotFoundError):
-            self.composer.add_task("missing")
-        self.composer.add_action(_action("one"))
-        with self.assertRaises(IndexError):
-            self.composer.move(0, 1)
-        with self.assertRaises(ValueError):
-            self.composer.repeat(0, 0, 1)
+            self.session.instantiate("missing")
 
 
 class DeviceAndExecutionViewModelTests(unittest.TestCase):

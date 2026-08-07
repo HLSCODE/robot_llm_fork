@@ -18,6 +18,7 @@ from ..domain.models import (
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
     sequence_entry_from_dict,
 )
 from ..domain.workflow import WorkflowDocument
@@ -744,6 +745,8 @@ def _pending_entry(entry: SequenceEntry) -> SequenceEntry:
     elif isinstance(cloned, ParallelBlock):
         for branch in cloned.branches:
             branch.items = [_pending_entry(child) for child in branch.items]
+    elif isinstance(cloned, SubworkflowBlock):
+        cloned.items = [_pending_entry(child) for child in cloned.items]
     return cloned
 
 
@@ -767,6 +770,9 @@ def _flatten_entries(
         if isinstance(entry, LoopBlock):
             for _ in range(entry.repeat_count):
                 flattened.extend(_flatten_entries(entry.items))
+            continue
+        if isinstance(entry, SubworkflowBlock):
+            flattened.extend(_flatten_entries(entry.items))
             continue
         for branch in entry.branches:
             flattened.extend(_flatten_entries(branch.items))

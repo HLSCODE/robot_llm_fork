@@ -44,7 +44,7 @@ from .composition import CompositionService
 from .safety import SafetyService
 from .external_localization import ExternalLocalizationService
 from .teleoperation import TeleoperationService
-from .task_composer import TaskComposerService
+from .workflow_editing import WorkflowEditingSession
 from .workflow_compiler import WorkflowCompiler
 from .workflow_preflight import WorkflowPreflightService
 
@@ -493,7 +493,7 @@ class ApplicationServices:
     vision: VisionService
     external_localization: ExternalLocalizationService
     composition: CompositionService
-    task_composer: TaskComposerService
+    workflow_editing: WorkflowEditingSession
     data_collection: DataCollectionService
     execution: ExecutionService
     workflow_compiler: WorkflowCompiler

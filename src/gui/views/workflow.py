@@ -1,25 +1,19 @@
 from __future__ import annotations
 
-import json
-from collections.abc import Iterable
-from typing import Any
-
-from PySide6.QtCore import QMimeData, QSize, Qt, Signal
-from PySide6.QtGui import QDrag, QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
+from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QMenu,
     QPushButton,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ...domain.models import (
-    ActionDefinition,
-    ActionType,
-)
+from ...domain.models import ActionType
 from ...devices import StopMode
 from .action_list import ActionListWidget
 from .control_panel import ControlPanel
@@ -51,93 +45,6 @@ class TaskLibraryListWidget(QListWidget):
         drag.setMimeData(mime)
         drag.setPixmap(current_item.icon().pixmap(50, 50))
         drag.exec(Qt.DropAction.CopyAction)
-
-
-class TaskComposerListWidget(QListWidget):
-    order_changed = Signal(int, int)
-    task_dropped = Signal(str, int)
-    action_dropped = Signal(object, int)
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setAcceptDrops(True)
-        self.setDragEnabled(True)
-        self.setDropIndicatorShown(True)
-        self.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
-        self.setViewMode(QListWidget.ViewMode.IconMode)
-        self.setFlow(QListWidget.Flow.LeftToRight)
-        self.setSpacing(12)
-        self.setIconSize(QSize(130, 88))
-
-    def startDrag(self, supported_actions: Qt.DropAction) -> None:  # noqa: N802
-        del supported_actions
-        current_item = self.currentItem()
-        if current_item is None or not current_item.data(Qt.ItemDataRole.UserRole):
-            return
-        mime = QMimeData()
-        mime.setData(
-            "application/x-task-composer-item",
-            json.dumps({"row": self.currentRow()}).encode("utf-8"),
-        )
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        drag.setPixmap(current_item.icon().pixmap(80, 54))
-        drag.exec(Qt.DropAction.MoveAction)
-
-    def dragEnterEvent(self, event: QDragEnterEvent | None) -> None:  # noqa: N802
-        self._accept_supported_drop(event)
-
-    def dragMoveEvent(self, event: QDragMoveEvent | None) -> None:  # noqa: N802
-        self._accept_supported_drop(event)
-
-    @staticmethod
-    def _accept_supported_drop(event: QDragEnterEvent | QDragMoveEvent | None) -> None:
-        if event is None:
-            return
-        formats = (
-            "application/x-task-name",
-            "application/x-action",
-            "application/x-task-composer-item",
-        )
-        mime = event.mimeData()
-        if mime is not None and any(mime.hasFormat(value) for value in formats):
-            event.accept()
-        else:
-            event.ignore()
-
-    def dropEvent(self, event: QDropEvent | None) -> None:  # noqa: N802
-        if event is None:
-            return
-        mime = event.mimeData()
-        if mime is None:
-            event.ignore()
-            return
-        insert_row = self._drop_row(event)
-        if mime.hasFormat("application/x-task-composer-item"):
-            payload = json.loads(bytes(mime.data("application/x-task-composer-item")))
-            source_row = payload["row"]
-            if 0 <= source_row < self.count():
-                if source_row < insert_row:
-                    insert_row -= 1
-                self.order_changed.emit(source_row, min(insert_row, self.count() - 1))
-                event.accept()
-            return
-        if mime.hasFormat("application/x-task-name"):
-            task_name = bytes(mime.data("application/x-task-name")).decode("utf-8")
-            self.task_dropped.emit(task_name, insert_row)
-            event.accept()
-            return
-        if mime.hasFormat("application/x-action"):
-            payload = bytes(mime.data("application/x-action")).decode("utf-8")
-            self.action_dropped.emit(ActionDefinition.from_dict(json.loads(payload)), insert_row)
-            event.accept()
-            return
-        event.ignore()
-
-    def _drop_row(self, event: QDropEvent) -> int:
-        position = event.position().toPoint() if hasattr(event, "position") else event.pos()
-        item = self.itemAt(position)
-        return self.count() if item is None else self.row(item)
 
 
 class ActionLibraryView(QWidget):
@@ -207,7 +114,8 @@ class ActionLibraryView(QWidget):
 
 
 class TaskLibraryView(QWidget):
-    task_add_requested = Signal()
+    task_open_requested = Signal()
+    task_insert_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -221,95 +129,35 @@ class TaskLibraryView(QWidget):
         layout.addWidget(title)
         self.task_library_list = TaskLibraryListWidget()
         self.task_library_list.setMinimumHeight(140)
-        self.task_library_list.itemDoubleClicked.connect(lambda _: self.task_add_requested.emit())
+        self.task_library_list.itemDoubleClicked.connect(
+            lambda _: self.task_open_requested.emit()
+        )
+        self.task_library_list.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.task_library_list.customContextMenuRequested.connect(
+            self._show_context_menu
+        )
         layout.addWidget(self.task_library_list, stretch=1)
-        add_button = QPushButton("添加到任务组合")
-        add_button.setMinimumHeight(32)
-        add_button.clicked.connect(lambda: self.task_add_requested.emit())
-        set_theme_role(add_button, "primary")
-        layout.addWidget(add_button)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(4)
+        open_button = QPushButton("打开")
+        insert_button = QPushButton("插入到当前任务")
+        for button in (open_button, insert_button):
+            button.setMinimumHeight(32)
+            buttons.addWidget(button)
+        open_button.clicked.connect(lambda: self.task_open_requested.emit())
+        insert_button.clicked.connect(lambda: self.task_insert_requested.emit())
+        set_theme_role(insert_button, "primary")
+        layout.addLayout(buttons)
 
-
-class TaskComposerView(QWidget):
-    remove_requested = Signal()
-    move_up_requested = Signal()
-    move_down_requested = Signal()
-    repeat_requested = Signal()
-    clear_requested = Signal()
-    refresh_requested = Signal()
-    add_task_requested = Signal()
-    add_action_requested = Signal()
-    execute_requested = Signal()
-    save_requested = Signal()
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(6)
-        title = QLabel("任务组合")
-        title_font = title.font()
-        title_font.setBold(True)
-        title.setFont(title_font)
-        self.task_composer_list = TaskComposerListWidget()
-        self.task_composer_list.setMinimumHeight(140)
-        layout.addWidget(title)
-        layout.addWidget(self.task_composer_list, stretch=1)
-
-        self._add_button_row(
-            layout,
-            (
-                ("上移", self.move_up_requested),
-                ("下移", self.move_down_requested),
-                ("循环", self.repeat_requested),
-            ),
-            28,
-        )
-        self._add_button_row(
-            layout,
-            (
-                ("移除", self.remove_requested),
-                ("清空", self.clear_requested),
-                ("刷新任务", self.refresh_requested),
-            ),
-            28,
-        )
-        self._add_button_row(
-            layout,
-            (
-                ("添加任务", self.add_task_requested),
-                ("添加动作", self.add_action_requested),
-            ),
-            30,
-        )
-        actions = self._add_button_row(
-            layout,
-            (
-                ("执行当前组合", self.execute_requested),
-                ("保存组合", self.save_requested),
-            ),
-            32,
-        )
-        set_theme_role(actions[0], "success")
-        set_theme_role(actions[1], "primary")
-
-    @staticmethod
-    def _add_button_row(
-        layout: QVBoxLayout,
-        specs: Iterable[tuple[str, Any]],
-        height: int,
-    ) -> list[QPushButton]:
-        row = QHBoxLayout()
-        row.setSpacing(4)
-        buttons = []
-        for text, signal in specs:
-            button = QPushButton(text)
-            button.setMinimumHeight(height)
-            button.clicked.connect(lambda _checked=False, target=signal: target.emit())
-            row.addWidget(button)
-            buttons.append(button)
-        layout.addLayout(row)
-        return buttons
+    def _show_context_menu(self, position: QPoint) -> None:
+        if self.task_library_list.itemAt(position) is None:
+            return
+        menu = QMenu(self)
+        menu.addAction("打开", self.task_open_requested.emit)
+        menu.addAction("插入到当前任务", self.task_insert_requested.emit)
+        menu.exec(self.task_library_list.viewport().mapToGlobal(position))
 
 
 class WorkflowEditorView(QWidget):
@@ -326,6 +174,7 @@ class WorkflowEditorView(QWidget):
     insert_action_in_loop_requested = Signal(str, int)
     insert_action_in_parallel_requested = Signal(str, str, int)
     add_parallel_branch_requested = Signal(str)
+    insert_subworkflow_requested = Signal(str, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -347,6 +196,9 @@ class WorkflowEditorView(QWidget):
         )
         self.sequence_list.add_parallel_branch_requested.connect(
             self.add_parallel_branch_requested.emit
+        )
+        self.sequence_list.insert_subworkflow_requested.connect(
+            self.insert_subworkflow_requested.emit
         )
         self.sequence_list.wrap_selection_requested.connect(
             self.repeat_requested.emit

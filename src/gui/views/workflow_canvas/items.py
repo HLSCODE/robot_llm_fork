@@ -15,7 +15,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ....domain.models import LoopBlock, ParallelBlock, SequenceEntry, SequenceItem
+from ....domain.models import (
+    LoopBlock,
+    ParallelBlock,
+    SequenceEntry,
+    SequenceItem,
+    SubworkflowBlock,
+)
 from .tokens import (
     ACTION_COLORS,
     INSERT_TARGET_SIZE,
@@ -54,6 +60,7 @@ class WorkflowNodeItem(QGraphicsObject):
     loop_insert_requested = Signal(str, int)
     parallel_insert_requested = Signal(str, str, int)
     move_requested = Signal(str, float)
+    subworkflow_open_requested = Signal(str)
 
     def __init__(
         self,
@@ -147,6 +154,14 @@ class WorkflowNodeItem(QGraphicsObject):
                 colors.accent,
             )
             return
+        if isinstance(self.entry, SubworkflowBlock):
+            self._paint_subworkflow(
+                painter,
+                colors.text,
+                colors.secondary_text,
+                emphasized=self.isSelected() or self.isUnderMouse(),
+            )
+            return
         if isinstance(self.entry, ParallelBlock):
             self._paint_parallel(
                 painter,
@@ -234,6 +249,10 @@ class WorkflowNodeItem(QGraphicsObject):
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
         self._reset_drag_state()
+        if isinstance(self.entry, SubworkflowBlock):
+            self.subworkflow_open_requested.emit(self.entry.uuid)
+            event.accept()
+            return
         item_uuid = self._item_uuid_at(event.pos())
         self.edit_requested.emit(self.node_id, item_uuid)
         event.accept()
@@ -261,6 +280,42 @@ class WorkflowNodeItem(QGraphicsObject):
             foreground,
             secondary_text,
             emphasized=emphasized,
+        )
+
+    def _paint_subworkflow(
+        self,
+        painter: QPainter,
+        foreground: QColor,
+        secondary_text: QColor,
+        *,
+        emphasized: bool,
+    ) -> None:
+        subworkflow = self.entry
+        if not isinstance(subworkflow, SubworkflowBlock):
+            return
+        colors = canvas_colors()
+        rect = QRectF(0.0, 0.0, NODE_WIDTH, NODE_HEIGHT)
+        painter.setBrush(QBrush(colors.surface))
+        painter.setPen(
+            QPen(colors.accent if emphasized else colors.border, 2.5 if emphasized else 1.5)
+        )
+        painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#2563eb"))
+        painter.drawRoundedRect(QRectF(0.0, 0.0, 10.0, NODE_HEIGHT), 5.0, 5.0)
+        painter.setPen(foreground)
+        painter.setFont(canvas_font(emphasis=True))
+        painter.drawText(
+            QRectF(24.0, 10.0, NODE_WIDTH - 42.0, 28.0),
+            Qt.AlignmentFlag.AlignVCenter,
+            subworkflow.name,
+        )
+        painter.setPen(secondary_text)
+        painter.setFont(canvas_font(secondary=True))
+        painter.drawText(
+            QRectF(24.0, 40.0, NODE_WIDTH - 42.0, 24.0),
+            Qt.AlignmentFlag.AlignVCenter,
+            f"子流程 · {len(subworkflow.items)} 个节点 · 双击进入",
         )
 
     def _paint_action_card(
@@ -395,7 +450,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 NODE_WIDTH,
                 LOOP_CHILD_HEIGHT,
             )
-            self._paint_action_card(
+            self._paint_parallel_child(
                 painter,
                 child,
                 child_rect,
@@ -613,12 +668,15 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         painter.setPen(foreground)
         painter.setFont(canvas_font(emphasis=True, secondary=True))
-        label = "循环" if isinstance(entry, LoopBlock) else "嵌套并行"
-        count = (
-            f"{entry.repeat_count} 次 · {len(entry.items)} 项"
-            if isinstance(entry, LoopBlock)
-            else f"{len(entry.branches)} 个分支"
-        )
+        if isinstance(entry, LoopBlock):
+            label = "循环"
+            count = f"{entry.repeat_count} 次 · {len(entry.items)} 项"
+        elif isinstance(entry, SubworkflowBlock):
+            label = f"子流程 · {entry.name}"
+            count = f"{len(entry.items)} 个节点"
+        else:
+            label = "嵌套并行"
+            count = f"{len(entry.branches)} 个分支"
         painter.drawText(
             QRectF(rect.left() + 12.0, rect.top() + 6.0, rect.width() - 24.0, 24.0),
             Qt.AlignmentFlag.AlignVCenter,
@@ -864,6 +922,11 @@ class WorkflowNodeItem(QGraphicsObject):
         return None
 
     def _tooltip(self) -> str:
+        if isinstance(self.entry, SubworkflowBlock):
+            return (
+                f"子流程: {self.entry.name}\n"
+                f"{len(self.entry.items)} 个节点，双击进入编辑"
+            )
         if isinstance(self.entry, LoopBlock):
             return (
                 f"循环 {self.entry.repeat_count} 次\n"

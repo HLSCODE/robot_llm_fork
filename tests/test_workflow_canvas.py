@@ -17,6 +17,7 @@ from src.domain.models import (
     ParallelBranch,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
 )
 from src.domain.workflow import WorkflowDocument
 from src.gui.views import WorkflowCanvasWidget
@@ -43,6 +44,30 @@ class WorkflowCanvasTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.canvas = WorkflowCanvasWidget()
+
+    def test_subworkflow_scope_edits_publish_the_root_document(self) -> None:
+        subworkflow = SubworkflowBlock(
+            uuid="subworkflow",
+            name="Reusable task",
+            items=[_item("inside")],
+            source_workflow_id="source",
+            source_revision=2,
+        )
+        self.canvas.render_entries((subworkflow,))
+
+        self.assertTrue(self.canvas.enter_subworkflow("subworkflow"))
+        self.canvas.insert_action(_action("added"))
+        self.canvas.leave_scope()
+
+        root = self.canvas.get_entries()
+        self.assertEqual(1, len(root))
+        restored = root[0]
+        self.assertIsInstance(restored, SubworkflowBlock)
+        assert isinstance(restored, SubworkflowBlock)
+        self.assertEqual(
+            ["inside", "added"],
+            [item.definition.id for item in restored.items],
+        )
         self.canvas.show()
         QApplication.processEvents()
 

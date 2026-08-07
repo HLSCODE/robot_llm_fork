@@ -6,7 +6,6 @@ from .dialogs import ActionConfigDialog, ActionPreviewDialog, SchemaActionForm
 from .startup import StartupProgressCard
 from .workflow import (
     ActionLibraryView,
-    TaskComposerView,
     TaskLibraryView,
     WorkflowEditorView,
 )
@@ -22,7 +21,6 @@ __all__ = [
     "DevicePoseView",
     "SchemaActionForm",
     "StartupProgressCard",
-    "TaskComposerView",
     "TaskLibraryView",
     "WorkflowEditorView",
     "WorkflowCanvasWidget",

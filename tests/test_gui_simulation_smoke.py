@@ -189,18 +189,14 @@ class GuiSimulationSmokeTests(unittest.TestCase):
     def test_workbench_keeps_canvas_and_safety_commands_available(self) -> None:
         workbench = self.window.workbench_view
         self.assertEqual(
-            {"tasks", "actions", "assistant", "composer"},
+            {"tasks", "actions", "assistant"},
             set(workbench.activity_bar.buttons),
         )
-        workbench.activity_bar.buttons["composer"].click()
-        QApplication.processEvents()
-        self.assertEqual("composer", workbench.active_side_page)
-        self.assertTrue(self.window.task_composer_view.isVisible())
-
         resource_button = workbench.activity_bar.buttons["tasks"]
 
-        resource_button.click()
-        QApplication.processEvents()
+        if workbench.active_side_page != "tasks":
+            resource_button.click()
+            QApplication.processEvents()
 
         self.assertEqual("tasks", workbench.active_side_page)
         self.assertTrue(self.window.task_library_view.isVisible())
@@ -301,47 +297,16 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertEqual("暂停", self.window.workflow_view.control_panel.pause_btn.text())
         self.assertEqual({}, self.services.resources.snapshot())
 
-    def test_task_composer_widget_renders_service_owned_draft(self) -> None:
-        first = ActionDefinition(
-            id="composer-first",
-            name="Composer first",
-            type=ActionType.WAIT,
-            parameters={"wait_seconds": 1.0},
-        )
-        second = ActionDefinition(
-            id="composer-second",
-            name="Composer second",
-            type=ActionType.WAIT,
-            parameters={"wait_seconds": 1.0},
-        )
-        self.window._add_action_to_composer(first, 0)
-        self.window._add_action_to_composer(second, 1)
+    def test_saved_task_can_be_inserted_as_editable_subworkflow(self) -> None:
+        library = self.window.task_library_view.task_library_list
+        library.setCurrentRow(0)
 
-        self.window.task_composer_view.task_composer_list.order_changed.emit(0, 1)
+        self.window.insert_selected_task()
 
-        entries = self.services.task_composer.entries()
-        self.assertEqual(
-            ["composer-second", "composer-first"],
-            [entry.action.id for entry in entries],
-        )
-        self.assertTrue(
-            self.window.task_composer_view.task_composer_list.item(0).data(
-                Qt.ItemDataRole.UserRole
-            )
-        )
-
-        third = ActionDefinition(
-            id="composer-third",
-            name="Composer third",
-            type=ActionType.WAIT,
-            parameters={"wait_seconds": 1.0},
-        )
-        with patch.object(self.window, "_choose_action", return_value=third):
-            self.window.task_composer_view.add_action_requested.emit()
-        self.assertEqual(
-            "composer-third",
-            self.services.task_composer.entries()[-1].action.id,
-        )
+        entries = self.window.workflow_view.sequence_list.get_entries()
+        self.assertEqual(1, len(entries))
+        self.assertEqual("startup-visible", entries[0].name)
+        self.assertTrue(entries[0].source_workflow_id)
 
     def test_ai_widget_uses_narrow_signals_without_main_window_reference(self) -> None:
         item = SequenceItem.from_definition(
@@ -360,7 +325,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             0,
         )
 
-        entries = self.services.composition.sequence_entries()
+        entries = self.services.workflow_editing.snapshot().document.to_entries()
         self.assertEqual("ai-signal-item", entries[0].definition.id)
 
     def test_close_requests_execution_cancel_without_blocking_visible_gui(self) -> None:

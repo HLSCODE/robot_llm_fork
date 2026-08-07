@@ -5,7 +5,7 @@
 > 最近更新：2026-08-07
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：150/158（148 DONE + 2 DROPPED，94.9%）
+> 计划进度：153/158（151 DONE + 2 DROPPED，96.8%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -301,9 +301,9 @@ src/devices/
 
 - `application/data_collection.py` 编排采集会话、资源租约与状态；
   `data_collection/` 负责采样和持久化实现。
-- 当前 `CompositionService` 持有已持久化动作、任务和共享序列，`TaskComposerService`
-  持有 GUI 组合草稿；D-029/D-030 将把当前编辑文档收敛到 `WorkflowEditingSession`
-  并删除 TaskComposer，届时 CompositionService 只保留目录/Repository 用例边界。
+- `CompositionService` 持有已持久化动作、任务和 Repository 用例；
+  `WorkflowEditingSession` 独占 GUI 当前文档、存储名、revision 与 dirty 状态。
+  原 `TaskComposerService` 已删除，不再存在第二份组合草稿。
 - UDP 外部定位与视觉工位重定位不是同一能力；通过更明确的类型和模块命名消除
   `Localization`/`Relocalization` 歧义，不合并状态所有权。
 
@@ -527,8 +527,8 @@ src/
 
 ### 9.1 当前状态与剩余问题
 
-- 当前任务组合草稿由 `TaskComposerService` 独占，但它与工作流画布形成第二编辑模型；
-  `flattened_task()` 会消除 Loop/Parallel 结构，已立项 D-028～D-030 直接删除该路径。
+- 当前文档由 `WorkflowEditingSession` 独占，已保存任务作为自包含 Subworkflow
+  插入唯一画布；原 `TaskComposerService` 与 `flattened_task()` 组合执行路径已删除。
 - 设备连接状态和执行按钮状态分别由 `DeviceViewModel`、`ExecutionViewModel`
   从运行时快照派生，不再使用 GUI 平行布尔变量。
 - `ActionConfigDialog` 已由统一 action schema 生成全部动作和 variant 字段，
@@ -593,9 +593,9 @@ src/
 | D-025 | P2 | DONE | 已建立项目自制 CC0 单色 SVG + 编译 Qt Resource 图标体系，Activity/Status 入口按 Palette 与 1x/2x/3x 渲染，主要命令区删除 Emoji 装饰；schema v1 QSettings 偏好持久化 Side/Bottom 当前页、可见性与尺寸，严格拒绝损坏/未知版本/已删除页面并恢复默认，提供显式恢复默认布局命令和 wheel 内容门禁 |
 | D-026 | P0 | DONE | 主窗口在首次渲染前通过 `CompositionService.list_tasks()` 刷新 TaskLibraryView；真实 MainWindow offscreen 回归预置磁盘任务并验证首屏条目名称，避免已保存任务再次显示为空 |
 | D-027 | P1 | DONE | 已为 WorkflowDocument v3 Parallel 节点实现横向分支复合节点、2～8 分支增删/排序、节点跨分支移动、动作库拖入分支、上下文命令和统一 Undo/Redo；ExecutionBridge 以 parallel UUID/branch ID 驱动画布分支状态，保存/加载、浅色/深色及窄窗口 offscreen 回归通过；继续复用既有 WorkflowCompiler/ExecutionPlan，GUI 未新增调度器 |
-| D-028 | P1 | TODO | WorkflowDocument/Schema 直接升级 v4，新增自包含、可递归 `SubworkflowBlock`，保存名称、可选来源 workflow ID/revision 与 body；Validator 增加深度/总节点/空 body 约束，Compiler 透明递归编译并保留 subworkflow path；提供递归身份重建，确保同一任务多次插入不复用 Action/Loop/Parallel/Subworkflow UUID 或 branch ID；v3 数据显式一次迁移，不双读 |
-| D-029 | P1 | TODO | 新增唯一 `WorkflowEditingSession`，独占当前 WorkflowDocument、文件名、revision、dirty、草稿和结构修改边界；任务/动作/AI/画布只发送 open/insert/update/move/wrap/save/execute 意图并渲染不可变快照；保存提交完整 document + expected revision，执行只编译当前快照，不再由 Canvas、CompositionService sequence 和组合草稿平行持有编辑事实 |
-| D-030 | P1 | TODO | 删除 `TaskComposerService`、`TaskComposerView`、`TaskComposerListWidget`、组合 Activity 入口及 MainWindow 全部组合控制路径；任务库双击打开源任务，拖入/右键插入为内嵌 Subworkflow；画布实现折叠子流程卡片、双击进入作用域、面包屑返回、多层内部 Action 编辑及全局 Undo/Redo；禁止 `flattened_task()` 作为组合执行路径，可选工作流大纲仅作当前文档投影 |
+| D-028 | P1 | DONE | WorkflowDocument/Schema 已直接升级 v4，新增自包含、可递归 `SubworkflowBlock`，保存名称、来源 workflow ID/revision 与 body；Validator/ExecutionPlan/Compiler/Engine 透明递归处理并保留 subworkflow path；插入时递归重建 Action/Loop/Parallel/Subworkflow UUID 与 branch ID；17 个活动 v3 文档一次迁移到 v4，runtime 不双读 |
+| D-029 | P1 | DONE | 新增唯一 `WorkflowEditingSession`，独占当前 WorkflowDocument、文件名、revision、dirty 与草稿边界；画布变更发布完整根文档快照，保存使用完整 document + expected revision，执行只编译当前会话快照；CompositionService 继续作为目录/Repository 与外部入口边界，不再持有 GUI 组合草稿 |
+| D-030 | P1 | DONE | 已删除 `TaskComposerService`、`TaskComposerView`、`TaskComposerListWidget`、组合 Activity 入口及 MainWindow 全部组合控制路径；任务库支持双击/按钮打开，按钮、右键或拖入创建内嵌 Subworkflow；画布提供折叠子流程卡片、双击/右键进入、逐级返回、多层内部编辑与整棵文档 Undo/Redo；组合执行不再调用 `flattened_task()` |
 
 ### 9.4 完成标准
 
@@ -1105,9 +1105,9 @@ M7 GUI 工作台信息架构与空间收敛
 
 - 启动 GUI 时已保存任务立即显示，保存/删除后的事件刷新与首屏加载使用同一查询入口。
 - `.task`、`.workflow` 已通过显式工具一次迁移为唯一 `*.workflow.json`，正常读取无写盘副作用，运行时不存在双格式分支。
-- 当前 WorkflowDocument v3 区分执行控制流和 presentation 元数据，运行状态不进入定义；
-  Sequence/Action/Loop/Parallel 可递归组合，编译后只生成一个 ExecutionPlan。D-028
-  将直接升级 v4 并增加自包含 Subworkflow；完成一次性 v3→v4 迁移后不保留运行时兼容分支。
+- 当前 WorkflowDocument v4 区分执行控制流和 presentation 元数据，运行状态不进入定义；
+  Sequence/Action/Loop/Parallel/Subworkflow 可递归组合，编译后只生成一个 ExecutionPlan。
+  活动数据已完成一次性 v3→v4 迁移，运行时不保留旧版本兼容分支。
 - 动作 ID 全局唯一，持久化参数使用规范机器字段和 JSON 类型，ActionSchema 继续是 UI/API/Skill/Planner 的唯一字段定义。
 - 每个 Skill 独立保存为 `*.skill.json`，跨文件 ID/动作引用/参数绑定严格校验，Python 内不存在第二份完整技能目录。
 - Planner 可区分 Action、Skill、Workflow 和 ExecutionControl；夹爪、相对移动等单步语音指令经过消歧、限幅、预览和风险确认后进入唯一 ExecutionManager。
@@ -1360,10 +1360,10 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-07 | M8 | A/D/G | 结构化 ExecutionPlan 与受控并行运行时 | A-014/A-015 TODO → DONE；D-027 新增为 TODO | WorkflowDocument/Schema 直接升级 v3；新增结构不可变且自校验的 ExecutionPlan 和递归 Sequence/Action/Loop/Parallel 编译；唯一 ExecutionManager 内按分支调度，提交前拒绝设备资源冲突，失败 cancel-all、父级 pause/resume/cancel、全分支 join 和唯一终态均保持原状态机/审计语义；GUI 编译结果直接提交 plan，WS/CLI 使用统一递归解析；17 个活动 workflow 一次迁移到 v3，不保留 v2 读取兼容 | Compile、Ruff、Mypy（84 files）、Pytest（497 passed + 48 subtests，64.51%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；聚焦结构/并行回归 51 passed + 18 subtests |
 | 2026-08-07 | M8 | D | Parallel 画布表达与编辑闭环 | D-027 TODO → DONE | 基于既有 v3 文档和执行计划实现横向分支泳道、汇合点和嵌套摘要；创建 Parallel、分支增删/排序、节点跨分支移动、动作拖入及 Undo/Redo 共用唯一画布状态边界，强制 2～8 分支与非空分支；既有 ExecutionBridge 事件按 parallel UUID/branch ID 派生分支高亮，GUI 不承担调度 | 聚焦 Pytest 81 passed；目标 Mypy 7 files、Ruff 通过；统一门禁通过：Mypy 84 files、Pytest 504 passed + 48 subtests、coverage 64.65%、LLM golden 14/14、性能 9/9、wheel smoke 通过 |
 | 2026-08-07 | M8 | D/G | 任务组合与画布单一化评审 | D-028～D-030 新增为 TODO；ADR-M-018 → Accepted | 确认 TaskComposer 与画布形成双编辑模型，且 flattened_task 会展开 Loop、顺序拼接 Parallel 分支；决定删除组合页面/服务，以 WorkflowDocument v4 内嵌 Subworkflow、唯一 WorkflowEditingSession、折叠卡片和面包屑作用域编辑承接“流程 + Action + 流程”及递归子流程；默认快照隔离源任务变化，插入时递归重建身份，不引入 GUI 调度器 | 文档架构评审；本次未修改 runtime 或活动数据，实施完成前当前组合器风险仍存在 |
+| 2026-08-07 | M8 | D/G | Subworkflow v4 与组合编辑单一化 | D-028～D-030 TODO → DONE | WorkflowDocument/Schema、Validator、Compiler、ExecutionPlan 与 Engine 直接支持递归 Subworkflow；新增 WorkflowEditingSession；17 个活动文档一次迁移 v4；删除独立组合页面/服务/Activity 入口，任务库打开或插入统一进入唯一画布，子流程作用域编辑和整棵文档 Undo/Redo 保留 Loop/Parallel 语义 | Compile、Ruff、项目 Mypy（84 files）、Pytest 506 passed + 48 subtests、LLM golden 14/14、性能 9/9、wheel 构建与隔离安装 smoke 全通过；活动数据 46 actions / 17 workflows（272 顶层节点）/ 13 skills 可直接加载 |
 
 ## 22. 建议的首批实施顺序
 
-1. **D-028～D-030**：整批完成 Subworkflow v4、WorkflowEditingSession 和组合页删除，优先消除拍平 Loop/Parallel 的语义风险；不保留双编辑器或兼容入口。
-2. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+1. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+2. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+3. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。

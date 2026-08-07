@@ -13,6 +13,7 @@ from ..domain.workflow import (
     WorkflowNode,
     WorkflowParallelNode,
     WorkflowSequence,
+    WorkflowSubworkflowNode,
 )
 
 
@@ -30,6 +31,7 @@ class WorkflowIssueCode(str, Enum):
     INVALID_ACTION = "invalid_action"
     INVALID_LOOP = "invalid_loop"
     INVALID_PARALLEL = "invalid_parallel"
+    INVALID_SUBWORKFLOW = "invalid_subworkflow"
     EXPANSION_LIMIT = "expansion_limit"
     NESTING_LIMIT = "nesting_limit"
 
@@ -89,7 +91,7 @@ class WorkflowValidator:
         if not document.root.children:
             state.issues.append(WorkflowValidationIssue(
                 WorkflowIssueCode.EMPTY,
-                "工作流至少需要一个动作、循环块或并行块",
+                "工作流至少需要一个动作、循环块、并行块或子流程",
             ))
         expanded = self._validate_sequence(document.root, state, depth=0)
         if expanded > self._max_expanded_steps:
@@ -146,7 +148,33 @@ class WorkflowValidator:
             return 1
         if isinstance(node, WorkflowLoopNode):
             return self._validate_loop(node, state, depth=depth + 1)
-        return self._validate_parallel(node, state, depth=depth + 1)
+        if isinstance(node, WorkflowParallelNode):
+            return self._validate_parallel(node, state, depth=depth + 1)
+        return self._validate_subworkflow(node, state, depth=depth + 1)
+
+    def _validate_subworkflow(
+        self,
+        node: WorkflowSubworkflowNode,
+        state: _ValidationState,
+        *,
+        depth: int,
+    ) -> int:
+        self._register_unique(
+            node.subworkflow_uuid,
+            state.entry_uuids,
+            WorkflowIssueCode.DUPLICATE_ENTRY_UUID,
+            "序列条目 UUID 重复",
+            node.node_id,
+            state.issues,
+        )
+        if not node.body.children:
+            state.issues.append(WorkflowValidationIssue(
+                WorkflowIssueCode.INVALID_SUBWORKFLOW,
+                "子流程至少需要一个子节点",
+                node_id=node.node_id,
+                field="body.children",
+            ))
+        return self._validate_sequence(node.body, state, depth=depth)
 
     def _validate_loop(
         self,

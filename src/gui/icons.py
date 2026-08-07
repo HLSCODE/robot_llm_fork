@@ -16,7 +16,6 @@ class IconName(str, Enum):
     TASKS = "tasks"
     ACTIONS = "actions"
     ASSISTANT = "assistant"
-    COMPOSER = "composer"
     DEVICES = "devices"
     POSES = "poses"
     CONTROLS = "controls"

@@ -19,6 +19,7 @@ from ..domain.execution_plan import (
     ExecutionPlan,
     ExecutionSequence,
     ExecutionStepIdentity,
+    ExecutionSubworkflow,
     iter_execution_steps,
 )
 from ..devices import DeviceNotRegisteredError, DeviceRuntime
@@ -293,6 +294,13 @@ class ActionEngine:
                 if not result.success:
                     return result
             return EngineResult(success=True)
+        if isinstance(node, ExecutionSubworkflow):
+            return self._execute_sequence(
+                node.body,
+                control,
+                identities,
+                path=f"{path}/subworkflow/{node.subworkflow_id}",
+            )
         return self._execute_parallel(node, control, identities, path=path)
 
     def _execute_plan_action(
@@ -413,6 +421,8 @@ class ActionEngine:
                         resources.append(resource_id)
             return tuple(resources)
         if isinstance(node, ExecutionLoop):
+            return self._node_resources(node.body)
+        if isinstance(node, ExecutionSubworkflow):
             return self._node_resources(node.body)
         branch_resources = [
             self._node_resources(branch.body)

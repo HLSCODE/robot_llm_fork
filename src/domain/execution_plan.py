@@ -15,6 +15,7 @@ from .models import (
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
 )
 
 
@@ -53,7 +54,17 @@ class ExecutionParallel:
     failure_policy: ParallelFailurePolicy
 
 
-ExecutionNode: TypeAlias = ExecutionAction | ExecutionLoop | ExecutionParallel
+@dataclass(frozen=True, slots=True)
+class ExecutionSubworkflow:
+    node_id: str
+    subworkflow_id: str
+    name: str
+    body: ExecutionSequence
+
+
+ExecutionNode: TypeAlias = (
+    ExecutionAction | ExecutionLoop | ExecutionParallel | ExecutionSubworkflow
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +164,16 @@ def iter_execution_steps(
                         branch_id=branch_id,
                     )
                 continue
+            if isinstance(node, ExecutionSubworkflow):
+                yield from visit(
+                    node.body,
+                    path=f"{node_path}/subworkflow/{node.subworkflow_id}",
+                    loop_id=loop_id,
+                    loop_iteration=loop_iteration,
+                    parallel_id=parallel_id,
+                    branch_id=branch_id,
+                )
+                continue
             for branch in node.branches:
                 yield from visit(
                     branch.body,
@@ -205,6 +226,19 @@ def _node_from_entry(entry: SequenceEntry, *, path: str) -> ExecutionNode:
             join_policy=entry.join_policy,
             failure_policy=entry.failure_policy,
         )
+    if isinstance(entry, SubworkflowBlock):
+        return ExecutionSubworkflow(
+            node_id=entry.uuid,
+            subworkflow_id=entry.uuid,
+            name=entry.name,
+            body=ExecutionSequence(
+                sequence_id=f"{entry.uuid}.body",
+                children=tuple(
+                    _node_from_entry(child, path=f"{path}/subworkflow/{index}")
+                    for index, child in enumerate(entry.items)
+                ),
+            ),
+        )
     raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
 
 
@@ -229,7 +263,10 @@ def _validate_sequence(
         raise ValueError("execution plan nesting exceeds 32 levels")
     expanded_steps = 0
     for node in sequence.children:
-        if not isinstance(node, (ExecutionAction, ExecutionLoop, ExecutionParallel)):
+        if not isinstance(
+            node,
+            (ExecutionAction, ExecutionLoop, ExecutionParallel, ExecutionSubworkflow),
+        ):
             raise TypeError("execution sequence contains an invalid node")
         _require_unique_id(node.node_id, "node", node_ids)
         if isinstance(node, ExecutionAction):
@@ -243,6 +280,20 @@ def _validate_sequence(
             if not node.body.children:
                 raise ValueError("execution loop body cannot be empty")
             expanded_steps += node.repeat_count * _validate_sequence(
+                node.body,
+                node_ids=node_ids,
+                item_ids=item_ids,
+                loop_ids=loop_ids,
+                parallel_ids=parallel_ids,
+                depth=depth + 1,
+            )
+            continue
+        if isinstance(node, ExecutionSubworkflow):
+            if not node.name.strip():
+                raise ValueError("execution subworkflow name cannot be empty")
+            if not node.body.children:
+                raise ValueError("execution subworkflow body cannot be empty")
+            expanded_steps += _validate_sequence(
                 node.body,
                 node_ids=node_ids,
                 item_ids=item_ids,

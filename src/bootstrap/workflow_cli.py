@@ -1,4 +1,4 @@
-"""Explicit one-way migration from legacy task/workflow files to workflow v3."""
+"""Explicit one-way migration from legacy task/workflow files to workflow v4."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     source_directory = root / "tasks"
     workflows_directory = root / "workflows"
     drafts_directory = root / "drafts"
-    backup_directory = root / "migration-backups" / "workflow-v1"
+    backup_directory = root / "migration-backups" / "workflow-v4"
     items = _plan(source_directory, workflows_directory, drafts_directory)
     print(f"legacy documents: {len(items)}")
     for item in items:
@@ -160,7 +160,7 @@ def _apply(
     workflows_directory: Path,
     backup_directory: Path,
 ) -> None:
-    with TemporaryDirectory(prefix="workflow-v3-", dir=workflows_directory.parent) as raw_stage:
+    with TemporaryDirectory(prefix="workflow-v4-", dir=workflows_directory.parent) as raw_stage:
         stage = Path(raw_stage)
         staged: list[tuple[Path, MigrationItem]] = []
         for index, item in enumerate(items):

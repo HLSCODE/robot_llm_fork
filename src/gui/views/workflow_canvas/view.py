@@ -29,6 +29,7 @@ from .tokens import FIT_PADDING, MAX_SCALE, MIN_SCALE
 
 class WorkflowCanvasView(QGraphicsView):
     action_dropped = Signal(object, float, float)
+    task_dropped = Signal(str, float, float)
     delete_requested = Signal()
     undo_requested = Signal()
     redo_requested = Signal()
@@ -76,6 +77,16 @@ class WorkflowCanvasView(QGraphicsView):
         if event is None or event.mimeData() is None:
             return
         mime = event.mimeData()
+        scene_position = self.mapToScene(event.position().toPoint())
+        if mime.hasFormat("application/x-task-name"):
+            try:
+                task_name = bytes(mime.data("application/x-task-name")).decode("utf-8")
+            except UnicodeDecodeError:
+                event.ignore()
+                return
+            self.task_dropped.emit(task_name, scene_position.x(), scene_position.y())
+            event.acceptProposedAction()
+            return
         if not mime.hasFormat("application/x-action"):
             event.ignore()
             return
@@ -85,7 +96,6 @@ class WorkflowCanvasView(QGraphicsView):
         except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             event.ignore()
             return
-        scene_position = self.mapToScene(event.position().toPoint())
         self.action_dropped.emit(action, scene_position.x(), scene_position.y())
         event.acceptProposedAction()
 
@@ -213,7 +223,9 @@ class WorkflowCanvasView(QGraphicsView):
     ) -> None:
         if event is None or event.mimeData() is None:
             return
-        if event.mimeData().hasFormat("application/x-action"):
+        if event.mimeData().hasFormat(
+            "application/x-action"
+        ) or event.mimeData().hasFormat("application/x-task-name"):
             event.acceptProposedAction()
         else:
             event.ignore()

@@ -68,12 +68,7 @@ from .teleoperation_observability import (
     TeleoperationMetricsSnapshot,
     TeleoperationObservability,
 )
-from .task_composer import (
-    ComposedAction,
-    ComposedTask,
-    ComposerEntry,
-    TaskComposerService,
-)
+from .workflow_editing import WorkflowEditingSession, WorkflowEditingState
 from .workflow_compiler import (
     CompiledStep,
     CompiledWorkflow,
@@ -112,9 +107,6 @@ __all__ = [
     "CompositionEvent",
     "CompositionRevisionConflict",
     "CompositionService",
-    "ComposedAction",
-    "ComposedTask",
-    "ComposerEntry",
     "ConfirmedCommand",
     "DataCollectionEpisodeStarted",
     "DataCollectionEpisodeStopped",
@@ -143,7 +135,8 @@ __all__ = [
     "SafetyService",
     "SafetyStopReport",
     "TaskSummary",
-    "TaskComposerService",
+    "WorkflowEditingSession",
+    "WorkflowEditingState",
     "TeleoperationService",
     "TeleoperationArmSnapshot",
     "TeleoperationCommandResult",

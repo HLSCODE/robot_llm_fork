@@ -6,7 +6,7 @@
 > 文档性质：目标架构、实施记录与后续验收约束
 > 最近更新：2026-08-07
 
-> 实施进度：D-015～D-027 已完成，D-028～D-030 已立项。纯 WorkflowDocument、版本化 `.workflow`
+> 实施进度：D-015～D-030 已完成。纯 WorkflowDocument、版本化 `.workflow`
 > 持久化与草稿恢复、Validator/Preflight/Compiler、稳定节点映射、受约束
 > QGraphics 画布、Loop 容器、Undo/Redo、触控导航和现有功能等价接入已经
 > 落地。系统 Palette、集中设计令牌、44 px 触控目标、可访问性、Qt
@@ -28,9 +28,9 @@
 > 非模态 Bottom Panel、Status Bar 与紧凑常驻安全命令已经切换；旧箭头抽屉和
 > 设备/位姿/基础控制/日志常驻布局已删除。
 >
-> M7 第二批已完成：已保存任务、分类基础动作、AI 助手和任务组合已经拆为四个
-> 独立 Side Bar 资源页，Activity Bar 可直接切换或收起当前页；任务组合器已从
-> 中央 Editor 移出，中央区域只保留工作流画布与唯一执行控制区。
+> M7 第二批的任务组合资源页属于过渡实现；M8 已将其页面、服务和 Activity
+> 入口直接删除。当前 Side Bar 只保留已保存任务、分类基础动作和 AI 助手，
+> 中央区域只有唯一工作流画布与执行控制区。
 >
 > M7 第三批已完成：项目自制 CC0 单色 SVG 已编译进入 Qt Resource，Activity Bar
 > 与 Status Bar 按 Palette 和 1x/2x/3x 渲染；主要命令区已删除 Emoji 装饰。
@@ -48,11 +48,9 @@
 > 分离，运行状态不落盘。17 个旧任务已由显式 CLI 转换并归档，`.task`、旧
 > `.workflow`、读取时隐式迁移、双格式 Repository API 和旧目录配置已从 runtime 删除。
 >
-> 2026-08-07 组合编辑复核：当前 `TaskComposerService/TaskComposerView` 与工作流画布
-> 形成两套编辑状态，且组合器通过 `flattened_task()` 展开任务时会消除 Loop 边界、将
-> Parallel 分支按列表顺序拼接，存在改变控制流语义的 P1 风险。后续 D-028～D-030
-> 将以 WorkflowDocument v4 的内嵌 Subworkflow 节点和唯一 WorkflowEditingSession
-> 直接替换组合器；原“任务组合”页面、服务和控制器路径删除，不保留兼容入口。
+> 2026-08-07 组合编辑单一化已完成：WorkflowDocument v4 使用自包含 Subworkflow
+> 保留 Loop/Parallel 控制流，`WorkflowEditingSession` 成为当前编辑文档唯一所有者。
+> 原“任务组合”页面、服务、Activity 入口和控制器路径已删除，不保留兼容入口。
 
 ## 1. 结论
 
@@ -559,19 +557,19 @@ src/
 - 保存/加载 round-trip、Undo/Redo、插入命中、分支命令、执行态、浅色/深色和窄窗口
   offscreen 回归已覆盖；大尺寸并行节点通过画布横向滚动和“适合内容”访问。
 
-### 阶段 13：Subworkflow 与组合编辑单一化（D-028～D-030，待实施）
+### 阶段 13：Subworkflow 与组合编辑单一化（D-028～D-030，已完成）
 
-- WorkflowDocument/Schema 直接升级 v4，新增递归 `SubworkflowBlock`：保存名称、可选来源
+- WorkflowDocument/Schema 已直接升级 v4，新增递归 `SubworkflowBlock`：保存名称、可选来源
   workflow ID/revision 和自包含 body；默认不是实时引用，源任务变化不得隐式改变父任务。
-- Validator 限制最大嵌套深度、总节点数和空子流程；Compiler 将 Subworkflow body 递归
+- Validator 限制最大嵌套深度、展开规模和空子流程；Compiler 将 Subworkflow body 递归
   编译进唯一 ExecutionPlan，并把 subworkflow path 纳入节点/运行事件身份，不新增 Handler。
-- 提供确定性的工作流片段复制函数，递归重建所有执行节点、容器和分支身份；同一任务
-  多次插入不得产生 UUID 冲突。v3 活动数据经显式 CLI 一次迁移到 v4，runtime 不双读。
-- 新增唯一 `WorkflowEditingSession`，独占当前文档、文件名、revision、dirty、草稿和结构
+- 已提供工作流片段复制函数，递归重建所有执行节点、容器和分支身份；同一任务
+  多次插入不会产生 UUID 冲突。17 个 v3 活动文档已一次迁移到 v4，runtime 不双读。
+- 已新增唯一 `WorkflowEditingSession`，独占当前文档、文件名、revision、dirty、草稿和结构
   修改边界；Canvas、任务库、动作库和 AI 只发送意图、渲染不可变快照。
-- 任务库双击打开文档，拖放/右键插入为 Subworkflow；画布使用折叠卡片、双击进入作用域
-  和面包屑导航，内部 Action/Loop/Parallel/Subworkflow 共用参数编辑与 Undo/Redo。
-- 删除 `TaskComposerService`、`TaskComposerView`、`TaskComposerListWidget`、组合 Activity
+- 任务库双击/按钮打开文档，拖放/右键/按钮插入为 Subworkflow；画布使用折叠卡片、双击或右键进入作用域
+  和逐级返回导航，内部 Action/Loop/Parallel/Subworkflow 共用参数编辑与 Undo/Redo。
+- 已删除 `TaskComposerService`、`TaskComposerView`、`TaskComposerListWidget`、组合 Activity
   入口及 MainWindow 对应添加/排序/循环/展开/执行/保存路径；不保留转发或隐藏兼容页。
 - 保存统一提交完整 WorkflowDocument 和 expected revision，保留 presentation；执行统一
   编译当前会话快照。禁止继续通过 `flattened_task()` 构建可执行组合。

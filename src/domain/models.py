@@ -178,7 +178,38 @@ class ParallelBlock:
         )
 
 
-SequenceEntry = Union[SequenceItem, LoopBlock, ParallelBlock]
+@dataclass
+class SubworkflowBlock:
+    """Self-contained workflow snapshot embedded in another workflow."""
+
+    uuid: str
+    name: str
+    items: List['SequenceEntry']
+    source_workflow_id: str = ""
+    source_revision: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "kind": "subworkflow",
+            "uuid": self.uuid,
+            "name": self.name,
+            "source_workflow_id": self.source_workflow_id,
+            "source_revision": self.source_revision,
+            "items": [item.to_dict() for item in self.items],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SubworkflowBlock':
+        return cls(
+            uuid=str(data["uuid"]),
+            name=str(data["name"]),
+            source_workflow_id=str(data.get("source_workflow_id", "")),
+            source_revision=int(data.get("source_revision", 0)),
+            items=[sequence_entry_from_dict(item) for item in data.get("items", [])],
+        )
+
+
+SequenceEntry = Union[SequenceItem, LoopBlock, ParallelBlock, SubworkflowBlock]
 
 
 def sequence_entry_from_dict(data: Dict[str, Any]) -> SequenceEntry:
@@ -187,4 +218,6 @@ def sequence_entry_from_dict(data: Dict[str, Any]) -> SequenceEntry:
         return LoopBlock.from_dict(data)
     if kind == "parallel":
         return ParallelBlock.from_dict(data)
+    if kind == "subworkflow":
+        return SubworkflowBlock.from_dict(data)
     return SequenceItem.from_dict(data)

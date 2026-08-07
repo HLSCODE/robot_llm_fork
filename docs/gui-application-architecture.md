@@ -10,7 +10,7 @@ GUI 是应用的表现层，不拥有设备、执行线程、任务持久化或�
 所有可被 WebSocket、HTTP、语音或其他入口复用的能力必须位于应用层；Qt
 组件只负责采集用户输入、显示不可变快照和把跨线程事件送回 GUI 线程。
 
-当前实现（D-030 完成前）：
+当前实现（D-030 完成后）：
 
 ```text
 MainWindow / Dialogs
@@ -18,13 +18,13 @@ MainWindow / Dialogs
 WorkbenchView
   | Activity Bar / Side Bar / Editor / Bottom Panel / Status Bar
   |
-TaskLibraryView / ActionLibraryView / AIAssistantWidget / TaskComposerView
+TaskLibraryView / ActionLibraryView / AIAssistantWidget
 WorkflowEditorView / DeviceHealthView / DevicePoseView / DeviceControlView
         | commands       ^ immutable view state / Qt signals
         v                |
-TaskComposerService   DeviceViewModel   ExecutionViewModel
+WorkflowEditingSession DeviceViewModel  ExecutionViewModel
         |                    |                 |
-CompositionService   DeviceManagement   ExecutionService
+CompositionService   DeviceManagement  ExecutionService
         |                    |                 |
  JSON repository       DeviceRuntime     ExecutionManager
 
@@ -57,12 +57,10 @@ GuiNotificationCenter: operational message -> history/log/status/modal
   提供显式恢复入口。
 - Activity Bar 与 Status Bar 图标使用 `IconName` 和编译后的 Qt Resource SVG；图标
   随 Palette 变化重绘并覆盖 1x/2x/3x，不从文件系统动态查找资源。
-- `TaskLibraryView` 只展示 `CompositionService` 的已保存任务投影，并发出添加到组合的
-  意图；`ActionLibraryView` 只展示按类型分类的基础动作并发出增删改、插入和相机测试意图。
+- `TaskLibraryView` 只展示 `CompositionService` 的已保存任务投影，并发出打开或作为
+  Subworkflow 插入当前文档的意图；`ActionLibraryView` 只展示按类型分类的基础动作并发出增删改、插入和相机测试意图。
 - `AIAssistantWidget` 是独立资源页，继续复用唯一 LLM/CommandRuntime，不嵌入动作库，
   也不反向持有 MainWindow。
-- `TaskComposerView` 只渲染 `TaskComposerService` 草稿并发出添加、排序、循环、移除、
-  清空、执行和保存意图；列表拖放只解析输入，不作为业务状态源。
 - `WorkflowEditorView` 只负责动作序列画布及其控制区；执行按钮状态通过单一
   `render_execution_controls()` 接口更新；两行紧凑命令区保持停止任务、快速停止和
   设备急停常驻可见，不再包含任务组合 Tab 或第二套暂停/停止控件。
@@ -74,20 +72,13 @@ GuiNotificationCenter: operational message -> history/log/status/modal
   Status Bar 保持设备摘要和通知出口，详细信息由对应页面展示。
 - `MainWindow` 直接持有上述组件，不再提供旧按钮、列表和状态标签属性别名。
 
-### 2.3 TaskComposerService
+### 2.3 WorkflowEditingSession
 
-- 独占尚未持久化的任务/动作组合草稿。
-- 提供插入、删除、移动、连续区块循环和清空操作。
-- 通过 `CompositionService` 解析任务引用，并为每次执行生成全新的
-  `SequenceItem` 与 UUID。
-- 对外返回防御性副本，QListWidget 不作为业务状态存储。
-
-持久化动作、任务与共享动作序列仍由 `CompositionService` 独占，两个服务
-职责不重叠。
-
-上述职责是当前实现，不再是长期目标。审计确认它通过 `flattened_task()` 组合任务时
-会展开 Loop 并顺序拼接 Parallel 分支，既不能编辑内部动作，也可能改变控制流语义；
-D-028～D-030 完成后本节对应组件与入口直接删除。
+- 独占当前 `WorkflowDocument`、存储文件名、revision、dirty 和草稿边界。
+- 打开任务会替换当前文档；插入任务会创建自包含 Subworkflow 快照并递归重建身份。
+- 画布在任意子流程作用域修改后发布完整根文档快照，Undo/Redo 也以整棵文档为边界。
+- 保存提交完整文档与 expected revision；执行只编译当前会话快照。
+- `CompositionService` 继续负责动作/任务目录和 Repository 用例，不再保存 GUI 组合草稿。
 
 ### 2.4 DeviceViewModel
 
@@ -135,7 +126,7 @@ Qt signals；安全停止使用短生命周期 I/O 调度线程，避免阻塞�
 canonical schema；只有文件选择器、设备发现等纯交互增强才可按 schema 元数据
 注册可复用 widget factory，不能复制业务字段定义或校验规则。
 
-### 2.8 已批准的组合编辑目标（D-028～D-030）
+### 2.8 当前组合编辑架构（D-028～D-030 已完成）
 
 ```text
 TaskLibraryView / ActionLibraryView / AIAssistantWidget
@@ -171,9 +162,8 @@ Canvas + Breadcrumb      JSON repository       ExecutionPlan
 |---|---|---|
 | 设备实例与生命周期 | `DeviceRuntime` | `DeviceManagementService` → `DeviceViewModel` |
 | 序列执行状态 | `ExecutionManager` | `ExecutionService` → `ExecutionViewModel` / `ExecutionBridge` |
-| 动作、任务、共享序列 | `CompositionService` | service 快照 + `CompositionBridge` |
-| 临时任务组合草稿（D-030 前） | `TaskComposerService` | service 快照；待删除 |
-| 当前编辑文档（D-029 后） | `WorkflowEditingSession` | 不可变 WorkflowDocument 快照 + 窄事件 |
+| 动作、任务目录与外部共享序列 | `CompositionService` | service 快照 + `CompositionBridge` |
+| 当前编辑文档 | `WorkflowEditingSession` | 不可变 WorkflowDocument 快照 + 窄事件 |
 | GUI 启动阶段 | `GuiStartupLifecycle` | `GuiStartupState` |
 | 动作参数定义 | canonical action schema | `SchemaActionForm` |
 | Workbench 布局偏好 | `QSettingsWorkbenchLayoutStore` | schema v1 `WorkbenchLayoutState` |
@@ -211,8 +201,6 @@ AI Assistant 不获取 MainWindow 对象。它通过以下窄信号协作：
 
 ## 6. 当前遗留项
 
-- `TaskComposerService/View/ListWidget` 与画布是两套编辑模型，且扁平组合会改变
-  Loop/Parallel 语义；D-028～D-030 必须作为同一批直接切换，完成前不得继续扩展组合器。
 - `MainWindow` 仍承担动作/任务列表内容转换和序列树局部展示协调；后续只有在这些
   展示规则形成稳定复用边界时再下沉，业务草稿和执行状态仍必须由应用服务独占。
 - ActionConfigDialog 内部的表单校验提示仍属于对话框局部交互；如后续需要统一

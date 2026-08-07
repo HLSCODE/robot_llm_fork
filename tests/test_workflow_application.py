@@ -22,8 +22,13 @@ from src.domain.models import (
     ParallelBranch,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
 )
-from src.domain.execution_plan import ExecutionPlan
+from src.domain.execution_plan import (
+    ExecutionPlan,
+    ExecutionSubworkflow,
+    iter_execution_steps,
+)
 from src.domain.workflow import (
     CanvasPosition,
     UnsupportedWorkflowDocumentVersion,
@@ -37,6 +42,31 @@ from src.persistence.storage import JsonCompositionRepository
 
 
 class WorkflowDocumentTests(unittest.TestCase):
+    def test_subworkflow_round_trip_and_execution_plan_preserve_scope(self) -> None:
+        subworkflow = SubworkflowBlock(
+            uuid="subworkflow-1",
+            name="Reusable",
+            items=[_item("child")],
+            source_workflow_id="source-workflow",
+            source_revision=3,
+        )
+        document = WorkflowDocument.from_entries(
+            workflow_id="workflow-subworkflow",
+            name="Subworkflow",
+            revision=1,
+            entries=(subworkflow,),
+        )
+
+        restored = WorkflowDocument.from_dict(document.to_dict())
+        plan = ExecutionPlan.from_entries(restored.to_entries())
+
+        self.assertEqual(document, restored)
+        self.assertIsInstance(plan.root.children[0], ExecutionSubworkflow)
+        self.assertIn(
+            "/subworkflow/subworkflow-1/",
+            tuple(iter_execution_steps(plan))[0][0].path,
+        )
+
     def test_versioned_round_trip_preserves_layout_and_resets_runtime_state(self) -> None:
         action = _item("action-item")
         action.status = SequenceItemStatus.SUCCESS
@@ -81,7 +111,7 @@ class WorkflowDocumentTests(unittest.TestCase):
         with self.assertRaises(UnsupportedWorkflowDocumentVersion):
             WorkflowDocument.from_dict(payload)
 
-    def test_nested_parallel_and_loop_round_trip_as_v3(self) -> None:
+    def test_nested_parallel_and_loop_round_trip_as_v4(self) -> None:
         parallel = ParallelBlock(
             uuid="parallel-1",
             branches=[
@@ -102,7 +132,7 @@ class WorkflowDocumentTests(unittest.TestCase):
         payload = document.to_dict()
         restored = WorkflowDocument.from_dict(payload)
 
-        self.assertEqual(3, payload["schema_version"])
+        self.assertEqual(4, payload["schema_version"])
         restored_parallel = restored.root.children[0]
         self.assertIsInstance(restored_parallel, WorkflowParallelNode)
         assert isinstance(restored_parallel, WorkflowParallelNode)

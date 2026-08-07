@@ -13,6 +13,7 @@ from ..domain.execution_plan import (
     ExecutionParallel,
     ExecutionPlan,
     ExecutionSequence,
+    ExecutionSubworkflow,
     iter_execution_steps,
 )
 from ..domain.models import (
@@ -23,6 +24,7 @@ from ..domain.models import (
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
 )
 from ..domain.workflow import (
     WorkflowActionNode,
@@ -31,6 +33,7 @@ from ..domain.workflow import (
     WorkflowNode,
     WorkflowParallelNode,
     WorkflowSequence,
+    WorkflowSubworkflowNode,
 )
 from .workflow_validation import WorkflowValidationResult, WorkflowValidator
 
@@ -157,7 +160,10 @@ class WorkflowCompiler:
         self,
         node: WorkflowNode,
         path: str,
-    ) -> tuple[ExecutionAction | ExecutionLoop | ExecutionParallel, SequenceEntry]:
+    ) -> tuple[
+        ExecutionAction | ExecutionLoop | ExecutionParallel | ExecutionSubworkflow,
+        SequenceEntry,
+    ]:
         if isinstance(node, WorkflowActionNode):
             item = self._compile_item(node)
             return ExecutionAction(node.node_id, item), item
@@ -166,6 +172,26 @@ class WorkflowCompiler:
             return (
                 ExecutionLoop(node.node_id, node.loop_uuid, node.repeat_count, body),
                 LoopBlock(node.loop_uuid, list(entries), node.repeat_count),
+            )
+        if isinstance(node, WorkflowSubworkflowNode):
+            body, entries = self._compile_sequence(
+                node.body,
+                f"{path}.subworkflow.{node.subworkflow_uuid}",
+            )
+            return (
+                ExecutionSubworkflow(
+                    node.node_id,
+                    node.subworkflow_uuid,
+                    node.name,
+                    body,
+                ),
+                SubworkflowBlock(
+                    uuid=node.subworkflow_uuid,
+                    name=node.name,
+                    source_workflow_id=node.source_workflow_id,
+                    source_revision=node.source_revision,
+                    items=list(entries),
+                ),
             )
         branches: list[ExecutionBranch] = []
         persisted_branches: list[ParallelBranch] = []
@@ -232,3 +258,5 @@ class WorkflowCompiler:
                 ))
                 for branch in node.branches:
                     self._collect_mappings(branch.body, loops, parallels)
+            elif isinstance(node, WorkflowSubworkflowNode):
+                self._collect_mappings(node.body, loops, parallels)
