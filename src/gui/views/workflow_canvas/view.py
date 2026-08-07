@@ -28,7 +28,7 @@ from .tokens import FIT_PADDING, MAX_SCALE, MIN_SCALE
 
 
 class WorkflowCanvasView(QGraphicsView):
-    action_dropped = Signal(object, float)
+    action_dropped = Signal(object, float, float)
     delete_requested = Signal()
     undo_requested = Signal()
     redo_requested = Signal()
@@ -85,8 +85,8 @@ class WorkflowCanvasView(QGraphicsView):
         except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             event.ignore()
             return
-        scene_y = self.mapToScene(event.position().toPoint()).y()
-        self.action_dropped.emit(action, scene_y)
+        scene_position = self.mapToScene(event.position().toPoint())
+        self.action_dropped.emit(action, scene_position.x(), scene_position.y())
         event.acceptProposedAction()
 
     def wheelEvent(self, event: QWheelEvent | None) -> None:  # noqa: N802

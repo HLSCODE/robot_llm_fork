@@ -5,7 +5,7 @@
 > 最近更新：2026-08-07
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：149/155（147 DONE + 2 DROPPED，96.1%）
+> 计划进度：150/155（148 DONE + 2 DROPPED，96.8%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -590,7 +590,7 @@ src/
 | D-024 | P0 | DONE | 设备详情、位姿、日志和基础控制已迁入非模态 Bottom Panel，Status Bar 展示同源设备摘要和通知；执行/编辑控制由五行大按钮收敛为两行命令区，停止任务、快速停止和设备急停在 Side/Bottom Panel 任意状态下常驻可见 |
 | D-025 | P2 | DONE | 已建立项目自制 CC0 单色 SVG + 编译 Qt Resource 图标体系，Activity/Status 入口按 Palette 与 1x/2x/3x 渲染，主要命令区删除 Emoji 装饰；schema v1 QSettings 偏好持久化 Side/Bottom 当前页、可见性与尺寸，严格拒绝损坏/未知版本/已删除页面并恢复默认，提供显式恢复默认布局命令和 wheel 内容门禁 |
 | D-026 | P0 | DONE | 主窗口在首次渲染前通过 `CompositionService.list_tasks()` 刷新 TaskLibraryView；真实 MainWindow offscreen 回归预置磁盘任务并验证首屏条目名称，避免已保存任务再次显示为空 |
-| D-027 | P1 | TODO | 为 WorkflowDocument v3 Parallel 节点补齐画布复合节点、分支增删/排序、动作拖入分支、上下文命令、执行态分支高亮及保存/加载 offscreen 回归；继续复用既有 WorkflowCompiler/ExecutionPlan，不在 GUI 新增调度器 |
+| D-027 | P1 | DONE | 已为 WorkflowDocument v3 Parallel 节点实现横向分支复合节点、2～8 分支增删/排序、节点跨分支移动、动作库拖入分支、上下文命令和统一 Undo/Redo；ExecutionBridge 以 parallel UUID/branch ID 驱动画布分支状态，保存/加载、浅色/深色及窄窗口 offscreen 回归通过；继续复用既有 WorkflowCompiler/ExecutionPlan，GUI 未新增调度器 |
 
 ### 9.4 完成标准
 
@@ -1349,10 +1349,10 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-07 | M8 | E/G | Action/Skill schema v2 与目录化整批切换 | G-030/G-031 TODO → DONE；G-032/G-033 TODO → DOING | Action 切换为目录集合并强制 ID/名称/参数唯一有效，34 个点位规范化为数组；13 个 Skill 按领域拆分、确定性加载和原子 Registry 替换，合并旧 Python/用户双事实源差异后删除 `default_skills.py`；配置直切目录变量，内置 JSON/Schema 纳入 package-data；活动旧集合移动到可恢复备份，runtime 不保留旧入口 | 活动目录只读校验 46 actions / 13 skills，数量与语义指纹稳定；Ruff、相关 Mypy、Pytest 471 passed + 48 subtests、LLM golden 14/14、wheel 构建与隔离安装 smoke 全通过 |
 | 2026-08-07 | M8 | D/G | WorkflowDocument v2 与唯一任务格式整批切换 | G-029/G-032/G-033 → DONE | 删除 Repository 的 `.task`/旧 `.workflow` 双 API，任务 UI/API 统一落到结构化 WorkflowDocument v2；控制流与 presentation 分离，运行状态不落盘；新增 `workflows/`、`drafts/`、Workflow JSON Schema、目录配置和 `robot-workflow-data` 显式迁移工具；17 个活动任务转换为 `*.workflow.json`，旧文件及 `.bak` 可恢复归档 | 活动数据 17 workflows / 272 顶层条目全部由新 Repository 加载；统一门禁通过：Mypy 83 files、Pytest 473 passed + 48 subtests、coverage 63.90%、LLM golden 14/14、性能 9/9、wheel smoke 通过 |
 | 2026-08-07 | M8 | A/D/G | 结构化 ExecutionPlan 与受控并行运行时 | A-014/A-015 TODO → DONE；D-027 新增为 TODO | WorkflowDocument/Schema 直接升级 v3；新增结构不可变且自校验的 ExecutionPlan 和递归 Sequence/Action/Loop/Parallel 编译；唯一 ExecutionManager 内按分支调度，提交前拒绝设备资源冲突，失败 cancel-all、父级 pause/resume/cancel、全分支 join 和唯一终态均保持原状态机/审计语义；GUI 编译结果直接提交 plan，WS/CLI 使用统一递归解析；17 个活动 workflow 一次迁移到 v3，不保留 v2 读取兼容 | Compile、Ruff、Mypy（84 files）、Pytest（497 passed + 48 subtests，64.51%）、LLM golden（14/14）、性能回归（9/9）及 Wheel smoke 全通过；聚焦结构/并行回归 51 passed + 18 subtests |
+| 2026-08-07 | M8 | D | Parallel 画布表达与编辑闭环 | D-027 TODO → DONE | 基于既有 v3 文档和执行计划实现横向分支泳道、汇合点和嵌套摘要；创建 Parallel、分支增删/排序、节点跨分支移动、动作拖入及 Undo/Redo 共用唯一画布状态边界，强制 2～8 分支与非空分支；既有 ExecutionBridge 事件按 parallel UUID/branch ID 派生分支高亮，GUI 不承担调度 | 聚焦 Pytest 81 passed；目标 Mypy 7 files、Ruff 通过；统一门禁通过：Mypy 84 files、Pytest 504 passed + 48 subtests、coverage 64.65%、LLM golden 14/14、性能 9/9、wheel smoke 通过 |
 
 ## 22. 建议的首批实施顺序
 
-1. **D-027**：在既有 WorkflowDocument v3/ExecutionPlan 上实现 Parallel 画布复合节点与编辑交互，不新增 GUI 执行器。
-2. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
-3. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
-4. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。
+1. **B-015**：确定下一种真实机械臂供应商/协议，在新 `devices/robots/<provider>/` 结构实现 adapter，并运行同一套核心契约测试和真实硬件验收。
+2. **B-007/ER-006/ER-011**：在限速、可控环境中测量 RealMan quick/emergency stop 最大响应延迟，并记录停止后的恢复条件。
+3. 在受信 RLBench 环境对 schema v2 Native episode 执行 `--trusted-native` 验收，并在真实双臂硬件上测量采样偏差分布。

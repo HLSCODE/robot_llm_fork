@@ -324,6 +324,8 @@ class WorkflowEditorView(QWidget):
     delete_requested = Signal()
     insert_action_at_requested = Signal(int)
     insert_action_in_loop_requested = Signal(str, int)
+    insert_action_in_parallel_requested = Signal(str, str, int)
+    add_parallel_branch_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -339,6 +341,12 @@ class WorkflowEditorView(QWidget):
         )
         self.sequence_list.insert_loop_action_requested.connect(
             self.insert_action_in_loop_requested.emit
+        )
+        self.sequence_list.insert_parallel_action_requested.connect(
+            self.insert_action_in_parallel_requested.emit
+        )
+        self.sequence_list.add_parallel_branch_requested.connect(
+            self.add_parallel_branch_requested.emit
         )
         self.sequence_list.wrap_selection_requested.connect(
             self.repeat_requested.emit

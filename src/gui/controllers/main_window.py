@@ -141,6 +141,9 @@ class MainWindow(QMainWindow):
         self._execution_bridge.step_failed.connect(self.on_step_failed)
         self._execution_bridge.log_message.connect(self._notifications.info)
         self._execution_bridge.loop_progress.connect(self.on_loop_progress)
+        self._execution_bridge.parallel_branch_state.connect(
+            self.on_parallel_branch_state
+        )
         self._execution_bridge.execution_completed.connect(
             self.on_execution_completed
         )
@@ -423,6 +426,12 @@ class MainWindow(QMainWindow):
         )
         workflow.insert_action_in_loop_requested.connect(
             self._choose_action_for_loop_insertion
+        )
+        workflow.insert_action_in_parallel_requested.connect(
+            self._choose_action_for_parallel_insertion
+        )
+        workflow.add_parallel_branch_requested.connect(
+            self._choose_action_for_new_parallel_branch
         )
         composer = self.task_composer_view
         composer.remove_requested.connect(self.remove_task_from_composer)
@@ -1213,6 +1222,29 @@ class MainWindow(QMainWindow):
                 action,
             )
 
+    def _choose_action_for_parallel_insertion(
+        self,
+        parallel_uuid: str,
+        branch_id: str,
+        child_index: int,
+    ) -> None:
+        action = self._choose_action("向并行分支插入动作")
+        if action is not None:
+            self.workflow_view.sequence_list.insert_action_into_parallel(
+                parallel_uuid,
+                branch_id,
+                child_index,
+                action,
+            )
+
+    def _choose_action_for_new_parallel_branch(self, parallel_uuid: str) -> None:
+        action = self._choose_action("新增并行分支")
+        if action is not None:
+            self.workflow_view.sequence_list.add_parallel_branch(
+                parallel_uuid,
+                action,
+            )
+
     def _choose_action(self, title: str) -> ActionDefinition | None:
         if not any(self.actions.values()):
             self._notifications.warning("动作库为空，请先创建动作")
@@ -1894,6 +1926,28 @@ class MainWindow(QMainWindow):
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
             display_list.update_loop_progress(loop_uuid, current_iteration)
+
+    def on_parallel_branch_state(
+        self,
+        parallel_uuid: str,
+        branch_id: str,
+        state: str,
+        error: str,
+    ) -> None:
+        display_list = getattr(self, "_execution_display_list", None)
+        if display_list is not None:
+            self._ensure_canvas_execution_mapping(display_list)
+            display_list.update_parallel_branch_state(
+                parallel_uuid,
+                branch_id,
+                state,
+            )
+        if error:
+            self._notifications.error(
+                f"并行分支执行失败：{error}",
+                title="并行执行失败",
+                modal=False,
+            )
 
     def _ensure_canvas_execution_mapping(self, display_list) -> None:
         if display_list.execution_mapping_active:

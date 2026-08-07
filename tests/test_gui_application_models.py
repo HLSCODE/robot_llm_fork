@@ -20,7 +20,8 @@ from src.domain.action_schema import get_action_schema
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.persistence.storage import JsonCompositionRepository
 from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
-from src.execution import ExecutionState
+from src.execution import ExecutionEvent, ExecutionEventType, ExecutionState
+from src.gui.bridges.execution import ExecutionBridge
 from src.gui.views.dialogs import SchemaActionForm
 from src.gui.bridges.notifications import (
     GuiNotificationCenter,
@@ -211,6 +212,7 @@ class GuiNotificationCenterTests(unittest.TestCase):
         self.assertTrue(notifications.confirm("continue?"))
         parent.deleteLater()
 
+
     def test_worker_notification_is_presented_on_gui_thread(self) -> None:
         parent = SchemaActionForm(ActionType.WAIT)
         sink_threads: list[QThread] = []
@@ -229,6 +231,38 @@ class GuiNotificationCenterTests(unittest.TestCase):
 
         self.assertEqual([gui_thread], sink_threads)
         parent.deleteLater()
+
+
+class ExecutionBridgeTests(unittest.TestCase):
+    def test_parallel_branch_event_preserves_runtime_identity_and_state(self) -> None:
+        bridge = ExecutionBridge(SimpleNamespace(
+            execution=object(),
+            safety=object(),
+        ))
+        emitted: list[tuple[str, str, str, str]] = []
+        bridge.parallel_branch_state.connect(
+            lambda parallel_id, branch_id, state, message: emitted.append(
+                (parallel_id, branch_id, state, message)
+            )
+        )
+
+        bridge._on_event(ExecutionEvent(  # noqa: SLF001
+            run_id="run-1",
+            event_type=ExecutionEventType.PARALLEL_BRANCH_FAILED,
+            origin="test",
+            message="branch failed",
+            data={
+                "parallel_id": "parallel-1",
+                "branch_id": "branch-2",
+                "branch_state": "failed",
+            },
+        ))
+
+        self.assertEqual(
+            [("parallel-1", "branch-2", "failed", "branch failed")],
+            emitted,
+        )
+        bridge.deleteLater()
 
 
 class GuiAuxiliaryStartupResultReceiverTests(unittest.TestCase):

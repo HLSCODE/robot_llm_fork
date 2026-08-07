@@ -13,6 +13,8 @@ from src.domain.models import (
     ActionDefinition,
     ActionType,
     LoopBlock,
+    ParallelBlock,
+    ParallelBranch,
     SequenceItem,
     SequenceItemStatus,
 )
@@ -23,7 +25,15 @@ from src.gui.views.workflow_canvas.items import (
     StartEndItem,
     WorkflowNodeItem,
 )
-from src.gui.views.workflow_canvas.tokens import contrasting_text
+from src.gui.views.workflow_canvas.tokens import (
+    PARALLEL_BRANCH_HEADER_HEIGHT,
+    PARALLEL_BRANCH_PADDING,
+    PARALLEL_BRANCH_WIDTH,
+    PARALLEL_CHILD_GAP,
+    PARALLEL_HEADER_HEIGHT,
+    PARALLEL_SECTION_GAP,
+    contrasting_text,
+)
 
 
 class WorkflowCanvasTests(unittest.TestCase):
@@ -249,6 +259,178 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.canvas.insert_action(_action("ignored-during-run"))
         self.assertEqual(before, tuple(entry.uuid for entry in self.canvas.get_entries()))
         self.canvas.finish_execution()
+
+    def test_parallel_wrap_round_trip_and_undo_redo(self) -> None:
+        self.canvas.render_entries((_item("first"), _item("second")))
+        self.canvas.set_selected_entry_rows((0, 1))
+
+        parallel = self.canvas.wrap_selected_in_parallel()
+
+        self.assertEqual(2, len(parallel.branches))
+        self.assertEqual(
+            [["first"], ["second"]],
+            [[item.uuid for item in branch.items] for branch in parallel.branches],
+        )
+        document = self.canvas.document(
+            workflow_id="parallel-workflow",
+            name="Parallel",
+            revision=1,
+        )
+        restored = WorkflowDocument.from_dict(document.to_dict()).to_entries()[0]
+        self.assertIsInstance(restored, ParallelBlock)
+        self.canvas.undo()
+        self.assertEqual(
+            ("first", "second"),
+            tuple(entry.uuid for entry in self.canvas.get_entries()),
+        )
+        self.canvas.redo()
+        self.assertIsInstance(self.canvas.get_entries()[0], ParallelBlock)
+
+    def test_parallel_wrap_enforces_runtime_branch_limit(self) -> None:
+        self.canvas.render_entries(tuple(
+            _item(f"branch-{index}") for index in range(9)
+        ))
+        self.canvas.set_selected_entry_rows(tuple(range(9)))
+
+        with self.assertRaisesRegex(ValueError, "最多支持 8 个分支"):
+            self.canvas.wrap_selected_in_parallel()
+
+        self.assertEqual(9, self.canvas.entry_count())
+
+    def test_parallel_branch_insertion_and_library_drop_use_branch_coordinates(self) -> None:
+        parallel = _parallel()
+        self.canvas.render_entries((parallel,))
+        node = self.canvas._node_items[parallel.uuid]  # noqa: SLF001
+        requested: list[tuple[str, str, int]] = []
+        self.canvas.insert_parallel_action_requested.connect(
+            lambda parallel_id, branch_id, index: requested.append(
+                (parallel_id, branch_id, index)
+            )
+        )
+        marker = QPointF(
+            PARALLEL_BRANCH_PADDING + PARALLEL_BRANCH_WIDTH / 2.0,
+            PARALLEL_HEADER_HEIGHT
+            + PARALLEL_SECTION_GAP
+            + PARALLEL_BRANCH_HEADER_HEIGHT
+            - PARALLEL_CHILD_GAP / 2.0,
+        )
+        position = self.canvas.view.mapFromScene(node.mapToScene(marker))
+
+        QTest.mouseClick(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=position,
+        )
+
+        self.assertEqual(
+            [(parallel.uuid, parallel.branches[0].branch_id, 0)],
+            requested,
+        )
+        second_branch_point = node.mapToScene(QPointF(
+            node.node_width - PARALLEL_BRANCH_PADDING - PARALLEL_BRANCH_WIDTH / 2.0,
+            marker.y() + 70.0,
+        ))
+        self.canvas._on_action_dropped(  # noqa: SLF001
+            _action("dropped"),
+            second_branch_point.x(),
+            second_branch_point.y(),
+        )
+        rendered = self.canvas.get_entries()[0]
+        assert isinstance(rendered, ParallelBlock)
+        self.assertEqual(
+            ["right", "dropped"],
+            [item.definition.id for item in rendered.branches[1].items],
+        )
+
+    def test_parallel_branch_commands_preserve_invariants_and_are_undoable(self) -> None:
+        parallel = ParallelBlock(
+            uuid="parallel",
+            branches=[
+                ParallelBranch("left", [_item("left-a"), _item("left-b")]),
+                ParallelBranch("middle", [_item("middle")]),
+                ParallelBranch("right", [_item("right")]),
+            ],
+        )
+        self.canvas.render_entries((parallel,))
+        self.canvas.set_current_entry_row(0)
+        self.canvas._current_item_uuid = "left-b"  # noqa: SLF001
+
+        self.assertTrue(self.canvas.move_current_parallel_item(1))
+        moved = self.canvas.get_entries()[0]
+        assert isinstance(moved, ParallelBlock)
+        self.assertEqual(["left-a"], [item.uuid for item in moved.branches[0].items])
+        self.assertEqual(
+            ["middle", "left-b"],
+            [item.uuid for item in moved.branches[1].items],
+        )
+        self.assertTrue(self.canvas.move_current_parallel_branch(1))
+        reordered = self.canvas.get_entries()[0]
+        assert isinstance(reordered, ParallelBlock)
+        self.assertEqual(
+            ("left", "right", "middle"),
+            tuple(branch.branch_id for branch in reordered.branches),
+        )
+        self.assertTrue(self.canvas.remove_current_parallel_branch())
+        reduced = self.canvas.get_entries()[0]
+        assert isinstance(reduced, ParallelBlock)
+        self.assertEqual(2, len(reduced.branches))
+        self.canvas.undo()
+        self.assertEqual(3, len(self.canvas.get_entries()[0].branches))
+
+    def test_parallel_execution_updates_branch_and_nested_action_state(self) -> None:
+        parallel = _parallel()
+        compiled = WorkflowCompiler().compile(WorkflowDocument.from_entries(
+            workflow_id="parallel-workflow",
+            name="Parallel",
+            revision=1,
+            entries=(parallel,),
+        ))
+        self.canvas.begin_execution(compiled)
+        running = _item("left")
+        running.status = SequenceItemStatus.RUNNING
+
+        self.canvas.update_parallel_branch_state("parallel", "left-branch", "started")
+        self.canvas.update_execution_step(0, running)
+
+        rendered = self.canvas.get_entries()[0]
+        assert isinstance(rendered, ParallelBlock)
+        self.assertIs(
+            SequenceItemStatus.RUNNING,
+            rendered.branches[0].items[0].status,
+        )
+        self.assertEqual(
+            "started",
+            self.canvas._parallel_branch_states[("parallel", "left-branch")],  # noqa: SLF001
+        )
+        self.assertFalse(self.canvas._editing_enabled)  # noqa: SLF001
+        self.canvas.finish_execution()
+        self.assertFalse(self.canvas._parallel_branch_states)  # noqa: SLF001
+
+    def test_parallel_node_renders_in_light_dark_and_narrow_viewports(self) -> None:
+        original = QApplication.palette()
+        try:
+            for window, base, text in (
+                ("#f3f4f6", "#ffffff", "#111827"),
+                ("#111827", "#1f2937", "#f9fafb"),
+            ):
+                palette = QPalette()
+                palette.setColor(QPalette.ColorRole.Window, QColor(window))
+                palette.setColor(QPalette.ColorRole.Base, QColor(base))
+                palette.setColor(QPalette.ColorRole.Text, QColor(text))
+                palette.setColor(QPalette.ColorRole.Mid, QColor("#64748b"))
+                palette.setColor(QPalette.ColorRole.Highlight, QColor("#2563eb"))
+                QApplication.setPalette(palette)
+                self.canvas.resize(360, 640)
+                self.canvas.render_entries((_parallel(),))
+                QApplication.processEvents()
+                node = self.canvas._node_items["parallel"]  # noqa: SLF001
+                self.assertGreater(node.node_width, 500.0)
+                self.assertGreater(node.node_height, 200.0)
+                self.assertTrue(node.isVisible())
+                self.assertGreater(self.canvas.scene.itemsBoundingRect().width(), 0)
+        finally:
+            QApplication.setPalette(original)
+            QApplication.processEvents()
 
     def test_canvas_uses_lightweight_items_and_versioned_document(self) -> None:
         self.canvas.render_entries((_item("first"),))
@@ -542,6 +724,16 @@ def _item(item_uuid: str) -> SequenceItem:
     return SequenceItem(
         uuid=item_uuid,
         definition=_action(item_uuid),
+    )
+
+
+def _parallel() -> ParallelBlock:
+    return ParallelBlock(
+        uuid="parallel",
+        branches=[
+            ParallelBranch("left-branch", [_item("left")]),
+            ParallelBranch("right-branch", [_item("right")]),
+        ],
     )
 
 

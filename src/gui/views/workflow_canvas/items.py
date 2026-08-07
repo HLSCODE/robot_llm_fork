@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
@@ -13,7 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ....domain.models import LoopBlock, SequenceEntry, SequenceItem
+from ....domain.models import LoopBlock, ParallelBlock, SequenceEntry, SequenceItem
 from .tokens import (
     ACTION_COLORS,
     INSERT_TARGET_SIZE,
@@ -25,6 +27,15 @@ from .tokens import (
     LOOP_NODE_WIDTH,
     LOOP_SECTION_GAP,
     MAX_VISIBLE_LOOP_CHILDREN,
+    PARALLEL_BRANCH_GAP,
+    PARALLEL_BRANCH_HEADER_HEIGHT,
+    PARALLEL_BRANCH_PADDING,
+    PARALLEL_BRANCH_WIDTH,
+    PARALLEL_CHILD_GAP,
+    PARALLEL_CHILD_HEIGHT,
+    PARALLEL_FOOTER_HEIGHT,
+    PARALLEL_HEADER_HEIGHT,
+    PARALLEL_SECTION_GAP,
     NODE_DRAG_THRESHOLD,
     NODE_HEIGHT,
     NODE_WIDTH,
@@ -41,6 +52,7 @@ class WorkflowNodeItem(QGraphicsObject):
     focused = Signal(str, str, bool)
     edit_requested = Signal(str, str)
     loop_insert_requested = Signal(str, int)
+    parallel_insert_requested = Signal(str, str, int)
     move_requested = Signal(str, float)
 
     def __init__(
@@ -49,11 +61,13 @@ class WorkflowNodeItem(QGraphicsObject):
         entry: SequenceEntry,
         *,
         editing_enabled: bool = True,
+        parallel_branch_states: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__()
         self.node_id = node_id
         self.entry = entry
         self._editing_enabled = editing_enabled
+        self._parallel_branch_states = dict(parallel_branch_states or {})
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable, True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
@@ -61,12 +75,28 @@ class WorkflowNodeItem(QGraphicsObject):
         self.setAcceptHoverEvents(True)
         self.setToolTip(self._tooltip())
         self._pressed_loop_insert_index: int | None = None
+        self._pressed_parallel_insert: tuple[str, int] | None = None
         self._press_scene_y: float | None = None
         self._drag_origin_y = 0.0
         self._is_dragging = False
 
     @property
     def node_height(self) -> float:
+        if isinstance(self.entry, ParallelBlock):
+            max_children = max(
+                (len(branch.items) for branch in self.entry.branches),
+                default=0,
+            )
+            body_height = max(1, max_children) * PARALLEL_CHILD_HEIGHT
+            body_height += max(0, max_children - 1) * PARALLEL_CHILD_GAP
+            return (
+                PARALLEL_HEADER_HEIGHT
+                + PARALLEL_SECTION_GAP
+                + PARALLEL_BRANCH_HEADER_HEIGHT
+                + body_height
+                + PARALLEL_SECTION_GAP
+                + PARALLEL_FOOTER_HEIGHT
+            )
         if not isinstance(self.entry, LoopBlock):
             return NODE_HEIGHT
         visible_children = min(
@@ -88,6 +118,13 @@ class WorkflowNodeItem(QGraphicsObject):
 
     @property
     def node_width(self) -> float:
+        if isinstance(self.entry, ParallelBlock):
+            branch_count = max(2, len(self.entry.branches))
+            return (
+                2 * PARALLEL_BRANCH_PADDING
+                + branch_count * PARALLEL_BRANCH_WIDTH
+                + (branch_count - 1) * PARALLEL_BRANCH_GAP
+            )
         return LOOP_NODE_WIDTH if isinstance(self.entry, LoopBlock) else NODE_WIDTH
 
     def boundingRect(self) -> QRectF:  # noqa: N802
@@ -110,6 +147,14 @@ class WorkflowNodeItem(QGraphicsObject):
                 colors.accent,
             )
             return
+        if isinstance(self.entry, ParallelBlock):
+            self._paint_parallel(
+                painter,
+                colors.text,
+                colors.secondary_text,
+                colors.accent,
+            )
+            return
         is_emphasized = self.isSelected() or self.isUnderMouse()
         self._paint_action(
             painter,
@@ -125,7 +170,12 @@ class WorkflowNodeItem(QGraphicsObject):
             self._pressed_loop_insert_index = loop_insert_index
             event.accept()
             return
-        item_uuid = self._item_uuid_at(event.pos().y())
+        parallel_insert = self._parallel_insertion_at(event.pos())
+        if parallel_insert is not None:
+            self._pressed_parallel_insert = parallel_insert
+            event.accept()
+            return
+        item_uuid = self._item_uuid_at(event.pos())
         additive = bool(
             event.modifiers() & Qt.KeyboardModifier.ShiftModifier
         )
@@ -163,6 +213,18 @@ class WorkflowNodeItem(QGraphicsObject):
                 self.loop_insert_requested.emit(self.node_id, insert_index)
             event.accept()
             return
+        if self._pressed_parallel_insert is not None:
+            target = self._pressed_parallel_insert
+            self._pressed_parallel_insert = None
+            if self._parallel_insertion_at(event.pos()) == target:
+                branch_id, insert_index = target
+                self.parallel_insert_requested.emit(
+                    self.node_id,
+                    branch_id,
+                    insert_index,
+                )
+            event.accept()
+            return
         was_dragging = self._is_dragging
         target_center_y = self.scenePos().y() + self.node_height / 2.0
         self._reset_drag_state()
@@ -172,7 +234,7 @@ class WorkflowNodeItem(QGraphicsObject):
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
         self._reset_drag_state()
-        item_uuid = self._item_uuid_at(event.pos().y())
+        item_uuid = self._item_uuid_at(event.pos())
         self.edit_requested.emit(self.node_id, item_uuid)
         event.accept()
 
@@ -390,13 +452,220 @@ class WorkflowNodeItem(QGraphicsObject):
             )
         self._paint_loop_paths(painter, header_rect, footer_rect)
 
+    def _paint_parallel(
+        self,
+        painter: QPainter,
+        foreground: QColor,
+        secondary_text: QColor,
+        accent: QColor,
+    ) -> None:
+        parallel = self.entry
+        if not isinstance(parallel, ParallelBlock):
+            return
+        colors = canvas_colors()
+        header_rect = QRectF(0.0, 0.0, self.node_width, PARALLEL_HEADER_HEIGHT)
+        parallel_color = QColor("#6d28d9")
+        painter.setBrush(parallel_color)
+        painter.setPen(QPen(accent if self.isSelected() else parallel_color, 3.0))
+        painter.drawRoundedRect(header_rect, NODE_RADIUS, NODE_RADIUS)
+        painter.setPen(QColor("#ffffff"))
+        painter.setFont(canvas_font(emphasis=True))
+        painter.drawText(
+            QRectF(20.0, 10.0, self.node_width - 40.0, 26.0),
+            Qt.AlignmentFlag.AlignVCenter,
+            "并行",
+        )
+        painter.setFont(canvas_font(secondary=True))
+        painter.drawText(
+            QRectF(20.0, 38.0, self.node_width - 40.0, 24.0),
+            Qt.AlignmentFlag.AlignVCenter,
+            f"{len(parallel.branches)} 个分支 · 全部分支完成后汇合",
+        )
+
+        branch_top = PARALLEL_HEADER_HEIGHT + PARALLEL_SECTION_GAP
+        body_top = branch_top + PARALLEL_BRANCH_HEADER_HEIGHT
+        max_children = max(
+            (len(branch.items) for branch in parallel.branches),
+            default=0,
+        )
+        body_height = max(1, max_children) * PARALLEL_CHILD_HEIGHT
+        body_height += max(0, max_children - 1) * PARALLEL_CHILD_GAP
+        footer_top = body_top + body_height + PARALLEL_SECTION_GAP
+        footer_rect = QRectF(
+            (self.node_width - LOOP_FOOTER_WIDTH) / 2.0,
+            footer_top,
+            LOOP_FOOTER_WIDTH,
+            PARALLEL_FOOTER_HEIGHT,
+        )
+
+        for branch_index, branch in enumerate(parallel.branches):
+            branch_left = self._parallel_branch_left(branch_index)
+            lane_rect = QRectF(
+                branch_left,
+                branch_top,
+                PARALLEL_BRANCH_WIDTH,
+                PARALLEL_BRANCH_HEADER_HEIGHT + body_height,
+            )
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(colors.surface)
+            painter.drawRoundedRect(lane_rect, NODE_RADIUS, NODE_RADIUS)
+            state = self._parallel_branch_states.get(branch.branch_id, "pending")
+            state_color, state_label = _parallel_state_style(state)
+            painter.setBrush(state_color)
+            painter.drawRoundedRect(
+                QRectF(
+                    branch_left,
+                    branch_top,
+                    PARALLEL_BRANCH_WIDTH,
+                    PARALLEL_BRANCH_HEADER_HEIGHT,
+                ),
+                NODE_RADIUS,
+                NODE_RADIUS,
+            )
+            painter.setPen(contrasting_text(state_color))
+            painter.setFont(canvas_font(emphasis=True, secondary=True))
+            painter.drawText(
+                QRectF(branch_left + 12.0, branch_top, 105.0, PARALLEL_BRANCH_HEADER_HEIGHT),
+                Qt.AlignmentFlag.AlignVCenter,
+                f"分支 {branch_index + 1}",
+            )
+            painter.setFont(canvas_font(secondary=True))
+            painter.drawText(
+                QRectF(
+                    branch_left + 112.0,
+                    branch_top,
+                    PARALLEL_BRANCH_WIDTH - 124.0,
+                    PARALLEL_BRANCH_HEADER_HEIGHT,
+                ),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                state_label,
+            )
+            if self._editing_enabled:
+                self._paint_insert_marker(
+                    painter,
+                    body_top - PARALLEL_CHILD_GAP / 2.0,
+                    accent,
+                    center_x=branch_left + PARALLEL_BRANCH_WIDTH / 2.0,
+                )
+            for child_index, child in enumerate(branch.items):
+                child_top = body_top + child_index * (
+                    PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP
+                )
+                if self._editing_enabled and child_index > 0:
+                    self._paint_insert_marker(
+                        painter,
+                        child_top - PARALLEL_CHILD_GAP / 2.0,
+                        accent,
+                        center_x=branch_left + PARALLEL_BRANCH_WIDTH / 2.0,
+                    )
+                child_rect = QRectF(
+                    branch_left + 8.0,
+                    child_top,
+                    PARALLEL_BRANCH_WIDTH - 16.0,
+                    PARALLEL_CHILD_HEIGHT,
+                )
+                self._paint_parallel_child(
+                    painter,
+                    child,
+                    child_rect,
+                    foreground,
+                    secondary_text,
+                )
+            if self._editing_enabled and branch.items:
+                self._paint_insert_marker(
+                    painter,
+                    body_top
+                    + len(branch.items) * PARALLEL_CHILD_HEIGHT
+                    + max(0, len(branch.items) - 1) * PARALLEL_CHILD_GAP
+                    + PARALLEL_CHILD_GAP / 2.0,
+                    accent,
+                    center_x=branch_left + PARALLEL_BRANCH_WIDTH / 2.0,
+                )
+
+        painter.setBrush(colors.border)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(footer_rect, 20.0, 20.0)
+        painter.setPen(foreground)
+        painter.setFont(canvas_font(emphasis=True, secondary=True))
+        painter.drawText(footer_rect, Qt.AlignmentFlag.AlignCenter, "并行汇合")
+        self._paint_parallel_paths(painter, header_rect, footer_rect, branch_top)
+
+    def _paint_parallel_child(
+        self,
+        painter: QPainter,
+        entry: SequenceEntry,
+        rect: QRectF,
+        foreground: QColor,
+        secondary_text: QColor,
+    ) -> None:
+        if isinstance(entry, SequenceItem):
+            self._paint_action_card(
+                painter,
+                entry,
+                rect,
+                foreground,
+                secondary_text,
+            )
+            return
+        colors = canvas_colors()
+        painter.setBrush(colors.canvas)
+        painter.setPen(QPen(colors.border, 1.5))
+        painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
+        painter.setPen(foreground)
+        painter.setFont(canvas_font(emphasis=True, secondary=True))
+        label = "循环" if isinstance(entry, LoopBlock) else "嵌套并行"
+        count = (
+            f"{entry.repeat_count} 次 · {len(entry.items)} 项"
+            if isinstance(entry, LoopBlock)
+            else f"{len(entry.branches)} 个分支"
+        )
+        painter.drawText(
+            QRectF(rect.left() + 12.0, rect.top() + 6.0, rect.width() - 24.0, 24.0),
+            Qt.AlignmentFlag.AlignVCenter,
+            label,
+        )
+        painter.setPen(secondary_text)
+        painter.setFont(canvas_font(secondary=True))
+        painter.drawText(
+            QRectF(rect.left() + 12.0, rect.top() + 32.0, rect.width() - 24.0, 22.0),
+            Qt.AlignmentFlag.AlignVCenter,
+            count,
+        )
+
+    def _paint_parallel_paths(
+        self,
+        painter: QPainter,
+        header_rect: QRectF,
+        footer_rect: QRectF,
+        branch_top: float,
+    ) -> None:
+        parallel = self.entry
+        if not isinstance(parallel, ParallelBlock):
+            return
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#a78bfa"), 2.0))
+        for branch_index, _branch in enumerate(parallel.branches):
+            branch_center = (
+                self._parallel_branch_left(branch_index)
+                + PARALLEL_BRANCH_WIDTH / 2.0
+            )
+            painter.drawLine(
+                QPointF(header_rect.center().x(), header_rect.bottom()),
+                QPointF(branch_center, branch_top),
+            )
+            painter.drawLine(
+                QPointF(branch_center, footer_rect.top() - PARALLEL_SECTION_GAP),
+                QPointF(footer_rect.center().x(), footer_rect.top()),
+            )
+
     @staticmethod
     def _paint_insert_marker(
         painter: QPainter,
         center_y: float,
         accent: QColor,
+        *,
+        center_x: float = LOOP_NODE_WIDTH / 2.0,
     ) -> None:
-        center_x = LOOP_NODE_WIDTH / 2.0
         painter.setBrush(accent)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(QPointF(center_x, center_y), 15.0, 15.0)
@@ -461,21 +730,113 @@ class WorkflowNodeItem(QGraphicsObject):
             "下一次",
         )
 
-    def _item_uuid_at(self, local_y: float) -> str:
-        if not self._editing_enabled or not isinstance(self.entry, LoopBlock):
+    def _item_uuid_at(self, position: QPointF) -> str:
+        if not self._editing_enabled:
+            return self.entry.uuid
+        if isinstance(self.entry, ParallelBlock):
+            target = self.parallel_child_at(position)
+            return target[1] if target is not None else self.entry.uuid
+        if not isinstance(self.entry, LoopBlock):
             return self.entry.uuid
         body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
         for index, child in enumerate(
             self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]
         ):
             child_top = body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP)
-            if child_top <= local_y <= child_top + LOOP_CHILD_HEIGHT:
+            if child_top <= position.y() <= child_top + LOOP_CHILD_HEIGHT:
                 return child.uuid
         return self.entry.uuid
 
-    def item_uuid_at(self, local_y: float) -> str:
-        """Resolve the action represented at a local vertical position."""
-        return self._item_uuid_at(local_y)
+    def item_uuid_at(self, position: QPointF) -> str:
+        """Resolve the entry represented at a local position."""
+        return self._item_uuid_at(position)
+
+    def parallel_child_at(self, position: QPointF) -> tuple[str, str] | None:
+        parallel = self.entry
+        if not isinstance(parallel, ParallelBlock):
+            return None
+        branch_index = self._parallel_branch_index_at(position.x())
+        if branch_index is None:
+            return None
+        body_top = (
+            PARALLEL_HEADER_HEIGHT
+            + PARALLEL_SECTION_GAP
+            + PARALLEL_BRANCH_HEADER_HEIGHT
+        )
+        branch = parallel.branches[branch_index]
+        for child_index, child in enumerate(branch.items):
+            child_top = body_top + child_index * (
+                PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP
+            )
+            if child_top <= position.y() <= child_top + PARALLEL_CHILD_HEIGHT:
+                return branch.branch_id, child.uuid
+        return None
+
+    def parallel_drop_target(self, position: QPointF) -> tuple[str, int] | None:
+        parallel = self.entry
+        if not isinstance(parallel, ParallelBlock):
+            return None
+        branch_index = self._parallel_branch_index_at(position.x())
+        if branch_index is None:
+            return None
+        branch = parallel.branches[branch_index]
+        body_top = (
+            PARALLEL_HEADER_HEIGHT
+            + PARALLEL_SECTION_GAP
+            + PARALLEL_BRANCH_HEADER_HEIGHT
+        )
+        insertion_index = 0
+        for child_index in range(len(branch.items)):
+            child_center = (
+                body_top
+                + child_index * (PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP)
+                + PARALLEL_CHILD_HEIGHT / 2.0
+            )
+            if position.y() < child_center:
+                break
+            insertion_index = child_index + 1
+        return branch.branch_id, insertion_index
+
+    def _parallel_insertion_at(
+        self,
+        position: QPointF,
+    ) -> tuple[str, int] | None:
+        if not self._editing_enabled:
+            return None
+        target = self.parallel_drop_target(position)
+        if target is None:
+            return None
+        _branch_id, insertion_index = target
+        body_top = (
+            PARALLEL_HEADER_HEIGHT
+            + PARALLEL_SECTION_GAP
+            + PARALLEL_BRANCH_HEADER_HEIGHT
+        )
+        center_y = body_top - PARALLEL_CHILD_GAP / 2.0
+        if insertion_index > 0:
+            center_y = (
+                body_top
+                + insertion_index * PARALLEL_CHILD_HEIGHT
+                + (insertion_index - 0.5) * PARALLEL_CHILD_GAP
+            )
+        return target if abs(position.y() - center_y) <= 20.0 else None
+
+    def _parallel_branch_index_at(self, local_x: float) -> int | None:
+        parallel = self.entry
+        if not isinstance(parallel, ParallelBlock):
+            return None
+        for index, _branch in enumerate(parallel.branches):
+            left = self._parallel_branch_left(index)
+            if left <= local_x <= left + PARALLEL_BRANCH_WIDTH:
+                return index
+        return None
+
+    @staticmethod
+    def _parallel_branch_left(branch_index: int) -> float:
+        return (
+            PARALLEL_BRANCH_PADDING
+            + branch_index * (PARALLEL_BRANCH_WIDTH + PARALLEL_BRANCH_GAP)
+        )
 
     def _loop_insertion_index_at(self, position: QPointF) -> int | None:
         if not isinstance(self.entry, LoopBlock):
@@ -508,11 +869,27 @@ class WorkflowNodeItem(QGraphicsObject):
                 f"循环 {self.entry.repeat_count} 次\n"
                 f"{len(self.entry.items)} 个动作，共 {self.entry.total_steps} 步"
             )
+        if isinstance(self.entry, ParallelBlock):
+            action_count = sum(len(branch.items) for branch in self.entry.branches)
+            return (
+                f"并行 · {len(self.entry.branches)} 个分支\n"
+                f"共 {action_count} 个控制流节点"
+            )
         parameters = ", ".join(
             f"{name}={value}"
             for name, value in list(self.entry.definition.parameters.items())[:5]
         )
         return f"{self.entry.definition.name}\n{parameters or '无参数'}"
+
+
+def _parallel_state_style(state: str) -> tuple[QColor, str]:
+    return {
+        "started": (QColor("#2563eb"), "执行中"),
+        "completed": (QColor("#16a34a"), "完成"),
+        "failed": (QColor("#dc2626"), "失败"),
+        "cancelled": (QColor("#64748b"), "已取消"),
+        "pending": (QColor("#475569"), "等待"),
+    }.get(state, (QColor("#475569"), "等待"))
 
 
 class StartEndItem(QGraphicsObject):

@@ -276,8 +276,8 @@ class WorkflowDocument:
 
 ### 7.1 M8 目标模型
 
-现有 `nodes + order` 足以承载顺序和单层 Loop，但不能表达并行、条件或嵌套控制流。
-M8 将在保持纯 Python/Qt 无关边界的前提下升级为结构化控制流：
+旧 `nodes + order` 只能承载顺序和单层 Loop；M8 已在保持纯 Python/Qt 无关
+边界的前提下升级为结构化控制流：
 
 ```text
 WorkflowDocument
@@ -287,8 +287,8 @@ WorkflowDocument
 ```
 
 - schema v3 已完整支持可嵌套 Sequence/Action/Loop/Parallel；A-014/A-015 已完成
-  编译、资源冲突、失败、取消、join、事件身份和调度语义。GUI 在 D-027 完成前
-  不提供 Parallel 创建/修改入口，但 API/Compiler/Runtime 使用同一正式模型。
+  编译、资源冲突、失败、取消、join、事件身份和调度语义；D-027 已补齐 GUI
+  Parallel 创建、分支编辑和运行状态表达，所有入口使用同一正式模型。
 - `presentation` 不参与执行语义，运行状态和执行历史不得写回 WorkflowDocument。
 - Action 节点保存规范化可复现快照及来源 action ID/revision，不按显示名称解析。
 - 不实现任意连线图或通用 BPMN；Condition 不执行任意代码，表达式模型另行评审。
@@ -525,12 +525,16 @@ src/
 - GUI 资源页、保存/加载、任务组合和 WebSocket 已统一使用 Workflow Repository；
   AI/语音后续 typed command 继续复用该入口，不在 View 中直接枚举文件。
 
-### 阶段 12：Parallel 画布表达（D-027，待实施）
+### 阶段 12：Parallel 画布表达（D-027，已完成）
 
-- 复用既有 WorkflowParallelNode/ExecutionPlan，仅增加画布复合节点和编辑命令。
-- 分支的新增、删除、排序和动作移动必须经过同一 WorkflowDocument 修改边界。
-- 执行态按 parallel UUID/branch ID/step path 高亮；不以 GUI 线程承担调度。
-- 补保存/加载、Undo/Redo、键鼠/触控和 offscreen 主题/尺寸回归后再关闭任务。
+- 复用既有 WorkflowDocument v3、WorkflowCompiler 与 ExecutionPlan，自绘横向分支泳道、
+  分支汇合点及嵌套动作摘要；未在 GUI 增加调度器或平行业务模型。
+- 新建 Parallel、分支新增/删除/左右排序、节点跨分支移动和动作库拖入分支均经过
+  同一画布文档修改边界，并复用快照式 QUndoStack；强制 2～8 分支和非空分支不变量。
+- ExecutionBridge 按 parallel UUID/branch ID 转发既有运行事件，画布只派生
+  pending/running/completed/failed/cancelled 表现状态，运行状态不写回持久化文档。
+- 保存/加载 round-trip、Undo/Redo、插入命中、分支命令、执行态、浅色/深色和窄窗口
+  offscreen 回归已覆盖；大尺寸并行节点通过画布横向滚动和“适合内容”访问。
 
 ## 15. 测试与验收
 

@@ -33,6 +33,7 @@ class ExecutionBridge(QObject):
     step_completed = Signal(int, object)
     step_failed = Signal(int, object, str)
     loop_progress = Signal(str, int, int)
+    parallel_branch_state = Signal(str, str, str, str)
     execution_completed = Signal(bool)
     log_message = Signal(str)
     safety_stop_completed = Signal(object)
@@ -139,6 +140,19 @@ class ExecutionBridge(QObject):
                 str(event.data["loop_uuid"]),
                 int(event.data["current_iteration"]),
                 int(event.data["total_iterations"]),
+            )
+            return
+        if event_type in {
+            ExecutionEventType.PARALLEL_BRANCH_STARTED,
+            ExecutionEventType.PARALLEL_BRANCH_COMPLETED,
+            ExecutionEventType.PARALLEL_BRANCH_FAILED,
+            ExecutionEventType.PARALLEL_BRANCH_CANCELLED,
+        }:
+            self.parallel_branch_state.emit(
+                str(event.data["parallel_id"]),
+                str(event.data["branch_id"]),
+                str(event.data["branch_state"]),
+                event.message,
             )
             return
         if event_type is ExecutionEventType.LOG:
