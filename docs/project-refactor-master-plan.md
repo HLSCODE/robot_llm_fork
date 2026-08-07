@@ -5,7 +5,7 @@
 > 最近更新：2026-08-07
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：153/158（151 DONE + 2 DROPPED，96.8%）
+> 计划进度：154/159（152 DONE + 2 DROPPED，96.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -850,8 +850,8 @@ src/
 
 - pytest 已建立 50% 全源码覆盖率门禁；Windows/Linux 质量矩阵和 GUI/Server/Hardware
   可选依赖隔离矩阵已建立。
-- Ruff 已覆盖全部 `src`、测试和受管脚本；供应商 SDK 与硬件联调脚本按隔离门禁管理。
-- Mypy 已覆盖 61 个核心文件，并整包覆盖 `src/execution`；GUI、语音、部分设备驱动和视觉算法等动态边界仍需逐步扩展。
+- Ruff 已以 `src/`、`scripts/` 和 `tests/` 目录为范围覆盖全部第一方 Python 代码，不再使用文件白名单。
+- Mypy 已默认检查全部手写 `src/` 与 `scripts/` Python 代码；唯一排除项为 Qt 资源编译器生成的 `src/gui/resources_rc.py`。
 - `test_devices.py` 等主要是硬件联调脚本。
 - 大量硬件代码难以在无设备环境导入和测试。
 
@@ -908,6 +908,7 @@ src/
 | G-031 | P1 | DONE | 集中式技能集合已拆为 `skills/<domain>/<id>.skill.json`；SkillRegistry 确定性递归加载、逐文件 schema/动作类型/参数/绑定校验、跨文件 ID 唯一校验并在全部成功后替换内存目录；`default_skills.py` 和手写索引已删除，内置与用户数据共享 JSON 格式 |
 | G-032 | P1 | DONE | Action/Skill/Workflow 显式迁移均已完成；`robot-workflow-data` 默认 dry-run，临时生成、重新加载和目标冲突校验后原子发布，17 个旧任务及 `.bak` 已移入可恢复归档；runtime 旧集合、`.task` 和旧 `.workflow` 入口全部删除 |
 | G-033 | P2 | DONE | `actions/`、`skills/`、`workflows/`、`drafts/`、四个目录级配置、三个版本控制内 JSON Schema、`$schema`、内置资源和 wheel package-data 已落地；GUI 文件对话框与 WebSocket 任务名统一使用 `*.workflow.json` |
+| G-034 | P1 | DONE | 全仓手写 Python 静态检查历史问题清零；Mypy 从 72 个文件的 570 个错误收敛为默认检查全部 `src/` 与 `scripts/`，仅排除自动生成的 `src/gui/resources_rc.py`；Ruff 默认检查 `src/`、`scripts/` 和 `tests/`，并以边界测试禁止白名单和扩大排除范围回归 |
 
 完成标准：
 
@@ -1243,7 +1244,7 @@ M7 GUI 工作台信息架构与空间收敛
 
 - [x] pytest、Windows 最小 CI、核心 Ruff 和 Mypy 门禁生效。
 - [x] 覆盖率阈值和 Windows/Linux 测试矩阵生效。
-- [ ] Ruff/Mypy 静态检查在历史问题清零后扩展到全仓。
+- [x] Ruff/Mypy 静态检查历史问题已清零，并扩展到全部手写第一方 Python 代码。
 - [x] 无硬件 simulation 可回归 GUI、统一执行、取消和资源清理主流程。
 - [ ] 关键真实硬件验收有记录。
 - [x] 配置、依赖、打包和平台支持策略清晰。
@@ -1361,6 +1362,7 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-07 | M8 | D | Parallel 画布表达与编辑闭环 | D-027 TODO → DONE | 基于既有 v3 文档和执行计划实现横向分支泳道、汇合点和嵌套摘要；创建 Parallel、分支增删/排序、节点跨分支移动、动作拖入及 Undo/Redo 共用唯一画布状态边界，强制 2～8 分支与非空分支；既有 ExecutionBridge 事件按 parallel UUID/branch ID 派生分支高亮，GUI 不承担调度 | 聚焦 Pytest 81 passed；目标 Mypy 7 files、Ruff 通过；统一门禁通过：Mypy 84 files、Pytest 504 passed + 48 subtests、coverage 64.65%、LLM golden 14/14、性能 9/9、wheel smoke 通过 |
 | 2026-08-07 | M8 | D/G | 任务组合与画布单一化评审 | D-028～D-030 新增为 TODO；ADR-M-018 → Accepted | 确认 TaskComposer 与画布形成双编辑模型，且 flattened_task 会展开 Loop、顺序拼接 Parallel 分支；决定删除组合页面/服务，以 WorkflowDocument v4 内嵌 Subworkflow、唯一 WorkflowEditingSession、折叠卡片和面包屑作用域编辑承接“流程 + Action + 流程”及递归子流程；默认快照隔离源任务变化，插入时递归重建身份，不引入 GUI 调度器 | 文档架构评审；本次未修改 runtime 或活动数据，实施完成前当前组合器风险仍存在 |
 | 2026-08-07 | M8 | D/G | Subworkflow v4 与组合编辑单一化 | D-028～D-030 TODO → DONE | WorkflowDocument/Schema、Validator、Compiler、ExecutionPlan 与 Engine 直接支持递归 Subworkflow；新增 WorkflowEditingSession；17 个活动文档一次迁移 v4；删除独立组合页面/服务/Activity 入口，任务库打开或插入统一进入唯一画布，子流程作用域编辑和整棵文档 Undo/Redo 保留 Loop/Parallel 语义 | Compile、Ruff、项目 Mypy（84 files）、Pytest 506 passed + 48 subtests、LLM golden 14/14、性能 9/9、wheel 构建与隔离安装 smoke 全通过；活动数据 46 actions / 17 workflows（272 顶层节点）/ 13 skills 可直接加载 |
+| 2026-08-07 | M8 | G | 全仓手写 Python 静态门禁收口 | G-034 → DONE | 从 Mypy 初始基线 570 errors / 72 files 逐模块收窄动态与第三方边界，默认门禁扩展为全部手写 `src/` 与 `scripts/`；唯一排除 Qt 自动生成的 `resources_rc.py`；Ruff 同步覆盖 `src/`、`scripts/`、`tests/`；新增视觉算法 4 项回归以及 DI 加载协议、深度 PNG、确定性超时回归 | 默认 Mypy 286 个 `src` + `scripts` 文件、0 errors；Ruff 全通过；统一门禁 514 passed + 48 subtests，coverage 65.71%，LLM golden 14/14，性能 9/9，Wheel smoke 及 GUI/Server/Hardware optional import smoke 全通过；真实硬件验收仍独立跟踪 |
 
 ## 22. 建议的首批实施顺序
 

@@ -96,7 +96,7 @@ class BaseLLMClient(ABC):
         """普通非流式对话。"""
         raise NotImplementedError
 
-    async def stream_chat(
+    def stream_chat(
         self,
         messages: List[LLMMessage],
         **options: Any,

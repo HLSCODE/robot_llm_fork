@@ -27,6 +27,19 @@ class _SkillRegistry:
             return self._skill
         return None
 
+    def list_skills(self) -> list[Skill]:
+        return [self._skill]
+
+
+class _LoadableSkillCatalog(_SkillRegistry):
+    def __init__(self, skill: Skill) -> None:
+        super().__init__(skill)
+        self.loaded_directory: str | None = None
+
+    def load_directory(self, directory: str) -> int:
+        self.loaded_directory = directory
+        return 1
+
 
 def _skill_with_action_types(*action_types: object) -> Skill:
     aliases = {
@@ -92,6 +105,15 @@ def _match(
 
 
 class SkillEngineActionTypeTests(unittest.TestCase):
+    def test_structural_catalog_can_supply_directory_loading_capability(self):
+        catalog = _LoadableSkillCatalog(_skill_with_action_types("WAIT"))
+        engine = SkillEngine(catalog)
+
+        loaded = engine.load_skills("catalog/skills")
+
+        self.assertEqual(1, loaded)
+        self.assertEqual("catalog/skills", catalog.loaded_directory)
+
     def test_unknown_action_type_is_rejected_instead_of_becoming_move(self):
         skill = _skill_with_action_types("MOVE", "MOVEE")
         engine = SkillEngine(cast(SkillRegistry, _SkillRegistry(skill)))

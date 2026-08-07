@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from threading import Lock, RLock
+from typing import TYPE_CHECKING
 
 from ...application.command_runtime import CommandRuntime
 from ...llm.errors import LLMError
@@ -16,16 +17,20 @@ from .wake_feedback import WakeFeedback
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from ...llm.registry import LLMRegistry
+    from ..adapters import CameraProvider
+
 
 class VoiceInteractionController:
     """Coordinate session state, intent classification, and task routing."""
 
     def __init__(
         self,
-        llm_registry,
+        llm_registry: "LLMRegistry",
         command_runtime: CommandRuntime,
         source: str,
-        camera_provider=None,
+        camera_provider: "CameraProvider | None" = None,
         session: VoiceSession | None = None,
         timeout_s: float = 30.0,
         turn_timeout_s: float = 90.0,

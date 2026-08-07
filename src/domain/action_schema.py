@@ -913,7 +913,7 @@ def get_action_fields(
 
 def validate_action_parameters(
     action_type: ActionType,
-    parameters: dict[str, Any],
+    parameters: object,
     *,
     apply_defaults: bool = True,
     reject_unknown: bool = True,

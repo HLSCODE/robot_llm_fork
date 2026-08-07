@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ..skill_system.builtin_catalog import get_builtin_skills
-from ..skill_system.models import SkillMatchResult
+from ..skill_system.models import Skill, SkillMatchResult
 from ..skill_system.skill_engine import SkillEngine
 from .fingerprints import fingerprint_json
 from .tasks import (
@@ -69,15 +69,15 @@ class _SkillCatalog:
     """Isolated catalog used by the offline runner."""
 
     def __init__(self) -> None:
-        self._skills = {
+        self._skills: dict[str, Skill] = {
             skill.id: skill
             for skill in get_builtin_skills()
         }
 
-    def get_skill(self, skill_id: str):
+    def get_skill(self, skill_id: str) -> Skill | None:
         return self._skills.get(skill_id)
 
-    def list_skills(self):
+    def list_skills(self) -> list[Skill]:
         return sorted(self._skills.values(), key=lambda skill: skill.name)
 
 
@@ -107,7 +107,7 @@ def run_regression_suite(
                 "profile is not registered in the regression runner",
             ))
             continue
-        actual = {
+        profile_actual = {
             "name": profile.name,
             "version": profile.version,
             "template_sha256": profile.template_sha256,
@@ -117,13 +117,13 @@ def run_regression_suite(
             category="profile",
             case_id=case_id,
             expected=expected,
-            actual=actual,
+            actual=profile_actual,
         )
 
     for case in dataset["classification_cases"]:
         total += 1
         try:
-            actual = parse_instruction_classification(
+            classification_actual = parse_instruction_classification(
                 json.dumps(case["model_response"], ensure_ascii=False)
             )
         except Exception as exc:
@@ -138,7 +138,7 @@ def run_regression_suite(
             category="classification",
             case_id=case["id"],
             expected=case["expected"],
-            actual=actual,
+            actual=classification_actual,
         )
 
     for case in dataset["planning_cases"]:
@@ -154,7 +154,7 @@ def run_regression_suite(
                 exc,
             ))
             continue
-        actual = {
+        plan_actual: dict[str, Any] = {
             "command": plan.command.to_dict() if plan.command is not None else None,
             "reasoning": plan.reasoning,
             "confidence": plan.confidence,
@@ -166,7 +166,7 @@ def run_regression_suite(
             category="planning",
             case_id=case["id"],
             expected=case["expected"],
-            actual=actual,
+            actual=plan_actual,
         )
 
     catalog = _SkillCatalog()
@@ -208,7 +208,7 @@ def run_regression_suite(
                 exc,
             ))
             continue
-        actual = {
+        skill_actual: dict[str, Any] = {
             "validation_code": validation.code.value,
             "actions": [
                 {
@@ -224,7 +224,7 @@ def run_regression_suite(
             category="skill",
             case_id=case["id"],
             expected=case["expected"],
-            actual=actual,
+            actual=skill_actual,
         )
 
     return RegressionReport(

@@ -191,7 +191,7 @@ def _create_data_collection_recorder(
     from ..data_collection.recorder import DemonstrationRecorder
 
     return DemonstrationRecorder(
-        robot_state_reader=robot_state_reader,
+        robot_telemetry_reader=robot_state_reader,
         camera_source=camera_source,
         config=DataCollectionConfig.from_settings(settings),
     )

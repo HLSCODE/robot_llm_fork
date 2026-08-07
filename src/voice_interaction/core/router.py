@@ -22,7 +22,7 @@ from ...llm import (
 )
 from ..adapters import CameraCaptureError
 from .session import VoiceSession
-from .types import VoiceEvent
+from .types import VoiceEvent, VoiceEventType
 
 logger = logging.getLogger(__name__)
 
@@ -316,7 +316,7 @@ class VoiceIntentRouter:
             action,
             expected_source=self.source,
         )
-        event_type = (
+        event_type: VoiceEventType = (
             "preview_cancelled"
             if result == "preview_cancelled"
             else "execution_controlled"

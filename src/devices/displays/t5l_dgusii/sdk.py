@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 from threading import RLock
+from types import TracebackType
 
 from .client import DgusClient, TraceCallback
 from .config import DgusSdkConfig, load_config
@@ -48,7 +49,12 @@ class T5LDgusSdk:
     def __enter__(self) -> "T5LDgusSdk":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()
 
 
@@ -60,7 +66,7 @@ class T5LServiceContainer:
     initialization does not close or corrupt the currently cached service.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._lock = RLock()
         self._sdk: T5LDgusSdk | None = None
         self._key: tuple[object, ...] | None = None
@@ -144,9 +150,25 @@ class T5LServiceContainer:
     def get_expression_service(
         self,
         config_path: str | Path | None = "t5l_config.json",
-        **kwargs,
+        *,
+        config: DgusSdkConfig | None = None,
+        port: str | None = None,
+        baudrate: int | None = None,
+        vp_addr: int | None = None,
+        sp_addr: int | None = None,
+        tx_delay: float = 0.05,
+        trace: TraceCallback | None = None,
     ) -> ExpressionSwitcher:
-        return self.get_sdk(config_path, **kwargs).expression_service
+        return self.get_sdk(
+            config_path,
+            config=config,
+            port=port,
+            baudrate=baudrate,
+            vp_addr=vp_addr,
+            sp_addr=sp_addr,
+            tx_delay=tx_delay,
+            trace=trace,
+        ).expression_service
 
     def close(self) -> None:
         with self._lock:

@@ -6,6 +6,7 @@ import argparse
 import importlib
 import os
 from collections.abc import Callable, Sequence
+from typing import cast
 
 SmokeCheck = Callable[[], None]
 
@@ -14,9 +15,11 @@ def _check_server() -> None:
     import numpy
     import websockets
 
+    from src.application.services import ApplicationServices
     from src.robot_server.ws_server import RobotWebSocketServer
 
-    server = RobotWebSocketServer(services=object())  # type: ignore[arg-type]
+    services = cast(ApplicationServices, object())
+    server = RobotWebSocketServer(services=services)
     if server.endpoint != "ws://127.0.0.1:8765/":
         raise RuntimeError(f"unexpected default WebSocket endpoint: {server.endpoint}")
     if not numpy.__version__ or not websockets.__version__:

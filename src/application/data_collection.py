@@ -591,13 +591,13 @@ class DataCollectionService:
         callback: Callable[[], Mapping[str, Any]],
     ) -> None:
         try:
-            result = callback()
-            if not isinstance(result, Mapping):
+            raw_result: object = callback()
+            if not isinstance(raw_result, Mapping):
                 errors.append(f"{operation}: recorder returned a non-mapping result")
-            elif result.get("success") is not True:
+            elif raw_result.get("success") is not True:
                 errors.append(
                     f"{operation}: "
-                    f"{DataCollectionService._message(result, 'operation failed')}"
+                    f"{DataCollectionService._message(raw_result, 'operation failed')}"
                 )
         except Exception as exc:
             errors.append(f"{operation}: {exc}")

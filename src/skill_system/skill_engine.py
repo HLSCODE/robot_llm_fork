@@ -6,7 +6,7 @@ import logging
 from collections.abc import Mapping
 import math
 from types import MappingProxyType
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Protocol, Tuple, runtime_checkable
 from uuid import uuid4
 
 from ..domain.action_schema import (
@@ -33,6 +33,21 @@ _ACTION_TYPES_BY_ALIAS: Mapping[str, ActionType] = MappingProxyType({
 })
 
 
+class SkillCatalog(Protocol):
+    """Read-only skill lookup capability required by the expansion engine."""
+
+    def get_skill(self, skill_id: str) -> Skill | None: ...
+
+    def list_skills(self) -> list[Skill]: ...
+
+
+@runtime_checkable
+class DirectorySkillLoader(Protocol):
+    """Optional capability for catalogs that can load a directory in place."""
+
+    def load_directory(self, directory: str) -> int: ...
+
+
 class SkillEngine:
     """
     技能解析引擎
@@ -42,7 +57,7 @@ class SkillEngine:
     3. 验证动作序列的合法性
     """
 
-    def __init__(self, registry: Optional[SkillRegistry] = None):
+    def __init__(self, registry: Optional[SkillCatalog] = None):
         """
         初始化技能引擎
 
@@ -62,6 +77,8 @@ class SkillEngine:
         Returns:
             加载的技能数量
         """
+        if not isinstance(self._registry, DirectorySkillLoader):
+            raise RuntimeError("当前 SkillCatalog 不支持从目录加载技能")
         return self._registry.load_directory(directory)
 
     def parse_and_expand(
@@ -312,8 +329,6 @@ class SkillEngine:
                 return None, "类型必须是 bool"
             return value, None
 
-        return None, f"不支持的参数类型: {parameter.type!r}"
-
     @staticmethod
     def _validate_parameter_bindings(
         skill: Skill,
@@ -332,12 +347,7 @@ class SkillEngine:
             )
 
         for step in skill.steps:
-            if not isinstance(step.parameters, dict):
-                return ValidationResult.failed(
-                    ValidationCode.INVALID_ACTION_PARAMETERS,
-                    f"技能 {skill.id} 步骤 {step.step_id} 的动作参数必须是字典",
-                )
-            if not isinstance(step.parameter_bindings, dict) or any(
+            if any(
                 not isinstance(source, str)
                 or not source
                 or not isinstance(target, str)

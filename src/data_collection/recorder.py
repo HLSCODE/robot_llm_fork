@@ -309,6 +309,9 @@ class DemonstrationRecorder:
 
 def _arm_frame_from_telemetry(telemetry: ArmTelemetry) -> ArmFrameData:
     pose = telemetry.state.pose
+    joints = telemetry.state.joints
+    if joints is None:
+        raise RuntimeError("arm joint state is unavailable")
     quaternion_xyzw = Rotation.from_euler(
         "xyz",
         [pose.rx_rad, pose.ry_rad, pose.rz_rad],
@@ -317,7 +320,7 @@ def _arm_frame_from_telemetry(telemetry: ArmTelemetry) -> ArmFrameData:
         sampled_at_utc_ns=telemetry.sampled_at_utc_ns,
         sampled_at_monotonic_ns=telemetry.sampled_at_monotonic_ns,
         joint_positions=np.asarray(
-            telemetry.state.joints.positions_deg,
+            joints.positions_deg,
             dtype=np.float64,
         ),
         joint_velocities=_optional_array(telemetry.joint_velocities_deg_s),

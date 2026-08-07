@@ -1,10 +1,12 @@
 """
 Wake-session voice interaction orchestration.
 """
+from typing import Any
+
 from .adapters import CameraCaptureError, CamerasModuleProvider
 from .core import WakeFeedback, VoiceEvent, VoiceInteractionController, VoiceSession, VoiceSessionState
 
-_LAZY_EXPORTS = {
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "ASREngine": (".speech", "ASREngine"),
     "AudioCapture": (".speech", "AudioCapture"),
     "AudioOutputGate": (".speech", "AudioOutputGate"),
@@ -25,7 +27,7 @@ _LAZY_EXPORTS = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name not in _LAZY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module_name, attr_name = _LAZY_EXPORTS[name]

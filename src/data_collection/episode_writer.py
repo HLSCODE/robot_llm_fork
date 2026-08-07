@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import cv2
@@ -26,6 +27,7 @@ from .schema import (
     DataCollectionFormat,
     EpisodeFile,
     EpisodeMetadata,
+    ArmFrameRecord,
     FrameRecord,
     normalize_descriptions,
     validate_source_arms,
@@ -363,15 +365,16 @@ class DataCollectionEpisodeWriter:
                 if isinstance(value, np.ndarray):
                     raw_bytes += value.nbytes
             for arm in frame.arms.values():
-                for value in (
+                arm_arrays: tuple[np.ndarray | None, ...] = (
                     arm.joint_positions,
                     arm.joint_velocities,
                     arm.joint_currents,
                     arm.gripper_pose,
                     arm.end_effector_wrench,
-                ):
-                    if isinstance(value, np.ndarray):
-                        raw_bytes += value.nbytes
+                )
+                for arm_array in arm_arrays:
+                    if arm_array is not None:
+                        raw_bytes += arm_array.nbytes
         return math.ceil(raw_bytes * self._storage_policy.overhead_factor)
 
     def _ensure_capacity(
@@ -539,7 +542,8 @@ class DataCollectionEpisodeWriter:
                     arrays[f"{prefix}{field_name}_valid"] = valid
 
         buffer = io.BytesIO()
-        np.savez_compressed(buffer, **arrays)
+        savez_compressed: Callable[..., None] = np.savez_compressed
+        savez_compressed(buffer, **arrays)
         self._write_bytes(
             episode_path / PORTABLE_LOW_DIM_FILENAME,
             buffer.getvalue(),
@@ -868,7 +872,7 @@ def _validate_frames(
 
 
 def _validate_arm_sample(
-    sample: object,
+    sample: ArmFrameRecord,
     *,
     arm_name: str,
     frame_index: int,
@@ -996,7 +1000,7 @@ def _required_array(
 
 
 def _masked_optional_stack(
-    samples: Sequence[object],
+    samples: Sequence[ArmFrameRecord],
     name: str,
 ) -> tuple[np.ndarray | None, np.ndarray]:
     values = [getattr(sample, name) for sample in samples]
@@ -1146,7 +1150,7 @@ def _is_temp_episode(name: str) -> bool:
     )
 
 
-def _native_rlbench_types():
+def _native_rlbench_types() -> tuple[type[Any], type[Any]]:
     from rlbench.backend.observation import Observation
     from rlbench.demo import Demo
 

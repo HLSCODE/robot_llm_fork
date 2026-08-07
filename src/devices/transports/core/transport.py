@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from .exceptions import TransportError, TransportErrorCategory
-from .strategies import FixedLengthStrategy, SerialExchangeStrategy
+from .strategies import FixedLengthStrategy, SerialExchangeStrategy, SerialPort
 
 DEFAULT_BAUDRATE = 115200
 DEFAULT_BYTESIZE = 8
@@ -83,7 +83,7 @@ class SerialTransport(StrategyTransport):
         dtr: bool | None = None,
         open_attempts: int = 1,
         open_retry_delay_seconds: float = 0.0,
-        serial_factory: Callable[..., object] | None = None,
+        serial_factory: Callable[..., SerialPort] | None = None,
     ) -> None:
         settings = (
             port
@@ -144,7 +144,7 @@ class SerialTransport(StrategyTransport):
         with self._lock:
             return bool(getattr(self._serial, "is_open", False))
 
-    def _open(self) -> object:
+    def _open(self) -> SerialPort:
         last_error: Exception | None = None
         for attempt in range(1, self.settings.open_attempts + 1):
             try:
@@ -161,7 +161,7 @@ class SerialTransport(StrategyTransport):
             operation="open",
         ) from last_error
 
-    def _open_once(self) -> object:
+    def _open_once(self) -> SerialPort:
         options = {
             "baudrate": self.settings.baudrate,
             "bytesize": self.settings.bytesize,
@@ -190,7 +190,7 @@ def _modbus_rtu_inter_frame_delay(baudrate: int) -> float:
     return MODBUS_RTU_INTER_FRAME_GAP_CHARS * bits_per_char / max(int(baudrate), 1)
 
 
-def _load_serial_factory() -> Callable[..., object]:
+def _load_serial_factory() -> Callable[..., SerialPort]:
     try:
         import serial
     except ImportError as exc:

@@ -1,7 +1,10 @@
 """
 Speech input pipeline: microphone, wake word, VAD, ASR, and runtime.
 """
-_LAZY_EXPORTS = {
+from typing import Any
+
+
+_LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "ASREngine": (".asr", "ASREngine"),
     "AudioCapture": (".audio", "AudioCapture"),
     "DummyWakeWordEngine": (".wake_word", "DummyWakeWordEngine"),
@@ -22,7 +25,7 @@ _LAZY_EXPORTS = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name not in _LAZY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module_name, attr_name = _LAZY_EXPORTS[name]

@@ -5,13 +5,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from ...application import CommandRuntimeError
+from ...application import CameraSession, CommandRuntimeError
+from ...devices import CameraSource
 from ...llm import (
     LLMCapability,
     LLMContentPart,
     LLMMessage,
     LLMStreamEvent,
 )
+from ...llm.base import BaseLLMClient
 from ...voice_interaction import (
     CamerasModuleProvider,
     VoiceInteractionController,
@@ -23,7 +25,7 @@ from .base import WebSocketHandlerHost
 logger = logging.getLogger(__name__)
 
 
-def _extract_user_text(data: dict) -> Optional[str]:
+def _extract_user_text(data: dict[str, Any]) -> Optional[str]:
     def text_from_content(content: object) -> Optional[str]:
         if isinstance(content, str):
             return content.strip() or None
@@ -92,7 +94,7 @@ class InteractionWebSocketHandler:
     def __init__(self, server: WebSocketHandlerHost) -> None:
         self._server = server
 
-    async def _handle_ai_chat(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_ai_chat(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         远程文本意图入口。
         请求: {"action": "ai_chat", "text": "帮我抓一个瓶子"}
@@ -131,7 +133,7 @@ class InteractionWebSocketHandler:
                 )
             )
 
-    async def _handle_ai_confirm(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_ai_confirm(self, websocket: Any, data: WebSocketRequest) -> None:
         """Confirm the exact preview ID/version and submit it once."""
         preview_id = str(data.get("preview_id") or "").strip()
         version = data.get("version")
@@ -182,7 +184,7 @@ class InteractionWebSocketHandler:
         if not accepted:
             self._server._ai_execution_pending = False
 
-    async def _handle_ai_cancel(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_ai_cancel(self, websocket: Any, data: WebSocketRequest) -> None:
         """取消 AI 规划"""
         if self._server._interaction_controller is not None:
             self._server._interaction_controller.cancel_active_turn()
@@ -226,7 +228,7 @@ class InteractionWebSocketHandler:
             )
         )
 
-    async def _handle_ai_status(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_ai_status(self, websocket: Any, data: WebSocketRequest) -> None:
         """查询 AI/LLM 状态"""
         registry = self._server._services.llm
         planner_client = self._get_planner_client()
@@ -300,7 +302,7 @@ class InteractionWebSocketHandler:
             )
         )
 
-    async def _handle_list_skills(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_list_skills(self, websocket: Any, data: WebSocketRequest) -> None:
         """获取可用技能列表"""
         await websocket.send(
             self._server._json_msg(
@@ -311,7 +313,11 @@ class InteractionWebSocketHandler:
             )
         )
 
-    async def _handle_minicpm_status(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_minicpm_status(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """
         查询 MiniCPM 网关配置与聊天状态
         请求: {"action": "minicpm_status"}
@@ -344,7 +350,7 @@ class InteractionWebSocketHandler:
             )
         )
 
-    async def _handle_chat_connect(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_chat_connect(self, websocket: Any, data: WebSocketRequest) -> None:
         """标记聊天会话激活（不预先连接网关）。
         请求: {"action": "chat_connect"}
         成功: {"event": "chat_connected"}
@@ -397,14 +403,18 @@ class InteractionWebSocketHandler:
         )
         logger.info("LLM 聊天会话已就绪: %s", websocket.remote_address)
 
-    async def _handle_chat_disconnect(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_chat_disconnect(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """断开 LLM 聊天会话。
         请求: {"action": "chat_disconnect"}
         """
         self._server._minicpm_sessions.pop(id(websocket), None)
         await websocket.send(self._server._json_msg({"event": "chat_disconnected"}))
 
-    async def _handle_chat_send(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_chat_send(self, websocket: Any, data: WebSocketRequest) -> None:
         """发送聊天消息。
         请求: {"action": "chat", "messages": [...], "streaming": true, ...}
         服务端持续推送规范化的 chat_data 事件。上游模型连接由 LLM provider 维护。
@@ -507,7 +517,6 @@ class InteractionWebSocketHandler:
                 registry.describe_providers(),
             )
 
-            voice_config = settings.voice.as_runtime_mapping()
             self._server._interaction_controller = VoiceInteractionController(
                 llm_registry=registry,
                 command_runtime=services.commands,
@@ -516,14 +525,15 @@ class InteractionWebSocketHandler:
                     session_factory=self._camera_capture_session,
                     camera_name=settings.vision.vision_camera_name or None,
                 ),
-                timeout_s=voice_config["session_timeout_s"],
+                timeout_s=settings.voice.voice_session_timeout_s,
                 turn_timeout_s=settings.runtime.interaction_turn_timeout_s,
-                history_turns=voice_config["session_history_turns"],
-                tts_enabled=voice_config["tts_enabled"],
+                history_turns=settings.voice.voice_session_history_turns,
+                tts_enabled=settings.voice.voice_tts_enabled,
                 wake_feedback=WakeFeedback(
-                    enabled=bool(voice_config.get("wake_feedback_enabled", True)),
-                    text=str(
-                        voice_config.get("wake_feedback_text") or "明德博士在，请说。"
+                    enabled=settings.voice.voice_wake_feedback_enabled,
+                    text=(
+                        settings.voice.voice_wake_feedback_text
+                        or "明德博士在，请说。"
                     ),
                 ),
             )
@@ -531,13 +541,13 @@ class InteractionWebSocketHandler:
         except Exception as e:
             logger.warning("AI 组件初始化失败: %s", e)
 
-    def _get_chat_client(self, provider: Optional[str] = None):
+    def _get_chat_client(self, provider: Optional[str] = None) -> BaseLLMClient:
         return self._server._services.llm.get_chat_client(provider)
 
-    def _camera_capture_session(self):
+    def _camera_capture_session(self) -> CameraSession[CameraSource]:
         return self._server._services.camera_access.open("websocket-voice-capture")
 
-    def _get_planner_client(self, provider: Optional[str] = None):
+    def _get_planner_client(self, provider: Optional[str] = None) -> BaseLLMClient:
         return self._server._services.llm.get_planner_client(provider)
 
     async def _run_interaction_text(
@@ -813,7 +823,7 @@ class InteractionWebSocketHandler:
         return messages
 
     @staticmethod
-    def _parse_llm_content(content) -> str | List[LLMContentPart]:
+    def _parse_llm_content(content: object) -> str | List[LLMContentPart]:
         if isinstance(content, str):
             return content
         if not isinstance(content, list):
@@ -845,7 +855,7 @@ class InteractionWebSocketHandler:
         return parts
 
     @staticmethod
-    def _extract_llm_options(payload: dict) -> dict:
+    def _extract_llm_options(payload: dict[str, Any]) -> dict[str, Any]:
         options = {
             "streaming": payload.get("streaming", True),
         }
@@ -866,7 +876,7 @@ class InteractionWebSocketHandler:
         return options
 
     @staticmethod
-    def _llm_stream_event_to_chat_data(event: LLMStreamEvent) -> dict:
+    def _llm_stream_event_to_chat_data(event: LLMStreamEvent) -> dict[str, Any]:
         base_event = {
             "event": "chat_data",
             "packet": event.raw,
@@ -912,7 +922,7 @@ class InteractionWebSocketHandler:
             "metrics": event.metrics,
         }
 
-    async def _close_minicpm_session(self, websocket) -> None:
+    async def _close_minicpm_session(self, websocket: Any) -> None:
         """清理指定客户端的 LLM 聊天会话标记。"""
         self._server._minicpm_sessions.pop(id(websocket), None)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Iterable
 from threading import RLock
+from types import TracebackType
 
 from .protocol import (
     build_write_bytes_frame,
@@ -81,5 +82,10 @@ class DgusClient:
     def __enter__(self) -> "DgusClient":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()

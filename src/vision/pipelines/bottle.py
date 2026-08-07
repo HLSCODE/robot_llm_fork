@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import time
-from typing import Callable
+from collections.abc import Callable, Sequence
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
+from ultralytics import SAM, YOLO
 
 from ...configuration.settings import VisionSettings
 from ...devices import (
@@ -18,23 +20,27 @@ from ...devices import (
 from .grasp import (
     load_sam_model,
     load_yolo_model,
+    normalize_rotation_matrix,
     process_mask_with_gmm,
 )
 from .vertical import vertical_catch_main as vertical_catch
 
 
 def detect_target(
-    image,
-    yolo_model,
-    sam_model,
-    process_mask_fn: Callable,
+    image: NDArray[np.generic],
+    yolo_model: YOLO,
+    sam_model: SAM,
+    process_mask_fn: Callable[
+        [NDArray[np.generic], NDArray[np.uint8]],
+        NDArray[np.uint8],
+    ],
     *,
     width: int,
     height: int,
     confidence_threshold: float,
-) -> tuple[np.ndarray, list[int] | None, bool]:
+) -> tuple[NDArray[np.uint8], list[int] | None, bool]:
     """Run YOLO, SAM and mask cleanup for the bottle workflow."""
-    mask = np.zeros((height, width), dtype=np.uint8)
+    mask: NDArray[np.uint8] = np.zeros((height, width), dtype=np.uint8)
     detected = False
     bounding_box: list[int] | None = None
 
@@ -76,12 +82,14 @@ def capture_and_move(
     height: int = 480,
 ) -> bool:
     """Capture a bottle, grasp it and place it through project capabilities."""
-    calibration = settings.calibration_config()
+    gripper_offset = list(settings.vision_gripper_offset)
+    rotation_matrix = normalize_rotation_matrix(settings.vision_rotation_matrix)
+    translation_vector = list(settings.vision_translation_vector)
     motion_options = MotionOptions(
         velocity_percent=settings.vision_default_velocity,
     )
 
-    def move(pose: list[float], mode: MotionMode) -> None:
+    def move(pose: Sequence[float], mode: MotionMode) -> None:
         robot_system.move_to_pose(
             arm,
             CartesianPose.from_iterable(pose),
@@ -125,9 +133,9 @@ def capture_and_move(
             color_intrinsics,
             current_pose,
             settings.vision_default_gripper_length,
-            calibration["gripper_offset"],
-            calibration["rotation_matrix"],
-            calibration["translation_vector"],
+            gripper_offset,
+            rotation_matrix,
+            translation_vector,
         )
         camera_above_pose = above_object_pose.copy()
         camera_above_pose[0] += settings.vision_prep_offset_x
@@ -157,11 +165,11 @@ def capture_and_move(
             color_intrinsics,
             current_pose,
             settings.vision_default_gripper_length,
-            calibration["gripper_offset"],
-            calibration["rotation_matrix"],
-            calibration["translation_vector"],
+            gripper_offset,
+            rotation_matrix,
+            translation_vector,
         )
-        final_pose[3:6] = calibration["gripper_offset"]
+        final_pose[3:6] = gripper_offset
 
         above_target = final_pose.copy()
         above_target[2] = current_pose[2]
@@ -194,7 +202,7 @@ def _place_at_fixed_position(
     settings: VisionSettings,
     motion_options: MotionOptions,
 ) -> None:
-    def move(pose: list[float], mode: MotionMode) -> None:
+    def move(pose: Sequence[float], mode: MotionMode) -> None:
         robot_system.move_to_pose(
             arm,
             CartesianPose.from_iterable(pose),
@@ -219,11 +227,25 @@ def _wait_for_frames(
     camera: DepthCameraSource,
     camera_name: str | None,
     timeout_seconds: float = 10.0,
-):
+) -> tuple[
+    NDArray[np.generic],
+    NDArray[np.generic],
+    dict[str, float],
+]:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        frames = camera.get_latest_raw_frames(camera_name)
-        if frames is not None and all(value is not None for value in frames):
-            return frames
+        frame = camera.get_latest_depth_frame(camera_name)
+        if frame is not None:
+            intrinsics = frame.intrinsics
+            return (
+                frame.color_bgr,
+                frame.depth_uint16,
+                {
+                    "fx": float(intrinsics[0, 0]),
+                    "fy": float(intrinsics[1, 1]),
+                    "ppx": float(intrinsics[0, 2]),
+                    "ppy": float(intrinsics[1, 2]),
+                },
+            )
         time.sleep(0.2)
     raise TimeoutError("等待深度相机帧超时")

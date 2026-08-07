@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from functools import partial
 import logging
+from typing import Any
 
 from ...application import DataCollectionError, DataCollectionState
 from ...application import websocket_teleoperation_owner
@@ -19,7 +20,7 @@ class TeleoperationWebSocketHandler:
     def __init__(self, server: WebSocketHandlerHost) -> None:
         self._server = server
 
-    async def _handle_teleop_init(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_teleop_init(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         遥操作初始化：移动机械臂到指定关节姿态
         支持单臂和双臂两种方式：
@@ -175,7 +176,7 @@ class TeleoperationWebSocketHandler:
                     )
                 )
 
-    async def _handle_teleop_start(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_teleop_start(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         启动遥操作模式
         支持单臂和双臂两种方式：
@@ -254,7 +255,7 @@ class TeleoperationWebSocketHandler:
             )
         )
 
-    async def _handle_teleop_joint(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_teleop_joint(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         处理遥操作关节指令（50Hz）
         支持单臂和双臂两种方式：
@@ -448,7 +449,7 @@ class TeleoperationWebSocketHandler:
                             name=f"WebSocketGrip-{arm_name}",
                         )
 
-    async def _handle_teleop_stop(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_teleop_stop(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         停止遥操作模式
         支持单臂和双臂两种方式：
@@ -525,7 +526,7 @@ class TeleoperationWebSocketHandler:
         )
 
     async def _handle_demo_session_start(
-        self, websocket, data: WebSocketRequest
+        self, websocket: Any, data: WebSocketRequest
     ) -> None:
         """Start a data-collection session through the application service."""
         task = data.get("task")
@@ -566,7 +567,7 @@ class TeleoperationWebSocketHandler:
         )
 
     async def _handle_demo_record_start(
-        self, websocket, data: WebSocketRequest
+        self, websocket: Any, data: WebSocketRequest
     ) -> None:
         """Start one episode and join the shared teleoperation session."""
         try:
@@ -591,7 +592,11 @@ class TeleoperationWebSocketHandler:
             )
         )
 
-    async def _handle_demo_record_stop(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_demo_record_stop(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """Stop and persist one episode without ending shared control."""
         try:
             result = await asyncio.to_thread(
@@ -617,7 +622,11 @@ class TeleoperationWebSocketHandler:
             )
         )
 
-    async def _handle_demo_session_end(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_demo_session_end(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """End the session and release recorder, camera and control resources."""
         try:
             result = await asyncio.to_thread(
@@ -646,7 +655,7 @@ class TeleoperationWebSocketHandler:
 
     async def _send_data_collection_error(
         self,
-        websocket,
+        websocket: Any,
         error: Exception,
     ) -> None:
         payload: dict[str, object] = {
@@ -682,7 +691,7 @@ class TeleoperationWebSocketHandler:
         except Exception as e:
             logger.error("遥操作夹爪执行异常: arm=%s, error=%s", arm, str(e))
 
-    def _owner_id(self, websocket) -> str:
+    def _owner_id(self, websocket: Any) -> str:
         return websocket_teleoperation_owner(
             self._server._client_id(websocket)
         )

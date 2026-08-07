@@ -6,40 +6,46 @@
 
 """
 
+from collections.abc import Sequence
+
 import numpy as np
+from numpy.typing import NDArray
 
 
-def euler_angles_to_rotation_matrix(rx, ry, rz):
+def euler_angles_to_rotation_matrix(
+    rx: float,
+    ry: float,
+    rz: float,
+) -> NDArray[np.float64]:
     # 计算旋转矩阵
-    Rx = np.array(
+    rotation_x = np.array(
         [[1, 0, 0], [0, np.cos(rx), -np.sin(rx)], [0, np.sin(rx), np.cos(rx)]]
     )
 
-    Ry = np.array(
+    rotation_y = np.array(
         [[np.cos(ry), 0, np.sin(ry)], [0, 1, 0], [-np.sin(ry), 0, np.cos(ry)]]
     )
 
-    Rz = np.array(
+    rotation_z = np.array(
         [[np.cos(rz), -np.sin(rz), 0], [np.sin(rz), np.cos(rz), 0], [0, 0, 1]]
     )
 
-    R = Rz @ Ry @ Rx  # 先z轴再y轴最后x轴
-    return R
+    return rotation_z @ rotation_y @ rotation_x  # 先 z 轴，再 y 轴，最后 x 轴
 
 
-def pose_to_homogeneous_matrix(pose):
+def pose_to_homogeneous_matrix(pose: Sequence[float]) -> NDArray[np.float64]:
     x, y, z, rx, ry, rz = pose
-    R = euler_angles_to_rotation_matrix(rx, ry, rz)
-    t = np.array([x, y, z]).reshape(3, 1)
+    rotation = euler_angles_to_rotation_matrix(rx, ry, rz)
+    translation = np.array([x, y, z], dtype=np.float64).reshape(3, 1)
 
-    H = np.eye(4)
-    H[:3, :3] = R
-    H[:3, 3] = t[:, 0]
+    homogeneous: NDArray[np.float64] = np.eye(4, dtype=np.float64)
+    homogeneous[:3, :3] = rotation
+    homogeneous[:3, 3] = translation[:, 0]
 
-    return H
+    return homogeneous
 
 
-def change_pose(pose, num):
+def change_pose(pose: Sequence[float], num: float) -> list[float]:
     """
     根据物体和基座的其次变换矩阵 求得 物体z轴 0 0 num 所在位置对应 基座标系的位姿
     y轴补偿6cm
@@ -60,4 +66,4 @@ def change_pose(pose, num):
 
     obj_base_init = matrix.dot(obj_init)
 
-    return [i for i in obj_base_init[:3]] + pose[3:]
+    return [float(value) for value in obj_base_init[:3]] + list(pose[3:])

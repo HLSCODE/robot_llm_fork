@@ -204,10 +204,10 @@ class MiniCPMRealtimeClient(BaseLLMClient):
         ctx.verify_mode = ssl.CERT_NONE
         return ctx
 
-    async def _send_json(self, ws, payload: Dict[str, Any]) -> None:
+    async def _send_json(self, ws: Any, payload: Dict[str, Any]) -> None:
         await ws.send(json.dumps(payload, ensure_ascii=False))
 
-    async def _recv_json(self, ws) -> Dict[str, Any]:
+    async def _recv_json(self, ws: Any) -> Dict[str, Any]:
         raw = await asyncio.wait_for(ws.recv(), timeout=self._timeout_s)
         text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
         try:
@@ -218,7 +218,7 @@ class MiniCPMRealtimeClient(BaseLLMClient):
             raise LLMProviderError("MiniCPM 返回非对象 JSON")
         return packet
 
-    async def _wait_for_type(self, ws, expected_type: str) -> Dict[str, Any]:
+    async def _wait_for_type(self, ws: Any, expected_type: str) -> Dict[str, Any]:
         while True:
             packet = await self._recv_json(ws)
             packet_type = packet.get("type")
@@ -239,7 +239,10 @@ class MiniCPMRealtimeClient(BaseLLMClient):
             or 512
         )
         streaming = bool(options.get("streaming", True))
-        tts_options = options.get("tts") if isinstance(options.get("tts"), dict) else {}
+        raw_tts_options = options.get("tts")
+        tts_options: Dict[str, Any] = (
+            raw_tts_options if isinstance(raw_tts_options, dict) else {}
+        )
 
         tts_enabled = bool(options.get("tts_enabled", tts_options.get("enabled", False)))
         input_payload: Dict[str, Any] = {
@@ -341,7 +344,7 @@ class MiniCPMRealtimeClient(BaseLLMClient):
         if isinstance(content, str):
             return content
 
-        parts = []
+        parts: list[dict[str, Any]] = []
         for part in content:
             if part.type == "text":
                 parts.append({"type": "text", "text": part.text or ""})
@@ -357,7 +360,7 @@ class MiniCPMRealtimeClient(BaseLLMClient):
                 parts.append(audio_part)
         return parts
 
-    async def _read_response_events(self, ws) -> AsyncIterator[LLMStreamEvent]:
+    async def _read_response_events(self, ws: Any) -> AsyncIterator[LLMStreamEvent]:
         while True:
             packet = await self._recv_json(ws)
             packet_type = packet.get("type")
@@ -399,7 +402,7 @@ class MiniCPMRealtimeClient(BaseLLMClient):
             else:
                 logger.debug("忽略 MiniCPM 事件: %s", packet_type)
 
-    async def _close_session(self, ws) -> None:
+    async def _close_session(self, ws: Any) -> None:
         try:
             await self._send_json(ws, {"type": "session.close", "reason": "turn_done"})
         except Exception:

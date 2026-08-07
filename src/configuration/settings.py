@@ -5,10 +5,44 @@ from __future__ import annotations
 from dataclasses import MISSING, dataclass, fields
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, TypeVar, cast
+from typing import Any, TypedDict, TypeVar, cast
 
 
 _SettingsT = TypeVar("_SettingsT")
+
+
+class TappingConfig(TypedDict):
+    port: str
+    baudrate: int
+    timeout: float
+    gripper_address: int
+    lift_address: int
+    rotation_address: int
+    lift_safe_position: int
+    lift_dispense_position: int
+    rotation_home_position: int
+    powder_large_step: int
+    powder_medium_step: int
+    powder_small_step: int
+    powder_micro_step: int
+    powder_large_step_threshold_mg: float
+    powder_medium_step_threshold_mg: float
+    powder_small_step_threshold_mg: float
+
+
+class PWMServoConfig(TypedDict):
+    servo_id: int
+    initial_pwm: int
+    pwm_min: int
+    pwm_max: int
+    default_time: int
+
+
+class PWMNeckConfig(TypedDict):
+    port: str
+    baudrate: int
+    horizontal: PWMServoConfig
+    vertical: PWMServoConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,7 +314,7 @@ class DeviceSettings:
             "timeout": self.relay_timeout,
         }
 
-    def tapping_config(self) -> dict[str, object]:
+    def tapping_config(self) -> TappingConfig:
         return {
             "port": self.tapping_serial_port,
             "baudrate": self.tapping_baudrate,
@@ -306,7 +340,7 @@ class DeviceSettings:
             ),
         }
 
-    def pwm_neck_config(self) -> dict[str, object]:
+    def pwm_neck_config(self) -> PWMNeckConfig:
         return {
             "port": self.pwm_neck_serial_port,
             "baudrate": self.pwm_neck_baudrate,

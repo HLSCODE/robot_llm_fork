@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -146,7 +146,7 @@ class StartupProgressCard(QWidget):
             """
         )
 
-    def showEvent(self, event) -> None:
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         screen = self.screen() or QApplication.primaryScreen()
         if screen is None:

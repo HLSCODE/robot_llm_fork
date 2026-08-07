@@ -14,6 +14,7 @@ from ...application import (
 )
 
 if TYPE_CHECKING:
+    from ...llm.base import BaseLLMClient
     from ..bridges.execution import ExecutionBridge
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class AIController(QObject):
         self._commands = services.commands
         self._execution_bridge = execution_bridge
         self._llm_registry = services.llm
-        self._status_client = None
+        self._status_client: BaseLLMClient | None = None
         execution_bridge.execution_completed.connect(
             self._on_execution_completed
         )
@@ -121,7 +122,7 @@ class AIController(QObject):
         }
         return bool(keys.get(provider, ""))
 
-    def _get_status_client(self):
+    def _get_status_client(self) -> BaseLLMClient:
         if self._status_client is None:
             self._status_client = self._llm_registry.get_provider()
         return self._status_client

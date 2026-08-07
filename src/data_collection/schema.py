@@ -71,7 +71,8 @@ class FrameRecord(Protocol):
     camera_distortion_model: str
     camera_hardware_timestamp_domain: str
     depth_aligned_to_color: bool
-    arms: Mapping[str, ArmFrameRecord]
+    @property
+    def arms(self) -> Mapping[str, ArmFrameRecord]: ...
 
 
 @dataclass(frozen=True, slots=True)

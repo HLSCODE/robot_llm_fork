@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..base import ClearBeforeSwitch
 from .controls import AnimationIconConfig
 from .services import Expression
 from .transport import SerialConfig
@@ -63,11 +64,16 @@ def _parse_bool(value: Any, name: str) -> bool:
     raise ValueError(f"{name} must be a boolean")
 
 
-def _parse_clear_before_switch(value: Any) -> str:
-    allowed = {"stop", "hide", "none"}
-    if value not in allowed:
-        raise ValueError(f"animation_icon.clear_before_switch must be one of {sorted(allowed)}")
-    return str(value)
+def _parse_clear_before_switch(value: Any) -> ClearBeforeSwitch:
+    if value == "stop":
+        return "stop"
+    if value == "hide":
+        return "hide"
+    if value == "none":
+        return "none"
+    raise ValueError(
+        "animation_icon.clear_before_switch must be one of ['hide', 'none', 'stop']"
+    )
 
 
 def _load_serial_config(data: dict[str, Any]) -> SerialConfig:

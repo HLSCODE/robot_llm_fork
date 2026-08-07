@@ -48,7 +48,7 @@ class ElectricGripper:
     def read_position(self) -> int:
         return self.read_register(GripperRegister.CURRENT_POS)
 
-    def read_motion_status(self):
+    def read_motion_status(self) -> MotionStatus:
         raw = self.read_register(GripperRegister.MOTION_STATUS)
         try:
             return MotionStatus(raw)

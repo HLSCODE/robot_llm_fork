@@ -4,11 +4,15 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from ...llm import LLMStreamEvent, REPEAT_PROFILE
 from .types import VoiceEvent
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ...llm.registry import LLMRegistry
 
 
 @dataclass(frozen=True)
@@ -18,7 +22,7 @@ class WakeFeedback:
     enabled: bool = True
     text: str = "明德博士在，请说。"
 
-    async def stream(self, llm_registry) -> AsyncIterator[VoiceEvent]:
+    async def stream(self, llm_registry: "LLMRegistry") -> AsyncIterator[VoiceEvent]:
         """Return acknowledgement text and audio stream events when enabled."""
         if not self.enabled or not self.text.strip():
             return

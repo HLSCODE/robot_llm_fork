@@ -1,11 +1,124 @@
-import time
 import os
 import threading
+import time
+from collections.abc import Mapping, Sequence
+from types import TracebackType
+from typing import Any, Protocol, TypeAlias
+
 from Robotic_Arm.rm_robot_interface import RoboticArm, rm_send_project_t, rm_thread_mode_e
 
 
+RobotState: TypeAlias = dict[str, Any]
+ArmStateResult: TypeAlias = tuple[int, RobotState]
+
+
+class _SdkLock(Protocol):
+    def __enter__(self) -> object: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None: ...
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool: ...
+
+    def release(self) -> None: ...
+
+
+class _RobotSdk(Protocol):
+    """RealMan SDK surface used by this legacy driver."""
+
+    def rm_create_robot_arm(self, ip: str, port: int) -> object: ...
+
+    def rm_delete_robot_arm(self) -> object: ...
+
+    def rm_get_current_arm_state(self) -> ArmStateResult: ...
+
+    def rm_set_arm_stop(self) -> int: ...
+
+    def rm_set_arm_slow_stop(self) -> int: ...
+
+    def rm_movel(
+        self,
+        pose: Sequence[float],
+        *,
+        v: float,
+        r: float,
+        connect: int,
+        block: int,
+    ) -> int: ...
+
+    def rm_movej_p(
+        self,
+        pose: Sequence[float],
+        *,
+        v: float,
+        r: float,
+        connect: int,
+        block: int,
+    ) -> int: ...
+
+    def rm_set_gripper_release(
+        self,
+        *,
+        speed: int,
+        block: bool,
+        timeout: float,
+    ) -> int: ...
+
+    def rm_set_gripper_pick_on(
+        self,
+        *,
+        speed: int,
+        block: bool,
+        timeout: float,
+        force: int,
+    ) -> int: ...
+
+    def rm_set_gripper_position(
+        self,
+        position: int,
+        *,
+        block: bool,
+        timeout: float,
+    ) -> int: ...
+
+    def rm_movej_canfd(
+        self,
+        joints: Sequence[float],
+        follow: bool,
+        *,
+        trajectory_mode: int,
+    ) -> int: ...
+
+    def rm_movej(
+        self,
+        joints: Sequence[float],
+        velocity: float,
+        radius: float,
+        connected: int,
+        blocking: int,
+    ) -> int: ...
+
+    def rm_start_drag_teach(self, record_trajectory: int) -> int: ...
+
+    def rm_stop_drag_teach(self) -> int: ...
+
+    def rm_save_trajectory(self, path: str | os.PathLike[str]) -> Any: ...
+
+    def rm_send_project(self, project: Any) -> tuple[int, int]: ...
+
+    def rm_get_program_run_state(self) -> tuple[int, RobotState]: ...
+
+
 class SimpleRobotArm:
-    def __init__(self, robot_config, robot_name="Robot"):
+    def __init__(
+        self,
+        robot_config: Mapping[str, Any],
+        robot_name: str = "Robot",
+    ) -> None:
         """
         简化的机械臂控制器
         :param robot_config: 机器人配置字典，包含ip、port等
@@ -13,13 +126,13 @@ class SimpleRobotArm:
         """
         self.robot_config = robot_config
         self.robot_name = robot_name
-        self.robot = None
-        self.handle = None
+        self.robot: _RobotSdk | None = None
+        self.handle: object | None = None
         self.is_connected = False
-        self.last_error = None
-        self.sdk_lock = threading.RLock()
+        self.last_error: str | None = None
+        self.sdk_lock: _SdkLock = threading.RLock()
 
-    def connect(self):
+    def connect(self) -> None:
         """连接到机械臂"""
         try:
             if self.robot is None:
@@ -49,7 +162,7 @@ class SimpleRobotArm:
             self.disconnect()
             raise
 
-    def disconnect(self):
+    def disconnect(self) -> None:
         """断开机械臂连接"""
         with self.sdk_lock:
             if self.robot is not None:
@@ -65,12 +178,16 @@ class SimpleRobotArm:
                     self.is_connected = False
                     print(f"{self.robot_name}连接已断开")
 
-    def owns_robot(self, robot) -> bool:
+    def owns_robot(self, robot: object) -> bool:
         return self.robot is robot
 
+
 class RobotController:
-    
-    def __init__(self, robot1_config, robot2_config):
+    def __init__(
+        self,
+        robot1_config: Mapping[str, Any],
+        robot2_config: Mapping[str, Any],
+    ) -> None:
         # 初始化并连接双机械臂
         self.robot1_ctrl = SimpleRobotArm(robot1_config, "Robot1")
         self.robot2_ctrl = SimpleRobotArm(robot2_config, "Robot2")
@@ -83,63 +200,71 @@ class RobotController:
             self.robot2_ctrl.disconnect()
             raise RuntimeError("机械臂连接失败，请检查网络或供电") from exc
 
-    def _arm_controller(self, arm):
+    def _arm_controller(self, arm: str) -> tuple[SimpleRobotArm, _RobotSdk]:
         if arm == "left":
             controller = self.robot1_ctrl
         elif arm == "right":
             controller = self.robot2_ctrl
         else:
             raise ValueError(f"unsupported arm: {arm}")
-        if controller.robot is None or not controller.is_connected:
+        robot = controller.robot
+        if robot is None or not controller.is_connected:
             raise RuntimeError(f"{arm} arm is not connected")
-        return controller
+        return controller, robot
 
-    def stop_arm(self, arm, *, emergency):
-        controller = self._arm_controller(arm)
-        method = (
-            controller.robot.rm_set_arm_stop
-            if emergency
-            else controller.robot.rm_set_arm_slow_stop
-        )
+    def stop_arm(self, arm: str, *, emergency: bool) -> int:
+        _, robot = self._arm_controller(arm)
+        method = robot.rm_set_arm_stop if emergency else robot.rm_set_arm_slow_stop
         return int(method())
 
     def move_to_pose(
         self,
-        arm,
-        pose,
+        arm: str,
+        pose: Sequence[float],
         *,
-        linear,
-        velocity,
-        blend_radius,
-        connected,
-        blocking,
-    ):
-        controller = self._arm_controller(arm)
-        method = controller.robot.rm_movel if linear else controller.robot.rm_movej_p
+        linear: bool,
+        velocity: float,
+        blend_radius: float,
+        connected: bool,
+        blocking: bool,
+    ) -> int:
+        controller, robot = self._arm_controller(arm)
+        method = robot.rm_movel if linear else robot.rm_movej_p
         with controller.sdk_lock:
-            return int(method(
-                pose,
-                v=velocity,
-                r=blend_radius,
-                connect=int(connected),
-                block=int(blocking),
-            ))
+            return int(
+                method(
+                    pose,
+                    v=velocity,
+                    r=blend_radius,
+                    connect=int(connected),
+                    block=int(blocking),
+                )
+            )
 
-    def read_state(self, arm, *, blocking=True):
-        controller = self._arm_controller(arm)
+    def read_state(
+        self,
+        arm: str,
+        *,
+        blocking: bool = True,
+    ) -> ArmStateResult | None:
+        controller, robot = self._arm_controller(arm)
         if not controller.sdk_lock.acquire(blocking=blocking):
             return None
         try:
-            return controller.robot.rm_get_current_arm_state()
+            return robot.rm_get_current_arm_state()
         finally:
             controller.sdk_lock.release()
 
-    def read_telemetry(self, arm, *, blocking=True):
-        controller = self._arm_controller(arm)
+    def read_telemetry(
+        self,
+        arm: str,
+        *,
+        blocking: bool = True,
+    ) -> dict[str, object] | None:
+        controller, robot = self._arm_controller(arm)
         if not controller.sdk_lock.acquire(blocking=blocking):
             return None
         try:
-            robot = controller.robot
             return {
                 "state": robot.rm_get_current_arm_state(),
                 "gripper": self._optional_sdk_call(robot, "rm_get_gripper_state"),
@@ -153,98 +278,154 @@ class RobotController:
             controller.sdk_lock.release()
 
     @staticmethod
-    def _optional_sdk_call(robot, method_name):
+    def _optional_sdk_call(robot: _RobotSdk, method_name: str) -> object | None:
         method = getattr(robot, method_name, None)
         return method() if callable(method) else None
 
-    def release_gripper(self, arm, *, speed, timeout_s):
-        controller = self._arm_controller(arm)
+    def release_gripper(
+        self,
+        arm: str,
+        *,
+        speed: int,
+        timeout_s: float,
+    ) -> int:
+        controller, robot = self._arm_controller(arm)
         with controller.sdk_lock:
-            return int(controller.robot.rm_set_gripper_release(
-                speed=speed,
-                block=True,
-                timeout=timeout_s,
-            ))
+            return int(
+                robot.rm_set_gripper_release(
+                    speed=speed,
+                    block=True,
+                    timeout=timeout_s,
+                )
+            )
 
-    def grip(self, arm, *, speed, force, timeout_s):
-        controller = self._arm_controller(arm)
+    def grip(
+        self,
+        arm: str,
+        *,
+        speed: int,
+        force: int,
+        timeout_s: float,
+    ) -> int:
+        controller, robot = self._arm_controller(arm)
         with controller.sdk_lock:
-            return int(controller.robot.rm_set_gripper_pick_on(
-                speed=speed,
-                block=True,
-                timeout=timeout_s,
-                force=force,
-            ))
+            return int(
+                robot.rm_set_gripper_pick_on(
+                    speed=speed,
+                    block=True,
+                    timeout=timeout_s,
+                    force=force,
+                )
+            )
 
-    def set_gripper_position(self, arm, position, *, timeout_s):
-        controller = self._arm_controller(arm)
+    def set_gripper_position(
+        self,
+        arm: str,
+        position: int,
+        *,
+        timeout_s: float,
+    ) -> int:
+        controller, robot = self._arm_controller(arm)
         with controller.sdk_lock:
-            return int(controller.robot.rm_set_gripper_position(
-                position,
-                block=True,
-                timeout=timeout_s,
-            ))
+            return int(
+                robot.rm_set_gripper_position(
+                    position,
+                    block=True,
+                    timeout=timeout_s,
+                )
+            )
 
-    def follow_joints(self, arm, joints, *, follow, trajectory_mode):
-        controller = self._arm_controller(arm)
+    def follow_joints(
+        self,
+        arm: str,
+        joints: Sequence[float],
+        *,
+        follow: bool,
+        trajectory_mode: int,
+    ) -> int:
+        controller, robot = self._arm_controller(arm)
         with controller.sdk_lock:
-            return int(controller.robot.rm_movej_canfd(
-                joints,
-                follow,
-                trajectory_mode=trajectory_mode,
-            ))
+            return int(
+                robot.rm_movej_canfd(
+                    joints,
+                    follow,
+                    trajectory_mode=trajectory_mode,
+                )
+            )
 
     def initialize_joints(
         self,
-        arm,
-        joints,
+        arm: str,
+        joints: Sequence[float],
         *,
-        velocity,
-        radius,
-        connected,
-        blocking,
-    ):
-        controller = self._arm_controller(arm)
+        velocity: float,
+        radius: float,
+        connected: bool,
+        blocking: bool,
+    ) -> int:
+        controller, robot = self._arm_controller(arm)
         with controller.sdk_lock:
-            return int(controller.robot.rm_movej(
-                joints,
-                velocity,
-                radius,
-                int(connected),
-                int(blocking),
-            ))
+            return int(
+                robot.rm_movej(
+                    joints,
+                    velocity,
+                    radius,
+                    int(connected),
+                    int(blocking),
+                )
+            )
 
-    def set_drag_teaching(self, arm, *, enabled):
-        controller = self._arm_controller(arm)
+    def set_drag_teaching(self, arm: str, *, enabled: bool) -> int:
+        controller, robot = self._arm_controller(arm)
         with controller.sdk_lock:
             if enabled:
-                return int(controller.robot.rm_start_drag_teach(1))
-            return int(controller.robot.rm_stop_drag_teach())
+                return int(robot.rm_start_drag_teach(1))
+            return int(robot.rm_stop_drag_teach())
 
-    def save_trajectory(self, arm, path):
-        controller = self._arm_controller(arm)
+    def save_trajectory(
+        self,
+        arm: str,
+        path: str | os.PathLike[str],
+    ) -> Any:
+        controller, robot = self._arm_controller(arm)
         with controller.sdk_lock:
-            return controller.robot.rm_save_trajectory(path)
+            return robot.rm_save_trajectory(path)
 
-    def send_trajectory(self, arm, path):
-        controller = self._arm_controller(arm)
-        return self.demo_send_project(controller.robot, path, project_type=1)
+    def send_trajectory(
+        self,
+        arm: str,
+        path: str | os.PathLike[str],
+    ) -> bool:
+        _, robot = self._arm_controller(arm)
+        return self.demo_send_project(robot, path, project_type=1)
 
-    def is_trajectory_complete(self, arm):
-        controller = self._arm_controller(arm)
-        return self.demo_get_program_run_state(
-            controller.robot,
-            time_sleep=0,
-            max_retries=1,
+    def is_trajectory_complete(self, arm: str) -> bool:
+        _, robot = self._arm_controller(arm)
+        return bool(
+            self.demo_get_program_run_state(
+                robot,
+                time_sleep=0,
+                max_retries=1,
+            )
         )
 
-    def _sdk_lock_for_robot(self, robot):
+    def _sdk_lock_for_robot(self, robot: object) -> _SdkLock:
         for ctrl in (self.robot1_ctrl, self.robot2_ctrl):
             if ctrl.owns_robot(robot):
                 return ctrl.sdk_lock
         return threading.RLock()
 
-    def demo_send_project(self, robot, file_path, plan_speed=20, only_save=0, save_id=0, step_flag=0, auto_start=0, project_type=1):
+    def demo_send_project(
+        self,
+        robot: _RobotSdk,
+        file_path: str | os.PathLike[str],
+        plan_speed: int = 20,
+        only_save: int = 0,
+        save_id: int = 0,
+        step_flag: int = 0,
+        auto_start: int = 0,
+        project_type: int = 1,
+    ) -> bool:
         """向机械臂发送项目"""
         if not file_path:
             print("文件路径为空")
@@ -296,7 +477,15 @@ class RobotController:
                 f"project_type={project_type}",
             )
 
-            send_project = rm_send_project_t(file_path, plan_speed, only_save, save_id, step_flag, auto_start, project_type)
+            send_project = rm_send_project_t(
+                file_path,
+                plan_speed,
+                only_save,
+                save_id,
+                step_flag,
+                auto_start,
+                project_type,
+            )
             result = robot.rm_send_project(send_project)
 
         if result[0] == 0:
@@ -316,7 +505,12 @@ class RobotController:
                 print("拖动示教轨迹应使用 project_type=1；在线编程文件应使用 project_type=0。")
             return False
 
-    def demo_get_program_run_state(self, robot, time_sleep=1, max_retries=10):
+    def demo_get_program_run_state(
+        self,
+        robot: _RobotSdk,
+        time_sleep: float = 1,
+        max_retries: int = 10,
+    ) -> bool | None:
         """获取程序运行状态"""
         retries = 0
         while retries < max_retries:
@@ -339,7 +533,9 @@ class RobotController:
             print("达到最大查询次数,退出")
             return False
 
-    def shutdown(self):
+        return None
+
+    def shutdown(self) -> None:
         """断开与机械臂的连接"""
         if hasattr(self, "robot1_ctrl") and self.robot1_ctrl is not None:
             self.robot1_ctrl.disconnect()

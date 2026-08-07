@@ -6,6 +6,7 @@ import asyncio
 import base64
 import logging
 import threading
+from typing import Any
 
 from ...devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from ...execution import ExecutionState
@@ -19,7 +20,7 @@ class DeviceWebSocketHandler:
     def __init__(self, server: WebSocketHandlerHost) -> None:
         self._server = server
 
-    async def _handle_status(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_status(self, websocket: Any, data: WebSocketRequest) -> None:
         """查询设备和执行状态"""
         execution = self._server._services.execution.snapshot()
         devices = self._server._services.devices.status()
@@ -76,7 +77,7 @@ class DeviceWebSocketHandler:
             )
         )
 
-    async def _handle_init_robots(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_init_robots(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         初始化机械臂
         请求: {"action": "init_robots"}
@@ -104,7 +105,7 @@ class DeviceWebSocketHandler:
                 )
             )
 
-    async def _handle_init_body(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_init_body(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         初始化身体（升降平台）
         请求: {"action": "init_body"}
@@ -145,7 +146,7 @@ class DeviceWebSocketHandler:
                 )
             )
 
-    async def _handle_disconnect(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_disconnect(self, websocket: Any, data: WebSocketRequest) -> None:
         """断开所有硬件连接"""
         results = await asyncio.to_thread(
             self._server._services.devices.shutdown_all,
@@ -160,13 +161,13 @@ class DeviceWebSocketHandler:
             )
         )
 
-    async def _handle_test_camera(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_test_camera(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         通过 DeviceRuntime 测试相机（与视觉抓取使用同一实例）。
         请求: {"action": "test_camera"}
         """
 
-        def _do_test():
+        def _do_test() -> None:
             session = None
             try:
                 import time
@@ -298,7 +299,11 @@ class DeviceWebSocketHandler:
             )
         )
 
-    async def _handle_camera_status(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_camera_status(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """
         查询相机管理器状态
         请求: {"action": "camera_status"}
@@ -330,7 +335,7 @@ class DeviceWebSocketHandler:
         )
 
     async def _handle_subscribe_camera_frames(
-        self, websocket, data: WebSocketRequest
+        self, websocket: Any, data: WebSocketRequest
     ) -> None:
         """订阅相机帧推送。
         请求: {"action": "subscribe_camera_frames"}
@@ -382,7 +387,7 @@ class DeviceWebSocketHandler:
         logger.info("客户端订阅相机帧: %s", websocket.remote_address)
 
     async def _handle_unsubscribe_camera_frames(
-        self, websocket, data: WebSocketRequest
+        self, websocket: Any, data: WebSocketRequest
     ) -> None:
         """取消相机帧订阅。
         请求: {"action": "unsubscribe_camera_frames"}

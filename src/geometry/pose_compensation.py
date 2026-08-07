@@ -4,7 +4,7 @@ import ast
 import json
 import math
 import re
-from typing import Iterable
+from collections.abc import Iterable, Mapping
 
 from ..domain.arm_names import normalize_arm_name
 
@@ -39,19 +39,21 @@ BODY_FROM_ARM_ROT = [
 ]
 
 
-def parse_pose(value) -> list[float]:
+def parse_pose(value: object) -> list[float]:
     """Parse a robot pose [x, y, z, rx, ry, rz] from list or text."""
     if isinstance(value, (list, tuple)):
         pose = [float(v) for v in value]
     elif isinstance(value, str):
         text = value.strip()
         try:
-            parsed = json.loads(text)
+            parsed: object = json.loads(text)
         except json.JSONDecodeError:
             match = re.search(r"\[[^\]]+\]", text)
             if not match:
                 raise ValueError(f"Cannot find pose list in: {value}")
             parsed = ast.literal_eval(match.group(0))
+        if not isinstance(parsed, (list, tuple)):
+            raise TypeError("Parsed pose must be a list or tuple")
         pose = [float(v) for v in parsed]
     else:
         raise TypeError(f"Unsupported pose value: {type(value).__name__}")
@@ -62,11 +64,11 @@ def parse_pose(value) -> list[float]:
 
 
 def compensate_pose(
-    taught_pose,
-    teach_offset: dict,
-    current_offset: dict,
+    taught_pose: object,
+    teach_offset: Mapping[str, object],
+    current_offset: Mapping[str, object],
     arm: str | None = None,
-    locator_to_arm_base_cm: dict | Iterable[float] | None = None,
+    locator_to_arm_base_cm: Mapping[str, object] | Iterable[float] | None = None,
 ) -> list[float]:
     """Return pose corrected from current UDP offset back to the taught offset."""
     pose = parse_pose(taught_pose)
@@ -81,7 +83,7 @@ def compensate_pose(
     return matrix_to_pose(corrected)
 
 
-def get_arm_locator_to_base_cm(arm: str | None) -> dict:
+def get_arm_locator_to_base_cm(arm: str | None) -> Mapping[str, float]:
     arm_key = normalize_arm_name(arm)
     if arm_key == "left":
         return LEFT_ARM_LOCATOR_TO_BASE_CM
@@ -90,9 +92,9 @@ def get_arm_locator_to_base_cm(arm: str | None) -> dict:
 
 def corrected_arm_base_from_tcp_matrix(
     pose: list[float],
-    teach_offset: dict,
-    current_offset: dict,
-    locator_to_arm_base_cm: dict | Iterable[float],
+    teach_offset: Mapping[str, object],
+    current_offset: Mapping[str, object],
+    locator_to_arm_base_cm: Mapping[str, object] | Iterable[float],
 ) -> list[list[float]]:
     teach_yaw = localization_yaw_rad(teach_offset)
     current_yaw = localization_yaw_rad(current_offset)
@@ -132,8 +134,8 @@ def corrected_arm_base_from_tcp_matrix(
 
 
 def world_from_arm_base_matrix(
-    localization_offset: dict,
-    locator_to_arm_base_cm: dict | Iterable[float],
+    localization_offset: Mapping[str, object],
+    locator_to_arm_base_cm: Mapping[str, object] | Iterable[float],
 ) -> list[list[float]]:
     world_from_body_rot = yaw_matrix(localization_yaw_rad(localization_offset))
     world_from_arm_rot = matmul(world_from_body_rot, BODY_FROM_ARM_ROT)
@@ -158,7 +160,7 @@ def world_from_arm_base_matrix(
     ]
 
 
-def localization_yaw_rad(offset: dict) -> float:
+def localization_yaw_rad(offset: Mapping[str, object]) -> float:
     return LOCALIZATION_ANGLE_SIGN * math.radians(_offset_value(offset, "angle"))
 
 
@@ -193,8 +195,10 @@ def vector_sub(a: Iterable[float], b: Iterable[float]) -> list[float]:
     return [a_values[i] - b_values[i] for i in range(3)]
 
 
-def locator_to_arm_base_m(offset_cm: dict | Iterable[float]) -> list[float]:
-    if isinstance(offset_cm, dict):
+def locator_to_arm_base_m(
+    offset_cm: Mapping[str, object] | Iterable[float],
+) -> list[float]:
+    if isinstance(offset_cm, Mapping):
         return [
             _optional_offset_value(offset_cm, ("x", "X", "x_cm", "x_forward"), 0.0)
             * POSE_LINEAR_UNITS_PER_UDP_CM,
@@ -212,7 +216,7 @@ def locator_to_arm_base_m(offset_cm: dict | Iterable[float]) -> list[float]:
     return [v * POSE_LINEAR_UNITS_PER_UDP_CM for v in values]
 
 
-def offset_to_matrix(offset: dict) -> list[list[float]]:
+def offset_to_matrix(offset: Mapping[str, object]) -> list[list[float]]:
     x_cm = _offset_value(offset, "x")
     y_cm = _offset_value(offset, "y")
     angle_deg = _offset_value(offset, "angle")
@@ -307,7 +311,7 @@ def transpose3(m: list[list[float]]) -> list[list[float]]:
     return [[m[j][i] for j in range(3)] for i in range(3)]
 
 
-def _offset_value(offset: dict, key: str) -> float:
+def _offset_value(offset: Mapping[str, object], key: str) -> float:
     aliases = {
         "x": ("x", "X", "x_cm"),
         "y": ("y", "Y", "y_cm"),
@@ -315,12 +319,22 @@ def _offset_value(offset: dict, key: str) -> float:
     }
     for alias in aliases[key]:
         if alias in offset:
-            return float(offset[alias])
+            return _numeric_offset(offset[alias], alias)
     raise KeyError(f"Missing UDP offset field: {key}")
 
 
-def _optional_offset_value(offset: dict, aliases: Iterable[str], default: float) -> float:
+def _optional_offset_value(
+    offset: Mapping[str, object],
+    aliases: Iterable[str],
+    default: float,
+) -> float:
     for alias in aliases:
         if alias in offset:
-            return float(offset[alias])
+            return _numeric_offset(offset[alias], alias)
     return default
+
+
+def _numeric_offset(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise TypeError(f"Offset field '{field}' must be numeric")
+    return float(value)

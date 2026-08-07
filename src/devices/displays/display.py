@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .base import ExpressionDisplayBackend, ExpressionSpec
+from .base import ClearBeforeSwitch, ExpressionDisplayBackend, ExpressionSpec
 
 
 class ExpressionDisplayUnavailable(RuntimeError):
@@ -52,6 +52,16 @@ def _parse_float(value: Any, *, default: float) -> float:
     return float(value)
 
 
+def _parse_clear_before_switch(value: Any) -> ClearBeforeSwitch:
+    if value == "stop":
+        return "stop"
+    if value == "hide":
+        return "hide"
+    if value == "none":
+        return "none"
+    raise ValueError("clear_before_switch must be stop, hide, or none")
+
+
 def _parse_expression_specs(value: Any) -> tuple[ExpressionSpec, ...]:
     if value is None:
         return DEFAULT_EXPRESSIONS
@@ -77,7 +87,7 @@ def _parse_expression_specs(value: Any) -> tuple[ExpressionSpec, ...]:
     if not text:
         return DEFAULT_EXPRESSIONS
 
-    result: list[ExpressionSpec] = []
+    parsed_specs: list[ExpressionSpec] = []
     for item in text.split(","):
         item = item.strip()
         if not item:
@@ -85,10 +95,10 @@ def _parse_expression_specs(value: Any) -> tuple[ExpressionSpec, ...]:
         parts = [part.strip() for part in item.split(":")]
         if len(parts) == 2:
             name, icon_lib = parts
-            result.append(ExpressionSpec(name, _parse_int(icon_lib)))
+            parsed_specs.append(ExpressionSpec(name, _parse_int(icon_lib)))
         elif len(parts) == 4:
             name, icon_lib, icon_start, icon_end = parts
-            result.append(
+            parsed_specs.append(
                 ExpressionSpec(
                     name=name,
                     icon_lib=_parse_int(icon_lib),
@@ -98,7 +108,7 @@ def _parse_expression_specs(value: Any) -> tuple[ExpressionSpec, ...]:
             )
         else:
             raise ValueError(f"Invalid expression spec: {item}")
-    return tuple(result) or DEFAULT_EXPRESSIONS
+    return tuple(parsed_specs) or DEFAULT_EXPRESSIONS
 
 
 def _parse_int_list(value: Any) -> tuple[int, ...]:
@@ -126,7 +136,7 @@ class ExpressionDisplaySettings:
     start_value: int = 0x0000
     stop_value: int = 0x0001
     hide_value: int = 0x0002
-    clear_before_switch: str = "stop"
+    clear_before_switch: ClearBeforeSwitch = "stop"
     switch_delay: float = 0.1
     update_icon_range: bool = True
     expressions: tuple[ExpressionSpec, ...] = DEFAULT_EXPRESSIONS
@@ -152,7 +162,9 @@ class ExpressionDisplaySettings:
             start_value=_parse_int(data.get("start_value"), default=0x0000),
             stop_value=_parse_int(data.get("stop_value"), default=0x0001),
             hide_value=_parse_int(data.get("hide_value"), default=0x0002),
-            clear_before_switch=str(data.get("clear_before_switch") or "stop"),
+            clear_before_switch=_parse_clear_before_switch(
+                data.get("clear_before_switch") or "stop"
+            ),
             switch_delay=_parse_float(data.get("switch_delay"), default=0.1),
             update_icon_range=_parse_bool(data.get("update_icon_range"), default=True),
             expressions=_parse_expression_specs(data.get("expressions")),
@@ -176,7 +188,7 @@ class ExpressionDisplay:
     def list_configured_expressions(self) -> list[ExpressionSpec]:
         return self._backend.list_configured_expressions()
 
-    def switch(self, expression: str | int):
+    def switch(self, expression: str | int) -> Any:
         return self._backend.switch(expression)
 
     def run_test(self) -> None:

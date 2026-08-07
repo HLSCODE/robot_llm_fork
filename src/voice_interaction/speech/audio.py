@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import queue
 from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
 
 import numpy as np
 
@@ -35,7 +36,7 @@ class AudioCapture:
     def __init__(self, config: VoiceAudioConfig) -> None:
         self.config = config
         self._queue: queue.Queue[np.ndarray] = queue.Queue(maxsize=config.queue_size)
-        self._stream = None
+        self._stream: AbstractContextManager[Any] | None = None
 
     def __enter__(self) -> Self:
         try:
@@ -84,7 +85,13 @@ class AudioCapture:
             except queue.Empty:
                 return cleared
 
-    def _callback(self, indata, frames, time_info, status) -> None:  # noqa: ANN001, ARG002
+    def _callback(
+        self,
+        indata: np.ndarray,
+        frames: int,
+        time_info: object,
+        status: object,
+    ) -> None:
         if status and self.config.show_status:
             print(f"Audio status: {status}")
 

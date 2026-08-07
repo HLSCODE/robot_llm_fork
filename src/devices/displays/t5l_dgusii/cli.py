@@ -5,6 +5,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import serial
 from serial.tools import list_ports
@@ -15,6 +16,9 @@ from .controls import AnimationIconConfig, AnimationIconControl
 from .sdk import create_sdk
 from .services import Expression, ExpressionSwitcher, default_expressions, parse_expression_specs
 from .utils import parse_int
+
+if TYPE_CHECKING:
+    from ..display import ExpressionDisplaySettings
 
 
 DEFAULT_TX_DELAY = 0.05
@@ -91,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _project_settings():
+def _project_settings() -> ExpressionDisplaySettings:
     from ....configuration.config_loader import load_application_settings
     from ..display import ExpressionDisplaySettings
 
@@ -102,7 +106,9 @@ def _project_settings():
     )
 
 
-def _config_from_project_settings(settings) -> DgusSdkConfig:
+def _config_from_project_settings(
+    settings: ExpressionDisplaySettings,
+) -> DgusSdkConfig:
     return DgusSdkConfig(
         serial=replace(
             DgusSdkConfig().serial,

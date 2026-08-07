@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -170,7 +171,7 @@ def _validate_installed_entry_point(wheel: Path, workspace: Path) -> None:
 
 
 def _venv_python(environment_directory: Path) -> Path:
-    if sys.platform == "win32":
+    if platform.system() == "Windows":
         return environment_directory / "Scripts" / "python.exe"
     return environment_directory / "bin" / "python"
 

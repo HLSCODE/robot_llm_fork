@@ -346,7 +346,7 @@ def print_report(best: dict, results: list[dict]) -> None:
         print(f"    orientation_delta_rad={item['orientation_delta_rad']}")
 
 
-def parse_pose(value) -> list[float]:
+def parse_pose(value: object) -> list[float]:
     if isinstance(value, (list, tuple)):
         pose = [float(v) for v in value]
     elif isinstance(value, str):

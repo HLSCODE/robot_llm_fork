@@ -1,7 +1,7 @@
 # 工程质量门禁
 
 > 状态：当前实现  
-> 最近更新：2026-08-03
+> 最近更新：2026-08-07
 
 ## 1. 目标
 
@@ -11,11 +11,11 @@ CI 配置长期漂移。普通质量门禁不连接机械臂、相机、串口�
 当前质量门禁覆盖：
 
 1. `compileall`：验证 `src/`、`tests/` 和 `scripts/` 的 Python 语法。
-2. Ruff：检查第一方 Python 代码中的语法错误、未定义名称、无效导入和基础风格错误。
-3. Mypy：严格检查协议、路由、请求流控、运行时模型和 LLM 基础数据模型。
+2. Ruff：检查全仓第一方 Python 代码中的语法错误、未定义名称、无效导入和基础风格错误。
+3. Mypy：严格检查全部手写 `src/` 与 `scripts/` Python 代码。
 4. Pytest + coverage：运行 unit、contract 和 simulation 级测试，并强制全源码覆盖率阈值。
 5. LLM golden regression：离线验证规划输出的 strict schema 和稳定错误分类。
-6. Performance regression：对五条无 I/O 关键路径执行多样本中位数预算检查。
+6. Performance regression：对九条无 I/O 关键路径执行多样本中位数预算检查。
 7. Wheel smoke：构建 wheel、检查关键模块、隔离安装并调用 `robot-llm --check-config`。
 
 普通质量门禁同时在 Windows/Linux 执行；真实硬件验收仍是独立工作，不能用普通 CI 结果替代。
@@ -66,27 +66,20 @@ uv sync --frozen --all-extras --group dev
 
 ## 4. 静态检查范围
 
-Ruff 当前检查统一入口、测试，以及已进入收敛主线的 action、application、core、
-data collection、device runtime、execution、GUI、LLM、WebSocket 和 skill system。
-全仓首次基线扫描仍发现供应商 SDK、旧设备/视觉/语音模块和联调脚本存在历史问题，因此这些
-目录暂不伪装成已达标；应在对应模块完成问题清零后加入 `pyproject.toml` 的 Ruff `include`。
-修改未纳入目录时仍需执行专项测试和硬件验收。
+Ruff 通过 `ruff check .` 检查全仓第一方 Python 代码，包括 `src/`、`scripts/` 和 `tests/`；
+不再使用目录或文件白名单隐藏历史问题。
 
-Mypy 先覆盖已完成收敛、类型边界较稳定的核心文件：
+Mypy 的 `[tool.mypy].files` 固定覆盖全部 `src/` 与 `scripts/`。唯一排除项是 Qt 资源编译器生成的
+`src/gui/resources_rc.py`；该文件应由资源源文件重新生成，不得手工维护。新增手写模块会自动进入
+类型门禁，不需要再维护文件清单。
 
-- WebSocket protocol、route registry 和 request limiter。
-- 版本化 JSON、用户数据路径、启动配置校验和内置数据安装。
-- 不可变领域 settings 和敏感配置边界。
-- DeviceRuntime 的供应商无关模型。
-- 设备错误分类、基础设施错误映射和 action result 错误 DTO。
-- ExecutionRuntime 的状态、事件和结果模型。
-- LLM 通用类型与确定性指纹。
+2026-08-07 的范围扩展验证从 72 个文件的 570 个 Mypy 错误收敛到默认检查
+286 个 `src` + `scripts` 文件且 0 错误。文件数是当次验证快照，门禁范围始终由上述目录而非
+固定数量定义。
 
-检查使用显式文件清单，且不递归扩散到尚未纳入的历史导入模块；这保证门禁范围可验证，
-不会用范围外错误淹没核心边界，也不代表被跳过模块已经通过类型检查。
-
-新增同类核心模块时，应将其加入 `pyproject.toml` 的 `[tool.mypy].files`，修复类型错误后再
-合并，不能通过大范围 `ignore` 或 `Any` 绕开边界设计。
+第三方库缺少类型存根时，`ignore_missing_imports` 只容许导入边界缺少声明。动态返回值必须在
+对应 adapter、provider 或 SDK wrapper 的窄边界完成校验和类型收窄，不能让 `Any` 扩散到应用层、
+领域层、执行运行时或表现层，也不能通过新增目录排除、文件排除或大范围 `ignore` 绕过检查。
 
 ## 5. CI 行为
 

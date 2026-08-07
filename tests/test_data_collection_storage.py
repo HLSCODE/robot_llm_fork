@@ -12,6 +12,7 @@ from unittest.mock import patch
 import numpy as np
 
 from src.configuration.settings import DataCollectionSettings
+from src.data_collection import validation as validation_module
 from src.data_collection.config import DataCollectionConfig
 from src.data_collection.episode_writer import (
     DataCollectionEpisodeWriter,
@@ -98,6 +99,36 @@ class DataCollectionStorageTests(unittest.TestCase):
         report = validate_episode(result.episode_path)
         self.assertTrue(report.valid, report.to_dict())
         self.assertEqual(len(metadata["files"]), report.checked_files)
+
+    def test_depth_png_validation_accepts_explicit_single_channel_axis(self):
+        original_imread = validation_module.cv2.imread
+
+        def read_with_channel_axis(
+            path: str,
+            flags: int,
+        ) -> np.ndarray | None:
+            image = original_imread(path, flags)
+            if (
+                image is not None
+                and image.ndim == 2
+                and "front_depth" in Path(path).parts
+            ):
+                return image[..., np.newaxis]
+            return image
+
+        with patch.object(
+            validation_module.cv2,
+            "imread",
+            side_effect=read_with_channel_axis,
+        ):
+            result = self.writer.save_episode(
+                task="single_channel_depth",
+                episode_id=0,
+                frames=_frames(1),
+                description="single-channel depth",
+            )
+
+        self.assertTrue(result.episode_path.is_dir())
 
     def test_portable_episode_persists_both_arms(self):
         writer = self._writer(source_arms=("left", "right"))

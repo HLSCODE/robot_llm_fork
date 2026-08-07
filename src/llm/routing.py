@@ -311,18 +311,18 @@ class RoutedLLMClient(BaseLLMClient):
                 self._health.release_cancelled_call(provider_name)
                 continue
             except TimeoutError as exc:
-                normalized = LLMTimeoutError(str(exc))
-                last_error = normalized
-                self._record_failure(provider_name, normalized)
+                timeout_error = LLMTimeoutError(str(exc))
+                last_error = timeout_error
+                self._record_failure(provider_name, timeout_error)
                 continue
             except LLMError as exc:
                 last_error = exc
                 self._record_failure(provider_name, exc)
                 continue
             except Exception as exc:
-                normalized = LLMProviderError(str(exc))
-                last_error = normalized
-                self._record_failure(provider_name, normalized)
+                provider_error = LLMProviderError(str(exc))
+                last_error = provider_error
+                self._record_failure(provider_name, provider_error)
                 continue
 
             self._health.record_success(provider_name)
@@ -444,29 +444,29 @@ class RoutedLLMClient(BaseLLMClient):
                 self._health.release_cancelled_call(provider_name)
                 raise
             except TimeoutError as exc:
-                error = LLMTimeoutError(str(exc))
-                last_error = error
-                self._record_failure(provider_name, error)
+                timeout_error = LLMTimeoutError(str(exc))
+                last_error = timeout_error
+                self._record_failure(provider_name, timeout_error)
                 failed = True
             except LLMError as exc:
                 last_error = exc
                 self._record_failure(provider_name, exc)
                 failed = True
             except Exception as exc:
-                error = LLMProviderError(str(exc))
-                last_error = error
-                self._record_failure(provider_name, error)
+                provider_error = LLMProviderError(str(exc))
+                last_error = provider_error
+                self._record_failure(provider_name, provider_error)
                 failed = True
             finally:
                 await self._close_stream(stream)
 
             if emitted:
                 if not failed:
-                    error = LLMProviderError(
+                    incomplete_error = LLMProviderError(
                         f"{provider_name} stream ended without done event"
                     )
-                    last_error = error
-                    self._record_failure(provider_name, error)
+                    last_error = incomplete_error
+                    self._record_failure(provider_name, incomplete_error)
                 yield LLMStreamEvent(
                     type="error",
                     error=str(last_error),

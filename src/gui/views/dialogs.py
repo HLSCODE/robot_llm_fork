@@ -42,11 +42,11 @@ class ActionPreviewDialog(QDialog):
 
     def __init__(
         self,
-        items: list,
-        command_info: dict,
+        items: list[dict[str, Any]],
+        command_info: dict[str, Any],
         *,
-        risk: dict | None = None,
-        parent=None,
+        risk: dict[str, Any] | None = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._items = items
@@ -327,7 +327,7 @@ class ActionConfigDialog(QDialog):
         self,
         action_type: ActionType,
         action_data: dict[str, Any] | None = None,
-        parent=None,
+        parent: QWidget | None = None,
         *,
         existing_names: set[str] | None = None,
         initial_variant: str | None = None,
@@ -405,6 +405,8 @@ def _uses_integer_widget(schema: ActionFieldSchema) -> bool:
 
 
 def _normalize_initial_variant(value: str | None) -> str | None:
+    if value is None:
+        return None
     return {
         "机械臂移动": "机械臂",
         "身体移动": "身体",

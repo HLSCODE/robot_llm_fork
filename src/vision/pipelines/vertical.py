@@ -1,22 +1,24 @@
+from collections.abc import Mapping, Sequence
+
 import cv2
 import numpy as np
-from numpy import ndarray
-from typing import Tuple
+from numpy.typing import NDArray
+
 from .coordinates import convert
 from .poses import change_pose
 
 
 def vertical_catch_main(
-        mask: ndarray,
-        depth_frame: ndarray,
-        color_intr: dict,
-        current_pose: list,
-        arm_gripper_length: float,
-        vertical_rx_ry_rz: list,
-        rotation_matrix: list,
-        translation_vector: list,
-        use_point_depth_or_mean: bool = True,
-) -> Tuple[list, list, list]:
+    mask: NDArray[np.uint8],
+    depth_frame: NDArray[np.generic],
+    color_intr: Mapping[str, float],
+    current_pose: Sequence[float],
+    arm_gripper_length: float,
+    vertical_rx_ry_rz: Sequence[float],
+    rotation_matrix: Sequence[Sequence[float]],
+    translation_vector: Sequence[float],
+    use_point_depth_or_mean: bool = True,
+) -> tuple[list[float], list[float], list[float]]:
     """
     :param center:  抓取的中心点位
     :param mask:    抓取物体的轮廓信息
@@ -40,7 +42,7 @@ def vertical_catch_main(
 
     # 修改对抓取点位深度信息的获取方式由单点改为整个mask的深度信息
     if not use_point_depth_or_mean:
-        dis = depth_frame[real_y][real_x]
+        distance_mm = float(depth_frame[real_y, real_x])
     else:
         # 获取物体深度信息
         depth_mask = depth_frame[mask == 255]  # 提取mask区域内的深度值
@@ -48,24 +50,39 @@ def vertical_catch_main(
         sorted_values = np.sort(non_zero_values)  # 将深度值从小到大排序
         top_20_percent_index = int(0.2 * len(sorted_values))  # 计算前20%的索引位置
         top_20_percent_values = sorted_values[:top_20_percent_index]  # 取最近的20%深度值
-        dis = np.mean(top_20_percent_values)  # 计算这20%深度值的平均值作为目标距离
+        if top_20_percent_values.size == 0:
+            raise ValueError("mask does not contain valid depth values")
+        distance_mm = float(
+            np.mean(top_20_percent_values)
+        )  # 计算这 20% 深度值的平均值作为目标距离
 
-    x = int(dis * (real_x - color_intr["ppx"]) / color_intr["fx"])
-    y = int(dis * (real_y - color_intr["ppy"]) / color_intr["fy"])
-    dis = int(dis)
+    x_mm = float(
+        int(distance_mm * (real_x - color_intr["ppx"]) / color_intr["fx"])
+    )
+    y_mm = float(
+        int(distance_mm * (real_y - color_intr["ppy"]) / color_intr["fy"])
+    )
+    distance_mm = float(int(distance_mm))
     
-    x, y, z = (
-        (x) * 0.001,
-        (y) * 0.001,
-        (dis) * 0.001,
-    )  # 夹爪刚好碰到 -180  前面加针 -200
+    x, y, z = x_mm * 0.001, y_mm * 0.001, distance_mm * 0.001
 
     # 计算物体位置，位置是物体中心点正上方10公分
-    obj_pose = convert(x, y, z, *current_pose, rotation_matrix, translation_vector)
-    obj_pose = [i for i in obj_pose]
+    if len(current_pose) != 6:
+        raise ValueError("current_pose must contain six values")
+    obj_pose = convert(
+        x,
+        y,
+        z,
+        current_pose[0],
+        current_pose[1],
+        current_pose[2],
+        current_pose[3],
+        current_pose[4],
+        current_pose[5],
+        rotation_matrix,
+        translation_vector,
+    ).tolist()
     
-    pose = obj_pose.copy()
-
     # 最终位置为物体上方 + 夹爪 + 10cm的距离
     obj_pose[2] = obj_pose.copy()[2] + 0.10 + arm_gripper_length * 0.001
 
@@ -91,20 +108,22 @@ def vertical_catch_main(
     correct_angle_pose = catch_pose.copy()
 
     # 计算需要下降的距离
-    _z=0.15
+    descent_distance = 0.15
 
     #计算最终位姿
-    finally_pose = change_pose(list(catch_pose), _z)
+    finally_pose = change_pose(catch_pose, descent_distance)
 
     finally_pose = finally_pose.copy()
     return above_object_pose, correct_angle_pose, finally_pose
 
 
-def compute_angle_with_mask(mask):
+def compute_angle_with_mask(
+    mask: NDArray[np.uint8],
+) -> tuple[float, tuple[int, int]]:
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     # 初始化最大外接矩形
     min_rect = None
-    max_area = 0
+    max_area = 0.0
 
     for contour in contours:
         # 计算最小外接矩形
@@ -115,10 +134,11 @@ def compute_angle_with_mask(mask):
             min_rect = center, (w, h), angle
 
     # 获取最小外接矩形的信息
+    if min_rect is None:
+        raise ValueError("mask does not contain a contour")
     center, (width, height), angle = min_rect
 
     if width > height:
         angle = -(90 - angle)
-    else:
-        angle = angle
-    return angle, center
+    center_pixel = (int(round(center[0])), int(round(center[1])))
+    return float(angle), center_pixel

@@ -345,9 +345,10 @@ def _create_wake_word_from_config(config: dict[str, Any]) -> WakeWordEngine:
         return DummyWakeWordEngine(auto_trigger=bool(config.get("wake_auto_trigger", False)))
 
     if engine == "openwakeword":
-        model_paths = [
-            _resolve_project_path(path)
+        model_paths: list[str | Path] = [
+            resolved
             for path in _split_csv(str(config.get("openwakeword_model_paths") or ""))
+            if (resolved := _resolve_project_path(path)) is not None
         ]
         return OpenWakeWordEngine(
             model_paths=model_paths or None,
@@ -372,12 +373,18 @@ def _create_wake_word_from_config(config: dict[str, Any]) -> WakeWordEngine:
             "请将模型放到 models/kws/，或更新 VOICE_KWS_* 配置。"
         )
 
+    validated_required = {
+        name: path
+        for name, path in required.items()
+        if path is not None
+    }
+
     return SherpaOnnxWakeWordEngine(
-        encoder=required["VOICE_KWS_ENCODER"],
-        decoder=required["VOICE_KWS_DECODER"],
-        joiner=required["VOICE_KWS_JOINER"],
-        tokens=required["VOICE_KWS_TOKENS"],
-        keywords_file=required["VOICE_KWS_KEYWORDS_FILE"],
+        encoder=validated_required["VOICE_KWS_ENCODER"],
+        decoder=validated_required["VOICE_KWS_DECODER"],
+        joiner=validated_required["VOICE_KWS_JOINER"],
+        tokens=validated_required["VOICE_KWS_TOKENS"],
+        keywords_file=validated_required["VOICE_KWS_KEYWORDS_FILE"],
         provider=str(config.get("kws_provider") or "cpu"),
         num_threads=int(config.get("kws_num_threads") or 1),
         max_active_paths=int(config.get("kws_max_active_paths") or 4),

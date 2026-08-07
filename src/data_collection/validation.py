@@ -208,6 +208,7 @@ def validate_dataset(
                 _error("dataset_not_found", "dataset path is not a directory", root),
             ),
         )
+    task_directories: tuple[Path, ...]
     if task is not None:
         task_path = root / validate_task_name(task)
         if not task_path.is_dir():
@@ -744,7 +745,7 @@ def _validate_trusted_native_payload(
         )
 
 
-def _native_rlbench_types():
+def _native_rlbench_types() -> tuple[type[Any], type[Any]]:
     from rlbench.backend.observation import Observation
     from rlbench.demo import Demo
 
@@ -765,7 +766,10 @@ def _validate_image(
         issues.append(
             _error("image_decode_failed", f"unable to decode {modality}", path)
         )
-    elif expected_shape is not None and tuple(image.shape) != expected_shape:
+    elif expected_shape is not None and not _image_shape_matches(
+        tuple(image.shape),
+        expected_shape,
+    ):
         issues.append(
             _error(
                 "image_shape_mismatch",
@@ -773,6 +777,15 @@ def _validate_image(
                 path,
             )
         )
+
+
+def _image_shape_matches(
+    actual_shape: tuple[int, ...],
+    expected_shape: tuple[int, ...],
+) -> bool:
+    if actual_shape == expected_shape:
+        return True
+    return len(expected_shape) == 2 and actual_shape == (*expected_shape, 1)
 
 
 def _resolve_episode_file(

@@ -112,7 +112,9 @@ class LoopBlock:
     @classmethod
     def from_sequence_items(cls, items: List[SequenceItem], repeat_count: int) -> 'LoopBlock':
         """从已有 SequenceItem 列表创建循环块（深拷贝子项）"""
-        cloned = [SequenceItem.from_dict(item.to_dict()) for item in items]
+        cloned: List[SequenceEntry] = [
+            SequenceItem.from_dict(item.to_dict()) for item in items
+        ]
         return cls(
             uuid=str(uuid4()),
             items=cloned,

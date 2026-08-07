@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 import logging
 import threading
 from typing import Any
@@ -14,6 +15,7 @@ from ...domain.models import (
     SequenceEntry,
     SequenceItem,
     SequenceItemStatus,
+    SubworkflowBlock,
     sequence_entry_from_dict,
 )
 from ...devices import StopMode
@@ -32,7 +34,7 @@ class ExecutionWebSocketHandler:
     def __init__(self, server: WebSocketHandlerHost) -> None:
         self._server = server
 
-    async def _handle_execute(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_execute(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         执行动作序列
         请求: {"action": "execute", "sequence": [...]}
@@ -82,7 +84,11 @@ class ExecutionWebSocketHandler:
             steps=total_steps,
         )
 
-    async def _handle_execute_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_execute_task(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """
         加载并执行已保存的任务
         请求: {"action": "execute_task", "name": "xxx.workflow.json"}
@@ -130,7 +136,7 @@ class ExecutionWebSocketHandler:
             steps=total_steps,
         )
 
-    async def _handle_stop(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_stop(self, websocket: Any, data: WebSocketRequest) -> None:
         """请求协作式停止任务；该接口不会触发设备硬件急停。"""
         if self._server._services.execution.snapshot().active:
             if self._server._ai_execution_pending:
@@ -151,17 +157,25 @@ class ExecutionWebSocketHandler:
                 )
             )
 
-    async def _handle_quick_stop(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_quick_stop(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         del data
         await self._handle_safety_stop(websocket, StopMode.QUICK)
 
-    async def _handle_emergency_stop(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_emergency_stop(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         del data
         await self._handle_safety_stop(websocket, StopMode.EMERGENCY)
 
     async def _handle_safety_stop(
         self,
-        websocket,
+        websocket: Any,
         mode: StopMode,
     ) -> None:
         report = await asyncio.to_thread(self._server._services.safety.stop, mode)
@@ -176,7 +190,7 @@ class ExecutionWebSocketHandler:
             )
         )
 
-    async def _handle_pause(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_pause(self, websocket: Any, data: WebSocketRequest) -> None:
         """暂停执行"""
         snapshot = self._server._services.execution.snapshot()
         if snapshot.state is ExecutionState.RUNNING:
@@ -191,7 +205,7 @@ class ExecutionWebSocketHandler:
                 )
             )
 
-    async def _handle_resume(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_resume(self, websocket: Any, data: WebSocketRequest) -> None:
         """恢复执行"""
         snapshot = self._server._services.execution.snapshot()
         if snapshot.state is ExecutionState.PAUSED:
@@ -208,8 +222,8 @@ class ExecutionWebSocketHandler:
 
     async def _submit_execution(
         self,
-        websocket,
-        sequence: list[SequenceEntry],
+        websocket: Any,
+        sequence: Sequence[SequenceEntry],
         *,
         origin: str,
         message: str,
@@ -514,6 +528,10 @@ def _reset_entry(entry: SequenceEntry) -> None:
         return
     if isinstance(entry, LoopBlock):
         entry.current_iteration = 0
+        for child in entry.items:
+            _reset_entry(child)
+        return
+    if isinstance(entry, SubworkflowBlock):
         for child in entry.items:
             _reset_entry(child)
         return

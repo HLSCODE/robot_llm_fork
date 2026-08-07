@@ -4,8 +4,9 @@ AI助手 Tab 组件
 """
 import asyncio
 import logging
+from contextlib import AbstractContextManager
 from time import monotonic
-from typing import Any, Dict
+from typing import Any
 
 from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QColor, QPalette, QTextCursor
@@ -31,8 +32,10 @@ from ...voice_interaction import (
     CamerasModuleProvider,
     VoiceInteractionController,
     VoiceSessionState,
+    VoiceSpeechRuntime,
     WakeFeedback,
 )
+from ...domain.models import SequenceItem
 from ..controllers.audio import VoiceAudioPlayer
 from ..theme import set_theme_role
 
@@ -55,14 +58,14 @@ class VoiceSessionWorker(QObject):
         text: str,
         *,
         require_awake: bool = True,
-    ):
+    ) -> None:
         super().__init__()
         self._controller = controller
         self._text = text
         self._require_awake = require_awake
 
     @Slot()
-    def run(self):
+    def run(self) -> None:
         try:
             asyncio.run(self._run_async())
         except Exception as exc:
@@ -70,7 +73,7 @@ class VoiceSessionWorker(QObject):
         finally:
             self.finished.emit()
 
-    async def _run_async(self):
+    async def _run_async(self) -> None:
         async for event in self._controller.handle_text(
             self._text,
             require_awake=self._require_awake,
@@ -88,18 +91,18 @@ class VoiceSpeechRuntimeWorker(QObject):
     def __init__(
         self,
         controller: VoiceInteractionController,
-        voice_config: dict,
+        voice_config: dict[str, Any],
         audio_output_gate: AudioOutputGate,
-    ):
+    ) -> None:
         super().__init__()
         self._controller = controller
         self._voice_config = dict(voice_config)
         self._audio_output_gate = audio_output_gate
-        self._runtime = None
+        self._runtime: VoiceSpeechRuntime | None = None
         self._stop_requested = False
 
     @Slot()
-    def run(self):
+    def run(self) -> None:
         try:
             asyncio.run(self._run_async())
         except Exception as exc:
@@ -108,12 +111,12 @@ class VoiceSpeechRuntimeWorker(QObject):
             self.finished.emit()
 
     @Slot()
-    def stop(self):
+    def stop(self) -> None:
         self._stop_requested = True
         if self._runtime is not None:
             self._runtime.stop()
 
-    async def _run_async(self):
+    async def _run_async(self) -> None:
         from ..voice_interaction import build_voice_speech_runtime
 
         self._runtime = build_voice_speech_runtime(
@@ -156,7 +159,11 @@ class AIAssistantWidget(QWidget):
     loop_progress = Signal(str, int, int)
     execution_completed = Signal(bool)
 
-    def __init__(self, services: ApplicationServices, parent=None):
+    def __init__(
+        self,
+        services: ApplicationServices,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
 
         # 初始化执行桥接器和AI控制器
@@ -176,10 +183,10 @@ class AIAssistantWidget(QWidget):
                 session_factory=self._camera_capture_session,
                 camera_name=settings.vision.vision_camera_name or None,
             ),
-            timeout_s=self._voice_config["session_timeout_s"],
+            timeout_s=settings.voice.voice_session_timeout_s,
             turn_timeout_s=settings.runtime.interaction_turn_timeout_s,
-            history_turns=self._voice_config["session_history_turns"],
-            tts_enabled=self._voice_config["tts_enabled"],
+            history_turns=settings.voice.voice_session_history_turns,
+            tts_enabled=settings.voice.voice_tts_enabled,
             wake_feedback=WakeFeedback(
                 enabled=bool(self._voice_config.get("wake_feedback_enabled", True)),
                 text=str(self._voice_config.get("wake_feedback_text") or "明德博士在，请说。"),
@@ -188,11 +195,11 @@ class AIAssistantWidget(QWidget):
         self._voice_input_enabled = bool(
             self._voice_config.get("speech_input_enabled")
         )
-        self._voice_thread = None
-        self._voice_worker = None
+        self._voice_thread: QThread | None = None
+        self._voice_worker: VoiceSessionWorker | None = None
         self._voice_event_source = "voice"
-        self._speech_thread = None
-        self._speech_worker = None
+        self._speech_thread: QThread | None = None
+        self._speech_worker: VoiceSpeechRuntimeWorker | None = None
         self._speech_runtime_active = False
         self._speech_runtime_starting = False
         self._speech_runtime_startup_reported = False
@@ -207,7 +214,7 @@ class AIAssistantWidget(QWidget):
         )
 
         # 当前预览数据
-        self._current_preview: Dict[str, Any] | None = None
+        self._current_preview: dict[str, Any] | None = None
 
         self._init_ui()
         self._connect_signals()
@@ -218,10 +225,10 @@ class AIAssistantWidget(QWidget):
         self._voice_timeout_timer.timeout.connect(self._check_voice_session_timeout)
         self._voice_timeout_timer.start()
 
-    def _camera_capture_session(self):
+    def _camera_capture_session(self) -> AbstractContextManager[object]:
         return self._services.camera_access.open("gui-voice-capture")
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         """初始化UI"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -361,7 +368,7 @@ class AIAssistantWidget(QWidget):
         # Welcome
         self._add_bot_message("你好！我是 AI 动作助手。\n\n你可以直接输入消息、问题或机器人指令，不需要先唤醒。\n\n示例：\n• 帮我抓一个瓶子\n• 你现在看到了什么\n• 吸取 500 微升液体")
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         """连接信号"""
         # AI 运行上下文只负责执行状态；对话/意图事件由 voice_interaction 返回。
         self._ai_controller.status_changed.connect(self._on_status_changed)
@@ -385,7 +392,7 @@ class AIAssistantWidget(QWidget):
         self._voice_audio_player.error_occurred.connect(self._on_voice_audio_error)
         self._update_speech_runtime_controls()
 
-    def _refresh_skill_list(self):
+    def _refresh_skill_list(self) -> None:
         """刷新技能列表"""
         self.skill_list.clear()
         skills = self._ai_controller.get_skill_list()
@@ -396,7 +403,7 @@ class AIAssistantWidget(QWidget):
             item_text = f"{icon} {name} ({category})"
             self.skill_list.addItem(item_text)
 
-    def _add_user_message(self, text: str):
+    def _add_user_message(self, text: str) -> None:
         """添加用户消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -409,7 +416,7 @@ class AIAssistantWidget(QWidget):
         )
         self.chat_history.ensureCursorVisible()
 
-    def _add_bot_message(self, text: str):
+    def _add_bot_message(self, text: str) -> None:
         """添加机器人消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -422,7 +429,7 @@ class AIAssistantWidget(QWidget):
         )
         self.chat_history.ensureCursorVisible()
 
-    def _add_system_message(self, text: str):
+    def _add_system_message(self, text: str) -> None:
         """添加系统消息到对话历史"""
         cursor = self.chat_history.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
@@ -435,7 +442,7 @@ class AIAssistantWidget(QWidget):
 
         self.chat_history.ensureCursorVisible()
 
-    def _update_status_display(self):
+    def _update_status_display(self) -> None:
         """更新状态显示"""
         if not self._ai_controller.is_api_key_set():
             self.model_label.setText("模型: 未配置 🔴")
@@ -449,7 +456,7 @@ class AIAssistantWidget(QWidget):
             self.model_label.setText("模型: 连接失败 🔴")
             set_theme_role(self.model_label, "danger")
 
-    def _set_input_enabled(self, enabled: bool):
+    def _set_input_enabled(self, enabled: bool) -> None:
         """设置输入控件的启用状态"""
         self.input_field.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
@@ -457,7 +464,7 @@ class AIAssistantWidget(QWidget):
     def _is_voice_session_active(self) -> bool:
         return self._voice_controller.session.state != VoiceSessionState.SLEEPING
 
-    def _update_voice_status_display(self):
+    def _update_voice_status_display(self) -> None:
         if not hasattr(self, "voice_state_label"):
             return
         state = self._voice_controller.session.state
@@ -476,7 +483,7 @@ class AIAssistantWidget(QWidget):
         self.voice_sleep_button.setEnabled(session_active)
         self._update_speech_runtime_controls()
 
-    def _update_speech_runtime_controls(self):
+    def _update_speech_runtime_controls(self) -> None:
         if not hasattr(self, "voice_listen_button"):
             return
         if not self._voice_input_enabled:
@@ -503,7 +510,7 @@ class AIAssistantWidget(QWidget):
         self.voice_asr_label.setText("监听: 待启动")
         set_theme_role(self.voice_asr_label, "muted")
 
-    def _check_voice_session_timeout(self):
+    def _check_voice_session_timeout(self) -> None:
         if not self._voice_input_enabled:
             return
         if self._voice_processing:
@@ -514,7 +521,7 @@ class AIAssistantWidget(QWidget):
         self._handle_voice_event(event.to_dict())
         self.status_label.setText("状态: 会话超时")
 
-    def _append_bot_delta(self, text: str):
+    def _append_bot_delta(self, text: str) -> None:
         if not text:
             return
         cursor = self.chat_history.textCursor()
@@ -531,7 +538,7 @@ class AIAssistantWidget(QWidget):
         )
         self.chat_history.ensureCursorVisible()
 
-    def _finish_bot_delta(self):
+    def _finish_bot_delta(self) -> None:
         if not self._voice_streaming_reply:
             return
         cursor = self.chat_history.textCursor()
@@ -540,7 +547,7 @@ class AIAssistantWidget(QWidget):
         self._voice_streaming_reply = False
         self.chat_history.ensureCursorVisible()
 
-    def _enqueue_voice_audio(self, audio_data: str):
+    def _enqueue_voice_audio(self, audio_data: str) -> None:
         if not audio_data:
             return
         if self._voice_audio_player.enqueue_base64(audio_data):
@@ -548,7 +555,7 @@ class AIAssistantWidget(QWidget):
 
     # ==================== 事件处理 ====================
 
-    def _on_send_clicked(self):
+    def _on_send_clicked(self) -> None:
         """发送按钮点击"""
         text = self.input_field.text().strip()
         if not text:
@@ -565,15 +572,15 @@ class AIAssistantWidget(QWidget):
 
         self._start_dialog_text_turn(text)
 
-    def _on_voice_wake_clicked(self):
+    def _on_voice_wake_clicked(self) -> None:
         event = self._voice_controller.wake()
         self._handle_voice_event(event.to_dict())
 
-    def _on_voice_sleep_clicked(self):
+    def _on_voice_sleep_clicked(self) -> None:
         event = self._voice_controller.sleep()
         self._handle_voice_event(event.to_dict())
 
-    def _on_voice_listen_clicked(self):
+    def _on_voice_listen_clicked(self) -> None:
         if self._speech_runtime_active or self._speech_runtime_starting:
             self._stop_voice_speech_runtime()
             return
@@ -585,11 +592,11 @@ class AIAssistantWidget(QWidget):
             return False
         return self._start_voice_speech_runtime(auto_start=True)
 
-    def notify_speech_startup_wait_timeout(self):
+    def notify_speech_startup_wait_timeout(self) -> None:
         if not self._speech_runtime_starting:
             return
-        timeout_s = self._voice_config.get(
-            "speech_startup_wait_timeout_s", 30.0
+        timeout_s = (
+            self._services.settings.voice.voice_speech_startup_wait_timeout_s
         )
         self._add_system_message(
             f"语音模型加载超过 {float(timeout_s):.0f} 秒，先继续初始化机器人；语音监听会在后台继续加载。"
@@ -632,7 +639,7 @@ class AIAssistantWidget(QWidget):
         self._speech_thread.start()
         return True
 
-    def _stop_voice_speech_runtime(self):
+    def _stop_voice_speech_runtime(self) -> None:
         if self._speech_worker is None:
             return
         self.voice_listen_button.setEnabled(False)
@@ -640,7 +647,7 @@ class AIAssistantWidget(QWidget):
         self.status_label.setText("状态: 正在停止语音监听...")
         self._speech_worker.stop()
 
-    def _start_dialog_text_turn(self, text: str):
+    def _start_dialog_text_turn(self, text: str) -> None:
         if self._voice_processing:
             self._add_system_message("正在处理上一句话，请稍候")
             return
@@ -681,14 +688,19 @@ class AIAssistantWidget(QWidget):
         self.execute_button.setEnabled(False)
 
     @Slot(dict)
-    def _handle_dialog_event(self, event: dict):
+    def _handle_dialog_event(self, event: dict[str, Any]) -> None:
         self._handle_interaction_event(event, source="dialog")
 
     @Slot(dict)
-    def _handle_voice_event(self, event: dict):
+    def _handle_voice_event(self, event: dict[str, Any]) -> None:
         self._handle_interaction_event(event, source="voice")
 
-    def _handle_interaction_event(self, event: dict, *, source: str):
+    def _handle_interaction_event(
+        self,
+        event: dict[str, Any],
+        *,
+        source: str,
+    ) -> None:
         event_type = event.get("type", "")
         is_voice_source = source == "voice"
         if event_type == "speech_runtime_started":
@@ -826,13 +838,13 @@ class AIAssistantWidget(QWidget):
         self._update_voice_status_display()
 
     @Slot(str)
-    def _on_voice_worker_error(self, error: str):
+    def _on_voice_worker_error(self, error: str) -> None:
         self._add_system_message(f"对话错误: {error}")
         self._voice_processing = False
         self._set_input_enabled(True)
 
     @Slot(str)
-    def _on_speech_worker_error(self, error: str):
+    def _on_speech_worker_error(self, error: str) -> None:
         was_starting = self._speech_runtime_starting
         self._speech_runtime_starting = False
         self._speech_runtime_active = False
@@ -846,14 +858,14 @@ class AIAssistantWidget(QWidget):
             self.speech_runtime_startup_finished.emit(False)
 
     @Slot(str)
-    def _on_voice_audio_error(self, error: str):
+    def _on_voice_audio_error(self, error: str) -> None:
         if self._voice_audio_playback_error_reported:
             return
         self._voice_audio_playback_error_reported = True
         self._add_system_message(f"语音播放失败: {error}")
 
     @Slot()
-    def _on_voice_worker_finished(self):
+    def _on_voice_worker_finished(self) -> None:
         self._finish_bot_delta()
         self._voice_processing = False
         self._set_input_enabled(True)
@@ -861,12 +873,12 @@ class AIAssistantWidget(QWidget):
         self.status_label.setText("状态: 就绪")
 
     @Slot()
-    def _on_voice_thread_finished(self):
+    def _on_voice_thread_finished(self) -> None:
         self._voice_thread = None
         self._voice_worker = None
 
     @Slot()
-    def _on_speech_worker_finished(self):
+    def _on_speech_worker_finished(self) -> None:
         was_starting = self._speech_runtime_starting
         self._speech_runtime_starting = False
         self._speech_runtime_active = False
@@ -878,11 +890,11 @@ class AIAssistantWidget(QWidget):
             self.speech_runtime_startup_finished.emit(False)
 
     @Slot()
-    def _on_speech_thread_finished(self):
+    def _on_speech_thread_finished(self) -> None:
         self._speech_thread = None
         self._speech_worker = None
 
-    def _on_execute_clicked(self):
+    def _on_execute_clicked(self) -> None:
         """执行按钮点击"""
         if self._current_preview is None:
             return
@@ -906,7 +918,7 @@ class AIAssistantWidget(QWidget):
         if accepted:
             self._current_preview = None
 
-    def _on_preview_clicked(self):
+    def _on_preview_clicked(self) -> None:
         """预览详情按钮点击"""
         if self._current_preview is None:
             return
@@ -920,11 +932,11 @@ class AIAssistantWidget(QWidget):
         dialog.confirmed.connect(self._on_preview_confirmed)
         dialog.exec()
 
-    def _on_preview_confirmed(self, risk_acknowledged: bool):
+    def _on_preview_confirmed(self, risk_acknowledged: bool) -> None:
         """预览确认后执行"""
         self._execute_preview(risk_acknowledged=risk_acknowledged)
 
-    def _on_cancel_clicked(self):
+    def _on_cancel_clicked(self) -> None:
         """取消按钮点击"""
         self._voice_audio_player.stop()
         self._voice_controller.cancel_active_turn()
@@ -934,12 +946,12 @@ class AIAssistantWidget(QWidget):
     # ==================== 执行上下文信号处理 ====================
 
     @Slot(str)
-    def _on_status_changed(self, status: str):
+    def _on_status_changed(self, status: str) -> None:
         """状态变更"""
         self.status_label.setText(f"状态: {status}")
 
     @Slot(str)
-    def _on_error_occurred(self, error: str):
+    def _on_error_occurred(self, error: str) -> None:
         """错误发生"""
         self._add_system_message(f"错误: {error}")
         self._set_input_enabled(True)
@@ -950,25 +962,28 @@ class AIAssistantWidget(QWidget):
         self.cancel_button.setEnabled(has_preview)
 
     @Slot()
-    def _on_execution_started(self):
+    def _on_execution_started(self) -> None:
         """执行开始"""
         self._add_system_message("开始执行动作序列...")
         self.cancel_button.setEnabled(True)
 
-    def _on_sequence_execution_started(self, sequence: list):
+    def _on_sequence_execution_started(
+        self,
+        sequence: list[SequenceItem],
+    ) -> None:
         """执行开始（携带序列数据，同步到右侧窗口）"""
         if sequence:
             self.sequence_visualization_requested.emit(sequence, True, 50)
 
     @Slot(bool, str)
-    def _on_execution_finished(self, success: bool, message: str):
+    def _on_execution_finished(self, success: bool, message: str) -> None:
         """执行完成"""
         result = "成功" if success else "失败"
         self._add_bot_message(f"执行{result}: {message}")
         self._reset_ui()
 
     @Slot(str)
-    def _on_execution_log(self, message: str):
+    def _on_execution_log(self, message: str) -> None:
         """执行日志"""
         # 在对话历史中显示执行日志
         cursor = self.chat_history.textCursor()
@@ -981,7 +996,7 @@ class AIAssistantWidget(QWidget):
             self.palette().color(QPalette.ColorRole.Text)
         )
 
-    def _reset_ui(self):
+    def _reset_ui(self) -> None:
         """重置UI状态"""
         self._set_input_enabled(True)
         self.execute_button.setEnabled(False)

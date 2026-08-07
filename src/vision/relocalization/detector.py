@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TypedDict
 
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 
 
 MARKER_ORDER = ["top_left", "top_right", "bottom_right", "bottom_left"]
@@ -11,7 +14,19 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 DEFAULT_DETECTION_PATHS = ["12_Color.png", "13_Color.png", "1_Color_Color.png", "1_Color.png", "2_Color.png"]
 
 
-def build_blue_mask(img):
+class Marker(TypedDict, total=False):
+    area: float
+    center: tuple[float, float]
+    bbox: tuple[int, int, int, int]
+    inner_corner: tuple[int, int]
+    inner_corner_refined: tuple[float, float]
+    depth: float
+    n_verts: int
+    squareness: float
+    order_name: str
+
+
+def build_blue_mask(img: NDArray[np.generic]) -> NDArray[np.uint8]:
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     b, g, r = cv2.split(img)
     hsv_mask = cv2.inRange(hsv, np.array([90, 30, 35]), np.array([135, 255, 255]))
@@ -21,20 +36,20 @@ def build_blue_mask(img):
         & (b > 45)
     ).astype(np.uint8) * 255
     blue_mask = cv2.bitwise_and(hsv_mask, blue_dominance)
-    kernel = np.ones((3, 3), np.uint8)
+    kernel: NDArray[np.uint8] = np.ones((3, 3), np.uint8)
     blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_CLOSE, kernel, iterations=1)
     blue_mask = cv2.morphologyEx(blue_mask, cv2.MORPH_OPEN, kernel, iterations=1)
     return blue_mask
 
 
-def order_markers(markers):
+def order_markers(markers: list[Marker]) -> list[Marker]:
     if len(markers) != 4:
         return markers
 
     pts = np.array([m["inner_corner_refined"] for m in markers], dtype=np.float32)
     center = pts.mean(axis=0)
 
-    def angle_from_center(marker):
+    def angle_from_center(marker: Marker) -> np.floating[np.generic]:
         x, y = marker["inner_corner_refined"]
         return np.arctan2(y - center[1], x - center[0])
 
@@ -49,7 +64,11 @@ def order_markers(markers):
     return ordered
 
 
-def draw_corner_marker(vis, point, label):
+def draw_corner_marker(
+    vis: NDArray[np.generic],
+    point: tuple[float, float],
+    label: str,
+) -> None:
     x, y = int(round(point[0])), int(round(point[1]))
     cv2.drawMarker(
         vis,
@@ -72,7 +91,10 @@ def draw_corner_marker(vis, point, label):
     )
 
 
-def make_visualization_path(fname, vis_dir=None):
+def make_visualization_path(
+    fname: str | Path,
+    vis_dir: str | Path | None = None,
+) -> str:
     path = Path(fname)
     if vis_dir:
         return str(Path(vis_dir) / f"{path.stem}_L_inner_corners{path.suffix}")
@@ -80,12 +102,12 @@ def make_visualization_path(fname, vis_dir=None):
 
 
 def find_l_inner_corners(
-    image,
+    image: str | Path | NDArray[np.generic],
     save_visualization: bool = True,
     verbose: bool = True,
-    vis_dir: str | None = None,
-    vis_path: str | None = None,
-):
+    vis_dir: str | Path | None = None,
+    vis_path: str | Path | None = None,
+) -> list[Marker] | None:
     """Detect four blue L markers and return their refined inner corners."""
     if isinstance(image, (str, Path)):
         img = cv2.imread(str(image))
@@ -112,7 +134,7 @@ def find_l_inner_corners(
     blue_mask = build_blue_mask(img)
     contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    candidates = []
+    candidates: list[Marker] = []
     image_area = h * w
     min_area = max(80.0, image_area * 0.00003)
     max_area = max(5000.0, image_area * 0.01)
@@ -142,13 +164,16 @@ def find_l_inner_corners(
         if defects is None:
             continue
 
-        best_defect = None
+        best_defect: tuple[int, int] | None = None
         best_depth = 0
         for defect in defects:
             _, _, far_idx, depth = defect[0]
             if depth > best_depth:
                 best_depth = depth
-                best_defect = tuple(contour[far_idx][0])
+                best_defect = (
+                    int(contour[far_idx][0][0]),
+                    int(contour[far_idx][0][1]),
+                )
         if best_depth < 5 * 256 or best_defect is None:
             continue
 
@@ -189,7 +214,10 @@ def find_l_inner_corners(
         rx2 = min(w, int(inner[0]) + margin)
         ry2 = min(h, int(inner[1]) + margin)
         roi_gray = gray[ry1:ry2, rx1:rx2]
-        init_pt = np.array([[inner[0] - rx1, inner[1] - ry1]], dtype=np.float32).reshape(1, 1, 2)
+        init_pt: NDArray[np.float32] = np.array(
+            [[inner[0] - rx1, inner[1] - ry1]],
+            dtype=np.float32,
+        ).reshape(1, 1, 2)
         refined = cv2.cornerSubPix(
             roi_gray,
             init_pt,
@@ -227,7 +255,10 @@ def find_l_inner_corners(
     return top4
 
 
-def markers_to_json_entry(fname, markers):
+def markers_to_json_entry(
+    fname: str | Path,
+    markers: Sequence[Marker],
+) -> dict[str, object]:
     img = cv2.imread(str(fname))
     if img is None:
         raise ValueError(f"Cannot read {fname}")
@@ -247,8 +278,8 @@ def markers_to_json_entry(fname, markers):
     }
 
 
-def expand_image_paths(paths):
-    resolved = []
+def expand_image_paths(paths: Sequence[str | Path]) -> list[str]:
+    resolved: list[str] = []
     for item in paths:
         path = Path(item)
         if path.is_dir():
@@ -260,8 +291,8 @@ def expand_image_paths(paths):
         else:
             print(f"WARNING: path does not exist, skipped: {item}")
 
-    unique = []
-    seen = set()
+    unique: list[str] = []
+    seen: set[str] = set()
     for item in resolved:
         key = str(Path(item).resolve())
         if key not in seen:
@@ -270,17 +301,22 @@ def expand_image_paths(paths):
     return unique
 
 
-def default_image_paths():
+def default_image_paths() -> list[str]:
     existing_defaults = [path for path in DEFAULT_DETECTION_PATHS if Path(path).is_file()]
     if existing_defaults:
         return existing_defaults
     return expand_image_paths(["."])
 
 
-def detect_images(image_paths, output_json="L_inner_corners.json", save_visualization=True, vis_dir=None):
+def detect_images(
+    image_paths: Sequence[str | Path],
+    output_json: str | Path = "L_inner_corners.json",
+    save_visualization: bool = True,
+    vis_dir: str | Path | None = None,
+) -> dict[str, dict[str, object]]:
     import json
 
-    results = {}
+    results: dict[str, dict[str, object]] = {}
     for fname in image_paths:
         markers = find_l_inner_corners(fname, save_visualization=save_visualization, vis_dir=vis_dir)
         if markers:

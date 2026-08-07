@@ -177,12 +177,14 @@ class VisionService:
         if self._capture_pipeline is None:
             from .pipelines import execute_vision_capture
 
-            self._capture_pipeline = execute_vision_capture
+            pipeline: CapturePipeline = execute_vision_capture
+            self._capture_pipeline = pipeline
         return self._capture_pipeline
 
     def _relocalization_executor(self) -> RelocalizationPipeline:
         if self._relocalization_pipeline is None:
             from .relocalization import execute_vision_relocalization
 
-            self._relocalization_pipeline = execute_vision_relocalization
+            pipeline: RelocalizationPipeline = execute_vision_relocalization
+            self._relocalization_pipeline = pipeline
         return self._relocalization_pipeline

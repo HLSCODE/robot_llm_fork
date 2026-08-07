@@ -368,10 +368,11 @@ class GripperActionHandler:
                 error=exc,
             )
 
-        def action() -> object:
+        def action() -> None:
             if operation == "开":
-                return gripper.open_gripper(arm)
-            return gripper.close_gripper(arm)
+                gripper.open_gripper(arm)
+                return
+            gripper.close_gripper(arm)
 
         context.log(f"夹爪动作: {operation}", "info")
         last_error: Exception | None = None
@@ -494,14 +495,15 @@ class PipetteActionHandler:
         context: ActionExecutionContext,
     ) -> bool:
         capacity_ul = _required_capacity(command)
-        if command.speed_ul_s is not None:
+        speed_ul_s = command.speed_ul_s
+        if speed_ul_s is not None:
             context.log(
                 f"正在设置吸液速度: {command.speed_ul_s}ul/s",
                 "info",
             )
             configured = context.invoke(
                 "pipette.set_absorb_speed",
-                lambda: pipette.set_absorb_speed(command.speed_ul_s),
+                lambda: pipette.set_absorb_speed(speed_ul_s),
             )
             if not configured:
                 context.log("设置吸液速度失败", "error")
@@ -520,14 +522,15 @@ class PipetteActionHandler:
         context: ActionExecutionContext,
     ) -> bool:
         capacity_ul = _required_capacity(command)
-        if command.speed_ul_s is not None:
+        speed_ul_s = command.speed_ul_s
+        if speed_ul_s is not None:
             context.log(
                 f"正在设置吐液速度: {command.speed_ul_s}ul/s",
                 "info",
             )
             configured = context.invoke(
                 "pipette.set_dispense_speed",
-                lambda: pipette.set_dispense_speed(command.speed_ul_s),
+                lambda: pipette.set_dispense_speed(speed_ul_s),
             )
             if not configured:
                 context.log("设置吐液速度失败", "error")

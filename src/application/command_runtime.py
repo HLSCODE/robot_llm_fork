@@ -245,6 +245,10 @@ class CommandRuntime:
     def command_catalog(self) -> list[dict[str, Any]]:
         return self._catalog.entries()
 
+    def list_skills(self) -> list[dict[str, Any]]:
+        """Return transport-safe skill summaries without exposing SkillEngine."""
+        return self._skill_engine.list_all_skills()
+
     def resolve_text(self, text: str) -> CommandResolution:
         return self._catalog.resolve(text)
 

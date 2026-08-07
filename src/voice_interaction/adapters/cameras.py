@@ -7,7 +7,7 @@ import base64
 from contextlib import AbstractContextManager
 import logging
 import time
-from typing import Callable, Optional, Protocol, Sequence
+from typing import Any, Callable, Optional, Protocol, Sequence
 
 from ...llm import LLMContentPart
 
@@ -93,7 +93,7 @@ class CamerasModuleProvider:
             )
         return parts
 
-    def _wait_for_jpegs(self, manager) -> list[tuple[str, str, bytes]]:
+    def _wait_for_jpegs(self, manager: Any) -> list[tuple[str, str, bytes]]:
         deadline = time.monotonic() + self.wait_timeout_s
         while True:
             frames = self._read_jpegs(manager)
@@ -103,7 +103,7 @@ class CamerasModuleProvider:
                 return []
             time.sleep(self.poll_interval_s)
 
-    def _read_jpegs(self, manager) -> list[tuple[str, str, bytes]]:
+    def _read_jpegs(self, manager: Any) -> list[tuple[str, str, bytes]]:
         frames: list[tuple[str, str, bytes]] = []
         if hasattr(manager, "get_latest_jpegs"):
             frames = [
@@ -126,7 +126,7 @@ class CamerasModuleProvider:
         return frames
 
     @staticmethod
-    def _format_cameras_info(manager) -> str:
+    def _format_cameras_info(manager: Any) -> str:
         if not hasattr(manager, "get_cameras_info"):
             return "未知"
         try:

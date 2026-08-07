@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 from importlib.util import resolve_name
 from pathlib import Path
+import re
+import tomllib
 import unittest
 
 
@@ -91,9 +93,44 @@ LEGACY_HARDWARE_PATHS = (
     "src/vision/interface.py",
     "src/vision/relocalization/cli.py",
 )
+MYPY_GENERATED_FILE = "src/gui/resources_rc.py"
+MYPY_GENERATED_FILE_PATTERN = r"^src/gui/resources_rc[.]py$"
 
 
 class DependencyBoundaryTests(unittest.TestCase):
+    def test_ruff_covers_all_first_party_python(self):
+        configuration = tomllib.loads(
+            (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8-sig")
+        )
+
+        self.assertEqual(
+            ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py"],
+            configuration["tool"]["ruff"]["include"],
+        )
+
+    def test_mypy_covers_all_handwritten_source_and_scripts(self):
+        configuration = tomllib.loads(
+            (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8-sig")
+        )
+        mypy_configuration = configuration["tool"]["mypy"]
+
+        self.assertEqual(["src", "scripts"], mypy_configuration["files"])
+        self.assertEqual(
+            MYPY_GENERATED_FILE_PATTERN,
+            mypy_configuration["exclude"],
+        )
+
+        excluded_python_files = sorted(
+            path.relative_to(PROJECT_ROOT).as_posix()
+            for root in (PROJECT_ROOT / "src", PROJECT_ROOT / "scripts")
+            for path in root.rglob("*.py")
+            if re.fullmatch(
+                mypy_configuration["exclude"],
+                path.relative_to(PROJECT_ROOT).as_posix(),
+            )
+        )
+        self.assertEqual([MYPY_GENERATED_FILE], excluded_python_files)
+
     def test_legacy_sequence_list_editor_is_removed(self):
         legacy_module = PROJECT_ROOT / "src/gui/views/components.py"
         gui_sources = "\n".join(

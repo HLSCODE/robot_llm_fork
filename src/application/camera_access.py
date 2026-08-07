@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeGuard, TypeVar
 from uuid import uuid4
 
 from ..devices import (
     CameraSource,
     DepthCameraSource,
+    DeviceContractError,
     DeviceRuntime,
     ResourceArbiter,
     ResourceLease,
@@ -75,13 +77,21 @@ class CameraAccessService:
         self._resources = resources
 
     def open(self, purpose: str) -> CameraSession[CameraSource]:
-        return self._open(purpose, CameraSource)
+        return self._open(
+            purpose,
+            _is_camera_source,
+            expected_contract="CameraSource",
+        )
 
     def open_depth(
         self,
         purpose: str,
     ) -> CameraSession[DepthCameraSource]:
-        return self._open(purpose, DepthCameraSource)
+        return self._open(
+            purpose,
+            _is_depth_camera_source,
+            expected_contract="DepthCameraSource",
+        )
 
     def status(self) -> CameraStatus:
         """Return a presentation-safe camera snapshot without exposing runtime."""
@@ -101,7 +111,9 @@ class CameraAccessService:
     def _open(
         self,
         purpose: str,
-        expected_type: type[CameraT],
+        validator: Callable[[object], TypeGuard[CameraT]],
+        *,
+        expected_contract: str,
     ) -> CameraSession[CameraT]:
         normalized_purpose = purpose.strip()
         if not normalized_purpose:
@@ -114,8 +126,20 @@ class CameraAccessService:
             resources=(CAMERA,),
         )
         try:
-            camera = self._runtime.require(CAMERA, expected_type)
+            camera_instance: object = self._runtime.require(CAMERA)
+            if not validator(camera_instance):
+                raise DeviceContractError(
+                    f"device '{CAMERA}' does not implement {expected_contract}"
+                )
         except Exception:
             lease.release()
             raise
-        return CameraSession(camera=camera, _lease=lease)
+        return CameraSession(camera=camera_instance, _lease=lease)
+
+
+def _is_camera_source(value: object) -> TypeGuard[CameraSource]:
+    return isinstance(value, CameraSource)
+
+
+def _is_depth_camera_source(value: object) -> TypeGuard[DepthCameraSource]:
+    return isinstance(value, DepthCameraSource)

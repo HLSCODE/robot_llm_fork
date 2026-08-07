@@ -8,7 +8,7 @@ from enum import Enum
 import logging
 from pathlib import Path
 from threading import RLock
-from typing import Protocol
+from typing import Protocol, overload
 from uuid import uuid4
 
 from ..domain.models import (
@@ -733,6 +733,22 @@ def _clone_action(action: ActionDefinition) -> ActionDefinition:
 
 def _clone_entry(entry: SequenceEntry) -> SequenceEntry:
     return sequence_entry_from_dict(deepcopy(entry.to_dict()))
+
+
+@overload
+def _pending_entry(entry: SequenceItem) -> SequenceItem: ...
+
+
+@overload
+def _pending_entry(entry: LoopBlock) -> LoopBlock: ...
+
+
+@overload
+def _pending_entry(entry: ParallelBlock) -> ParallelBlock: ...
+
+
+@overload
+def _pending_entry(entry: SubworkflowBlock) -> SubworkflowBlock: ...
 
 
 def _pending_entry(entry: SequenceEntry) -> SequenceEntry:

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import time
 import unittest
 from dataclasses import replace
+from unittest.mock import patch
 
 from src.application import create_application_services
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
@@ -159,41 +159,51 @@ class ActionHandlerResultTests(unittest.TestCase):
 
 class ActionExecutionContextTests(unittest.TestCase):
     def test_invoke_reports_timeout_only_after_blocking_call_returns(self):
-        context = ActionExecutionContext(
-            action_name="blocking device call",
-            control=ExecutionControl(),
-            timeout_seconds=0.01,
-            log=lambda _message, _level: None,
-        )
-        returned = False
-
-        def operation() -> None:
-            nonlocal returned
-            time.sleep(0.03)
-            returned = True
-
-        with self.assertRaisesRegex(
-            ActionTimeoutError,
-            "returned after the deadline",
+        clock = [0.0]
+        with patch(
+            "src.execution.handler_api.time.monotonic",
+            side_effect=lambda: clock[0],
         ):
-            context.invoke("fake.block", operation)
+            context = ActionExecutionContext(
+                action_name="blocking device call",
+                control=ExecutionControl(),
+                timeout_seconds=0.01,
+                log=lambda _message, _level: None,
+            )
+            returned = False
+
+            def operation() -> None:
+                nonlocal returned
+                clock[0] = 0.02
+                returned = True
+
+            with self.assertRaisesRegex(
+                ActionTimeoutError,
+                "returned after the deadline",
+            ):
+                context.invoke("fake.block", operation)
 
         self.assertTrue(returned)
 
     def test_invoke_does_not_hide_timeout_behind_device_failure(self):
-        context = ActionExecutionContext(
-            action_name="failed blocking device call",
-            control=ExecutionControl(),
-            timeout_seconds=0.01,
-            log=lambda _message, _level: None,
-        )
+        clock = [0.0]
+        with patch(
+            "src.execution.handler_api.time.monotonic",
+            side_effect=lambda: clock[0],
+        ):
+            context = ActionExecutionContext(
+                action_name="failed blocking device call",
+                control=ExecutionControl(),
+                timeout_seconds=0.01,
+                log=lambda _message, _level: None,
+            )
 
-        def operation() -> None:
-            time.sleep(0.03)
-            raise RuntimeError("late device failure")
+            def operation() -> None:
+                clock[0] = 0.02
+                raise RuntimeError("late device failure")
 
-        with self.assertRaises(ActionTimeoutError):
-            context.invoke("fake.block", operation)
+            with self.assertRaises(ActionTimeoutError):
+                context.invoke("fake.block", operation)
 
     def test_pause_does_not_disable_hard_action_deadline(self):
         control = ExecutionControl()

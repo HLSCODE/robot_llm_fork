@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from ...transports import Transport
 from .pwm import (
     HorizontalServoConfig,
@@ -17,11 +19,11 @@ class PWMNeckController:
     def __init__(
         self,
         transport: Transport,
-        horizontal_config: dict,
-        vertical_config: dict,
+        horizontal_config: Mapping[str, object],
+        vertical_config: Mapping[str, object],
     ) -> None:
-        h_cfg = HorizontalServoConfig(**horizontal_config)
-        v_cfg = VerticalServoConfig(**vertical_config)
+        h_cfg = HorizontalServoConfig(**_servo_config_values(horizontal_config))
+        v_cfg = VerticalServoConfig(**_servo_config_values(vertical_config))
         self._controller = NeckController(transport, h_cfg, v_cfg)
 
     # ---------------- 对外 API（代理到 SDK）----------------
@@ -58,8 +60,19 @@ class PWMNeckController:
         self._controller.reset(time_ms)
 
     @property
-    def current_pwm(self) -> dict:
+    def current_pwm(self) -> dict[ServoAxis, int]:
         return self._controller.current_pwm
 
     def close(self) -> None:
         self._controller.close()
+
+
+def _servo_config_values(config: Mapping[str, object]) -> dict[str, int]:
+    fields = ("servo_id", "initial_pwm", "pwm_max", "pwm_min", "default_time")
+    values: dict[str, int] = {}
+    for field in fields:
+        value = config.get(field)
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"{field} must be an integer")
+        values[field] = value
+    return values

@@ -80,7 +80,7 @@ class StepperSeriesSpec:
 M_SERIES_SPEC = StepperSeriesSpec(StepperSeries.M)
 B_SERIES_SPEC = StepperSeriesSpec(StepperSeries.B)
 STEPPER_SPECS = {StepperSeries.M: M_SERIES_SPEC, StepperSeries.B: B_SERIES_SPEC}
-DEFAULT_STEPPER_SERIES_BY_ADDRESS = {}
+DEFAULT_STEPPER_SERIES_BY_ADDRESS: dict[int, StepperSeriesLike] = {}
 
 
 def clamp_u16(value: int) -> int:

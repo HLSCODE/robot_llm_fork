@@ -2,9 +2,15 @@
 
 import logging
 import threading
-from typing import Optional
+from collections.abc import Mapping, Sequence
+from typing import Optional, TypedDict
 
 logger = logging.getLogger(__name__)
+
+
+class _ConfiguredCamera(TypedDict):
+    index: int
+    name: str
 
 try:
     import cv2
@@ -19,7 +25,7 @@ class OpenCVCameraManager:
 
     def __init__(
         self,
-        cameras: list[dict] = (),
+        cameras: Sequence[Mapping[str, object]] = (),
         fps: int = 30,
         width: int = 640,
         height: int = 480,
@@ -27,13 +33,7 @@ class OpenCVCameraManager:
         encode_fps: int | None = None,
         backend: Optional[int] = None,
     ) -> None:
-        self._cameras: list[dict] = [
-            {
-                "index": int(c.get("index", 0)),
-                "name": c.get("name", "") or f"webcam-{int(c.get('index', 0))}",
-            }
-            for c in cameras
-        ]
+        self._cameras = [_normalize_camera(camera) for camera in cameras]
         self._fps = fps
         self._width = width
         self._height = height
@@ -150,3 +150,13 @@ class OpenCVCameraManager:
             with self._lock:
                 self._latest_jpegs = frames
             threading.Event().wait(interval)
+
+
+def _normalize_camera(config: Mapping[str, object]) -> _ConfiguredCamera:
+    raw_index = config.get("index", 0)
+    if isinstance(raw_index, bool) or not isinstance(raw_index, (int, float, str)):
+        raise TypeError("camera index must be an integer or numeric string")
+    index = int(raw_index)
+    raw_name = config.get("name", "")
+    name = str(raw_name) if raw_name else f"webcam-{index}"
+    return {"index": index, "name": name}

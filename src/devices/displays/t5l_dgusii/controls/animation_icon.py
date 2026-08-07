@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Literal
 
+from ...base import ClearBeforeSwitch
 from ..client import DgusClient
 from ..protocol import check_byte, check_word
-
-ClearBeforeSwitch = Literal["stop", "hide", "none"]
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import TracebackType
 from typing import Protocol
 
 from ...transports import (
@@ -54,5 +55,10 @@ class SerialTransport:
     def __enter__(self) -> "SerialTransport":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         self.close()

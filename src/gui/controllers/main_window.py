@@ -1,16 +1,19 @@
+from __future__ import annotations
+
 import math
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import List
+from typing import Any
 from uuid import uuid4
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QInputDialog,
+    QListWidget,
     QListWidgetItem,
     QMainWindow,
 )
@@ -23,6 +26,7 @@ from ...application import (
     CompositionRevisionConflict,
     WorkflowCompilationError,
 )
+from ...application.camera_access import CameraSession
 from ...domain.models import (
     ActionDefinition,
     ActionType,
@@ -34,7 +38,7 @@ from ...domain.models import (
     SubworkflowBlock,
 )
 from ...domain.workflow import WorkflowDocument
-from ...devices import StopMode
+from ...devices import CameraSource, DepthCameraSource, StopMode
 from ...devices.runtime.ids import (
     BODY_AXIS,
     MOBILE_BASE,
@@ -43,6 +47,7 @@ from ...devices.runtime.ids import (
 )
 from ..views.log_widget import LogWidget
 from ..views.ai_assistant import AIAssistantWidget
+from ..views.action_list import ActionListWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceHealthView, DevicePoseView
 from ..views.dialogs import ActionConfigDialog
@@ -60,6 +65,7 @@ from ..views.workflow import (
     TaskLibraryView,
     WorkflowEditorView,
 )
+from ..views.workflow_canvas import WorkflowCanvasWidget
 from ..views.workbench import WorkbenchPage, WorkbenchView
 from ..theme import ThemeController, ThemeMode
 from ..icons import IconName
@@ -96,14 +102,21 @@ class MainWindow(QMainWindow):
             ActionType.TRAJECTORY: []
         }
         self.settings = services.settings
-        self.robot_pose_cache = {"robot1": None, "robot2": None}
-        self.pose_timer = None
+        self.robot_pose_cache: dict[str, list[float] | None] = {
+            "robot1": None,
+            "robot2": None,
+        }
+        self.pose_timer: QTimer | None = None
         self._startup_lifecycle = GuiStartupLifecycle()
-        self._speech_startup_wait_timer = None
-        self._hardware_startup_thread = None
-        self._hardware_startup_worker = None
+        self._speech_startup_wait_timer: QTimer | None = None
+        self._hardware_startup_thread: QThread | None = None
+        self._hardware_startup_worker: GuiHardwareStartupWorker | None = None
+        self._camera_test_thread: QThread | None = None
 
         self.init_ui()
+        self._execution_display_list: WorkflowCanvasWidget | None = (
+            self.workflow_view.sequence_list
+        )
         self._notifications = GuiNotificationCenter(
             self,
             log_sink=self.log_widget.append_log,
@@ -180,7 +193,7 @@ class MainWindow(QMainWindow):
     def startup_state(self) -> GuiStartupState:
         return self._startup_lifecycle.state
 
-    def start_startup_initialization(self):
+    def start_startup_initialization(self) -> None:
         """启动 GUI 显示前的必要初始化流程。"""
         if not self._startup_lifecycle.begin():
             return
@@ -239,7 +252,10 @@ class MainWindow(QMainWindow):
         )
         self.initialize_startup_hardware(speech_ready)
 
-    def initialize_startup_hardware(self, _speech_ready: bool = False):
+    def initialize_startup_hardware(
+        self,
+        _speech_ready: bool = False,
+    ) -> None:
         """Start hardware initialization without blocking the GUI thread."""
         if not self._startup_lifecycle.begin_hardware_initialization():
             return
@@ -269,7 +285,7 @@ class MainWindow(QMainWindow):
         self._hardware_startup_worker = worker
         thread.start()
 
-    def _on_speech_startup_wait_timeout(self):
+    def _on_speech_startup_wait_timeout(self) -> None:
         """Continue hardware startup if ASR/KWS first-load is still downloading."""
         if self.startup_state is not GuiStartupState.WAITING_FOR_SPEECH:
             return
@@ -344,7 +360,7 @@ class MainWindow(QMainWindow):
             PIPETTE: "移液枪",
         }.get(device_id, device_id)
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         self.setWindowTitle("机器人动作编排器")
         self.setMinimumSize(540, 800)
         self.resize(900, 960)
@@ -443,7 +459,7 @@ class MainWindow(QMainWindow):
         controls.relay_requested.connect(self._set_relay_state)
         controls.pipette_eject_requested.connect(self.eject_pipette_tip)
 
-    def create_menu(self):
+    def create_menu(self) -> None:
         menubar = self.menuBar()
 
         file_menu = menubar.addMenu("文件")
@@ -558,7 +574,7 @@ class MainWindow(QMainWindow):
         if isinstance(mode, ThemeMode):
             self._theme_actions[mode].setChecked(True)
 
-    def _set_relay_state(self, channel: int, turn_on: bool):
+    def _set_relay_state(self, channel: int, turn_on: bool) -> None:
         action_text = "打开" if turn_on else "关闭"
         try:
             self._services.manual_control.set_relay(channel, turn_on)
@@ -586,10 +602,10 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self._notifications.warning(f"Robot1 夹爪{action}异常: {e}")
 
-    def record_trajectory(self, robot_name: str):
+    def record_trajectory(self, robot_name: str) -> str | None:
         if not self._device_view_model.snapshot().robot_ready:
             self._notifications.warning(f"{robot_name.upper()} 未连接")
-            return
+            return None
 
         default_path = self._next_trajectory_file(robot_name)
         filename, _ = QFileDialog.getSaveFileName(
@@ -599,7 +615,7 @@ class MainWindow(QMainWindow):
             "轨迹文件 (*.txt);;所有文件 (*)"
         )
         if not filename:
-            return
+            return None
 
         teaching_started = False
         try:
@@ -641,7 +657,7 @@ class MainWindow(QMainWindow):
             self._notifications.warning(f"轨迹录制异常: {e}")
         return None
 
-    def run_trajectory(self, robot_name: str):
+    def run_trajectory(self, robot_name: str) -> None:
         if not self._device_view_model.snapshot().robot_ready:
             self._notifications.warning(f"{robot_name.upper()} 未连接")
             return
@@ -667,10 +683,10 @@ class MainWindow(QMainWindow):
         )
         self._start_sequence_execution([SequenceItem.from_definition(action)], display_list=None, label="轨迹")
 
-    def on_trajectory_succeeded(self, message: str):
+    def on_trajectory_succeeded(self, message: str) -> None:
         self._notifications.info(message, title="轨迹", modal=True)
 
-    def on_trajectory_failed(self, message: str):
+    def on_trajectory_failed(self, message: str) -> None:
         self._notifications.warning(message, title="轨迹")
 
     def _trajectory_dir(self, robot_name: str) -> Path:
@@ -689,7 +705,7 @@ class MainWindow(QMainWindow):
         next_number = max(existing_numbers, default=0) + 1
         return trajectory_dir / f"trajectory_{next_number:03d}.txt"
 
-    def _set_trajectory_buttons_enabled(self, enabled: bool):
+    def _set_trajectory_buttons_enabled(self, enabled: bool) -> None:
         self._render_device_state()
         if not enabled:
             for attr in (
@@ -701,20 +717,20 @@ class MainWindow(QMainWindow):
                 if hasattr(self, attr):
                     getattr(self, attr).setEnabled(False)
 
-    def _pause_pose_refresh(self):
+    def _pause_pose_refresh(self) -> None:
         if self.pose_timer is not None and self.pose_timer.isActive():
             self.pose_timer.stop()
 
-    def _resume_pose_refresh(self):
+    def _resume_pose_refresh(self) -> None:
         if self.pose_timer is not None and not self.pose_timer.isActive():
             self.pose_timer.start()
 
-    def refresh_arm_poses(self):
+    def refresh_arm_poses(self) -> None:
         self._refresh_single_robot_pose("robot1")
         self._refresh_single_robot_pose("robot2")
         self.refresh_external_localization()
 
-    def refresh_external_localization(self):
+    def refresh_external_localization(self) -> None:
         try:
             receiver = self._services.external_localization
             position = receiver.latest(
@@ -735,7 +751,7 @@ class MainWindow(QMainWindow):
             self.format_external_localization_text(position)
         )
 
-    def _refresh_single_robot_pose(self, robot_name: str):
+    def _refresh_single_robot_pose(self, robot_name: str) -> None:
         pose = self._get_current_pose(robot_name)
         if pose is None:
             self.robot_pose_cache[robot_name] = None
@@ -745,7 +761,7 @@ class MainWindow(QMainWindow):
         self.robot_pose_cache[robot_name] = pose
         self.device_pose_view.render_pose(robot_name, self.format_pose_text(pose))
 
-    def _get_current_pose(self, robot_name: str):
+    def _get_current_pose(self, robot_name: str) -> list[float] | None:
         try:
             state = self._services.robot_query.try_read_state(robot_name)
             if state is None:
@@ -754,7 +770,7 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
-    def format_pose_text(self, pose):
+    def format_pose_text(self, pose: Sequence[float]) -> str:
         x_mm = pose[0] * 1000
         y_mm = pose[1] * 1000
         z_mm = pose[2] * 1000
@@ -766,7 +782,10 @@ class MainWindow(QMainWindow):
             f"RX:{rx_deg:.1f} RY:{ry_deg:.1f} RZ:{rz_deg:.1f} deg"
         )
 
-    def format_external_localization_text(self, position: dict):
+    def format_external_localization_text(
+        self,
+        position: Mapping[str, int | float],
+    ) -> str:
         age = max(0.0, time.time() - float(position.get("timestamp", 0.0)))
         tag_id = int(position.get("id", -99))
         if tag_id == -99:
@@ -780,7 +799,7 @@ class MainWindow(QMainWindow):
             f"age:{age:.1f}s"
         )
 
-    def copy_robot_pose(self, robot_name: str):
+    def copy_robot_pose(self, robot_name: str) -> None:
         pose = self.robot_pose_cache.get(robot_name)
         if pose is None:
             self._refresh_single_robot_pose(robot_name)
@@ -794,7 +813,7 @@ class MainWindow(QMainWindow):
         QApplication.clipboard().setText(pose_text)
         self._notifications.info(f"已复制 {robot_name.upper()} 位姿: {pose_text}")
 
-    def initialize_robots(self):
+    def initialize_robots(self) -> None:
         """初始化机械臂"""
         self._notifications.info("开始初始化机械臂...")
 
@@ -828,7 +847,7 @@ class MainWindow(QMainWindow):
         self.workbench_view.status_bar.render_device_state(state)
         self.device_control_view.render_state(state)
 
-    def initialize_pipette(self):
+    def initialize_pipette(self) -> None:
         """Initialize the runtime-owned pipette."""
         self._notifications.info("开始初始化移液枪...")
         self.device_control_view.set_pipette_action_enabled(False)
@@ -847,7 +866,7 @@ class MainWindow(QMainWindow):
         finally:
             self.device_control_view.set_pipette_action_enabled(True)
 
-    def initialize_pipette_on_startup(self):
+    def initialize_pipette_on_startup(self) -> None:
         """Initialize pipette automatically when app starts."""
         self._notifications.info("自动初始化移液枪...")
         try:
@@ -864,7 +883,7 @@ class MainWindow(QMainWindow):
                 modal=False,
             )
 
-    def eject_pipette_tip(self):
+    def eject_pipette_tip(self) -> None:
         """Eject pipette tip manually."""
         self.device_control_view.set_pipette_action_enabled(False)
         try:
@@ -879,7 +898,7 @@ class MainWindow(QMainWindow):
         finally:
             self.device_control_view.set_pipette_action_enabled(True)
 
-    def initialize_body(self):
+    def initialize_body(self) -> None:
         """初始化身体（ModbusMotor）"""
         self._notifications.info("开始初始化身体...")
 
@@ -894,7 +913,7 @@ class MainWindow(QMainWindow):
             )
             self._render_device_state()
 
-    def _collect_action_names(self) -> set:
+    def _collect_action_names(self) -> set[str]:
         """收集当前所有动作的名称（用于去重校验）"""
         names = set()
         for actions in self.actions.values():
@@ -902,7 +921,7 @@ class MainWindow(QMainWindow):
                 names.add(a.name)
         return names
 
-    def create_action(self):
+    def create_action(self) -> None:
         current_tab = self.action_library_view.action_tabs.currentIndex()
         resolved = self._resolve_action_type_for_current_tab(current_tab)
         if resolved is None:
@@ -925,7 +944,7 @@ class MainWindow(QMainWindow):
                 origin="gui",
             )
 
-    def create_trajectory_action(self):
+    def create_trajectory_action(self) -> None:
         options = ["录制 R1", "录制 R2", "使用已有文件"]
         selected, ok = QInputDialog.getItem(
             self,
@@ -996,7 +1015,7 @@ class MainWindow(QMainWindow):
         )
         self._notifications.info(f"轨迹动作已创建: {name}")
 
-    def delete_action(self):
+    def delete_action(self) -> None:
         current_tab = self.action_library_view.action_tabs.currentIndex()
         
         # 移动类 Tab 需要特殊处理，因为包含多种类型
@@ -1046,7 +1065,7 @@ class MainWindow(QMainWindow):
                 origin="gui",
             )
 
-    def edit_action(self):
+    def edit_action(self) -> None:
         action_list = self._get_current_action_list_widget()
         if action_list is None:
             return
@@ -1086,7 +1105,7 @@ class MainWindow(QMainWindow):
             self._notifications.warning("未找到目标动作")
             return
 
-    def refresh_action_list(self, action_type: ActionType):
+    def refresh_action_list(self, action_type: ActionType) -> None:
         if action_type in {ActionType.MANIPULATE, ActionType.WAIT}:
             self._refresh_execute_merged_list()
             return
@@ -1119,7 +1138,7 @@ class MainWindow(QMainWindow):
         for action in self.actions[action_type]:
             action_list.add_action(action)
 
-    def load_actions(self):
+    def load_actions(self) -> None:
         all_actions = self._services.composition.list_actions()
         for action_type in self.actions:
             self.actions[action_type].clear()
@@ -1233,14 +1252,17 @@ class MainWindow(QMainWindow):
             parent=self,
         )
 
-    def _refresh_execute_merged_list(self):
+    def _refresh_execute_merged_list(self) -> None:
         self.action_library_view.action_list(ActionType.MANIPULATE).clear()
         for action in self.actions[ActionType.MANIPULATE]:
             self.action_library_view.action_list(ActionType.MANIPULATE).add_action(action)
         for action in self.actions[ActionType.WAIT]:
             self.action_library_view.action_list(ActionType.MANIPULATE).add_action(action)
 
-    def _resolve_action_type_for_current_tab(self, current_tab: int):
+    def _resolve_action_type_for_current_tab(
+        self,
+        current_tab: int,
+    ) -> ActionType | tuple[ActionType, str] | None:
         action_type_map = {
             0: ActionType.MOVE,  # 移动类 Tab，需要进一步选择
             2: ActionType.INSPECT,
@@ -1295,7 +1317,7 @@ class MainWindow(QMainWindow):
 
         return action_type_map.get(current_tab)
 
-    def _get_current_action_list_widget(self):
+    def _get_current_action_list_widget(self) -> ActionListWidget | None:
         current_tab = self.action_library_view.action_tabs.currentIndex()
         tab_list_map = {
             0: self.action_library_view.action_list(ActionType.MOVE),
@@ -1307,7 +1329,7 @@ class MainWindow(QMainWindow):
         }
         return tab_list_map.get(current_tab)
 
-    def refresh_task_library(self):
+    def refresh_task_library(self) -> None:
         self.task_library_view.task_library_list.clear()
         for summary in self._services.composition.list_tasks():
             task_name = summary.name
@@ -1340,7 +1362,7 @@ class MainWindow(QMainWindow):
         painter.end()
         return QIcon(pixmap)
 
-    def save_task(self):
+    def save_task(self) -> None:
         state = self._services.workflow_editing.snapshot()
         if not state.document.to_entries():
             self._notifications.warning("序列为空，无需保存")
@@ -1409,7 +1431,7 @@ class MainWindow(QMainWindow):
             return None
         return str(item.data(Qt.ItemDataRole.UserRole))
 
-    def load_task(self):
+    def load_task(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
             "加载任务序列",
@@ -1426,7 +1448,7 @@ class MainWindow(QMainWindow):
             self._render_sequence(state.document.to_entries())
             self._notifications.info(f"任务已加载: {item_name}")
 
-    def start_execution(self):
+    def start_execution(self) -> None:
         entries = self._services.workflow_editing.snapshot().document.to_entries()
         if not entries:
             self._notifications.warning("请先添加动作到序列中")
@@ -1463,9 +1485,9 @@ class MainWindow(QMainWindow):
     def _start_sequence_execution(
         self,
         sequence: Sequence[SequenceEntry],
-        display_list=None,
+        display_list: WorkflowCanvasWidget | None = None,
         label: str = "序列",
-    ):
+    ) -> None:
         if self._execution_view_model.snapshot().active:
             self._notifications.warning("当前已有序列正在执行")
             return
@@ -1524,7 +1546,7 @@ class MainWindow(QMainWindow):
             self._resume_pose_refresh()
             self._notifications.warning("提交执行失败")
 
-    def toggle_pause(self):
+    def toggle_pause(self) -> None:
         before = self._execution_view_model.snapshot()
         after = self._execution_view_model.toggle_pause()
         if after.state is before.state:
@@ -1534,7 +1556,7 @@ class MainWindow(QMainWindow):
             "执行继续" if after.can_pause else "执行暂停"
         )
 
-    def stop_execution(self):
+    def stop_execution(self) -> None:
         state = self._execution_view_model.snapshot()
         if state.can_cancel:
             self._execution_view_model.cancel()
@@ -1552,14 +1574,14 @@ class MainWindow(QMainWindow):
                 modal=False,
             )
 
-    def on_execution_completed(self, success: bool):
+    def on_execution_completed(self, success: bool) -> None:
         message = "序列执行成功" if success else "序列执行失败或已停止"
         if success:
             self._notifications.info(message)
         else:
             self._notifications.warning(message, modal=False)
         self._render_execution_state()
-        display_list = getattr(self, "_execution_display_list", None)
+        display_list = self._execution_display_list
         if display_list is not None:
             display_list.finish_execution()
         self._execution_display_list = self.workflow_view.sequence_list
@@ -1575,20 +1597,25 @@ class MainWindow(QMainWindow):
             state.can_cancel,
         )
 
-    def on_step_started(self, index: int, item: SequenceItem):
-        display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
+    def on_step_started(self, index: int, item: SequenceItem) -> None:
+        display_list = self._execution_display_list
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
             display_list.update_execution_step(index, item)
 
-    def on_step_completed(self, index: int, item: SequenceItem):
-        display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
+    def on_step_completed(self, index: int, item: SequenceItem) -> None:
+        display_list = self._execution_display_list
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
             display_list.update_execution_step(index, item)
 
-    def on_step_failed(self, index: int, item: SequenceItem, error_msg: str):
-        display_list = getattr(self, "_execution_display_list", self.workflow_view.sequence_list)
+    def on_step_failed(
+        self,
+        index: int,
+        item: SequenceItem,
+        error_msg: str,
+    ) -> None:
+        display_list = self._execution_display_list
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
             display_list.update_execution_step(index, item)
@@ -1597,9 +1624,14 @@ class MainWindow(QMainWindow):
             title="执行失败",
         )
 
-    def on_loop_progress(self, loop_uuid: str, current_iteration: int, total_iterations: int):
+    def on_loop_progress(
+        self,
+        loop_uuid: str,
+        current_iteration: int,
+        total_iterations: int,
+    ) -> None:
         del total_iterations
-        display_list = getattr(self, "_execution_display_list", None)
+        display_list = self._execution_display_list
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
             display_list.update_loop_progress(loop_uuid, current_iteration)
@@ -1611,7 +1643,7 @@ class MainWindow(QMainWindow):
         state: str,
         error: str,
     ) -> None:
-        display_list = getattr(self, "_execution_display_list", None)
+        display_list = self._execution_display_list
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
             display_list.update_parallel_branch_state(
@@ -1626,7 +1658,10 @@ class MainWindow(QMainWindow):
                 modal=False,
             )
 
-    def _ensure_canvas_execution_mapping(self, display_list) -> None:
+    def _ensure_canvas_execution_mapping(
+        self,
+        display_list: WorkflowCanvasWidget,
+    ) -> None:
         if display_list.execution_mapping_active:
             return
         state = self._services.workflow_editing.snapshot()
@@ -1645,17 +1680,17 @@ class MainWindow(QMainWindow):
             return
         display_list.begin_execution(compiled)
 
-    def move_item_up(self):
+    def move_item_up(self) -> None:
         self.workflow_view.sequence_list.move_selected(-1)
 
-    def move_item_down(self):
+    def move_item_down(self) -> None:
         self.workflow_view.sequence_list.move_selected(1)
 
-    def delete_item(self):
+    def delete_item(self) -> None:
         if not self.workflow_view.sequence_list.delete_selected():
             self._notifications.warning("请先选择要删除的节点")
 
-    def repeat_sequence_selection(self):
+    def repeat_sequence_selection(self) -> None:
         """将选中的连续动作包裹为 LoopBlock 循环容器"""
         rows = self.workflow_view.sequence_list.selected_entry_rows()
         if not rows:
@@ -1706,7 +1741,7 @@ class MainWindow(QMainWindow):
 
     def _selected_contiguous_rows(
         self,
-        list_widget,
+        list_widget: QListWidget,
         empty_message: str,
     ) -> list[int] | None:
         rows = sorted(
@@ -1720,7 +1755,7 @@ class MainWindow(QMainWindow):
             return None
         return rows
 
-    def edit_sequence_item(self):
+    def edit_sequence_item(self) -> None:
         seq_item = self.workflow_view.sequence_list.current_sequence_item()
         if seq_item is None:
             loop = self.workflow_view.sequence_list.current_loop_block()
@@ -1764,10 +1799,10 @@ class MainWindow(QMainWindow):
 
     def add_ai_sequence(
         self,
-        sequence: List,
+        sequence: Sequence[SequenceItem | dict[str, Any]],
         replace: bool = False,
         stagger_interval_ms: int = 0,
-    ):
+    ) -> None:
         """将 AI 规划的动作同步到右侧序列区；replace=True 时先清空。
         stagger_interval_ms>0 时按间隔逐项出现（类似从左拖到右侧的观感），需与执行启动延迟配合。"""
         if not sequence:
@@ -1802,26 +1837,29 @@ class MainWindow(QMainWindow):
         for i, item in enumerate(normalized):
             item.status = SequenceItemStatus.PENDING
 
-            def make_add(seq_item: SequenceItem):
-                def _add():
+            def make_add(seq_item: SequenceItem) -> Callable[[], None]:
+                def _add() -> None:
                     self.workflow_view.sequence_list.insert_entry(seq_item)
 
                 return _add
 
             QTimer.singleShot(stagger_interval_ms * i, make_add(item))
 
-    def clear_sequence(self):
+    def clear_sequence(self) -> None:
         if self._notifications.confirm("确定要清空所有序列吗？"):
             self.workflow_view.sequence_list.render_entries(())
             self._publish_current_sequence()
             self._notifications.info("序列已清空")
 
-    def refresh_sequence_numbers(self, selected_row: int | None = None):
+    def refresh_sequence_numbers(
+        self,
+        selected_row: int | None = None,
+    ) -> None:
         """Keep the selected canvas node visible after external operations."""
         if selected_row is not None:
             self.workflow_view.sequence_list.set_current_entry_row(selected_row)
 
-    def test_camera(self):
+    def test_camera(self) -> None:
         """
         通过 DeviceRuntime 测试相机（与视觉抓取使用同一实例）。
         在独立 QThread 中运行，避免阻塞 UI。
@@ -1835,14 +1873,12 @@ class MainWindow(QMainWindow):
                 super().__init__()
                 self._services = services
 
-            def run(self):
-                import time
-
+            def run(self) -> None:
                 camera_name = (
-                    self.settings.vision.vision_camera_name
+                    self._services.settings.vision.vision_camera_name
                     or None
                 )
-                session = None
+                session: CameraSession[CameraSource] | None = None
 
                 try:
                     session = self._services.camera_access.open(
@@ -1852,7 +1888,7 @@ class MainWindow(QMainWindow):
 
                     # 等待至少一路相机上线
                     deadline = time.time() + 10
-                    online = []
+                    online: list[dict[str, Any]] = []
                     while (
                         time.time() < deadline
                         and not self.isInterruptionRequested()
@@ -1882,25 +1918,28 @@ class MainWindow(QMainWindow):
                         time.time() < deadline
                         and not self.isInterruptionRequested()
                     ):
-                        if hasattr(mgr, "get_latest_raw_frames"):
-                            # RealSense：取原始帧（与视觉抓取 executor.py 一致）
-                            raw = mgr.get_latest_raw_frames(camera_name)
-                            if raw is not None:
-                                color, depth, intr = raw
-                                if color is not None and depth is not None:
-                                    h, w = color.shape[:2]
-                                    center_dist = float(depth[h // 2, w // 2])
-                                    actual_name = camera_name or online[0]["name"]
-                                    sn = ""
-                                    for c in online:
-                                        if c["name"] == actual_name:
-                                            sn = f" SN={c['serial']}"
-                                            break
-                                    msg = (f"成功: 彩色={w}x{h}  "
-                                           f"深度(中心)={center_dist / 1000:.3f}m  "
-                                           f"(相机={actual_name}{sn})")
-                                    self.result.emit(True, msg)
-                                    return
+                        if isinstance(mgr, DepthCameraSource):
+                            frame = mgr.get_latest_depth_frame(camera_name)
+                            if frame is not None:
+                                height, width = frame.color_bgr.shape[:2]
+                                center_depth_units = float(
+                                    frame.depth_uint16[height // 2, width // 2]
+                                )
+                                center_distance_metres = (
+                                    center_depth_units * frame.depth_scale_metres
+                                )
+                                serial_text = (
+                                    f" SN={frame.camera_serial}"
+                                    if frame.camera_serial
+                                    else ""
+                                )
+                                message = (
+                                    f"成功: 彩色={width}x{height}  "
+                                    f"深度(中心)={center_distance_metres:.3f}m  "
+                                    f"(相机={frame.camera_name}{serial_text})"
+                                )
+                                self.result.emit(True, message)
+                                return
                         else:
                             # OpenCV / Webcam：取 JPEG 帧
                             jpegs = mgr.get_latest_jpegs()
@@ -1926,7 +1965,7 @@ class MainWindow(QMainWindow):
                     if session is not None:
                         session.close()
 
-        def on_result(success, msg):
+        def on_result(success: bool, msg: str) -> None:
             message = f"[相机测试] {msg}"
             if success:
                 self._notifications.info(message)
@@ -1938,14 +1977,14 @@ class MainWindow(QMainWindow):
         self._camera_test_thread.result.connect(on_result)
         self._camera_test_thread.start()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         execution_state = self._execution_view_model.snapshot()
         if execution_state.active:
             self._execution_view_model.cancel()
         self._notifications.info("应用正在关闭，后台资源将按顺序释放...")
         if self.pose_timer is not None:
             self.pose_timer.stop()
-        camera_thread = getattr(self, "_camera_test_thread", None)
+        camera_thread = self._camera_test_thread
         if camera_thread is not None and camera_thread.isRunning():
             camera_thread.requestInterruption()
         if self._hardware_startup_worker is not None:
@@ -1968,7 +2007,7 @@ class MainWindow(QMainWindow):
                     "设备初始化线程未在 10 秒内退出，设备关闭流程将等待资源释放",
                     modal=False,
                 )
-        camera_thread = getattr(self, "_camera_test_thread", None)
+        camera_thread = self._camera_test_thread
         if camera_thread is not None and camera_thread.isRunning():
             camera_thread.requestInterruption()
             if not camera_thread.wait(2000):

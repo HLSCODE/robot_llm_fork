@@ -9,21 +9,23 @@ from __future__ import annotations
 
 import array
 import base64
+import importlib
 import logging
 import sys
 from collections import deque
-from typing import Deque, Optional
+from typing import TYPE_CHECKING, Any, Deque, Optional
 
-from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtCore import QIODevice, QObject, QTimer, Signal
 
 from ...voice_interaction.speech.output_gate import AudioOutputGate
 
+if TYPE_CHECKING:
+    from PySide6.QtMultimedia import QAudioFormat, QAudioSink
+
 try:
-    from PySide6.QtMultimedia import QAudioFormat, QAudioSink, QMediaDevices
+    _qt_multimedia: Any | None = importlib.import_module("PySide6.QtMultimedia")
 except Exception as exc:  # pragma: no cover - depends on local Qt install
-    QAudioFormat = None
-    QAudioSink = None
-    QMediaDevices = None
+    _qt_multimedia = None
     _QT_MULTIMEDIA_IMPORT_ERROR: Optional[Exception] = exc
 else:
     _QT_MULTIMEDIA_IMPORT_ERROR = None
@@ -48,9 +50,9 @@ class VoiceAudioPlayer(QObject):
         self._sample_rate = sample_rate
         self._channel_count = channel_count
         self._queue: Deque[bytes] = deque()
-        self._sink = None
-        self._audio_io = None
-        self._format = None
+        self._sink: QAudioSink | None = None
+        self._audio_io: QIODevice | None = None
+        self._format: QAudioFormat | None = None
         self._sample_format = "float32"
         self._reported_unavailable = False
         self._output_gate = output_gate or AudioOutputGate()
@@ -98,7 +100,8 @@ class VoiceAudioPlayer(QObject):
         if self._sink is not None and self._audio_io is not None:
             return True
 
-        if QAudioFormat is None or QAudioSink is None or QMediaDevices is None:
+        qt_multimedia = _qt_multimedia
+        if qt_multimedia is None:
             if not self._reported_unavailable:
                 self._reported_unavailable = True
                 message = f"QtMultimedia 不可用，无法播放语音: {_QT_MULTIMEDIA_IMPORT_ERROR}"
@@ -106,15 +109,19 @@ class VoiceAudioPlayer(QObject):
                 self.error_occurred.emit(message)
             return False
 
-        device = QMediaDevices.defaultAudioOutput()
+        device = qt_multimedia.QMediaDevices.defaultAudioOutput()
         if device.isNull():
             self.error_occurred.emit("未找到可用的音频输出设备")
             return False
 
-        audio_format = self._build_format(QAudioFormat.SampleFormat.Float)
+        audio_format = self._build_format(
+            qt_multimedia.QAudioFormat.SampleFormat.Float
+        )
         self._sample_format = "float32"
         if not device.isFormatSupported(audio_format):
-            audio_format = self._build_format(QAudioFormat.SampleFormat.Int16)
+            audio_format = self._build_format(
+                qt_multimedia.QAudioFormat.SampleFormat.Int16
+            )
             self._sample_format = "int16"
 
         if not device.isFormatSupported(audio_format):
@@ -122,9 +129,10 @@ class VoiceAudioPlayer(QObject):
             return False
 
         self._format = audio_format
-        self._sink = QAudioSink(device, audio_format, self)
-        self._sink.setBufferSize(self._sample_rate * self._channel_count * 4)
-        self._audio_io = self._sink.start()
+        sink = qt_multimedia.QAudioSink(device, audio_format, self)
+        sink.setBufferSize(self._sample_rate * self._channel_count * 4)
+        self._sink = sink
+        self._audio_io = sink.start()
         if self._audio_io is None:
             self.error_occurred.emit("音频输出启动失败")
             self.stop()
@@ -133,8 +141,11 @@ class VoiceAudioPlayer(QObject):
         logger.info("语音播放已启动: %s PCM, %d Hz", self._sample_format, self._sample_rate)
         return True
 
-    def _build_format(self, sample_format) -> QAudioFormat:
-        audio_format = QAudioFormat()
+    def _build_format(self, sample_format: Any) -> QAudioFormat:
+        qt_multimedia = _qt_multimedia
+        if qt_multimedia is None:
+            raise RuntimeError("QtMultimedia is unavailable")
+        audio_format = qt_multimedia.QAudioFormat()
         audio_format.setSampleRate(self._sample_rate)
         audio_format.setChannelCount(self._channel_count)
         audio_format.setSampleFormat(sample_format)

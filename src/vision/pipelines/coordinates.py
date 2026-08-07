@@ -1,8 +1,23 @@
+from collections.abc import Sequence
+
 import numpy as np
+from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
 
-def convert(x, y, z, x1, y1, z1, rx, ry, rz, rotation_matrix, translation_vector):
+def convert(
+    x: float,
+    y: float,
+    z: float,
+    x1: float,
+    y1: float,
+    z1: float,
+    rx: float,
+    ry: float,
+    rz: float,
+    rotation_matrix: Sequence[Sequence[float]],
+    translation_vector: Sequence[float],
+) -> NDArray[np.float64]:
     """
     接收单位 m
 
@@ -11,8 +26,12 @@ def convert(x, y, z, x1, y1, z1, rx, ry, rz, rotation_matrix, translation_vector
 
     """
 
-    rotation_matrix = rotation_matrix
-    translation_vector = translation_vector
+    rotation = np.asarray(rotation_matrix, dtype=np.float64)
+    translation = np.asarray(translation_vector, dtype=np.float64)
+    if rotation.shape != (3, 3):
+        raise ValueError("rotation_matrix must have shape (3, 3)")
+    if translation.shape not in {(3,), (3, 1)}:
+        raise ValueError("translation_vector must contain exactly three values")
     # 深度相机识别物体返回的坐标
     obj_camera_coordinates = np.array([x, y, z])
 
@@ -20,29 +39,29 @@ def convert(x, y, z, x1, y1, z1, rx, ry, rz, rotation_matrix, translation_vector
     end_effector_pose = np.array([x1, y1, z1, rx, ry, rz])
 
     # 将旋转矩阵和平移向量转换为齐次变换矩阵
-    T_camera_to_end_effector = np.eye(4)
-    T_camera_to_end_effector[:3, :3] = rotation_matrix
-    T_camera_to_end_effector[:3, 3] = translation_vector
+    camera_to_end_effector: NDArray[np.float64] = np.eye(4, dtype=np.float64)
+    camera_to_end_effector[:3, :3] = rotation
+    camera_to_end_effector[:3, 3] = translation.reshape(3)
 
     # 机械臂末端的位姿转换为齐次变换矩阵
     position = end_effector_pose[:3]
     orientation = R.from_euler("xyz", end_effector_pose[3:], degrees=False).as_matrix()
 
-    T_base_to_end_effector = np.eye(4)
-    T_base_to_end_effector[:3, :3] = orientation
-    T_base_to_end_effector[:3, 3] = position
+    base_to_end_effector: NDArray[np.float64] = np.eye(4, dtype=np.float64)
+    base_to_end_effector[:3, :3] = orientation
+    base_to_end_effector[:3, 3] = position
 
     # 计算物体相对于机械臂基座的位姿
-    obj_camera_coordinates_homo = np.append(
+    obj_camera_coordinates_homo: NDArray[np.float64] = np.append(
         obj_camera_coordinates, [1]
     )  # 将物体坐标转换为齐次坐标
     # obj_end_effector_coordinates_homo = np.linalg.inv(T_camera_to_end_effector).dot(obj_camera_coordinates_homo)
 
-    obj_end_effector_coordinates_homo = T_camera_to_end_effector.dot(
+    obj_end_effector_coordinates_homo = camera_to_end_effector.dot(
         obj_camera_coordinates_homo
     )
 
-    obj_base_coordinates_homo = T_base_to_end_effector.dot(
+    obj_base_coordinates_homo = base_to_end_effector.dot(
         obj_end_effector_coordinates_homo
     )
 
@@ -51,7 +70,7 @@ def convert(x, y, z, x1, y1, z1, rx, ry, rz, rotation_matrix, translation_vector
     ]  # 从齐次坐标中提取物体的x, y, z坐标
 
     # 计算物体的旋转
-    obj_orientation_matrix = T_base_to_end_effector[:3, :3].dot(rotation_matrix)
+    obj_orientation_matrix = base_to_end_effector[:3, :3].dot(rotation)
     obj_orientation_euler = R.from_matrix(obj_orientation_matrix).as_euler(
         "xyz", degrees=False
     )

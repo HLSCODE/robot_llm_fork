@@ -154,9 +154,9 @@ class _EnvironmentConfig:
     BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS: float = 2.0
 
     # 手眼标定参数
-    VISION_ROTATION_MATRIX: list = None
-    VISION_TRANSLATION_VECTOR: list = None
-    VISION_GRIPPER_OFFSET: list = None
+    VISION_ROTATION_MATRIX: list[float] | None = None
+    VISION_TRANSLATION_VECTOR: list[float] | None = None
+    VISION_GRIPPER_OFFSET: list[float] | None = None
 
     # 视觉抓取默认参数
     VISION_DEFAULT_CONFIDENCE: float = 0.7
@@ -174,18 +174,18 @@ class _EnvironmentConfig:
     VISION_RELOCALIZATION_STATIONS_FILE: str = "data/vision_stations/profiles.json"
     VISION_RELOCALIZATION_LEFT_CAMERA_NAME: str = ""
     VISION_RELOCALIZATION_RIGHT_CAMERA_NAME: str = ""
-    VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX: list = None
-    VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX: list = None
-    VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION: list = None
-    VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION: list = None
-    VISION_RELOCALIZATION_LEFT_DIST_COEFFS: list = None
-    VISION_RELOCALIZATION_RIGHT_DIST_COEFFS: list = None
+    VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX: list[float] | None = None
+    VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX: list[float] | None = None
+    VISION_RELOCALIZATION_LEFT_CAMERA_MATRIX_RESOLUTION: list[float] | None = None
+    VISION_RELOCALIZATION_RIGHT_CAMERA_MATRIX_RESOLUTION: list[float] | None = None
+    VISION_RELOCALIZATION_LEFT_DIST_COEFFS: list[float] | None = None
+    VISION_RELOCALIZATION_RIGHT_DIST_COEFFS: list[float] | None = None
     VISION_RELOCALIZATION_DEFAULT_MARKER_WIDTH: float = 0.158
     VISION_RELOCALIZATION_DEFAULT_MARKER_HEIGHT: float = 0.158
     VISION_RELOCALIZATION_POSE_ROTATION_TYPE: str = "rpy"
     VISION_RELOCALIZATION_POSE_ANGLE_UNIT: str = "rad"
-    VISION_RELOCALIZATION_LEFT_T_E_C: list = None
-    VISION_RELOCALIZATION_RIGHT_T_E_C: list = None
+    VISION_RELOCALIZATION_LEFT_T_E_C: list[list[float]] | None = None
+    VISION_RELOCALIZATION_RIGHT_T_E_C: list[list[float]] | None = None
     VISION_RELOCALIZATION_MODE: str = "planar"
     VISION_RELOCALIZATION_PLANAR_CONSTRAINT: str = "none"
     VISION_RELOCALIZATION_SAVE_DEBUG_IMAGES: bool = True
@@ -193,26 +193,26 @@ class _EnvironmentConfig:
     # 机械臂配置
     ROBOT1_IP: str = "192.168.3.18"
     ROBOT1_PORT: int = 8080
-    ROBOT1_INITIAL_POSE: list = None
+    ROBOT1_INITIAL_POSE: list[float] | None = None
     ROBOT2_IP: str = "192.168.3.19"
     ROBOT2_PORT: int = 8080
-    ROBOT2_INITIAL_POSE: list = None
+    ROBOT2_INITIAL_POSE: list[float] | None = None
     ROBOT_PROVIDER: str = "realman"
     ROBOT_MODEL: str = "rm75-dual"
     ROBOT_TOOL_RACK_ARM: str = "right"
-    ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE: list = None
-    ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE: list = None
-    ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_1_APPROACH_POSE: list[float] | None = None
+    ROBOT_TOOL_RACK_SLOT_1_ATTACH_POSE: list[float] | None = None
+    ROBOT_TOOL_RACK_SLOT_1_DETACH_POSE: list[float] | None = None
     ROBOT_TOOL_RACK_SLOT_1_ATTACH_DWELL_SECONDS: float = 0.5
     ROBOT_TOOL_RACK_SLOT_1_DETACH_DWELL_SECONDS: float = 1.0
-    ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE: list = None
-    ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE: list = None
-    ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE: list = None
+    ROBOT_TOOL_RACK_SLOT_2_APPROACH_POSE: list[float] | None = None
+    ROBOT_TOOL_RACK_SLOT_2_ATTACH_POSE: list[float] | None = None
+    ROBOT_TOOL_RACK_SLOT_2_DETACH_POSE: list[float] | None = None
     ROBOT_TOOL_RACK_SLOT_2_ATTACH_DWELL_SECONDS: float = 0.5
     ROBOT_TOOL_RACK_SLOT_2_DETACH_DWELL_SECONDS: float = 0.5
     MOVE_CONTROLLER_HOST: str = "192.168.1.216"
     MOVE_CONTROLLER_PORT: int = 12345
-    MOVE_CONTROLLER_CLIENT_BIND_PORT: int = None
+    MOVE_CONTROLLER_CLIENT_BIND_PORT: int | None = None
     MOVE_VELOCITY: int = 10
     MOVE_RADIUS: int = 0
     MOVE_CONNECT: int = 0
@@ -336,13 +336,13 @@ class _EnvironmentConfig:
     MINICPM_ASK_MODEL: str = "gpt-4o-mini"
 
     # 位置配置
-    INITIAL_POSE: list = None
-    LEFT_INITIAL_POSE: list = None
-    RIGHT_INITIAL_POSE: list = None
+    INITIAL_POSE: list[float] | None = None
+    LEFT_INITIAL_POSE: list[float] | None = None
+    RIGHT_INITIAL_POSE: list[float] | None = None
     PLACE_DROP_HEIGHT: float = 0.06
-    PLACE_ABOVE: list = None
-    PLACE_POS2: list = None
-    PLACE_TRANSFER_POSE: list = None
+    PLACE_ABOVE: list[float] | None = None
+    PLACE_POS2: list[float] | None = None
+    PLACE_TRANSFER_POSE: list[float] | None = None
 
     @classmethod
     def load(cls, env_path: Optional[str] = None) -> "_EnvironmentConfig":
@@ -370,13 +370,13 @@ class _EnvironmentConfig:
         if env_path is None:
             # 默认查找项目根目录的 config.env
             _src_dir = Path(__file__).parent.parent.parent
-            env_path = _src_dir / "config.env"
+            resolved_env_path = _src_dir / "config.env"
         else:
-            env_path = Path(env_path)
+            resolved_env_path = Path(env_path)
 
         # 优先从指定路径加载
-        if env_path.exists():
-            load_dotenv(env_path, override=False)
+        if resolved_env_path.exists():
+            load_dotenv(resolved_env_path, override=False)
         else:
             # 尝试从项目根目录加载
             _src_dir = Path(__file__).parent.parent.parent
@@ -1136,7 +1136,7 @@ class _EnvironmentConfig:
         return instance
 
     @classmethod
-    def _parse_float_list(cls, value: str) -> list:
+    def _parse_float_list(cls, value: str) -> list[float]:
         """解析逗号分隔的浮点数列表"""
         if not value:
             return []
@@ -1164,7 +1164,11 @@ class _EnvironmentConfig:
         return values
 
     @classmethod
-    def _matrix4_from_rt(cls, rotation_flat: list, translation: list) -> list:
+    def _matrix4_from_rt(
+        cls,
+        rotation_flat: list[float],
+        translation: list[float],
+    ) -> list[list[float]]:
         rot = rotation_flat or [1, 0, 0, 0, 1, 0, 0, 0, 1]
         trans = translation or [0, 0, 0]
         if len(rot) != 9:
@@ -1179,7 +1183,11 @@ class _EnvironmentConfig:
         ]
 
     @classmethod
-    def _parse_matrix4(cls, value: str, default: list | None = None) -> list:
+    def _parse_matrix4(
+        cls,
+        value: str,
+        default: list[list[float]] | None = None,
+    ) -> list[list[float]]:
         values = cls._parse_float_list(value)
         if len(values) != 16:
             return default or cls._matrix4_from_rt([], [])

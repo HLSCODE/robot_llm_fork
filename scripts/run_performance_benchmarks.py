@@ -20,7 +20,11 @@ from src.application.teleoperation_observability import (
     TeleoperationEventType,
     TeleoperationObservability,
 )
-from src.domain.action_schema import get_action_schema, validate_action_parameters
+from src.domain.action_schema import (
+    ActionTypeSchema,
+    get_action_schema,
+    validate_action_parameters,
+)
 from src.domain.models import ActionType
 from src.devices import ArmId
 from src.devices.runtime.resources import ResourceArbiter
@@ -357,7 +361,7 @@ def _benchmark_llm_vision_observability(iterations: int) -> None:
 
 
 def _benchmark_action_schema_snapshot(iterations: int) -> None:
-    schema: dict[str, object] = {}
+    schema: dict[str, ActionTypeSchema] = {}
     for _ in range(iterations):
         schema = get_action_schema()
     if ActionType.MOVE.value not in schema:

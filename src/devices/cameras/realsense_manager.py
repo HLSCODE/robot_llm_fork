@@ -13,10 +13,17 @@ import logging
 import threading
 import time
 import traceback
+from collections.abc import Mapping, Sequence
+from typing import TypedDict
 
 from ..runtime.camera_models import DepthCameraFrame
 
 logger = logging.getLogger(__name__)
+
+
+class _ConfiguredCamera(TypedDict):
+    serial: str
+    name: str
 
 try:
     import numpy as np
@@ -47,7 +54,7 @@ class RealSenseManager:
 
     def __init__(
         self,
-        cameras: list[dict] = (),
+        cameras: Sequence[Mapping[str, object]] = (),
         fps: int = 30,
         width: int = 640,
         height: int = 480,
@@ -62,8 +69,11 @@ class RealSenseManager:
         encode_fps: int | None = None,
     ) -> None:
         # 规范化相机配置，缺省 name 用 serial 代替
-        self._cameras: list[dict] = [
-            {"serial": c.get("serial", ""), "name": c.get("name", "") or c.get("serial", "")}
+        self._cameras: list[_ConfiguredCamera] = [
+            {
+                "serial": str(c.get("serial", "")),
+                "name": str(c.get("name", "") or c.get("serial", "")),
+            }
             for c in cameras
         ]
         self._fps = fps
@@ -185,7 +195,7 @@ class RealSenseManager:
                 pass
 
             # 构建 pipeline 配置
-            def _build_config():
+            def _build_config() -> tuple["rs.pipeline", "rs.config"]:
                 _pipeline = rs.pipeline(ctx)
                 _cfg = rs.config()
                 # 先清空所有默认流（D435if 默认会带 IMU），再只启用需要的
@@ -406,7 +416,10 @@ class RealSenseManager:
                 elif fail_count == 4:
                     logger.warning("相机 %s (%s) 连续取帧失败已达 %d 次，后续静默", name, serial, fail_count)
 
-    def get_latest_raw_frames(self, camera_name: str | None = None) -> tuple | None:
+    def get_latest_raw_frames(
+        self,
+        camera_name: str | None = None,
+    ) -> tuple["np.ndarray", "np.ndarray", dict[str, float]] | None:
         """获取最新原始帧（线程安全）。
 
         Args:

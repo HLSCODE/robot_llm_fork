@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 from uuid import uuid4
 
 from ...domain.action_schema import get_action_schema
@@ -23,7 +24,7 @@ class CompositionWebSocketHandler:
     def __init__(self, server: WebSocketHandlerHost) -> None:
         self._server = server
 
-    async def _handle_list_actions(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_list_actions(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         返回动作库（按类型分组）
         响应: {"event": "actions_list", "actions": {...按类型分组...}}
@@ -31,7 +32,9 @@ class CompositionWebSocketHandler:
         all_actions = self._server._services.composition.list_actions()
 
         # 按类型分组（与 GUI 左侧 Tab 对应）
-        grouped = {action_type.value: [] for action_type in ActionType}
+        grouped: dict[str, list[dict[str, Any]]] = {
+            action_type.value: [] for action_type in ActionType
+        }
         for a in all_actions:
             grouped[a.type.value].append(a.to_dict())
 
@@ -45,7 +48,7 @@ class CompositionWebSocketHandler:
             )
         )
     async def _handle_get_action_schema(
-        self, websocket, data: WebSocketRequest
+        self, websocket: Any, data: WebSocketRequest
     ) -> None:
         """
         返回所有动作类型的参数结构定义，前端可据此动态生成表单
@@ -63,7 +66,7 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_create_action(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_create_action(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         新建动作
         请求: {"action": "create_action", "name": "移动到A点", "type": "MOVE_TO_POINT", "parameters": {...}}
@@ -124,7 +127,7 @@ class CompositionWebSocketHandler:
         )
         logger.info("新建动作: %s (%s)", name, action_type_str)
 
-    async def _handle_delete_action(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_delete_action(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         删除动作
         请求: {"action": "delete_action", "id": "..."}
@@ -162,7 +165,7 @@ class CompositionWebSocketHandler:
         )
         logger.info("删除动作: %s", action_id)
 
-    async def _handle_update_action(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_update_action(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         更新动作
         请求: {"action": "update_action", "id": "...", "name": "...", "type": "...", "parameters": {...}}
@@ -224,7 +227,7 @@ class CompositionWebSocketHandler:
         )
         logger.info("更新动作: %s", action_id)
 
-    async def _handle_get_sequence(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_get_sequence(self, websocket: Any, data: WebSocketRequest) -> None:
         """获取当前编排的序列"""
         entries = self._server._services.composition.sequence_entries()
         await websocket.send(
@@ -236,7 +239,7 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_add_to_sequence(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_add_to_sequence(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         添加动作到序列
         请求: {"action": "add_to_sequence", "items": [
@@ -299,14 +302,15 @@ class CompositionWebSocketHandler:
         )
 
     async def _handle_remove_from_sequence(
-        self, websocket, data: WebSocketRequest
+        self, websocket: Any, data: WebSocketRequest
     ) -> None:
         """
         删除序列中的某项
         请求: {"action": "remove_from_sequence", "index": 0}
         """
-        index = data.get("index")
+        raw_index = data.get("index")
         try:
+            index = _integer_field(data, "index")
             removed = self._server._services.composition.remove_sequence_entry(
                 index,
                 origin=self._server._composition_origin(websocket),
@@ -317,7 +321,7 @@ class CompositionWebSocketHandler:
                 self._server._json_msg(
                     {
                         "event": "error",
-                        "message": f"无效的索引: {index}，序列长度: {sequence_length}",
+                        "message": f"无效的索引: {raw_index}，序列长度: {sequence_length}",
                     }
                 )
             )
@@ -334,18 +338,22 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_move_in_sequence(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_move_in_sequence(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """
         移动序列项位置
         请求: {"action": "move_in_sequence", "from": 0, "to": 1}
         """
-        from_idx = data.get("from")
-        to_idx = data.get("to")
-
-        if from_idx is None or to_idx is None:
+        try:
+            from_idx = _integer_field(data, "from")
+            to_idx = _integer_field(data, "to")
+        except TypeError:
             await websocket.send(
                 self._server._json_msg(
-                    {"event": "error", "message": "需要提供 from 和 to 索引"}
+                    {"event": "error", "message": "from 和 to 必须是整数索引"}
                 )
             )
             return
@@ -377,7 +385,7 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_clear_sequence(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_clear_sequence(self, websocket: Any, data: WebSocketRequest) -> None:
         """清空序列"""
         self._server._services.composition.clear_sequence(
             origin=self._server._composition_origin(websocket),
@@ -391,7 +399,7 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_list_tasks(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_list_tasks(self, websocket: Any, data: WebSocketRequest) -> None:
         """返回所有已保存的任务文件名"""
         summaries = await asyncio.to_thread(
             self._server._services.composition.list_tasks
@@ -412,7 +420,7 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_save_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_save_task(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         保存当前序列为任务文件
         请求: {"action": "save_task", "name": "xxx.workflow.json"}
@@ -449,7 +457,7 @@ class CompositionWebSocketHandler:
         )
         logger.info("任务已保存: %s", stored_name)
 
-    async def _handle_load_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_load_task(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         加载任务到当前序列（不执行）
         请求: {"action": "load_task", "name": "xxx.workflow.json"}
@@ -490,7 +498,7 @@ class CompositionWebSocketHandler:
         )
         logger.info("任务已加载: %s", task_name)
 
-    async def _handle_delete_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_delete_task(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         删除任务文件
         请求: {"action": "delete_task", "name": "xxx.workflow.json"}
@@ -528,7 +536,11 @@ class CompositionWebSocketHandler:
         )
         logger.info("任务已删除: %s", deleted_name)
 
-    async def _handle_get_task_detail(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_get_task_detail(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """
         读取任务文件内容，但不影响当前序列
         请求: {"action": "get_task_detail", "name": "xxx.workflow.json"}
@@ -567,7 +579,7 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_rename_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_rename_task(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         重命名任务文件
         请求: {"action": "rename_task", "name": "old.workflow.json", "new_name": "new.workflow.json"}
@@ -614,7 +626,7 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_add_to_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_add_to_task(self, websocket: Any, data: WebSocketRequest) -> None:
         """
         直接向任务文件追加/插入动作
         请求:
@@ -665,8 +677,9 @@ class CompositionWebSocketHandler:
             )
             return
 
-        index = data.get("index")
+        raw_index = data.get("index")
         try:
+            index = _optional_integer_field(data, "index")
             sequence = await asyncio.to_thread(
                 self._server._services.composition.insert_task_entries,
                 task_name,
@@ -684,7 +697,7 @@ class CompositionWebSocketHandler:
         except (IndexError, TypeError):
             await websocket.send(
                 self._server._json_msg(
-                    {"event": "error", "message": f"无效的插入位置: {index}"}
+                    {"event": "error", "message": f"无效的插入位置: {raw_index}"}
                 )
             )
             return
@@ -698,14 +711,16 @@ class CompositionWebSocketHandler:
                 }
             )
         )
-    async def _handle_remove_from_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_remove_from_task(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """
         直接删除任务文件中的某一步
         请求: {"action": "remove_from_task", "name": "x.workflow.json", "index": 0}
         """
         task_name = data.get("name", "").strip()
-        index = data.get("index")
-
         if not task_name:
             await websocket.send(
                 self._server._json_msg(
@@ -714,7 +729,9 @@ class CompositionWebSocketHandler:
             )
             return
 
+        raw_index = data.get("index")
         try:
+            index = _integer_field(data, "index")
             removed, sequence = await asyncio.to_thread(
                 self._server._services.composition.remove_task_entry,
                 task_name,
@@ -731,7 +748,7 @@ class CompositionWebSocketHandler:
         except (IndexError, TypeError):
             await websocket.send(
                 self._server._json_msg(
-                    {"event": "error", "message": f"无效的索引: {index}"}
+                    {"event": "error", "message": f"无效的索引: {raw_index}"}
                 )
             )
             return
@@ -747,15 +764,16 @@ class CompositionWebSocketHandler:
             )
         )
 
-    async def _handle_move_in_task(self, websocket, data: WebSocketRequest) -> None:
+    async def _handle_move_in_task(
+        self,
+        websocket: Any,
+        data: WebSocketRequest,
+    ) -> None:
         """
         直接调整任务文件内部顺序
         请求: {"action": "move_in_task", "name": "x.workflow.json", "from": 0, "to": 1}
         """
         task_name = data.get("name", "").strip()
-        from_idx = data.get("from")
-        to_idx = data.get("to")
-
         if not task_name:
             await websocket.send(
                 self._server._json_msg(
@@ -765,6 +783,8 @@ class CompositionWebSocketHandler:
             return
 
         try:
+            from_idx = _integer_field(data, "from")
+            to_idx = _integer_field(data, "to")
             sequence = await asyncio.to_thread(
                 self._server._services.composition.move_task_entry,
                 task_name,
@@ -801,3 +821,25 @@ class CompositionWebSocketHandler:
 def _workflow_file_name(value: str) -> str:
     name = str(value).strip()
     return name if name.endswith(".workflow.json") else f"{name}.workflow.json"
+
+
+def _integer_field(
+    data: WebSocketRequest,
+    name: str,
+) -> int:
+    value = data.get(name)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    return value
+
+
+def _optional_integer_field(
+    data: WebSocketRequest,
+    name: str,
+) -> int | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer or null")
+    return value

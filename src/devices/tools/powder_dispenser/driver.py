@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from ...transports import SerialTransport
 from ....configuration.settings import DeviceSettings
 from .electric_gripper import ElectricGripper, MotionStatus
-from .stepper_motor import MSeriesRegister, MotorStatus, StepperBus
+from .stepper_motor import MSeriesRegister, MotorStatus, StepperBus, StepperMotor
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,12 @@ class TappingController:
             time.sleep(poll_interval)
         raise TimeoutError(f"夹爪运动超时 ({timeout}s)")
 
-    def _wait_for_motor(self, motor, timeout: float = 15.0, poll_interval: float = 0.1) -> None:
+    def _wait_for_motor(
+        self,
+        motor: StepperMotor,
+        timeout: float = 15.0,
+        poll_interval: float = 0.1,
+    ) -> None:
         """轮询步进电机状态，直到空闲/到位或超时。"""
         start = time.time()
         while time.time() - start < timeout:

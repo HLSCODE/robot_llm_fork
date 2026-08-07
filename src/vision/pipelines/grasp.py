@@ -19,13 +19,16 @@ CameraSource 和 RobotSystem 能力，不接触厂商 SDK。
 from __future__ import annotations
 
 import os
-import time
 import threading
-from typing import Optional, Literal, Tuple, Any, Callable
+import time
+from collections.abc import Callable, Sequence
+from typing import Literal, cast
+
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 from sklearn.mixture import GaussianMixture
-from ultralytics import YOLO, SAM
+from ultralytics import SAM, YOLO
 
 from ...configuration.settings import VisionSettings
 from ...devices import (
@@ -51,8 +54,13 @@ from .vertical import vertical_catch_main as vertical_catch
 # ---------------------------------------------------------------
 # 模型缓存（避免重复加载）
 # ---------------------------------------------------------------
-_model_cache: dict[str, Any] = {}
+_model_cache: dict[str, YOLO | SAM] = {}
 _cache_lock = threading.Lock()
+
+MaskProcessor = Callable[
+    [NDArray[np.generic], NDArray[np.uint8]],
+    NDArray[np.uint8],
+]
 
 
 def load_yolo_model(path: str) -> YOLO:
@@ -61,7 +69,7 @@ def load_yolo_model(path: str) -> YOLO:
     with _cache_lock:
         if "yolo" not in _model_cache:
             _model_cache["yolo"] = YOLO(path)
-        return _model_cache["yolo"]
+        return cast(YOLO, _model_cache["yolo"])
 
 
 def load_sam_model(path: str) -> SAM:
@@ -70,7 +78,7 @@ def load_sam_model(path: str) -> SAM:
     with _cache_lock:
         if "sam" not in _model_cache:
             _model_cache["sam"] = SAM(path)
-        return _model_cache["sam"]
+        return cast(SAM, _model_cache["sam"])
 
 
 # ---------------------------------------------------------------
@@ -78,7 +86,11 @@ def load_sam_model(path: str) -> SAM:
 # ---------------------------------------------------------------
 
 
-def process_mask_with_gmm(image: np.ndarray, mask: np.ndarray, n_components: int = 1) -> np.ndarray:
+def process_mask_with_gmm(
+    image: NDArray[np.generic],
+    mask: NDArray[np.uint8],
+    n_components: int = 1,
+) -> NDArray[np.uint8]:
     """
     使用高斯混合模型(GMM)处理SAM分割掩码，过滤噪声并保留最大连通区域。
 
@@ -114,23 +126,23 @@ def process_mask_with_gmm(image: np.ndarray, mask: np.ndarray, n_components: int
 
         new_mask = cv2.bitwise_or(new_mask, component_mask)
 
-    kernel = np.ones((5, 5), np.uint8)
+    kernel: NDArray[np.uint8] = np.ones((5, 5), np.uint8)
     new_mask = cv2.morphologyEx(new_mask, cv2.MORPH_CLOSE, kernel)
     new_mask = cv2.morphologyEx(new_mask, cv2.MORPH_OPEN, kernel)
     return new_mask
 
 
 def detect_and_segment(
-    color_image: np.ndarray,
-    yolo_model,
-    sam_model,
+    color_image: NDArray[np.generic],
+    yolo_model: YOLO,
+    sam_model: SAM,
     width: int = 640,
     height: int = 480,
     confidence_threshold: float = 0.7,
     apply_gmm: bool = True,
-    debug_save_path: Optional[str] = None,
-    process_mask_fn=None,
-) -> Tuple[bool, np.ndarray]:
+    debug_save_path: str | None = None,
+    process_mask_fn: MaskProcessor | None = None,
+) -> tuple[bool, NDArray[np.uint8]]:
     """
     对单帧图像执行 YOLO 检测 + SAM 分割，返回合并掩码。
 
@@ -150,7 +162,7 @@ def detect_and_segment(
     if process_mask_fn is None:
         process_mask_fn = process_mask_with_gmm
 
-    mask = np.zeros((height, width), dtype=np.uint8)
+    mask: NDArray[np.uint8] = np.zeros((height, width), dtype=np.uint8)
     yolo_results = yolo_model(color_image, verbose=False)
 
     detected = False
@@ -239,25 +251,23 @@ class VisionCaptureAction:
         robot_system: RobotSystem,
         camera: DepthCameraSource,
         settings: VisionSettings,
-        yolo_model_path: str = None,
-        sam_model_path: str = None,
+        yolo_model_path: str | None = None,
+        sam_model_path: str | None = None,
         target_robot: Literal["robot1", "robot2"] = "robot1",
         workflow: Literal["vertical", "bottle"] = "bottle",
-        gripper_offset: list = None,
-        rotation_matrix: list = None,
-        translation_vector: list = None,
-        gripper_length: float = None,
-        confidence_threshold: float = None,
-        move_velocity: int = None,
+        gripper_offset: Sequence[float] | None = None,
+        rotation_matrix: Sequence[Sequence[float]] | None = None,
+        translation_vector: Sequence[float] | None = None,
+        gripper_length: float | None = None,
+        confidence_threshold: float | None = None,
+        move_velocity: int | None = None,
         image_width: int = 640,
         image_height: int = 480,
         save_debug_images: bool = True,
-        debug_save_root: str = None,
+        debug_save_root: str | None = None,
         raise_on_error: bool = True,
-    ):
+    ) -> None:
         # ── 从不可变设置快照加载默认值 ──
-        calibration = settings.calibration_config()
-
         self.settings = settings
         self.yolo_model_path = yolo_model_path or settings.yolo_model_path
         self.sam_model_path = sam_model_path or settings.sam_model_path
@@ -267,9 +277,13 @@ class VisionCaptureAction:
         self.target_robot = target_robot
         self.workflow = workflow
 
-        self.gripper_offset = list(gripper_offset or calibration["gripper_offset"])
-        self.rotation_matrix = rotation_matrix or calibration["rotation_matrix"]
-        self.translation_vector = translation_vector or calibration["translation_vector"]
+        self.gripper_offset = list(gripper_offset or settings.vision_gripper_offset)
+        self.rotation_matrix = normalize_rotation_matrix(
+            rotation_matrix or settings.vision_rotation_matrix
+        )
+        self.translation_vector = list(
+            translation_vector or settings.vision_translation_vector
+        )
         self.gripper_length = (
             gripper_length if gripper_length is not None else settings.vision_default_gripper_length
         )
@@ -288,12 +302,12 @@ class VisionCaptureAction:
         self.max_attempts = settings.max_attempts
         self.raise_on_error = raise_on_error
 
-        self._process_mask_fn: Callable = process_mask_with_gmm
+        self._process_mask_fn: MaskProcessor = process_mask_with_gmm
 
         # 运行时状态
-        self._yolo_model = None
-        self._sam_model = None
-        self._last_error: Optional[str] = None
+        self._yolo_model: YOLO | None = None
+        self._sam_model: SAM | None = None
+        self._last_error: str | None = None
         self._result: bool = False
 
     # ---- 公共 API ----
@@ -440,7 +454,7 @@ class VisionCaptureAction:
         return True
 
     @property
-    def last_error(self) -> Optional[str]:
+    def last_error(self) -> str | None:
         return self._last_error
 
     @property
@@ -455,13 +469,29 @@ class VisionCaptureAction:
         if self._sam_model is None:
             self._sam_model = load_sam_model(self.sam_model_path)
 
-    def _fetch_frames(self):
+    def _fetch_frames(
+        self,
+    ) -> tuple[
+        NDArray[np.generic],
+        NDArray[np.generic],
+        dict[str, float],
+    ]:
         camera_name = self.settings.vision_camera_name or None
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
-            frames = self.camera.get_latest_raw_frames(camera_name)
-            if frames is not None:
-                return frames
+            frame = self.camera.get_latest_depth_frame(camera_name)
+            if frame is not None:
+                intrinsics = frame.intrinsics
+                return (
+                    frame.color_bgr,
+                    frame.depth_uint16,
+                    {
+                        "fx": float(intrinsics[0, 0]),
+                        "fy": float(intrinsics[1, 1]),
+                        "ppx": float(intrinsics[0, 2]),
+                        "ppy": float(intrinsics[1, 2]),
+                    },
+                )
             time.sleep(0.2)
         raise RuntimeError("等待深度相机帧超时")
 
@@ -503,19 +533,44 @@ class VisionCaptureAction:
         )
         print(f"[VisionCapture] 已移动到 {label}: {pose}")
 
-    def _validate_frames(self, color, depth, intr) -> None:
+    def _validate_frames(
+        self,
+        color: NDArray[np.generic] | None,
+        depth: NDArray[np.generic] | None,
+        intr: dict[str, float] | None,
+    ) -> None:
         if color is None or depth is None or intr is None:
             raise RuntimeError("无法获取深度相机帧")
 
-    def _debug_dir(self, sub: str) -> Optional[str]:
+    def _debug_dir(self, sub: str) -> str | None:
         if not self.save_debug_images:
             return None
         d = os.path.join(self.debug_save_root, sub)
         os.makedirs(d, exist_ok=True)
         return d
 
-    def _save_failed_image(self, img, name) -> None:
+    def _save_failed_image(
+        self,
+        img: NDArray[np.generic] | None,
+        name: str,
+    ) -> None:
         if not self.save_debug_images or img is None:
             return
         d = self._debug_dir("failed")
+        if d is None:
+            return
         cv2.imwrite(os.path.join(d, name), img)
+
+
+def normalize_rotation_matrix(
+    values: Sequence[Sequence[float]] | Sequence[float],
+) -> list[list[float]]:
+    flattened: list[float] = []
+    for value in values:
+        if isinstance(value, Sequence):
+            flattened.extend(float(item) for item in value)
+        else:
+            flattened.append(float(value))
+    if len(flattened) != 9:
+        raise ValueError("vision rotation matrix must contain nine values")
+    return [flattened[index : index + 3] for index in range(0, 9, 3)]

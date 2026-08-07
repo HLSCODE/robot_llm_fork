@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from threading import RLock
+from typing import TYPE_CHECKING, NoReturn
 
 from ..base import ExpressionSpec
 from ..provider import ExpressionDisplayProviderDefinition
+
+if TYPE_CHECKING:
+    from ..display import ExpressionDisplaySettings
+    from .config import DgusSdkConfig
+    from .sdk import T5LServiceContainer
+    from .services import Expression, ExpressionSwitcher
 
 
 class T5LDgusiiExpressionDisplay:
@@ -13,11 +20,11 @@ class T5LDgusiiExpressionDisplay:
     facade only chooses this strategy; it does not manage serial internals.
     """
 
-    def __init__(self, settings):
+    def __init__(self, settings: ExpressionDisplaySettings) -> None:
         self.settings = settings
         self._lock = RLock()
-        self._container = None
-        self._sdk_config = None
+        self._container: T5LServiceContainer | None = None
+        self._sdk_config: DgusSdkConfig | None = None
 
     @property
     def enabled(self) -> bool:
@@ -31,7 +38,7 @@ class T5LDgusiiExpressionDisplay:
                 "Expression display is disabled. Set EXPRESSION_DISPLAY_ENABLED=true to use it."
             )
 
-    def _raise_optional_dependency_error(self, exc: ModuleNotFoundError) -> None:
+    def _raise_optional_dependency_error(self, exc: ModuleNotFoundError) -> NoReturn:
         if exc.name == "serial":
             from ..display import ExpressionDisplayUnavailable
 
@@ -41,9 +48,9 @@ class T5LDgusiiExpressionDisplay:
             ) from exc
         raise exc
 
-    def _get_container(self):
+    def _get_container(self) -> T5LServiceContainer:
         try:
-            from . import T5LServiceContainer
+            from .sdk import T5LServiceContainer
         except ModuleNotFoundError as exc:
             self._raise_optional_dependency_error(exc)
 
@@ -51,12 +58,12 @@ class T5LDgusiiExpressionDisplay:
             self._container = T5LServiceContainer()
         return self._container
 
-    def _get_sdk_config(self):
+    def _get_sdk_config(self) -> DgusSdkConfig:
         if self._sdk_config is None:
             self._sdk_config = self._build_sdk_config()
         return self._sdk_config
 
-    def _build_sdk_config(self):
+    def _build_sdk_config(self) -> DgusSdkConfig:
         try:
             from .config import DgusSdkConfig, ExpressionConfig
             from .controls import AnimationIconConfig
@@ -94,7 +101,7 @@ class T5LDgusiiExpressionDisplay:
             test_interval=self.settings.test_interval,
         )
 
-    def _get_service(self):
+    def _get_service(self) -> ExpressionSwitcher:
         self._ensure_enabled()
         container = self._get_container()
         if self.settings.config_path is not None:
@@ -113,7 +120,7 @@ class T5LDgusiiExpressionDisplay:
             return list(self.settings.expressions)
 
         try:
-            from . import load_config
+            from .config import load_config
         except ModuleNotFoundError as exc:
             self._raise_optional_dependency_error(exc)
 
@@ -123,7 +130,7 @@ class T5LDgusiiExpressionDisplay:
             for item in config.expressions
         ]
 
-    def switch(self, expression: str | int):
+    def switch(self, expression: str | int) -> Expression:
         with self._lock:
             return self._get_service().switch(expression)
 
@@ -139,7 +146,7 @@ class T5LDgusiiExpressionDisplay:
             self._sdk_config = None
 
 
-def create_display(settings) -> T5LDgusiiExpressionDisplay:
+def create_display(settings: ExpressionDisplaySettings) -> T5LDgusiiExpressionDisplay:
     return T5LDgusiiExpressionDisplay(settings)
 
 

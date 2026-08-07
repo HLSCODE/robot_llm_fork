@@ -96,7 +96,10 @@ class OpenAICompatibleClient(BaseLLMClient):
         request = self._build_chat_request(messages, options, stream=False)
 
         try:
-            response = await self._async_client.chat.completions.create(**request)
+            client = self._async_client
+            if client is None:
+                raise LLMConfigError(f"{self._provider_name} LLM 客户端未初始化")
+            response = await client.chat.completions.create(**request)
             message = response.choices[0].message
             text = (message.content or "").strip()
             return LLMChatResult(
@@ -128,7 +131,10 @@ class OpenAICompatibleClient(BaseLLMClient):
 
         stream = None
         try:
-            stream = await self._async_client.chat.completions.create(**request)
+            client = self._async_client
+            if client is None:
+                raise LLMConfigError(f"{self._provider_name} LLM 客户端未初始化")
+            stream = await client.chat.completions.create(**request)
             async for chunk in stream:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 text_delta = getattr(delta, "content", None) if delta else None
@@ -210,7 +216,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         if isinstance(content, str):
             return content
 
-        parts = []
+        parts: list[dict[str, Any]] = []
         for part in content:
             if part.type == "text":
                 parts.append({"type": "text", "text": part.text or ""})

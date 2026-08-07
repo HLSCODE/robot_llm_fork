@@ -95,17 +95,23 @@ def resolve_startup_options(
     args: argparse.Namespace,
     settings: ApplicationSettings,
 ) -> StartupOptions:
+    websocket_port_value = getattr(args, "websocket_port", None)
+    if websocket_port_value is None:
+        websocket_port = settings.server.websocket_port
+    elif isinstance(websocket_port_value, bool) or not isinstance(
+        websocket_port_value,
+        int,
+    ):
+        raise ValueError("websocket_port must be an integer")
+    else:
+        websocket_port = websocket_port_value
     return StartupOptions(
         simulation=bool(getattr(args, "simulation", False) or settings.runtime.simulation_mode),
         websocket_enabled=bool(
             settings.server.websocket_enabled and not getattr(args, "disable_websocket", False)
         ),
         websocket_host=(getattr(args, "websocket_host", None) or settings.server.websocket_host),
-        websocket_port=(
-            getattr(args, "websocket_port", None)
-            if getattr(args, "websocket_port", None) is not None
-            else settings.server.websocket_port
-        ),
+        websocket_port=websocket_port,
         log_level=(getattr(args, "log_level", None) or settings.logging.level),
     )
 
@@ -173,8 +179,6 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             startup_card.set_progress(100, message, "正在打开控制界面...")
 
             def reveal() -> None:
-                if window is None:
-                    return
                 window.show()
                 window.raise_()
                 window.activateWindow()
@@ -189,10 +193,6 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             if not success:
                 startup_card.mark_failed(message)
                 return
-            if auxiliary_host is None:
-                reveal_main_window(message)
-                return
-
             startup_card.set_progress(
                 97,
                 "正在启动附加服务...",
@@ -204,6 +204,12 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             worker.moveToThread(thread)
 
             def services_started(snapshots: object) -> None:
+                if not isinstance(snapshots, tuple) or not all(
+                    isinstance(snapshot, AuxiliaryServiceSnapshot)
+                    for snapshot in snapshots
+                ):
+                    services_failed("附加服务返回了无效的启动快照")
+                    return
                 for snapshot in snapshots:
                     _log_service_snapshot(snapshot)
                 reveal_main_window(message)

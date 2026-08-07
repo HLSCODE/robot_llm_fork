@@ -94,7 +94,7 @@ from contextlib import suppress
 import json
 import logging
 import threading
-from collections.abc import Coroutine, Mapping
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
 from typing import (
     Any,
     Dict,
@@ -163,7 +163,7 @@ class _BoundedWebSocket:
         self._timeout_seconds = timeout_seconds
         self._metrics = metrics
 
-    def __aiter__(self):
+    def __aiter__(self) -> AsyncIterator[Any]:
         return self._websocket.__aiter__()
 
     def __getattr__(self, name: str) -> Any:
@@ -263,7 +263,7 @@ class RobotWebSocketServer:
         self._validate_transport_boundary(auth_token)
         self._teleoperation_command_timeout_seconds = teleoperation_command_timeout_seconds
         self._server: Any = None
-        self._composition_unsubscribe = None
+        self._composition_unsubscribe: Callable[[], None] | None = None
 
         # 已连接的客户端集合
         self._clients: Set = set()
@@ -505,7 +505,7 @@ class RobotWebSocketServer:
     # 连接处理
     # ------------------------------------------------------------------
 
-    async def _handler(self, websocket) -> None:
+    async def _handler(self, websocket: Any) -> None:
         """所有连接统一进入主控处理器，通过 action 字段分发指令。"""
         try:
             await self._handle_frontend_ws(
@@ -519,7 +519,7 @@ class RobotWebSocketServer:
             with suppress(Exception):
                 await websocket.close(code=1011, reason="send timeout")
 
-    async def _handle_frontend_ws(self, websocket) -> None:
+    async def _handle_frontend_ws(self, websocket: Any) -> None:
         """处理前端主控 WebSocket 连接"""
         remote = getattr(websocket, "remote_address", None)
         client_id = self._register_client(websocket, remote)
@@ -899,14 +899,14 @@ class RobotWebSocketServer:
             )
         return dict(registry.freeze())
 
-    async def _dispatch(self, websocket, data: object) -> None:
+    async def _dispatch(self, websocket: Any, data: object) -> None:
         started_at = self._metrics.request_started()
         try:
             await self._dispatch_request(websocket, data)
         finally:
             self._metrics.request_finished(started_at)
 
-    async def _dispatch_request(self, websocket, data: object) -> None:
+    async def _dispatch_request(self, websocket: Any, data: object) -> None:
         """Validate a typed request, then dispatch it to a domain handler."""
         try:
             request = WebSocketRequest.parse(
@@ -1199,7 +1199,7 @@ class RobotWebSocketServer:
     async def _handle_authenticate(
         self,
         websocket: Any,
-        data: dict[str, Any],
+        data: WebSocketRequest,
     ) -> None:
         session = self._access.authenticate(
             self._client_id(websocket),
@@ -1219,7 +1219,7 @@ class RobotWebSocketServer:
     async def _handle_control_status(
         self,
         websocket: Any,
-        data: dict[str, Any],
+        data: WebSocketRequest,
     ) -> None:
         client_id = self._client_id(websocket)
         session = self._access.session(client_id)
@@ -1242,7 +1242,7 @@ class RobotWebSocketServer:
     async def _handle_server_metrics(
         self,
         websocket: Any,
-        data: dict[str, Any],
+        data: WebSocketRequest,
     ) -> None:
         await websocket.send(
             self._json_msg(
@@ -1262,7 +1262,7 @@ class RobotWebSocketServer:
     async def _handle_acquire_control(
         self,
         websocket: Any,
-        data: dict[str, Any],
+        data: WebSocketRequest,
     ) -> None:
         lease = self._access.acquire_control(self._client_id(websocket))
         await websocket.send(
@@ -1278,7 +1278,7 @@ class RobotWebSocketServer:
     async def _handle_control_heartbeat(
         self,
         websocket: Any,
-        data: dict[str, Any],
+        data: WebSocketRequest,
     ) -> None:
         lease = self._access.renew_control(self._client_id(websocket))
         await websocket.send(
@@ -1294,7 +1294,7 @@ class RobotWebSocketServer:
     async def _handle_release_control(
         self,
         websocket: Any,
-        data: dict[str, Any],
+        data: WebSocketRequest,
     ) -> None:
         client_id = self._client_id(websocket)
         released = self._access.release_control(client_id)
@@ -1484,5 +1484,5 @@ class RobotWebSocketServer:
         return json.dumps(payload, ensure_ascii=False)
 
     @staticmethod
-    def _composition_origin(websocket) -> str:
+    def _composition_origin(websocket: Any) -> str:
         return f"websocket:{id(websocket)}"
