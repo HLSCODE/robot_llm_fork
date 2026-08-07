@@ -2,11 +2,11 @@
 
 > 适用场景：竖屏、窄窗口、触控操作、机器人动作编排与任务执行  
 > 推荐技术栈：Python + PySide6 + QGraphicsView/QGraphicsScene  
-> 文档版本：V2.1
+> 文档版本：V2.2
 > 文档性质：目标架构、实施记录与后续验收约束
 > 最近更新：2026-08-07
 
-> 实施进度：D-015～D-025 已完成，M6/M7 软件重构项全部关闭。纯 WorkflowDocument、版本化 `.workflow`
+> 实施进度：D-015～D-027 已完成，D-028～D-030 已立项。纯 WorkflowDocument、版本化 `.workflow`
 > 持久化与草稿恢复、Validator/Preflight/Compiler、稳定节点映射、受约束
 > QGraphics 画布、Loop 容器、Undo/Redo、触控导航和现有功能等价接入已经
 > 落地。系统 Palette、集中设计令牌、44 px 触控目标、可访问性、Qt
@@ -47,17 +47,25 @@
 > 用户可见“任务”的唯一源文档，执行计划由 Compiler 派生；控制流与 presentation
 > 分离，运行状态不落盘。17 个旧任务已由显式 CLI 转换并归档，`.task`、旧
 > `.workflow`、读取时隐式迁移、双格式 Repository API 和旧目录配置已从 runtime 删除。
+>
+> 2026-08-07 组合编辑复核：当前 `TaskComposerService/TaskComposerView` 与工作流画布
+> 形成两套编辑状态，且组合器通过 `flattened_task()` 展开任务时会消除 Loop 边界、将
+> Parallel 分支按列表顺序拼接，存在改变控制流语义的 P1 风险。后续 D-028～D-030
+> 将以 WorkflowDocument v4 的内嵌 Subworkflow 节点和唯一 WorkflowEditingSession
+> 直接替换组合器；原“任务组合”页面、服务和控制器路径删除，不保留兼容入口。
 
 ## 1. 结论
 
 本次 GUI 重构应以“受约束的工作流画布 + 工作台壳层”替换当前纵向堆叠式界面，并继续复用项目已经收敛的领域模型、应用服务、设备运行时和唯一执行运行时。
 
-重构不新建第二套执行器、动作处理器或持久化仓库，也不以视觉升级为由回退现有循环、任务组合、AI 生成序列、轨迹和执行控制能力。
+重构不新建第二套执行器、动作处理器或持久化仓库；任务组合能力进入唯一工作流画布，
+不能继续由独立列表组合器维护，也不能以视觉升级为由回退循环、子流程、AI 生成序列、
+轨迹和执行控制能力。
 
 目标调用链固定为：
 
 ```text
-WorkflowDocument（纯编辑模型）
+WorkflowDocument v4（Action/Loop/Parallel/Subworkflow 纯编辑模型）
     ↓
 WorkflowValidator（结构与 Schema 校验）
     ↓
@@ -79,7 +87,8 @@ DeviceRuntime / Application Service
 - `ExecutionManager` 是唯一序列执行器。
 - `ActionHandlerRegistry` 是唯一动作 Handler 注册表。
 - `CompositionService` 是动作、任务和当前序列的唯一持久化入口。
-- `ActionDefinition`、`SequenceItem`、`LoopBlock`、`ParallelBlock`、`SequenceEntry`、`ExecutionPlan` 和 `ActionSchema` 是规范领域模型。
+- `ActionDefinition`、`SequenceItem`、`LoopBlock`、`ParallelBlock`、`SubworkflowBlock`、
+  `SequenceEntry`、`ExecutionPlan` 和 `ActionSchema` 是规范领域模型。
 - GUI 不直接访问设备、JSON 文件、Handler 或 Provider。
 - 不保留新旧编辑器双写、双执行或长期兼容层；达到切换门槛后一次切换并删除旧入口。
 
@@ -99,7 +108,8 @@ DeviceRuntime / Application Service
 
 非目标：
 
-- 第一阶段不实现条件分支、数据流和子流程；受控并行运行时已在 M8 完成，画布编辑与可视化由 D-027 单独实施。
+- 条件分支、数据流和实时引用型子流程仍不在本轮范围；受控并行已完成，D-028～D-030
+  仅实现自包含、可递归编辑、编译时透明展开的内嵌 Subworkflow。
 - 第一阶段不实现任意拓扑、任意端口连接或通用 BPMN 引擎。
 - 不为未立项能力预建执行上下文、节点 Handler 或协议兼容层。
 
@@ -110,11 +120,12 @@ DeviceRuntime / Application Service
 | Action | 一个规范化的 `ActionDefinition` |
 | Sequence item | 带稳定 UUID、状态和 Action 的 `SequenceItem` |
 | Loop block | 带重复次数和子项的 `LoopBlock` |
-| Sequence entry | `SequenceItem | LoopBlock | ParallelBlock`，是持久化/组合边界元素 |
+| Sequence entry | `SequenceItem | LoopBlock | ParallelBlock | SubworkflowBlock`，是持久化/组合边界元素 |
+| Subworkflow | 带名称、来源元数据和递归 `WorkflowSequence` body 的内嵌快照；可独立进入作用域编辑，编译时透明展开 |
 | Execution plan | Compiler 生成的不可变递归执行输入，包含 Sequence/Action/Loop/Parallel |
 | Workflow document | GUI 编辑期纯 Python 文档，包含节点、顺序和布局元数据 |
 | Task | 用户可见概念；持久化为唯一 `*.workflow.json`/WorkflowDocument，运行时计划由 Compiler 派生 |
-| Node | Action、Loop、Start 或 End 的画布表现，不是新的业务动作类型 |
+| Node | Action、Loop、Parallel、Subworkflow、Start 或 End 的画布表现，不是新的业务动作类型 |
 | Compile | 将合法编辑文档转换为规范 `ExecutionPlan`，不执行设备动作 |
 | Preflight | 执行前检查设备在线、能力、资源和停止能力等瞬时条件 |
 
@@ -127,7 +138,7 @@ DeviceRuntime / Application Service
 - 动作库浏览、搜索、分类和参数配置。
 - 动作添加、删除、复制、排序、清空、撤销和重做。
 - `LoopBlock` 创建、编辑、嵌套约束、循环次数和执行进度展示。
-- 任务保存、加载、重命名、删除和任务组合草稿。
+- 任务保存、加载、重命名、删除，以及任务/动作混合插入当前工作流。
 - AI/语音生成序列的预览、人工确认、导入和执行。
 - 轨迹、视觉、相机及手动控制相关入口的现有可用能力。
 - 开始、暂停、恢复、停止任务、快速停止和设备紧急停止。
@@ -148,11 +159,11 @@ DeviceRuntime / Application Service
 ┌────────────────────────────────────────────────────────────┐
 │ 文件  编辑  视图  执行  设备                       顶部菜单 │
 ├────┬──────────────┬────────────────────────────────────────┤
-│任务│  当前资源页  │ 当前任务 / 保存状态 / 撤销重做 / 缩放 │
+│任务│  当前资源页  │ 面包屑 / 保存状态 / 撤销重做 / 缩放   │
 │动作│              ├────────────────────────────────────────┤
 │ AI │  可调整宽度  │                                        │
-│组合│  的 Side Bar │              工作流画布                │
-│    │              │                                        │
+│大纲│  的 Side Bar │              工作流画布                │
+│可选│              │                                        │
 │设置│              ├────────────────────────────────────────┤
 │    │              │ 设备 / 位姿 / 日志 / 基础控制底部面板 │
 ├────┴──────────────┴────────────────────────────────────────┤
@@ -163,7 +174,9 @@ DeviceRuntime / Application Service
 工作台区域职责：
 
 - 顶部 `QMenuBar` 提供文件、编辑、视图、执行和设备命令及键盘快捷键，不重复放置全宽保存/加载按钮。
-- 左侧 Activity Bar 固定约 48～52 px，只负责切换已保存任务、基础动作、AI 助手和任务组合资源页；再次点击当前图标即收起 Side Bar，不设置额外展开/关闭按钮。
+- 左侧 Activity Bar 固定约 48～52 px，只负责切换已保存任务、基础动作、AI 助手和
+  可选工作流大纲；原任务组合资源页删除。再次点击当前图标即收起 Side Bar，不设置
+  额外展开/关闭按钮。
 - Side Bar 使用 `QStackedWidget` 承载独立资源页；基础动作在页内按动作类型分组，禁止为每个动作类型占用一个 Activity Bar 图标。
 - Side Bar 与画布通过水平 `QSplitter` 调整宽度；视觉上永远只显示 1 px 分隔线，允许使用 6～8 px 透明命中区提高可操作性，并记忆每个资源页最近宽度。
 - 画布与 Bottom Panel 通过垂直 `QSplitter` 调整高度；设备详情、位姿、日志和基础控制使用非模态页面，不以阻塞画布的弹窗承载持续状态。
@@ -188,6 +201,10 @@ DeviceRuntime / Application Service
 3. 从动作库拖到画布的有效插入区。
 4. 端口拖到空白处弹出菜单仅作为后续可用性验证项，不是首版重点。
 
+已保存任务的组合入口统一为：双击打开为当前编辑文档，拖到节点间“+”或使用右键
+“插入到当前任务”则复制为 Subworkflow。一次插入必须递归重建 Action/Loop/Parallel/
+Subworkflow 节点 UUID 和 Parallel branch ID，并作为单条 Undo 命令提交。
+
 新节点自动布局并连接。按住节点左键并超过移动阈值后进入纵向拖动排序，松开后按目标位置提交一次撤销命令并自动吸附；未超过阈值的左键仍只负责选择。Shift+左键不启动拖动，Ctrl+左键仅用于画布平移。上移/下移按钮和右键菜单保留为精确排序及触控替代入口。只有进入高级连线模式时才允许直接操作边。
 
 循环节点采用展开式结构：循环头显示次数与动作数，循环体内保留可执行动作卡片，底部显示“循环完成”，两侧分别显示“下一次”和“达到次数”路径。循环头与子动作间的“+”必须可点击，并将动作插入循环体的准确位置，不能只是装饰图形。
@@ -199,6 +216,10 @@ DeviceRuntime / Application Service
 - 单击节点不显示参数摘要；参数编辑通过双击、Enter、右键菜单或“修改”按钮按需打开完整编辑对话框。
 - 删除、移动、参数更新、循环调整、粘贴均使用 `QUndoCommand`。
 - 连续拖动合并为一个撤销命令，避免命令栈污染。
+- Subworkflow 默认显示为紧凑折叠卡片，展示名称、直接子节点数和来源 revision；双击或
+  Enter 进入其 body，顶部面包屑显示“根任务 / 子流程 / …”，点击任一级返回对应作用域。
+- 子流程内 Action 继续使用同一 Schema 参数编辑器；修改默认只影响当前文档中的内嵌
+  快照，不隐式修改基础动作或源任务。
 
 ### 6.3 画布导航
 
@@ -214,7 +235,8 @@ DeviceRuntime / Application Service
 ### 6.4 Activity Bar 与资源侧栏
 
 - Activity Bar 使用单色 SVG 图标、选中指示条、Tooltip 和 `accessibleName`；不能只靠图标形状表达含义。
-- 已保存任务、基础动作、AI 助手和任务组合是独立资源页，原 `ActionLibraryView` 不再同时堆叠多类资源。
+- 已保存任务、基础动作和 AI 助手是独立资源页；工作流大纲仅投影当前文档结构，不能
+  成为第二状态源。原任务组合页及其列表式草稿删除。
 - 点击未选图标时切换并展开对应资源页；点击已选图标时收起 Side Bar；“视图”菜单与快捷键提供等价入口。
 - Side Bar 设置合理最小/最大宽度，窗口缩小时优先保持画布和常驻安全命令可用。
 - 动作插入选择器继续采用“动作类型—分类内动作”结构，空分类不显示，禁止扁平化为单个长列表。
@@ -506,6 +528,7 @@ src/
 ### 阶段 9：资源页与底部面板拆分
 
 - 已将 `ActionLibraryView` 拆为任务、动作、AI 和任务组合资源页，保持原意图信号及 Application Service 边界。
+- 该阶段的任务组合资源页是已落地的中间架构，将由阶段 13 直接删除；此处仅保留历史记录。
 - 已将设备状态/位姿、日志和基础控制迁入 Bottom Panel，并建立 Status Bar 摘要投影。
 - 保存/加载、编辑和执行命令统一进入菜单、工具栏、快捷键或节点上下文菜单，删除重复的大按钮入口。
 
@@ -536,11 +559,32 @@ src/
 - 保存/加载 round-trip、Undo/Redo、插入命中、分支命令、执行态、浅色/深色和窄窗口
   offscreen 回归已覆盖；大尺寸并行节点通过画布横向滚动和“适合内容”访问。
 
+### 阶段 13：Subworkflow 与组合编辑单一化（D-028～D-030，待实施）
+
+- WorkflowDocument/Schema 直接升级 v4，新增递归 `SubworkflowBlock`：保存名称、可选来源
+  workflow ID/revision 和自包含 body；默认不是实时引用，源任务变化不得隐式改变父任务。
+- Validator 限制最大嵌套深度、总节点数和空子流程；Compiler 将 Subworkflow body 递归
+  编译进唯一 ExecutionPlan，并把 subworkflow path 纳入节点/运行事件身份，不新增 Handler。
+- 提供确定性的工作流片段复制函数，递归重建所有执行节点、容器和分支身份；同一任务
+  多次插入不得产生 UUID 冲突。v3 活动数据经显式 CLI 一次迁移到 v4，runtime 不双读。
+- 新增唯一 `WorkflowEditingSession`，独占当前文档、文件名、revision、dirty、草稿和结构
+  修改边界；Canvas、任务库、动作库和 AI 只发送意图、渲染不可变快照。
+- 任务库双击打开文档，拖放/右键插入为 Subworkflow；画布使用折叠卡片、双击进入作用域
+  和面包屑导航，内部 Action/Loop/Parallel/Subworkflow 共用参数编辑与 Undo/Redo。
+- 删除 `TaskComposerService`、`TaskComposerView`、`TaskComposerListWidget`、组合 Activity
+  入口及 MainWindow 对应添加/排序/循环/展开/执行/保存路径；不保留转发或隐藏兼容页。
+- 保存统一提交完整 WorkflowDocument 和 expected revision，保留 presentation；执行统一
+  编译当前会话快照。禁止继续通过 `flattened_task()` 构建可执行组合。
+
 ## 15. 测试与验收
 
 ### 15.1 自动化测试
 
 - Workflow 文档序列化 round-trip、Schema 升级和损坏数据拒绝。
+- v3→v4 一次迁移的语义指纹、备份、失败不切换和 runtime 拒绝旧版本。
+- Subworkflow 多层 round-trip、递归 UUID 重建、同一任务重复插入、嵌套深度/节点总量拒绝。
+- 组合 Loop/Parallel 时编译计划保持控制流结构，禁止退化为扁平顺序动作。
+- 根任务/多层子流程面包屑、作用域切换、内部 Action 编辑和全局 Undo/Redo。
 - `.task`/`.workflow` 到 `*.workflow.json` 的 dry-run、备份、语义指纹和失败不切换测试。
 - 主窗口启动时已有任务立即显示，首屏加载与保存/删除事件刷新结果一致。
 - Validator、Compiler 与 `ExecutionPlan` 的确定性，以及嵌套 Loop/Parallel 覆盖。
@@ -562,19 +606,26 @@ src/
 
 ### 15.3 切换门槛
 
-- 现有功能基线全部通过，Loop、任务组合和 AI 导入无回退。
+- 现有功能基线全部通过，Loop、Parallel、Subworkflow 和 AI 导入无回退；组合后结构
+  与源结构的编译语义一致，不允许拍平控制流。
 - GUI 线程无设备 I/O、模型加载或长时间计算。
 - 仓库中不存在第二个执行器、动作 Handler 注册表或 GUI 私有持久化入口。
 - 停止、快停和设备急停文案、能力和结果与真实运行时一致。
 - 保存失败、版本冲突、设备离线和运行失败均有可恢复反馈。
 - 旧编辑器删除后，全量质量门禁与 GUI extra/wheel smoke 通过。
+- `TaskComposerService/View/ListWidget`、组合 Activity 入口及 `flattened_task()` 组合执行
+  调用全部删除，仓库中只剩一个工作流编辑状态源。
 
 ## 16. 风险与控制
 
 | 风险 | 等级 | 控制方式 |
 |---|---|---|
 | GUI 新建执行器造成双状态源 | P0 | 编译结果只提交现有 ExecutionBridge/ExecutionManager，并加架构测试 |
-| Loop、AI 或任务组合在切换时回退 | P0 | 功能等价清单和切换门槛阻止上线 |
+| Loop、Parallel、AI 或子流程组合在切换时回退 | P0 | 结构化编译指纹、功能等价清单和切换门槛阻止上线 |
+| 独立组合器拍平控制流 | P1 | D-030 删除组合器；组合只允许插入结构化 Subworkflow，不再调用 flattened_task 执行 |
+| 重复插入任务造成 UUID/事件映射冲突 | P1 | 领域层递归身份重建，并覆盖同源任务多次插入和嵌套回归 |
+| 修改源任务意外改变父任务 | P1 | 默认保存自包含快照；更新来源只能通过显式替换并确认，不实现隐式实时引用 |
+| 多层子流程挤满画布 | P2 | 默认折叠卡片、双击进入作用域、面包屑返回；大纲只读投影 |
 | 软件急停造成安全误导 | P0 | 区分三类停止，能力驱动显示，真实硬件验收 |
 | 自由画布增加窄屏操作成本 | P1 | 默认自动布局和“+”插入，自由布线延后 |
 | Qt 模型与领域模型耦合 | P1 | 纯文档 + QObject Bridge + Scene 表现三层分离 |

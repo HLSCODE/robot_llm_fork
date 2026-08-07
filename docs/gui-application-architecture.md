@@ -1,7 +1,7 @@
 # GUI 应用架构
 
-> 文档类型：Current Architecture  
-> 最近更新：2026-08-06
+> 文档类型：Current Architecture + Approved Target
+> 最近更新：2026-08-07
 > 状态：Active
 
 ## 1. 目标与边界
@@ -9,6 +9,8 @@
 GUI 是应用的表现层，不拥有设备、执行线程、任务持久化或业务状态机。
 所有可被 WebSocket、HTTP、语音或其他入口复用的能力必须位于应用层；Qt
 组件只负责采集用户输入、显示不可变快照和把跨线程事件送回 GUI 线程。
+
+当前实现（D-030 完成前）：
 
 ```text
 MainWindow / Dialogs
@@ -83,6 +85,10 @@ GuiNotificationCenter: operational message -> history/log/status/modal
 持久化动作、任务与共享动作序列仍由 `CompositionService` 独占，两个服务
 职责不重叠。
 
+上述职责是当前实现，不再是长期目标。审计确认它通过 `flattened_task()` 组合任务时
+会展开 Loop 并顺序拼接 Parallel 分支，既不能编辑内部动作，也可能改变控制流语义；
+D-028～D-030 完成后本节对应组件与入口直接删除。
+
 ### 2.4 DeviceViewModel
 
 - 只读取 `DeviceManagementService.status()`。
@@ -129,6 +135,36 @@ Qt signals；安全停止使用短生命周期 I/O 调度线程，避免阻塞�
 canonical schema；只有文件选择器、设备发现等纯交互增强才可按 schema 元数据
 注册可复用 widget factory，不能复制业务字段定义或校验规则。
 
+### 2.8 已批准的组合编辑目标（D-028～D-030）
+
+```text
+TaskLibraryView / ActionLibraryView / AIAssistantWidget
+                    | open / insert / generate intents
+                    v
+             WorkflowEditingSession
+      document / name / revision / dirty / draft / commands
+                    |
+          immutable WorkflowDocument v4 snapshot
+          /                    |                  \
+WorkflowEditorView     CompositionService     WorkflowCompiler
+Canvas + Breadcrumb      JSON repository       ExecutionPlan
+```
+
+- 原 `TaskComposerView`、`TaskComposerListWidget`、`TaskComposerService` 和 Activity Bar
+  组合入口删除；可选 WorkflowOutlineView 只能投影当前文档，不能保存第二份编辑状态。
+- WorkflowDocument v4 增加递归 `SubworkflowBlock`。它保存名称、可选来源 workflow
+  ID/revision 和自包含 body；默认是内嵌快照，不是随源文件变化的实时引用。
+- 根任务画布显示折叠 Subworkflow 卡片；双击进入 body，面包屑负责多层作用域导航。
+  内部 Action/Loop/Parallel/Subworkflow 使用同一编辑命令和全局 Undo/Redo。
+- 任务库“双击”打开独立源任务；拖入画布或“插入到当前任务”创建内嵌副本。复制边界
+  必须递归重建节点 UUID、容器 UUID 和 branch ID，同时保留来源元数据。
+- 修改内嵌动作只影响当前父任务；修改基础动作或源任务必须走单独明确命令。若以后需要
+  更新来源，只允许显式替换并确认，禁止后台隐式传播。
+- WorkflowCompiler 递归透明编译 Subworkflow body，继续输出唯一 ExecutionPlan；GUI、
+  Subworkflow 和 WorkflowEditingSession 均不创建执行 worker 或动作 Handler。
+- 保存提交完整 WorkflowDocument 和 expected revision，执行编译当前会话快照；禁止通过
+  `flattened_task()` 创建组合执行输入。
+
 ## 3. 状态所有权
 
 | 状态 | 唯一所有者 | GUI 获取方式 |
@@ -136,7 +172,8 @@ canonical schema；只有文件选择器、设备发现等纯交互增强才可�
 | 设备实例与生命周期 | `DeviceRuntime` | `DeviceManagementService` → `DeviceViewModel` |
 | 序列执行状态 | `ExecutionManager` | `ExecutionService` → `ExecutionViewModel` / `ExecutionBridge` |
 | 动作、任务、共享序列 | `CompositionService` | service 快照 + `CompositionBridge` |
-| 临时任务组合草稿 | `TaskComposerService` | service 快照 |
+| 临时任务组合草稿（D-030 前） | `TaskComposerService` | service 快照；待删除 |
+| 当前编辑文档（D-029 后） | `WorkflowEditingSession` | 不可变 WorkflowDocument 快照 + 窄事件 |
 | GUI 启动阶段 | `GuiStartupLifecycle` | `GuiStartupState` |
 | 动作参数定义 | canonical action schema | `SchemaActionForm` |
 | Workbench 布局偏好 | `QSettingsWorkbenchLayoutStore` | schema v1 `WorkbenchLayoutState` |
@@ -174,6 +211,8 @@ AI Assistant 不获取 MainWindow 对象。它通过以下窄信号协作：
 
 ## 6. 当前遗留项
 
+- `TaskComposerService/View/ListWidget` 与画布是两套编辑模型，且扁平组合会改变
+  Loop/Parallel 语义；D-028～D-030 必须作为同一批直接切换，完成前不得继续扩展组合器。
 - `MainWindow` 仍承担动作/任务列表内容转换和序列树局部展示协调；后续只有在这些
   展示规则形成稳定复用边界时再下沉，业务草稿和执行状态仍必须由应用服务独占。
 - ActionConfigDialog 内部的表单校验提示仍属于对话框局部交互；如后续需要统一
