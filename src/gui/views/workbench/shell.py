@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from ...view_models.models import DeviceViewState
 from ...icons import IconName, themed_icon
-from ...toolbars import IconToolButton
+from ...toolbars import IconToolButton, icon_foreground
 from ...workbench_layout import (
     WORKBENCH_LAYOUT_SCHEMA_VERSION,
     WorkbenchLayoutState,
@@ -30,6 +30,10 @@ from ...workbench_layout import (
 
 
 ACTIVITY_BAR_WIDTH = 52
+ACTIVITY_BUTTON_SIZE = 44
+ACTIVITY_ICON_SIZE = 20
+STATUS_BUTTON_SIZE = 28
+STATUS_ICON_SIZE = 16
 SPLITTER_HIT_WIDTH = 7
 SIDE_BAR_DEFAULT_WIDTH = 280
 SIDE_BAR_MINIMUM_WIDTH = 220
@@ -38,7 +42,6 @@ DETAIL_PANEL_DEFAULT_WIDTH = 460
 DETAIL_PANEL_DEFAULT_HEIGHT = 300
 DETAIL_PANEL_MARGIN = 8
 LAYOUT_SAVE_DELAY_MS = 250
-STATUS_ICON_COLOR = QColor("#ffffff")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,8 +109,8 @@ class _ActivityBar(QFrame):
             button.setAccessibleDescription(f"显示或收起{page.title}资源页")
             button.setToolTip(page.title)
             button.setCheckable(True)
-            button.setFixedSize(44, 44)
-            button.setIconSize(QSize(22, 22))
+            button.setFixedSize(ACTIVITY_BUTTON_SIZE, ACTIVITY_BUTTON_SIZE)
+            button.setIconSize(QSize(ACTIVITY_ICON_SIZE, ACTIVITY_ICON_SIZE))
             button.clicked.connect(
                 lambda _checked=False, key=page.key: self.page_requested.emit(key)
             )
@@ -131,7 +134,14 @@ class _ActivityBar(QFrame):
 
     def _refresh_icons(self) -> None:
         for key, button in self.buttons.items():
-            button.setIcon(themed_icon(button, self._pages[key].icon, size=22))
+            button.setIcon(
+                themed_icon(
+                    button,
+                    self._pages[key].icon,
+                    size=ACTIVITY_ICON_SIZE,
+                    color=icon_foreground(button),
+                )
+            )
 
 
 class WorkbenchStatusBar(QFrame):
@@ -148,11 +158,9 @@ class WorkbenchStatusBar(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 6, 0)
         layout.setSpacing(4)
-        self.device_summary = QLabel("● 设备状态未知")
-        self.device_summary.setAccessibleName("设备状态摘要")
-        layout.addWidget(self.device_summary)
         self.message_label = QLabel()
         self.message_label.setObjectName("workbenchStatusMessage")
+        self.message_label.setAccessibleName("状态消息")
         layout.addWidget(self.message_label, stretch=1)
         self.buttons: dict[str, QToolButton] = {}
         for page in pages:
@@ -163,8 +171,8 @@ class WorkbenchStatusBar(QFrame):
             button.setAccessibleName(f"显示或隐藏{page.title}")
             button.setAccessibleDescription(f"切换状态栏{page.title}详情浮层")
             button.setCheckable(True)
-            button.setFixedSize(28, 28)
-            button.setIconSize(QSize(16, 16))
+            button.setFixedSize(STATUS_BUTTON_SIZE, STATUS_BUTTON_SIZE)
+            button.setIconSize(QSize(STATUS_ICON_SIZE, STATUS_ICON_SIZE))
             button.clicked.connect(
                 lambda _checked=False, key=page.key: self.panel_requested.emit(key)
             )
@@ -189,6 +197,8 @@ class WorkbenchStatusBar(QFrame):
         if event.type() in {
             QEvent.Type.PaletteChange,
             QEvent.Type.ApplicationPaletteChange,
+            QEvent.Type.DynamicPropertyChange,
+            QEvent.Type.EnabledChange,
         }:
             self._refresh_icons()
 
@@ -198,8 +208,8 @@ class WorkbenchStatusBar(QFrame):
                 themed_icon(
                     button,
                     self._pages[key].icon,
-                    size=16,
-                    color=STATUS_ICON_COLOR,
+                    size=STATUS_ICON_SIZE,
+                    color=icon_foreground(button),
                 )
             )
 
@@ -212,12 +222,17 @@ class WorkbenchStatusBar(QFrame):
                 state.relay_ready,
             )
         )
-        self.device_summary.setText(f"● 设备 {ready_count}/4")
-        role = "success" if ready_count == 4 else "danger"
-        self.device_summary.setProperty("themeRole", role)
-        style = self.device_summary.style()
-        style.unpolish(self.device_summary)
-        style.polish(self.device_summary)
+        device_button = self.buttons["devices"]
+        is_ready = ready_count == 4
+        role = "statusSuccess" if is_ready else "statusDanger"
+        device_button.setProperty("themeRole", role)
+        summary = f"设备状态：{ready_count}/4 可用"
+        device_button.setToolTip(f"{summary}（打开设备详情）")
+        device_button.setAccessibleName(summary)
+        style = device_button.style()
+        style.unpolish(device_button)
+        style.polish(device_button)
+        self._refresh_icons()
 
 
 class _FloatingDetailPanel(QFrame):

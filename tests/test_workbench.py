@@ -212,7 +212,7 @@ class WorkbenchViewTests(unittest.TestCase):
         self.assertIs(self.workbench.bottom_stack, self.device_page.parentWidget())
         self.assertIs(self.workbench.bottom_stack, self.log_page.parentWidget())
 
-    def test_status_bar_renders_device_summary_from_view_state(self) -> None:
+    def test_status_bar_consolidates_device_summary_into_details_button(self) -> None:
         self.workbench.status_bar.render_device_state(
             DeviceViewState(
                 robot_ready=True,
@@ -222,11 +222,13 @@ class WorkbenchViewTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual("● 设备 2/4", self.workbench.status_bar.device_summary.text())
+        device_button = self.workbench.status_bar.buttons["devices"]
+        self.assertFalse(hasattr(self.workbench.status_bar, "device_summary"))
         self.assertEqual(
-            "danger",
-            self.workbench.status_bar.device_summary.property("themeRole"),
+            "statusDanger",
+            device_button.property("themeRole"),
         )
+        self.assertIn("2/4", device_button.toolTip())
 
     def test_restores_and_persists_versioned_layout_state(self) -> None:
         store = _MemoryLayoutStore(

@@ -600,6 +600,7 @@ src/
 | D-029 | P1 | DONE | 新增唯一 `WorkflowEditingSession`，独占当前 WorkflowDocument、文件名、revision、dirty 与草稿边界；画布变更发布完整根文档快照，保存使用完整 document + expected revision，执行只编译当前会话快照；CompositionService 继续作为目录/Repository 与外部入口边界，不再持有 GUI 组合草稿 |
 | D-030 | P1 | DONE | 已删除 `TaskComposerService`、`TaskComposerView`、`TaskComposerListWidget`、组合 Activity 入口及 MainWindow 全部组合控制路径；任务库支持双击/按钮打开，按钮、右键或拖入创建内嵌 Subworkflow；画布提供折叠子流程卡片、双击/右键进入、逐级返回、多层内部编辑与整棵文档 Undo/Redo；组合执行不再调用 `flattened_task()` |
 | D-031 | P1 | DONE | Task/Action/Workflow 功能命令及 fit/zoom 已迁至对应面板顶部的 Qt Resource 单色 SVG icon-only 工具栏，统一 Tooltip 与可访问名称；编辑工具使用 32 px 命中区，停止/快停/急停保持 44 px 与语义色。删除 Bottom Panel 垂直 Splitter，Status Bar 设备/位姿/控制/日志图标打开右下锚定非模态详情浮层，同键/Escape/关闭图标可关闭且 resize/窄屏不越界；布局 schema 直接升级 v2（`panel_page`/`panel_visible`），不兼容读取 v1。节点拖动显示跟随鼠标的 ghost 并保留原位占位，二维激活半径内的合法主序列“+”以主题化发光/脉冲/位置标签预告插入；无目标释放恢复原位，Action/Task 提交复用相同 resolver，Esc/失焦/失去鼠标抓取统一清理且有效放置只提交一次 UndoCommand；保留原生标题栏及其下客户区菜单，不接管跨平台非客户区 |
+| D-032 | P2 | DONE | GUI 视觉与命令一致性收口：恢复任务资源页“将当前流程保存为任务”SVG 入口（仍经唯一 WorkflowEditingSession/CompositionService）；全部顶部菜单动作进入可编辑、冲突校验、QSettings 持久化的 ShortcutRegistry；基础动作分类由平铺 Tab 改为下拉选择。主题化 SVG 覆盖数值增减箭头，Activity/Pane/Command/Status 图标按共享尺寸和 Palette 刷新；状态栏移除重复设备文字摘要，仅以设备图标/详情浮层展示同源状态；浅/深主题下列表及画布选择改为柔和底色，节点令牌整体收紧而不改变结构或执行语义。 |
 
 ### 9.4 完成标准
 
@@ -1374,6 +1375,7 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-07 | M8 | D/G | Subworkflow v4 与组合编辑单一化 | D-028～D-030 TODO → DONE | WorkflowDocument/Schema、Validator、Compiler、ExecutionPlan 与 Engine 直接支持递归 Subworkflow；新增 WorkflowEditingSession；17 个活动文档一次迁移 v4；删除独立组合页面/服务/Activity 入口，任务库打开或插入统一进入唯一画布，子流程作用域编辑和整棵文档 Undo/Redo 保留 Loop/Parallel 语义 | Compile、Ruff、项目 Mypy（84 files）、Pytest 506 passed + 48 subtests、LLM golden 14/14、性能 9/9、wheel 构建与隔离安装 smoke 全通过；活动数据 46 actions / 17 workflows（272 顶层节点）/ 13 skills 可直接加载 |
 | 2026-08-07 | M8 | G | 全仓手写 Python 静态门禁收口 | G-034 → DONE | 从 Mypy 初始基线 570 errors / 72 files 逐模块收窄动态与第三方边界，默认门禁扩展为全部手写 `src/` 与 `scripts/`；唯一排除 Qt 自动生成的 `resources_rc.py`；Ruff 同步覆盖 `src/`、`scripts/`、`tests/`；新增视觉算法 4 项回归以及 DI 加载协议、深度 PNG、确定性超时回归 | 默认 Mypy 286 个 `src` + `scripts` 文件、0 errors；Ruff 全通过；统一门禁 514 passed + 48 subtests，coverage 65.71%，LLM golden 14/14，性能 9/9，Wheel smoke 及 GUI/Server/Hardware optional import smoke 全通过；真实硬件验收仍独立跟踪 |
 | 2026-08-07 | M8 | D/G | GUI icon-only 工具栏、详情浮层与拖放反馈收口 | D-031 → DONE | Task/Action/Workflow 命令与 fit/zoom 统一迁至 Qt Resource SVG 工具栏，区分 32 px 编辑与 44 px 安全命中区；删除 Bottom Panel 垂直 Splitter，以 Status Bar 入口打开右下锚定非模态浮层并直接升级布局 schema v2；节点拖动新增 ghost、原位占位及二维合法插入点发光/脉冲/位置标签，无目标释放恢复原位，外部拖入提交复用相同 resolver，Esc/失焦/失去抓取统一清理且有效放置只提交一次 UndoCommand；批准保留原生标题栏及其下客户区菜单 | 本批 5 个 GUI 变更测试文件 63 passed + 26 subtests；完整门禁 Compile/Ruff 通过，Mypy 287 source files / 0 errors，Pytest 529 passed + 74 subtests，coverage 66.09%，LLM golden 14/14，performance 9/9，wheel smoke 通过 |
+| 2026-08-10 | M8 | D/G | GUI 视觉、快捷键与任务入口一致性收口 | D-032 → DONE | 恢复任务资源页保存当前流程入口；建立集中式可编辑快捷键注册表；动作分类下拉化；数值控件、状态栏、SVG 与浅/深主题可读性收口；画布节点紧凑化并移除粗实线选择框 | 聚焦 GUI 回归 73 passed + 28 subtests；MainWindow/快捷键回归 17 passed + 25 subtests；全仓 Mypy（288 源文件）、Ruff 与 Pytest 532 passed + 101 subtests 通过 |
 
 ## 22. 建议的首批实施顺序
 

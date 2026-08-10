@@ -14,6 +14,7 @@ from .tooltips import ToolTipService, install_tooltip_service
 from .widget_style import (
     create_consistent_widget_style,
     install_combo_box_popup_coordinator,
+    retain_application_style,
 )
 
 
@@ -163,7 +164,9 @@ def apply_consistent_base_style(application: QApplication) -> None:
     install_combo_box_popup_coordinator(application)
     if application.property(_BASE_STYLE_INSTALLED_PROPERTY) is True:
         return
-    application.setStyle(create_consistent_widget_style())
+    style = create_consistent_widget_style()
+    application.setStyle(style)
+    retain_application_style(application, style)
     application.setProperty(_BASE_STYLE_INSTALLED_PROPERTY, True)
 
 
@@ -197,6 +200,12 @@ def build_stylesheet(colors: ThemeColors) -> str:
         if colors == DARK_COLORS
         else ":/icons/chevron-down-on-light.svg"
     )
+    spin_arrow_up = (
+        ":/icons/chevron-up-on-dark.svg"
+        if colors == DARK_COLORS
+        else ":/icons/chevron-up-on-light.svg"
+    )
+    spin_arrow_down = combo_arrow
     return f"""
 QWidget {{ color: {colors.text}; }}
 QMainWindow, QDialog {{ background: {colors.window}; }}
@@ -233,8 +242,23 @@ QGroupBox {{ font-weight: 700; border: none; margin-top: 14px; padding: 14px 8px
 QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {colors.accent}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {colors.surface_subtle}; color: {colors.text}; border: 1px solid transparent; border-radius: 6px; }}
 QTextEdit, QListWidget {{ background: {colors.surface}; color: {colors.text}; border: none; border-radius: 6px; }}
-QLineEdit, QSpinBox, QDoubleSpinBox {{ padding: 5px 8px; }}
+QLineEdit {{ padding: 5px 8px; }}
+QSpinBox, QDoubleSpinBox {{ padding: 5px 30px 5px 8px; }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {colors.accent}; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-origin: border; subcontrol-position: top right;
+    width: 24px; height: 50%; background: transparent; border: none;
+    border-top-right-radius: 6px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border; subcontrol-position: bottom right;
+    width: 24px; height: 50%; background: transparent; border: none;
+    border-bottom-right-radius: 6px;
+}}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {colors.selection}; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({spin_arrow_up}); width: 12px; height: 8px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({spin_arrow_down}); width: 12px; height: 8px; }}
 QComboBox {{ padding: 6px 34px 6px 10px; min-height: 18px; }}
 QComboBox:hover, QComboBox:focus, QComboBox:on {{ background: {colors.surface}; border-color: {colors.accent}; }}
 QComboBox:disabled {{ background: {colors.disabled_surface}; color: {colors.disabled_text}; }}
@@ -259,9 +283,14 @@ QComboBox QAbstractItemView::item {{ min-height: 28px; padding: 3px 8px; border:
 QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected {{
     background: {colors.selection}; color: {colors.text}; border: none; outline: none;
 }}
-QListWidget::item {{ padding: 6px 10px; border-radius: 4px; }}
-QListWidget::item:hover {{ background: {colors.surface_subtle}; }}
-QListWidget::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
+QListWidget, QAbstractItemView {{ outline: 0; }}
+QListWidget::item {{ padding: 6px 10px; border: none; border-radius: 6px; }}
+QListWidget::item:hover {{ background: {colors.surface_subtle}; border: none; }}
+QListWidget::item:selected, QListWidget::item:selected:active,
+QAbstractItemView::item:selected {{
+    background: {colors.selection}; color: {colors.text}; border: none; outline: none;
+}}
+QListWidget::item:focus, QAbstractItemView::item:focus {{ outline: none; border: none; }}
 QFrame[frameShape="6"] {{ border: none; background: {colors.surface}; }}
 QCheckBox {{ spacing: 6px; color: {colors.text}; }}
 QScrollBar:vertical {{ width: 8px; background: transparent; }}
@@ -284,6 +313,7 @@ QToolButton#paneToolButton {{
 QToolButton#paneToolButton:hover {{ background: {colors.selection}; }}
 QToolButton#paneToolButton:pressed, QToolButton#paneToolButton:checked {{ background: {colors.border}; }}
 QToolButton#paneToolButton:disabled {{ background: transparent; color: {colors.disabled_text}; }}
+QToolButton:focus {{ outline: none; border: none; }}
 QToolButton#paneToolButton[themeRole="primary"] {{ background: {colors.selection}; }}
 QToolButton#paneToolButton[themeRole="success"] {{ background: {colors.success}; }}
 QToolButton#paneToolButton[themeRole="warning"] {{ background: {colors.warning}; }}
@@ -298,15 +328,17 @@ QLabel#workbenchFloatingPanelTitle {{
     background: transparent; border: none; color: {colors.text}; font-weight: 600;
 }}
 QStackedWidget#workbenchDetailStack {{ background: transparent; border: none; }}
-QToolButton#activityButton {{ background: transparent; border: none; border-radius: 6px; color: {colors.text_muted}; font-size: 22px; }}
+QToolButton#activityButton {{ background: transparent; border: none; border-radius: 6px; color: {colors.text_muted}; padding: 0; }}
 QToolButton#activityButton:hover {{ background: {colors.selection}; color: {colors.text}; }}
 QToolButton#activityButton:checked {{ background: {colors.selection}; color: {colors.accent}; }}
-QFrame#workbenchStatusBar {{ background: {colors.accent}; border: none; color: #ffffff; }}
-QFrame#workbenchStatusBar QLabel {{ color: #ffffff; }}
-QFrame#workbenchStatusBar QLabel[themeRole="success"] {{ color: #ffffff; }}
-QFrame#workbenchStatusBar QLabel[themeRole="danger"] {{ color: #ffffff; font-weight: 700; }}
-QToolButton#statusPanelButton {{ background: transparent; border: none; border-radius: 4px; color: #ffffff; padding: 3px 8px; }}
-QToolButton#statusPanelButton:hover, QToolButton#statusPanelButton:checked {{ background: rgba(255, 255, 255, 38); }}
+QFrame#workbenchStatusBar {{
+    background: {colors.surface}; border: none; color: {colors.text_muted};
+}}
+QFrame#workbenchStatusBar QLabel {{ color: {colors.text_muted}; }}
+QToolButton#statusPanelButton {{
+    background: transparent; border: none; border-radius: 5px; color: {colors.text_muted}; padding: 3px;
+}}
+QToolButton#statusPanelButton:hover, QToolButton#statusPanelButton:checked {{ background: {colors.selection}; }}
 QMenuBar {{ background: {colors.surface}; color: {colors.text}; border: none; padding: 2px 4px; spacing: 2px; }}
 QMenuBar::item {{ background: transparent; padding: 6px 10px; margin: 1px; border-radius: 5px; }}
 QMenuBar::item:selected, QMenuBar::item:pressed {{ background: {colors.selection}; color: {colors.text}; }}

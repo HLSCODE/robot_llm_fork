@@ -7,8 +7,11 @@ from math import ceil
 
 from PySide6.QtCore import (
     QAbstractAnimation,
+    QByteArray,
     QEasingCurve,
     QEvent,
+    QFile,
+    QIODevice,
     QPointF,
     QRectF,
     Qt,
@@ -16,6 +19,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsObject,
@@ -31,16 +35,21 @@ from ....domain.models import (
     ParallelBlock,
     SequenceEntry,
     SequenceItem,
+    SequenceItemStatus,
     SubworkflowBlock,
 )
+from ...icons import IconName, action_icon
 from .tokens import (
     ACTION_COLORS,
+    ControlFlowKind,
     DRAG_PREVIEW_MAX_HEIGHT,
     DRAG_PREVIEW_MAX_WIDTH,
     DRAG_PREVIEW_OPACITY,
     DRAG_SOURCE_OPACITY,
+    EXECUTION_PULSE_DURATION_MS,
     INSERT_TARGET_SIZE,
     INSERT_TARGET_HINT_WIDTH,
+    INSERT_HOVER_TRANSITION_MS,
     INSERT_TARGET_PULSE_DURATION_MS,
     LOOP_CHILD_HEIGHT,
     LOOP_CHILD_GAP,
@@ -67,8 +76,60 @@ from .tokens import (
     NODE_RADIUS,
     canvas_colors,
     canvas_font,
+    control_flow_colors,
     contrasting_text,
 )
+
+
+_SVG_RENDERERS: dict[tuple[IconName, str], QSvgRenderer] = {}
+_INSERT_ACTION_TOOLTIP = "在此处插入动作"
+
+
+def _draw_svg_icon(
+    painter: QPainter,
+    icon_name: IconName,
+    rect: QRectF,
+    color: QColor,
+) -> None:
+    cache_key = (icon_name, color.name())
+    renderer = _SVG_RENDERERS.get(cache_key)
+    if renderer is None:
+        resource = QFile(f":/icons/{icon_name.value}.svg")
+        if not resource.open(QIODevice.OpenModeFlag.ReadOnly):
+            return
+        try:
+            source = bytes(resource.readAll()).replace(
+                b"#000000",
+                color.name().encode("ascii"),
+            )
+        finally:
+            resource.close()
+        renderer = QSvgRenderer(QByteArray(source))
+        if not renderer.isValid():
+            return
+        _SVG_RENDERERS[cache_key] = renderer
+    renderer.render(painter, rect)
+
+
+def _entry_is_running(entry: SequenceEntry) -> bool:
+    if isinstance(entry, SequenceItem):
+        return entry.status is SequenceItemStatus.RUNNING
+    if isinstance(entry, (LoopBlock, SubworkflowBlock)):
+        return any(_entry_is_running(child) for child in entry.items)
+    return any(
+        _entry_is_running(child)
+        for branch in entry.branches
+        for child in branch.items
+    )
+
+
+def _card_brush(surface: QColor, accent: QColor, emphasized: bool) -> QBrush:
+    """Keep selected and hovered cards calm without a thick focus outline."""
+    if not emphasized:
+        return QBrush(surface)
+    highlighted = QColor(accent)
+    highlighted.setAlpha(24)
+    return QBrush(highlighted)
 
 
 class NodeDragPreviewItem(QGraphicsPixmapItem):
@@ -91,6 +152,8 @@ class WorkflowNodeItem(QGraphicsObject):
     move_requested = Signal(str, float)
     drag_position_changed = Signal(str, float, float)
     drag_ended = Signal(str, bool)
+    loop_child_drag_position_changed = Signal(str, str, float, float)
+    loop_child_drag_ended = Signal(str, str, bool)
     subworkflow_open_requested = Signal(str)
 
     def __init__(
@@ -121,6 +184,41 @@ class WorkflowNodeItem(QGraphicsObject):
         self._is_dragging = False
         self._drag_preview: NodeDragPreviewItem | None = None
         self._drag_preview_anchor = QPointF()
+        self._dragged_item_uuid = node_id
+        self._active_child_uuid = ""
+        self._active_loop_drop_index: int | None = None
+        self._drop_pulse_phase = 0.0
+        self._drop_pulse_animation = QVariantAnimation(self)
+        self._drop_pulse_animation.setDuration(INSERT_TARGET_PULSE_DURATION_MS)
+        self._drop_pulse_animation.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._drop_pulse_animation.setKeyValueAt(0.0, 0.0)
+        self._drop_pulse_animation.setKeyValueAt(0.5, 1.0)
+        self._drop_pulse_animation.setKeyValueAt(1.0, 0.0)
+        self._drop_pulse_animation.setLoopCount(-1)
+        self._drop_pulse_animation.valueChanged.connect(
+            self._on_drop_pulse_value_changed
+        )
+        self._hovered_insert_target: tuple[str, int] | None = None
+        self._insert_hover_phase = 0.0
+        self._insert_hover_animation = QVariantAnimation(self)
+        self._insert_hover_animation.setDuration(INSERT_HOVER_TRANSITION_MS)
+        self._insert_hover_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._insert_hover_animation.valueChanged.connect(
+            self._on_insert_hover_value_changed
+        )
+        self._execution_pulse_phase = 0.0
+        self._execution_pulse = QVariantAnimation(self)
+        self._execution_pulse.setDuration(EXECUTION_PULSE_DURATION_MS)
+        self._execution_pulse.setEasingCurve(QEasingCurve.Type.InOutSine)
+        self._execution_pulse.setKeyValueAt(0.0, 0.0)
+        self._execution_pulse.setKeyValueAt(0.5, 1.0)
+        self._execution_pulse.setKeyValueAt(1.0, 0.0)
+        self._execution_pulse.setLoopCount(-1)
+        self._execution_pulse.valueChanged.connect(
+            self._on_execution_pulse_changed
+        )
+        if _entry_is_running(entry):
+            self._execution_pulse.start()
 
     @property
     def drag_preview(self) -> NodeDragPreviewItem | None:
@@ -129,6 +227,24 @@ class WorkflowNodeItem(QGraphicsObject):
     @property
     def is_dragging(self) -> bool:
         return self._is_dragging
+
+    @property
+    def execution_pulse_active(self) -> bool:
+        return self._execution_pulse.state() == QAbstractAnimation.State.Running
+
+    @property
+    def hovered_insert_target(self) -> tuple[str, int] | None:
+        return self._hovered_insert_target
+
+    @property
+    def is_loop_drop_pulsing(self) -> bool:
+        return self._drop_pulse_animation.state() == QAbstractAnimation.State.Running
+
+    def _on_execution_pulse_changed(self, value: object) -> None:
+        if not isinstance(value, (int, float)):
+            return
+        self._execution_pulse_phase = float(value)
+        self.update()
 
     @property
     def node_height(self) -> float:
@@ -234,6 +350,8 @@ class WorkflowNodeItem(QGraphicsObject):
             event.accept()
             return
         item_uuid = self._item_uuid_at(event.pos())
+        self._dragged_item_uuid = item_uuid
+        self.set_active_child_uuid(item_uuid if item_uuid != self.node_id else "")
         additive = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         self.focused.emit(self.node_id, item_uuid, additive)
         if self._editing_enabled and not additive:
@@ -259,11 +377,19 @@ class WorkflowNodeItem(QGraphicsObject):
             self._begin_drag_preview(event.scenePos())
         self._drag_target_center_y = self._drag_origin_y + delta_y + self.node_height / 2.0
         self._position_drag_preview(event.scenePos())
-        self.drag_position_changed.emit(
-            self.node_id,
-            event.scenePos().x(),
-            event.scenePos().y(),
-        )
+        if self._dragged_item_uuid == self.node_id:
+            self.drag_position_changed.emit(
+                self.node_id,
+                event.scenePos().x(),
+                event.scenePos().y(),
+            )
+        else:
+            self.loop_child_drag_position_changed.emit(
+                self.node_id,
+                self._dragged_item_uuid,
+                event.scenePos().x(),
+                event.scenePos().y(),
+            )
         event.accept()
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
@@ -288,10 +414,18 @@ class WorkflowNodeItem(QGraphicsObject):
             return
         was_dragging = self._is_dragging
         target_center_y = self._drag_target_center_y
+        dragged_item_uuid = self._dragged_item_uuid
         self._reset_drag_state()
         if was_dragging:
-            self.drag_ended.emit(self.node_id, True)
-            self.move_requested.emit(self.node_id, target_center_y)
+            if dragged_item_uuid == self.node_id:
+                self.drag_ended.emit(self.node_id, True)
+                self.move_requested.emit(self.node_id, target_center_y)
+            else:
+                self.loop_child_drag_ended.emit(
+                    self.node_id,
+                    dragged_item_uuid,
+                    True,
+                )
         event.accept()
 
     def mouseDoubleClickEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
@@ -315,9 +449,35 @@ class WorkflowNodeItem(QGraphicsObject):
                 preview_scene.removeItem(preview)
         self._drag_preview = None
         self._drag_preview_anchor = QPointF()
+        self._dragged_item_uuid = self.node_id
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setOpacity(1.0)
         self.setZValue(0.0)
+        self.update()
+
+    def set_active_child_uuid(self, item_uuid: str) -> None:
+        """Highlight the nested loop action currently selected by the user."""
+        normalized = item_uuid if item_uuid != self.node_id else ""
+        if self._active_child_uuid == normalized:
+            return
+        self._active_child_uuid = normalized
+        self.update()
+
+    def set_loop_drop_target(self, child_index: int | None) -> None:
+        if self._active_loop_drop_index == child_index:
+            return
+        self._active_loop_drop_index = child_index
+        if child_index is None:
+            self._drop_pulse_animation.stop()
+            self._drop_pulse_phase = 0.0
+        elif self._drop_pulse_animation.state() != QAbstractAnimation.State.Running:
+            self._drop_pulse_animation.start()
+        self.update()
+
+    def _on_drop_pulse_value_changed(self, value: object) -> None:
+        if isinstance(value, (int, float)):
+            self._drop_pulse_phase = float(value)
+            self.update()
 
     def cancel_drag(self) -> None:
         """Restore the stationary node and discard transient drag feedback."""
@@ -326,19 +486,29 @@ class WorkflowNodeItem(QGraphicsObject):
         if was_dragging:
             self.drag_ended.emit(self.node_id, False)
 
+    def refresh_theme(self) -> None:
+        """Discard the device-coordinate cache after a palette change."""
+        cache_mode = self.cacheMode()
+        self.setCacheMode(self.CacheMode.NoCache)
+        self.update()
+        self.setCacheMode(cache_mode)
+        self.update()
+
     def sceneEvent(self, event: QEvent) -> bool:  # noqa: N802
         if event.type() is QEvent.Type.UngrabMouse:
             self.cancel_drag()
         return super().sceneEvent(event)
 
     def _begin_drag_preview(self, scene_position: QPointF) -> None:
+        preview_entry = self._drag_preview_entry()
+        preview_rect = self._drag_preview_rect()
         preview_scale = min(
             1.0,
-            DRAG_PREVIEW_MAX_WIDTH / self.node_width,
-            DRAG_PREVIEW_MAX_HEIGHT / self.node_height,
+            DRAG_PREVIEW_MAX_WIDTH / preview_rect.width(),
+            DRAG_PREVIEW_MAX_HEIGHT / preview_rect.height(),
         )
-        preview_width = max(1, ceil(self.node_width * preview_scale))
-        preview_height = max(1, ceil(self.node_height * preview_scale))
+        preview_width = max(1, ceil(preview_rect.width() * preview_scale))
+        preview_height = max(1, ceil(preview_rect.height() * preview_scale))
         pixmap = QPixmap(preview_width, preview_height)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -346,29 +516,79 @@ class WorkflowNodeItem(QGraphicsObject):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
             painter.scale(preview_scale, preview_scale)
-            self.paint(painter, QStyleOptionGraphicsItem(), None)
+            if preview_entry is self.entry:
+                self.paint(painter, QStyleOptionGraphicsItem(), None)
+            else:
+                colors = canvas_colors(QApplication.palette())
+                self._paint_parallel_child(
+                    painter,
+                    preview_entry,
+                    QRectF(0.0, 0.0, preview_rect.width(), preview_rect.height()),
+                    colors.text,
+                    colors.secondary_text,
+                )
         finally:
             painter.end()
 
-        preview = NodeDragPreviewItem(self.node_id, pixmap)
+        preview = NodeDragPreviewItem(self._dragged_item_uuid, pixmap)
         scene = self.scene()
         if scene is not None:
             scene.addItem(preview)
         self._drag_preview = preview
-        press_position = self._press_local_position or self.boundingRect().center()
+        press_position = self._press_local_position or preview_rect.center()
         self._drag_preview_anchor = QPointF(
-            press_position.x() * preview_scale,
-            press_position.y() * preview_scale,
+            (press_position.x() - preview_rect.left()) * preview_scale,
+            (press_position.y() - preview_rect.top()) * preview_scale,
         )
         self._is_dragging = True
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        self.setOpacity(DRAG_SOURCE_OPACITY)
+        if self._dragged_item_uuid == self.node_id:
+            self.setOpacity(DRAG_SOURCE_OPACITY)
+        self.update()
         self._position_drag_preview(scene_position)
 
     def _position_drag_preview(self, scene_position: QPointF) -> None:
         if self._drag_preview is None:
             return
         self._drag_preview.setPos(scene_position - self._drag_preview_anchor)
+
+    def _drag_preview_entry(self) -> SequenceEntry:
+        return self._entry_at(self._press_local_position or self.boundingRect().center())
+
+    def _drag_preview_rect(self) -> QRectF:
+        position = self._press_local_position or self.boundingRect().center()
+        if isinstance(self.entry, LoopBlock):
+            body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
+            card_left = (LOOP_NODE_WIDTH - NODE_WIDTH) / 2.0
+            for index, _child in enumerate(self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]):
+                child_rect = QRectF(
+                    card_left,
+                    body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP),
+                    NODE_WIDTH,
+                    LOOP_CHILD_HEIGHT,
+                )
+                if child_rect.contains(position):
+                    return child_rect
+        if isinstance(self.entry, ParallelBlock):
+            target = self.parallel_child_at(position)
+            if target is not None:
+                branch_id, child_uuid = target
+                for branch_index, branch in enumerate(self.entry.branches):
+                    if branch.branch_id != branch_id:
+                        continue
+                    for child_index, child in enumerate(branch.items):
+                        if child.uuid == child_uuid:
+                            return QRectF(
+                                self._parallel_branch_left(branch_index) + 8.0,
+                                PARALLEL_HEADER_HEIGHT
+                                + PARALLEL_SECTION_GAP
+                                + PARALLEL_BRANCH_HEADER_HEIGHT
+                                + child_index
+                                * (PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP),
+                                PARALLEL_BRANCH_WIDTH - 16.0,
+                                PARALLEL_CHILD_HEIGHT,
+                            )
+        return self.boundingRect()
 
     def _paint_action(
         self,
@@ -401,27 +621,35 @@ class WorkflowNodeItem(QGraphicsObject):
             return
         colors = canvas_colors()
         rect = QRectF(0.0, 0.0, NODE_WIDTH, NODE_HEIGHT)
-        painter.setBrush(QBrush(colors.surface))
-        painter.setPen(
-            QPen(colors.accent if emphasized else colors.border, 2.5 if emphasized else 1.5)
-        )
+        painter.setBrush(_card_brush(colors.surface, colors.accent, emphasized))
+        border = STATUS_COLORS[SequenceItemStatus.RUNNING] if _entry_is_running(subworkflow) else colors.border
+        border_width = 1.5 + self._execution_pulse_phase * 1.5
+        painter.setPen(QPen(border, border_width))
         painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#2563eb"))
-        painter.drawRoundedRect(QRectF(0.0, 0.0, 10.0, NODE_HEIGHT), 5.0, 5.0)
+        _draw_svg_icon(
+            painter,
+            IconName.WORKFLOW,
+            QRectF(14.0, 17.0, 22.0, 22.0),
+            QColor("#3b82f6"),
+        )
         painter.setPen(foreground)
         painter.setFont(canvas_font(emphasis=True))
+        subworkflow_name_rect = QRectF(46.0, 5.0, NODE_WIDTH - 58.0, 25.0)
         painter.drawText(
-            QRectF(24.0, 10.0, NODE_WIDTH - 42.0, 28.0),
+            subworkflow_name_rect,
             Qt.AlignmentFlag.AlignVCenter,
-            subworkflow.name,
+            painter.fontMetrics().elidedText(
+                subworkflow.name,
+                Qt.TextElideMode.ElideRight,
+                int(subworkflow_name_rect.width()),
+            ),
         )
         painter.setPen(secondary_text)
         painter.setFont(canvas_font(secondary=True))
         painter.drawText(
-            QRectF(24.0, 40.0, NODE_WIDTH - 42.0, 24.0),
+            QRectF(46.0, 29.0, NODE_WIDTH - 58.0, 21.0),
             Qt.AlignmentFlag.AlignVCenter,
-            f"子流程 · {len(subworkflow.items)} 个节点 · 双击进入",
+            f"{len(subworkflow.items)} 个节点",
         )
 
     def _paint_action_card(
@@ -434,41 +662,45 @@ class WorkflowNodeItem(QGraphicsObject):
         *,
         emphasized: bool = False,
     ) -> None:
+        del secondary_text
         colors = canvas_colors()
-        painter.setBrush(QBrush(colors.surface))
-        painter.setPen(
-            QPen(colors.accent if emphasized else colors.border, 2.5 if emphasized else 1.5)
-        )
+        painter.setBrush(_card_brush(colors.surface, colors.accent, emphasized))
+        is_running = item.status is SequenceItemStatus.RUNNING
+        border = STATUS_COLORS[item.status] if is_running else colors.border
+        border_width = 1.5 + self._execution_pulse_phase * 1.5 if is_running else 1.5
+        painter.setPen(QPen(border, border_width))
         painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         color = ACTION_COLORS.get(item.definition.type, QColor("#64748b"))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        painter.drawRoundedRect(
-            QRectF(rect.left(), rect.top(), 10.0, rect.height()),
-            5.0,
-            5.0,
+        _draw_svg_icon(
+            painter,
+            action_icon(item.definition),
+            QRectF(rect.left() + 14.0, rect.top() + 18.0, 22.0, 22.0),
+            color,
         )
         painter.setPen(foreground)
         painter.setFont(canvas_font(emphasis=True))
-        painter.drawText(
-            QRectF(rect.left() + 24.0, rect.top() + 10.0, rect.width() - 42.0, 28.0),
-            Qt.AlignmentFlag.AlignVCenter,
-            item.definition.name,
+        action_name_rect = QRectF(
+            rect.left() + 46.0,
+            rect.top() + 13.0,
+            rect.width() - 124.0,
+            30.0,
         )
-        painter.setFont(canvas_font(secondary=True))
-        painter.setPen(secondary_text)
         painter.drawText(
-            QRectF(rect.left() + 24.0, rect.top() + 38.0, rect.width() - 42.0, 22.0),
+            action_name_rect,
             Qt.AlignmentFlag.AlignVCenter,
-            item.definition.type.value,
+            painter.fontMetrics().elidedText(
+                item.definition.name,
+                Qt.TextElideMode.ElideRight,
+                int(action_name_rect.width()),
+            ),
         )
         status_color = STATUS_COLORS[item.status]
         painter.setBrush(status_color)
         painter.setPen(Qt.PenStyle.NoPen)
         status_rect = QRectF(
-            rect.right() - 86.0,
-            rect.bottom() - 28.0,
-            70.0,
+            rect.right() - 72.0,
+            rect.top() + 18.0,
+            60.0,
             22.0,
         )
         painter.drawRoundedRect(
@@ -500,15 +732,38 @@ class WorkflowNodeItem(QGraphicsObject):
             NODE_WIDTH,
             LOOP_HEADER_HEIGHT,
         )
-        loop_color = QColor("#7c5a16")
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(loop_color)
-        painter.setPen(QPen(accent if self.isSelected() else loop_color, 3.0))
+        control = control_flow_colors(ControlFlowKind.LOOP)
+        painter.setBrush(control.header)
+        loop_running = _entry_is_running(loop)
+        loop_border = (
+            STATUS_COLORS[SequenceItemStatus.RUNNING]
+            if loop_running
+            else accent if self.isSelected() else control.accent
+        )
+        loop_border_width = (
+            1.5 + self._execution_pulse_phase * 1.5
+            if loop_running
+            else 1.5
+        )
+        painter.setPen(QPen(loop_border, loop_border_width))
         painter.drawRoundedRect(header_rect, NODE_RADIUS, NODE_RADIUS)
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(control.accent)
+        painter.drawRoundedRect(
+            QRectF(header_rect.left(), header_rect.top(), 5.0, header_rect.height()),
+            2.5,
+            2.5,
+        )
+        _draw_svg_icon(
+            painter,
+            IconName.LOOP,
+            QRectF(card_left + 16.0, 11.0, 18.0, 18.0),
+            control.accent,
+        )
+        painter.setPen(control.header_text)
         painter.setFont(canvas_font(emphasis=True))
         painter.drawText(
-            QRectF(card_left + 18.0, 10.0, NODE_WIDTH - 36.0, 26.0),
+            QRectF(card_left + 44.0, 7.0, NODE_WIDTH - 60.0, 26.0),
             Qt.AlignmentFlag.AlignVCenter,
             "循环",
         )
@@ -520,13 +775,13 @@ class WorkflowNodeItem(QGraphicsObject):
             else ""
         )
         painter.drawText(
-            QRectF(card_left + 18.0, 38.0, NODE_WIDTH - 36.0, 24.0),
+            QRectF(card_left + 44.0, 31.0, NODE_WIDTH - 60.0, 22.0),
             Qt.AlignmentFlag.AlignVCenter,
-            f"循环 {loop.repeat_count} 次 · {len(loop.items)} 个动作{progress}",
+            f"{loop.repeat_count} 次 · {len(loop.items)} 个节点{progress}",
         )
 
         body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
-        painter.setPen(QColor("#fbbf24"))
+        painter.setPen(control.path)
         painter.drawText(
             QRectF(
                 LOOP_NODE_WIDTH / 2.0 + 24.0,
@@ -543,6 +798,9 @@ class WorkflowNodeItem(QGraphicsObject):
                 painter,
                 body_top - LOOP_SECTION_GAP / 2.0,
                 accent,
+                active=self._active_loop_drop_index == 0,
+                active_phase=self._drop_pulse_phase,
+                hover_phase=self._loop_insert_hover_phase(0),
             )
         for index, child in enumerate(visible_children):
             child_top = body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP)
@@ -551,6 +809,9 @@ class WorkflowNodeItem(QGraphicsObject):
                     painter,
                     child_top - LOOP_CHILD_GAP / 2.0,
                     accent,
+                    active=self._active_loop_drop_index == index,
+                    active_phase=self._drop_pulse_phase,
+                    hover_phase=self._loop_insert_hover_phase(index),
                 )
             child_rect = QRectF(
                 card_left,
@@ -558,13 +819,23 @@ class WorkflowNodeItem(QGraphicsObject):
                 NODE_WIDTH,
                 LOOP_CHILD_HEIGHT,
             )
+            is_dragged_child = (
+                self._is_dragging
+                and self._dragged_item_uuid == child.uuid
+            )
+            if is_dragged_child:
+                painter.save()
+                painter.setOpacity(DRAG_SOURCE_OPACITY)
             self._paint_parallel_child(
                 painter,
                 child,
                 child_rect,
                 foreground,
                 secondary_text,
+                emphasized=child.uuid == self._active_child_uuid,
             )
+            if is_dragged_child:
+                painter.restore()
 
         if visible_children:
             children_bottom = (
@@ -577,6 +848,9 @@ class WorkflowNodeItem(QGraphicsObject):
                     painter,
                     children_bottom + LOOP_SECTION_GAP / 2.0,
                     accent,
+                    active=self._active_loop_drop_index == len(loop.items),
+                    active_phase=self._drop_pulse_phase,
+                    hover_phase=self._loop_insert_hover_phase(len(loop.items)),
                 )
         else:
             children_bottom = body_top + 44.0
@@ -594,10 +868,10 @@ class WorkflowNodeItem(QGraphicsObject):
             LOOP_FOOTER_WIDTH,
             LOOP_FOOTER_HEIGHT,
         )
-        painter.setBrush(canvas_colors().border)
+        painter.setBrush(control.footer)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(footer_rect, 20.0, 20.0)
-        painter.setPen(foreground)
+        painter.setPen(control.footer_text)
         painter.drawText(
             footer_rect,
             Qt.AlignmentFlag.AlignCenter,
@@ -610,7 +884,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 Qt.AlignmentFlag.AlignCenter,
                 f"另有 {len(loop.items) - MAX_VISIBLE_LOOP_CHILDREN} 个动作",
             )
-        self._paint_loop_paths(painter, header_rect, footer_rect)
+        self._paint_loop_paths(painter, header_rect, footer_rect, control.path)
 
     def _paint_parallel(
         self,
@@ -623,21 +897,41 @@ class WorkflowNodeItem(QGraphicsObject):
         if not isinstance(parallel, ParallelBlock):
             return
         colors = canvas_colors()
+        control = control_flow_colors(ControlFlowKind.PARALLEL)
         header_rect = QRectF(0.0, 0.0, self.node_width, PARALLEL_HEADER_HEIGHT)
-        parallel_color = QColor("#6d28d9")
-        painter.setBrush(parallel_color)
-        painter.setPen(QPen(accent if self.isSelected() else parallel_color, 3.0))
+        painter.setBrush(control.header)
+        parallel_running = _entry_is_running(parallel)
+        parallel_border = (
+            STATUS_COLORS[SequenceItemStatus.RUNNING]
+            if parallel_running
+            else accent if self.isSelected() else control.accent
+        )
+        parallel_border_width = (
+            1.5 + self._execution_pulse_phase * 1.5
+            if parallel_running
+            else 1.5
+        )
+        painter.setPen(QPen(parallel_border, parallel_border_width))
         painter.drawRoundedRect(header_rect, NODE_RADIUS, NODE_RADIUS)
-        painter.setPen(QColor("#ffffff"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(control.accent)
+        painter.drawRoundedRect(QRectF(0.0, 0.0, 5.0, header_rect.height()), 2.5, 2.5)
+        _draw_svg_icon(
+            painter,
+            IconName.WORKFLOW,
+            QRectF(18.0, 12.0, 18.0, 18.0),
+            control.accent,
+        )
+        painter.setPen(control.header_text)
         painter.setFont(canvas_font(emphasis=True))
         painter.drawText(
-            QRectF(20.0, 10.0, self.node_width - 40.0, 26.0),
+            QRectF(46.0, 8.0, self.node_width - 64.0, 26.0),
             Qt.AlignmentFlag.AlignVCenter,
             "并行",
         )
         painter.setFont(canvas_font(secondary=True))
         painter.drawText(
-            QRectF(20.0, 38.0, self.node_width - 40.0, 24.0),
+            QRectF(46.0, 36.0, self.node_width - 64.0, 24.0),
             Qt.AlignmentFlag.AlignVCenter,
             f"{len(parallel.branches)} 个分支 · 全部分支完成后汇合",
         )
@@ -706,6 +1000,7 @@ class WorkflowNodeItem(QGraphicsObject):
                     body_top - PARALLEL_CHILD_GAP / 2.0,
                     accent,
                     center_x=branch_left + PARALLEL_BRANCH_WIDTH / 2.0,
+                    hover_phase=self._parallel_insert_hover_phase(branch.branch_id, 0),
                 )
             for child_index, child in enumerate(branch.items):
                 child_top = body_top + child_index * (PARALLEL_CHILD_HEIGHT + PARALLEL_CHILD_GAP)
@@ -715,6 +1010,10 @@ class WorkflowNodeItem(QGraphicsObject):
                         child_top - PARALLEL_CHILD_GAP / 2.0,
                         accent,
                         center_x=branch_left + PARALLEL_BRANCH_WIDTH / 2.0,
+                        hover_phase=self._parallel_insert_hover_phase(
+                            branch.branch_id,
+                            child_index,
+                        ),
                     )
                 child_rect = QRectF(
                     branch_left + 8.0,
@@ -738,12 +1037,16 @@ class WorkflowNodeItem(QGraphicsObject):
                     + PARALLEL_CHILD_GAP / 2.0,
                     accent,
                     center_x=branch_left + PARALLEL_BRANCH_WIDTH / 2.0,
+                    hover_phase=self._parallel_insert_hover_phase(
+                        branch.branch_id,
+                        len(branch.items),
+                    ),
                 )
 
-        painter.setBrush(colors.border)
+        painter.setBrush(control.footer)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(footer_rect, 20.0, 20.0)
-        painter.setPen(foreground)
+        painter.setPen(control.footer_text)
         painter.setFont(canvas_font(emphasis=True, secondary=True))
         painter.drawText(footer_rect, Qt.AlignmentFlag.AlignCenter, "并行汇合")
         self._paint_parallel_paths(painter, header_rect, footer_rect, branch_top)
@@ -755,6 +1058,8 @@ class WorkflowNodeItem(QGraphicsObject):
         rect: QRectF,
         foreground: QColor,
         secondary_text: QColor,
+        *,
+        emphasized: bool = False,
     ) -> None:
         if isinstance(entry, SequenceItem):
             self._paint_action_card(
@@ -763,11 +1068,12 @@ class WorkflowNodeItem(QGraphicsObject):
                 rect,
                 foreground,
                 secondary_text,
+                emphasized=emphasized,
             )
             return
         colors = canvas_colors()
-        painter.setBrush(colors.canvas)
-        painter.setPen(QPen(colors.border, 1.5))
+        painter.setBrush(_card_brush(colors.canvas, colors.accent, emphasized))
+        painter.setPen(QPen(colors.accent if emphasized else colors.border, 1.5))
         painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
         painter.setPen(foreground)
         painter.setFont(canvas_font(emphasis=True, secondary=True))
@@ -823,10 +1129,34 @@ class WorkflowNodeItem(QGraphicsObject):
         accent: QColor,
         *,
         center_x: float = LOOP_NODE_WIDTH / 2.0,
+        active: bool = False,
+        active_phase: float = 0.0,
+        hover_phase: float = 0.0,
     ) -> None:
-        painter.setBrush(accent)
+        if active:
+            glow = QColor("#16a34a")
+            glow.setAlphaF(0.20 + active_phase * 0.16)
+            painter.setBrush(glow)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(
+                QPointF(center_x, center_y),
+                20.0 + active_phase * 3.0,
+                20.0 + active_phase * 3.0,
+            )
+        if hover_phase > 0.0 and not active:
+            glow = QColor(accent)
+            glow.setAlphaF(0.10 + hover_phase * 0.10)
+            painter.setBrush(glow)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(
+                QPointF(center_x, center_y),
+                18.0 + hover_phase * 3.0,
+                18.0 + hover_phase * 3.0,
+            )
+        painter.setBrush(QColor("#16a34a") if active else accent)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(center_x, center_y), 15.0, 15.0)
+        radius = 17.0 + active_phase * 2.0 if active else 15.0 + hover_phase * 2.0
+        painter.drawEllipse(QPointF(center_x, center_y), radius, radius)
         painter.setPen(QPen(QColor("#ffffff"), 2.0))
         painter.drawLine(
             QPointF(center_x - 6.0, center_y),
@@ -842,8 +1172,8 @@ class WorkflowNodeItem(QGraphicsObject):
         painter: QPainter,
         header_rect: QRectF,
         footer_rect: QRectF,
+        loop_color: QColor,
     ) -> None:
-        loop_color = QColor("#fbbf24")
         left_x = 24.0
         right_x = LOOP_NODE_WIDTH - 24.0
         header_center_y = header_rect.center().y()
@@ -863,7 +1193,12 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.setPen(QPen(loop_color, 2.0))
         painter.drawPath(forward_path)
         painter.drawText(
-            QRectF(right_x - 84.0, header_center_y + 18.0, 76.0, 24.0),
+            QRectF(
+                header_rect.right() + 8.0,
+                header_center_y + 18.0,
+                right_x - header_rect.right() - 12.0,
+                24.0,
+            ),
             Qt.AlignmentFlag.AlignRight,
             "达到次数",
         )
@@ -883,7 +1218,12 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawPath(return_path)
         painter.setPen(loop_color)
         painter.drawText(
-            QRectF(0.0, header_center_y + 18.0, 68.0, 24.0),
+            QRectF(
+                4.0,
+                header_center_y + 18.0,
+                header_rect.left() - 16.0,
+                24.0,
+            ),
             Qt.AlignmentFlag.AlignRight,
             "下一次",
         )
@@ -903,9 +1243,42 @@ class WorkflowNodeItem(QGraphicsObject):
                 return child.uuid
         return self.entry.uuid
 
+    def _entry_at(self, position: QPointF) -> SequenceEntry:
+        """Return the concrete card under the pointer, or this container."""
+        if isinstance(self.entry, LoopBlock):
+            body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
+            card_left = (LOOP_NODE_WIDTH - NODE_WIDTH) / 2.0
+            for index, child in enumerate(self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]):
+                child_rect = QRectF(
+                    card_left,
+                    body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP),
+                    NODE_WIDTH,
+                    LOOP_CHILD_HEIGHT,
+                )
+                if child_rect.contains(position):
+                    return child
+        elif isinstance(self.entry, ParallelBlock):
+            target = self.parallel_child_at(position)
+            if target is not None:
+                branch_id, child_uuid = target
+                for branch in self.entry.branches:
+                    if branch.branch_id == branch_id:
+                        return next(
+                            child
+                            for child in branch.items
+                            if child.uuid == child_uuid
+                        )
+        return self.entry
+
     def item_uuid_at(self, position: QPointF) -> str:
         """Resolve the entry represented at a local position."""
         return self._item_uuid_at(position)
+
+    def tooltip_at(self, position: QPointF) -> str:
+        """Resolve tooltip content for the concrete card below a local pointer."""
+        if self._insert_target_at(position) is not None:
+            return _INSERT_ACTION_TOOLTIP
+        return self._tooltip_for_entry(self._entry_at(position))
 
     def parallel_child_at(self, position: QPointF) -> tuple[str, str] | None:
         parallel = self.entry
@@ -1002,21 +1375,87 @@ class WorkflowNodeItem(QGraphicsObject):
                 return index
         return None
 
+    def loop_drop_target(self, position: QPointF) -> int | None:
+        """Resolve a pointer position to an insertion index in this loop body."""
+        if not isinstance(self.entry, LoopBlock):
+            return None
+        card_left = (LOOP_NODE_WIDTH - NODE_WIDTH) / 2.0
+        if not card_left <= position.x() <= card_left + NODE_WIDTH:
+            return None
+        body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
+        footer_top = self.node_height - LOOP_FOOTER_HEIGHT
+        if not body_top <= position.y() <= footer_top:
+            return None
+        child_index = 0
+        for index, _child in enumerate(self.entry.items):
+            center_y = body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP)
+            center_y += LOOP_CHILD_HEIGHT / 2.0
+            if position.y() < center_y:
+                break
+            child_index = index + 1
+        return child_index
+
+    def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        insert_target = self._insert_target_at(event.pos())
+        self._set_hovered_insert_target(insert_target)
+        if insert_target is not None:
+            self.setToolTip(_INSERT_ACTION_TOOLTIP)
+        else:
+            self.setToolTip(self._tooltip_for_entry(self._entry_at(event.pos())))
+        super().hoverMoveEvent(event)
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        self._set_hovered_insert_target(None)
+        self.setToolTip(self._tooltip())
+        super().hoverLeaveEvent(event)
+
+    def _insert_target_at(self, position: QPointF) -> tuple[str, int] | None:
+        loop_index = self._loop_insertion_index_at(position)
+        if loop_index is not None:
+            return ("", loop_index)
+        return self._parallel_insertion_at(position)
+
+    def _set_hovered_insert_target(self, target: tuple[str, int] | None) -> None:
+        if self._hovered_insert_target == target:
+            return
+        self._hovered_insert_target = target
+        self._insert_hover_animation.stop()
+        self._insert_hover_animation.setStartValue(self._insert_hover_phase)
+        self._insert_hover_animation.setEndValue(1.0 if target is not None else 0.0)
+        self._insert_hover_animation.start()
+        self.update()
+
+    def _on_insert_hover_value_changed(self, value: object) -> None:
+        if isinstance(value, (int, float)):
+            self._insert_hover_phase = float(value)
+            self.update()
+
+    def _loop_insert_hover_phase(self, index: int) -> float:
+        return self._insert_hover_phase if self._hovered_insert_target == ("", index) else 0.0
+
+    def _parallel_insert_hover_phase(self, branch_id: str, index: int) -> float:
+        target = (branch_id, index)
+        return self._insert_hover_phase if self._hovered_insert_target == target else 0.0
+
     def _tooltip(self) -> str:
-        if isinstance(self.entry, SubworkflowBlock):
-            return f"子流程: {self.entry.name}\n{len(self.entry.items)} 个节点，双击进入编辑"
-        if isinstance(self.entry, LoopBlock):
+        return self._tooltip_for_entry(self.entry)
+
+    @staticmethod
+    def _tooltip_for_entry(entry: SequenceEntry) -> str:
+        if isinstance(entry, SubworkflowBlock):
+            return f"子流程: {entry.name}\n{len(entry.items)} 个节点，双击进入编辑"
+        if isinstance(entry, LoopBlock):
             return (
-                f"循环 {self.entry.repeat_count} 次\n"
-                f"{len(self.entry.items)} 个动作，共 {self.entry.total_steps} 步"
+                f"循环 {entry.repeat_count} 次\n"
+                f"{len(entry.items)} 个动作，共 {entry.total_steps} 步"
             )
-        if isinstance(self.entry, ParallelBlock):
-            action_count = sum(len(branch.items) for branch in self.entry.branches)
-            return f"并行 · {len(self.entry.branches)} 个分支\n共 {action_count} 个控制流节点"
+        if isinstance(entry, ParallelBlock):
+            action_count = sum(len(branch.items) for branch in entry.branches)
+            return f"并行 · {len(entry.branches)} 个分支\n共 {action_count} 个控制流节点"
         parameters = ", ".join(
-            f"{name}={value}" for name, value in list(self.entry.definition.parameters.items())[:5]
+            f"{name}={value}" for name, value in list(entry.definition.parameters.items())[:5]
         )
-        return f"{self.entry.definition.name}\n{parameters or '无参数'}"
+        return f"{entry.definition.name}\n{parameters or '无参数'}"
 
 
 def _parallel_state_style(state: str) -> tuple[QColor, str]:
@@ -1077,6 +1516,12 @@ class InsertionItem(QGraphicsObject):
         self._is_pressed = False
         self._is_drop_target_active = False
         self._target_label = ""
+        self._is_hovered = False
+        self._hover_phase = 0.0
+        self._hover_animation = QVariantAnimation(self)
+        self._hover_animation.setDuration(INSERT_HOVER_TRANSITION_MS)
+        self._hover_animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._hover_animation.valueChanged.connect(self._on_hover_value_changed)
         self._pulse_phase = 0.0
         self._pulse_animation = QVariantAnimation(self)
         self._pulse_animation.setDuration(INSERT_TARGET_PULSE_DURATION_MS)
@@ -1088,7 +1533,8 @@ class InsertionItem(QGraphicsObject):
         self._pulse_animation.valueChanged.connect(self._on_pulse_value_changed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
-        self.setToolTip("在此处插入动作")
+        self.setAcceptHoverEvents(True)
+        self.setToolTip(_INSERT_ACTION_TOOLTIP)
 
     @property
     def index(self) -> int:
@@ -1105,6 +1551,14 @@ class InsertionItem(QGraphicsObject):
     @property
     def is_pulsing(self) -> bool:
         return self._pulse_animation.state() == QAbstractAnimation.State.Running
+
+    @property
+    def is_hovered(self) -> bool:
+        return self._is_hovered
+
+    @property
+    def hover_phase(self) -> float:
+        return self._hover_phase
 
     def boundingRect(self) -> QRectF:  # noqa: N802
         right_edge = INSERT_TARGET_SIZE + INSERT_TARGET_HINT_WIDTH + 16.0
@@ -1131,15 +1585,21 @@ class InsertionItem(QGraphicsObject):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         colors = canvas_colors()
         center = QPointF(INSERT_TARGET_SIZE / 2.0, INSERT_TARGET_SIZE / 2.0)
-        if self._is_drop_target_active:
+        if self._is_drop_target_active or self._hover_phase > 0.0:
             glow = QColor(colors.accent)
-            glow.setAlphaF(0.20 + self._pulse_phase * 0.16)
-            glow_radius = 20.0 + self._pulse_phase * 3.0
+            glow.setAlphaF(
+                0.08 * self._hover_phase
+                + (0.20 + self._pulse_phase * 0.16 if self._is_drop_target_active else 0.0)
+            )
+            glow_radius = 18.0 + self._hover_phase * 3.0
+            if self._is_drop_target_active:
+                glow_radius = 20.0 + self._pulse_phase * 3.0
             painter.setBrush(glow)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(center, glow_radius, glow_radius)
 
         core_radius = 15.0
+        core_radius += self._hover_phase * 2.0
         if self._is_drop_target_active:
             core_radius += 1.5 + self._pulse_phase * 1.5
         painter.setBrush(colors.accent)
@@ -1155,13 +1615,17 @@ class InsertionItem(QGraphicsObject):
             QPointF(center.x(), center.y() + 6.0),
         )
 
-        if self._is_drop_target_active and self._target_label:
+        hint_label = self._target_label if self._is_drop_target_active else "添加动作"
+        hint_opacity = 1.0 if self._is_drop_target_active else self._hover_phase
+        if hint_label and hint_opacity > 0.0:
             hint_rect = QRectF(
                 INSERT_TARGET_SIZE + 8.0,
                 7.0,
                 INSERT_TARGET_HINT_WIDTH,
                 30.0,
             )
+            painter.save()
+            painter.setOpacity(hint_opacity)
             painter.setBrush(colors.surface)
             painter.setPen(QPen(colors.accent, 1.25))
             painter.drawRoundedRect(hint_rect, 8.0, 8.0)
@@ -1170,8 +1634,9 @@ class InsertionItem(QGraphicsObject):
             painter.drawText(
                 hint_rect.adjusted(10.0, 0.0, -8.0, 0.0),
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                self._target_label,
+                hint_label,
             )
+            painter.restore()
 
     def set_drop_target_active(self, active: bool, label: str = "") -> None:
         normalized_label = label.strip() if active else ""
@@ -1179,13 +1644,39 @@ class InsertionItem(QGraphicsObject):
             return
         self._is_drop_target_active = active
         self._target_label = normalized_label
-        self.setZValue(50.0 if active else 0.0)
+        self._refresh_z_value()
         if active:
             self._pulse_animation.start()
         else:
             self._pulse_animation.stop()
             self._pulse_phase = 0.0
         self.update()
+
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        self._set_hovered(True)
+        event.accept()
+
+    def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        self._set_hovered(False)
+        event.accept()
+
+    def _set_hovered(self, hovered: bool) -> None:
+        if self._is_hovered == hovered:
+            return
+        self._is_hovered = hovered
+        self._hover_animation.stop()
+        self._hover_animation.setStartValue(self._hover_phase)
+        self._hover_animation.setEndValue(1.0 if hovered else 0.0)
+        self._hover_animation.start()
+        self._refresh_z_value()
+
+    def _refresh_z_value(self) -> None:
+        self.setZValue(50.0 if self._is_drop_target_active else 30.0 if self._is_hovered else 0.0)
+
+    def _on_hover_value_changed(self, value: object) -> None:
+        if isinstance(value, (int, float)):
+            self._hover_phase = float(value)
+            self.update()
 
     def _on_pulse_value_changed(self, value: object) -> None:
         if isinstance(value, (int, float)):

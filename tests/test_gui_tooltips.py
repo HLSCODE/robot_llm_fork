@@ -100,6 +100,37 @@ class GuiToolTipTests(unittest.TestCase):
         self.assertTrue(event.isAccepted())
         self.assertFalse(self.service.bubble.isVisible())
 
+    def test_hiding_a_tooltip_after_its_owner_is_deleted_is_safe(self) -> None:
+        button = QPushButton("即将关闭")
+        self._show_widget(button)
+        self.service.show_text(
+            "窗口关闭提示",
+            button.mapToGlobal(QPoint(5, 5)),
+            owner=button,
+        )
+
+        button.close()
+        button.deleteLater()
+        QApplication.processEvents()
+        self.service.hide()
+        QApplication.processEvents()
+
+        self.assertFalse(self.service.bubble.isVisible())
+
+    def test_tooltip_lookup_supports_non_viewport_children(self) -> None:
+        scene = QGraphicsScene()
+        scene.addItem(QGraphicsRectItem(QRectF(0, 0, 80, 40)))
+        view = QGraphicsView(scene)
+        self._show_widget(view)
+        scroll_bar = view.verticalScrollBar()
+        event = QHelpEvent(
+            QEvent.Type.ToolTip,
+            QPoint(2, 2),
+            scroll_bar.mapToGlobal(QPoint(2, 2)),
+        )
+
+        self.assertTrue(self.service.eventFilter(scroll_bar, event))
+
     def _show_widget(self, widget: QWidget) -> None:
         self.widgets.append(widget)
         widget.resize(240, 160)

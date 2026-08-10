@@ -20,6 +20,7 @@ from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.controllers.startup import GuiStartupLifecycle
 from src.gui.theme import ThemeController, ThemeMode
+from src.gui.shortcuts import DEFAULT_SHORTCUTS
 from src.gui.views import StartupProgressCard
 from src.gui.views.ai_assistant import AIAssistantWidget
 from src.gui.views.workflow_canvas.items import InsertionItem
@@ -138,6 +139,10 @@ class GuiSimulationSmokeTests(unittest.TestCase):
                 Qt.ItemDataRole.UserRole
             ),
         )
+        self.assertEqual(
+            "startup-visible (1 步)",
+            self.window.task_library_view.task_library_list.item(0).text(),
+        )
         for removed_alias in (
             "sequence_list",
             "control_panel",
@@ -233,6 +238,17 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         QApplication.processEvents()
 
         self.assertEqual(GuiStartupState.CLOSED, self.window.startup_state)
+
+    def test_top_menu_commands_share_one_nonempty_shortcut_registry(self) -> None:
+        expected_command_ids = {
+            definition.command_id for definition in DEFAULT_SHORTCUTS
+        }
+
+        self.assertEqual(expected_command_ids, set(self.window._menu_actions))
+        self.assertIn("view.shortcuts", self.window._menu_actions)
+        for command_id, action in self.window._menu_actions.items():
+            with self.subTest(command=command_id):
+                self.assertFalse(action.shortcut().isEmpty())
 
     def test_buttons_drive_pause_resume_and_cancel_through_shared_runtime(self) -> None:
         item = SequenceItem.from_definition(

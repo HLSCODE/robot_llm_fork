@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
+from collections.abc import Callable
+
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
+    QComboBox,
     QListWidget,
     QMenu,
-    QTabWidget,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -15,8 +18,19 @@ from ...devices import StopMode
 from .action_list import ActionListWidget
 from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
-from ..icons import IconName
+from ..icons import IconName, themed_icon
+from ..drag_preview import create_drag_card_preview
 from ..toolbars import PaneHeader
+
+
+ACTION_LIBRARY_CATEGORIES: tuple[tuple[ActionType, str], ...] = (
+    (ActionType.MOVE, "移动类"),
+    (ActionType.MANIPULATE, "执行类"),
+    (ActionType.INSPECT, "检测类"),
+    (ActionType.CHANGE_GUN, "换枪类"),
+    (ActionType.VISION_CAPTURE, "视觉类"),
+    (ActionType.TRAJECTORY, "轨迹类"),
+)
 
 
 class TaskLibraryListWidget(QListWidget):
@@ -27,6 +41,23 @@ class TaskLibraryListWidget(QListWidget):
         self.setIconSize(QSize(28, 28))
         self.setSpacing(2)
         self.setResizeMode(QListWidget.ResizeMode.Adjust)
+        self._canvas_scale_provider: Callable[[], float] = lambda: 1.0
+
+    def set_canvas_scale_provider(self, provider: Callable[[], float]) -> None:
+        self._canvas_scale_provider = provider
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() not in {
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+        }:
+            return
+        color = self.palette().highlight().color()
+        for index in range(self.count()):
+            self.item(index).setIcon(
+                themed_icon(self, IconName.WORKFLOW, size=20, color=color)
+            )
 
     def startDrag(self, supported_actions: Qt.DropAction) -> None:  # noqa: N802
         del supported_actions
@@ -41,7 +72,16 @@ class TaskLibraryListWidget(QListWidget):
         mime.setData("application/x-task-name", task_name.encode("utf-8"))
         drag = QDrag(self)
         drag.setMimeData(mime)
-        drag.setPixmap(current_item.icon().pixmap(50, 50))
+        preview = create_drag_card_preview(
+            self,
+            title=current_item.text(),
+            subtitle="已保存任务 · 拖入画布",
+            icon=current_item.icon(),
+            accent=self.palette().highlight().color(),
+            canvas_scale=self._canvas_scale_provider(),
+        )
+        drag.setPixmap(preview.pixmap)
+        drag.setHotSpot(preview.hotspot)
         drag.exec(Qt.DropAction.CopyAction)
 
 
@@ -81,9 +121,13 @@ class ActionLibraryView(QWidget):
         )
         layout.addWidget(header)
 
-        self.action_tabs = QTabWidget()
-        self.action_tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self.action_tabs.setMovable(False)
+        self.category_selector = QComboBox()
+        self.category_selector.setAccessibleName("基础动作分类")
+        self.category_selector.setToolTip("选择基础动作分类")
+        self.category_selector.setMinimumContentsLength(8)
+        layout.addWidget(self.category_selector)
+
+        self.action_stack = QStackedWidget()
         self.action_lists = {
             ActionType.MOVE: ActionListWidget(),
             ActionType.MANIPULATE: ActionListWidget(),
@@ -96,19 +140,29 @@ class ActionLibraryView(QWidget):
             action_list.action_selected.connect(
                 self.action_insert_requested.emit
             )
-        for action_type, title in (
-            (ActionType.MOVE, "移动类"),
-            (ActionType.MANIPULATE, "执行类"),
-            (ActionType.INSPECT, "检测类"),
-            (ActionType.CHANGE_GUN, "换枪类"),
-            (ActionType.VISION_CAPTURE, "视觉类"),
-        ):
-            self.action_tabs.addTab(self.action_lists[action_type], title)
-        self.action_tabs.addTab(self.action_lists[ActionType.TRAJECTORY], "轨迹类")
-        layout.addWidget(self.action_tabs, stretch=1)
+        for action_type, title in ACTION_LIBRARY_CATEGORIES:
+            self.category_selector.addItem(title, action_type)
+            self.action_stack.addWidget(self.action_lists[action_type])
+        self.category_selector.currentIndexChanged.connect(
+            self.action_stack.setCurrentIndex
+        )
+        layout.addWidget(self.action_stack, stretch=1)
 
     def action_list(self, action_type: ActionType) -> ActionListWidget:
         return self.action_lists[action_type]
+
+    def current_category_type(self) -> ActionType:
+        action_type = self.category_selector.currentData()
+        if not isinstance(action_type, ActionType):
+            raise RuntimeError("基础动作分类未初始化")
+        return action_type
+
+    def current_action_list(self) -> ActionListWidget:
+        return self.action_lists[self.current_category_type()]
+
+    def set_canvas_scale_provider(self, provider: Callable[[], float]) -> None:
+        for action_list in self.action_lists.values():
+            action_list.set_canvas_scale_provider(provider)
 
     def set_camera_test_running(self, running: bool) -> None:
         self.camera_test_button.setEnabled(not running)
@@ -151,6 +205,9 @@ class TaskLibraryView(QWidget):
         )
         layout.addWidget(self.task_library_list, stretch=1)
 
+    def set_canvas_scale_provider(self, provider: Callable[[], float]) -> None:
+        self.task_library_list.set_canvas_scale_provider(provider)
+
     def _show_context_menu(self, position: QPoint) -> None:
         if self.task_library_list.itemAt(position) is None:
             return
@@ -161,6 +218,8 @@ class TaskLibraryView(QWidget):
 
 
 class WorkflowEditorView(QWidget):
+    save_requested = Signal()
+    clear_requested = Signal()
     start_requested = Signal()
     pause_requested = Signal()
     stop_requested = Signal()
@@ -175,6 +234,7 @@ class WorkflowEditorView(QWidget):
     insert_action_in_parallel_requested = Signal(str, str, int)
     add_parallel_branch_requested = Signal(str)
     insert_subworkflow_requested = Signal(str, int)
+    insert_subworkflow_in_loop_requested = Signal(str, str, int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -203,6 +263,9 @@ class WorkflowEditorView(QWidget):
         self.sequence_list.insert_subworkflow_requested.connect(
             self.insert_subworkflow_requested.emit
         )
+        self.sequence_list.insert_subworkflow_in_loop_requested.connect(
+            self.insert_subworkflow_in_loop_requested.emit
+        )
         self.sequence_list.wrap_selection_requested.connect(
             self.repeat_requested.emit
         )
@@ -210,6 +273,8 @@ class WorkflowEditorView(QWidget):
     def _connect_control_panel(self) -> None:
         controls = self.control_panel
         for source, target in (
+            (controls.save_clicked, self.save_requested),
+            (controls.clear_clicked, self.clear_requested),
             (controls.start_clicked, self.start_requested),
             (controls.pause_clicked, self.pause_requested),
             (controls.stop_clicked, self.stop_requested),
@@ -226,6 +291,8 @@ class WorkflowEditorView(QWidget):
         )
         controls.undo_clicked.connect(self.sequence_list.undo)
         controls.redo_clicked.connect(self.sequence_list.redo)
+        controls.fit_clicked.connect(self.sequence_list.fit_workflow)
+        controls.reset_zoom_clicked.connect(self.sequence_list.reset_zoom)
         self.sequence_list.can_undo_changed.connect(
             lambda enabled: controls.set_undo_redo_enabled(
                 enabled,

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TypeVar
+from typing import Protocol, TypeVar, runtime_checkable
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QHelpEvent, QPainter, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QToolTip,
     QWidget,
 )
+from shiboken6 import isValid
 
 
 TOOLTIP_SERVICE_OBJECT_NAME = "unifiedToolTipService"
@@ -24,7 +25,18 @@ TOOLTIP_VERTICAL_PADDING = 7
 TOOLTIP_MAXIMUM_TEXT_WIDTH = 360
 TOOLTIP_CORNER_RADIUS = 6.0
 
+_APPLICATION_TOOLTIP_SERVICES: dict[int, ToolTipService] = {}
+
 _WidgetType = TypeVar("_WidgetType", bound=QWidget)
+
+
+@runtime_checkable
+class _PositionToolTipItem(Protocol):
+    def mapFromScene(self, position: QPointF) -> QPointF:  # noqa: N802
+        """Map a scene point into this item's local coordinate system."""
+
+    def tooltip_at(self, position: QPointF) -> str:
+        """Return tooltip text for an item-local scene position."""
 
 
 class ToolTipBubble(QWidget):
@@ -115,6 +127,7 @@ class ToolTipService(QObject):
         self._application = application
         self._bubble = ToolTipBubble()
         self._owner: QWidget | None = None
+        self._is_closed = False
         application.installEventFilter(self)
         application.aboutToQuit.connect(self.close)
 
@@ -129,6 +142,8 @@ class ToolTipService(QObject):
         *,
         owner: QWidget | None = None,
     ) -> None:
+        if self._is_closed:
+            return
         normalized_text = text.strip()
         if not normalized_text:
             self.hide()
@@ -142,17 +157,26 @@ class ToolTipService(QObject):
         _schedule_widget_repaint(owner)
 
     def hide(self) -> None:
+        if self._is_closed:
+            return
         owner = self._owner
         self._owner = None
         self._bubble.hide()
         _schedule_widget_repaint(owner)
 
     def close(self) -> None:
+        if self._is_closed:
+            return
+        self._is_closed = True
         self._application.removeEventFilter(self)
-        self._bubble.close()
-        self._bubble.deleteLater()
+        self._owner = None
+        if isValid(self._bubble):
+            self._bubble.close()
+            self._bubble.deleteLater()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if self._is_closed:
+            return False
         if event.type() is QEvent.Type.ToolTip:
             return self._show_event_tooltip(watched, event)
         if event.type() is QEvent.Type.Leave and watched is self._owner:
@@ -206,23 +230,32 @@ def install_tooltip_service(application: QApplication) -> ToolTipService:
             isinstance(child, ToolTipService)
             and child.objectName() == TOOLTIP_SERVICE_OBJECT_NAME
         ):
+            _APPLICATION_TOOLTIP_SERVICES[id(application)] = child
             return child
-    return ToolTipService(application)
+    service = ToolTipService(application)
+    _APPLICATION_TOOLTIP_SERVICES[id(application)] = service
+    return service
 
 
 def _tooltip_text_at(widget: QWidget, position: QPoint) -> str:
+    global_position = widget.mapToGlobal(position)
     graphics_view = _ancestor_of_type(widget, QGraphicsView)
     if graphics_view is not None:
-        viewport_position = graphics_view.viewport().mapFrom(widget, position)
+        viewport_position = graphics_view.viewport().mapFromGlobal(global_position)
+        scene_position = graphics_view.mapToScene(viewport_position)
         item = graphics_view.itemAt(viewport_position)
         while item is not None:
+            if isinstance(item, _PositionToolTipItem):
+                text = item.tooltip_at(item.mapFromScene(scene_position))
+                if text:
+                    return text
             if item.toolTip():
                 return item.toolTip()
             item = item.parentItem()
 
     item_view = _ancestor_of_type(widget, QAbstractItemView)
     if item_view is not None:
-        viewport_position = item_view.viewport().mapFrom(widget, position)
+        viewport_position = item_view.viewport().mapFromGlobal(global_position)
         index = item_view.indexAt(viewport_position)
         if index.isValid():
             value = index.data(Qt.ItemDataRole.ToolTipRole)
@@ -253,7 +286,13 @@ def _text_flags() -> int:
 
 
 def _schedule_widget_repaint(widget: QWidget | None) -> None:
-    if widget is None:
+    if widget is None or not isValid(widget):
         return
     widget.update()
-    QTimer.singleShot(0, widget.update)
+    QTimer.singleShot(0, lambda: _update_if_valid(widget))
+
+
+def _update_if_valid(widget: QWidget) -> None:
+    """Refresh only if Qt has not destroyed the Python-owned widget meanwhile."""
+    if isValid(widget):
+        widget.update()

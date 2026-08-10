@@ -6,7 +6,8 @@ from PySide6.QtCore import QSize
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QWidget
 
-from src.gui.icons import IconName, themed_icon
+from src.domain.models import ActionDefinition, ActionType
+from src.gui.icons import IconName, action_icon, themed_icon
 
 
 class GuiIconTests(unittest.TestCase):
@@ -38,6 +39,48 @@ class GuiIconTests(unittest.TestCase):
 
         self.assertTrue(_contains_dominant_channel(red, channel="red"))
         self.assertTrue(_contains_dominant_channel(blue, channel="blue"))
+
+    def test_motion_subtypes_have_distinct_robot_semantic_icons(self) -> None:
+        icons = {
+            action_icon(_action(ActionType.MOVE, {"目标": "机械臂"})),
+            action_icon(_action(ActionType.MOVE, {"目标": "机械臂相对"})),
+            action_icon(_action(ActionType.MOVE, {"目标": "身体"})),
+            action_icon(_action(ActionType.BASE_MOVE, {"move_mode": "position"})),
+        }
+
+        self.assertEqual(4, len(icons))
+
+    def test_manipulator_subtypes_share_family_but_keep_distinct_icons(self) -> None:
+        executors = (
+            "快换手",
+            "继电器",
+            "夹爪",
+            "吸液枪",
+            "颈部",
+            "右臂转圈注液",
+            "加粉装置",
+            "智能加粉",
+            "表情屏",
+        )
+        icons = {
+            action_icon(_action(ActionType.MANIPULATE, {"执行器": executor}))
+            for executor in executors
+        }
+
+        self.assertEqual(len(executors), len(icons))
+        self.assertNotIn(IconName.ACTION_MANIPULATE, icons)
+
+
+def _action(
+    action_type: ActionType,
+    parameters: dict[str, object],
+) -> ActionDefinition:
+    return ActionDefinition(
+        id="action-id",
+        name="action",
+        type=action_type,
+        parameters=parameters,
+    )
 
 
 def _contains_dominant_channel(image, *, channel: str) -> bool:

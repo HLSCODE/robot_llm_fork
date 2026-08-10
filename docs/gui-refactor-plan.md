@@ -2,11 +2,11 @@
 
 > 适用场景：竖屏、窄窗口、触控操作、机器人动作编排与任务执行  
 > 推荐技术栈：Python + PySide6 + QGraphicsView/QGraphicsScene  
-> 文档版本：V2.3
+> 文档版本：V2.4
 > 文档性质：目标架构、实施记录与后续验收约束
-> 最近更新：2026-08-07
+> 最近更新：2026-08-10
 
-> 实施进度：D-015～D-031 已完成。纯 WorkflowDocument、版本化 `.workflow`
+> 实施进度：D-015～D-032 已完成。纯 WorkflowDocument、版本化 `.workflow`
 > 持久化与草稿恢复、Validator/Preflight/Compiler、稳定节点映射、受约束
 > QGraphics 画布、Loop 容器、Undo/Redo、触控导航和现有功能等价接入已经
 > 落地。系统 Palette、集中设计令牌、44 px 触控目标、可访问性、Qt
@@ -58,6 +58,12 @@
 > 垂直 Splitter 已删除，设备、位姿、控制和日志改由 Status Bar 图标打开右下锚定的
 > 非模态详情浮层。节点拖动增加 ghost 缩略图、原位占位与最近插入点脉冲反馈；布局
 > 偏好直接升级为 schema v2，不兼容读取 v1。
+
+> 2026-08-10 D-032 视觉与命令一致性收口已完成：任务页恢复“将当前流程保存为任务”
+> SVG 入口；菜单动作统一注册到可编辑、冲突校验并持久化的快捷键表；基础动作分类由
+> 平铺 Tab 改为单一下拉选择。浅/深主题下的 SVG、状态栏、数值增减控件、列表选择态和
+> 节点尺寸共享同一 Palette/QSS/令牌：状态栏不再重复设备摘要，设备入口以同源详情为准；
+> 画布节点更紧凑，选择仅使用柔和背景层级而非粗实线框。
 
 ## 1. 结论
 
@@ -588,7 +594,7 @@ src/
 - 保存统一提交完整 WorkflowDocument 和 expected revision，保留 presentation；执行统一
   编译当前会话快照。禁止继续通过 `flattened_task()` 构建可执行组合。
 
-### 阶段 14：工作台工具栏、详情浮层与拖放反馈（D-031，已完成）
+### 阶段 14：工作台工具栏、详情浮层与交互一致性（D-031～D-032，已完成）
 
 - Task/Action/Workflow 高频功能已迁移到对应面板顶部的 Qt Resource 单色 SVG
   icon-only 工具栏，统一 Tooltip、可访问名称、主题刷新和键盘等价入口；适合内容与
@@ -608,6 +614,16 @@ src/
   有效放置只提交一次 `UndoCommand`。
 - 顶部菜单继续位于原生标题栏下方；未接管跨平台非客户区，这是对窗口行为、DPI 和
   无障碍维护风险的批准取舍。
+- 任务资源页提供“将当前流程保存为任务”的 SVG 图标入口；保存仍经唯一
+  `WorkflowEditingSession`/CompositionService，不新增 GUI 私有文件写入路径。
+- 所有顶部菜单动作由 `ShortcutRegistry` 统一登记默认键位、QSettings 持久化和冲突校验；
+  “视图 → 快捷键设置”可编辑或恢复默认，禁止空键位和重复组合键。
+- 基础动作侧栏以单一下拉框切换移动、执行、检测、换枪、视觉和轨迹类别；数值输入使用
+  主题化 SVG 增减箭头。状态栏去除重复的左侧设备文字摘要，仅将可用数及语义色附着到
+  “设备详情”图标和浮层。
+- Activity/Pane/Command/Status 图标按共享尺寸令牌与 Palette 刷新；浅色与深色下的
+  禁用、普通和语义操作均保持可读。列表选择与画布节点使用柔和选中底色、紧凑尺寸和
+  必要边界，不再用粗实线框表达选中。
 
 ## 15. 测试与验收
 
@@ -637,6 +653,11 @@ D-031 落地验证：本批 5 个 GUI 变更测试文件聚焦回归
 `287 source files / 0 errors`，Pytest
 `529 passed + 74 subtests`，coverage `66.09%`，LLM golden `14/14`，
 performance `9/9`，wheel smoke 通过。
+
+D-032 落地验证：主题/Workbench/Toolbar/Shortcut/Canvas 聚焦回归
+`73 passed + 28 subtests`，真实 MainWindow 与菜单快捷键回归
+`17 passed + 25 subtests`；全仓手写 Mypy `288 source files / 0 errors`、
+Ruff（`src`/`scripts`/`tests`）和完整 Pytest `532 passed + 101 subtests` 通过。
 
 ### 15.2 目标设备矩阵
 

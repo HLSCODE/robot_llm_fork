@@ -5,14 +5,22 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QHBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from ..icons import IconName
 from ..theme import set_theme_role
-from ..toolbars import IconToolButton
+from ..toolbars import IconToolButton, TOOL_BUTTON_ICON_SIZE
+
+
+EXECUTION_COMMAND_HIT_SIZE = 44
+EXECUTION_COMMAND_ICON_SIZE = 20
 
 
 class ControlPanel(QWidget):
+    save_clicked = Signal()
+    clear_clicked = Signal()
+    fit_clicked = Signal()
+    reset_zoom_clicked = Signal()
     start_clicked = Signal()
     pause_clicked = Signal()
     stop_clicked = Signal()
@@ -29,45 +37,80 @@ class ControlPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("workflowCommandBar")
-        layout = QHBoxLayout(self)
-        layout.setSpacing(2)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(4)
         layout.setContentsMargins(6, 4, 6, 4)
+        self.edit_command_row = QHBoxLayout()
+        self.edit_command_row.setSpacing(2)
+        self.execution_command_row = QHBoxLayout()
+        self.execution_command_row.setSpacing(2)
+        layout.addLayout(self.edit_command_row)
+        layout.addLayout(self.execution_command_row)
 
+        self.save_btn = self._button(
+            IconName.SAVE,
+            "将当前流程保存为任务 (Ctrl+S)",
+            self.save_clicked.emit,
+        )
         self.undo_btn = self._button(IconName.UNDO, "撤销", self.undo_clicked.emit)
         self.redo_btn = self._button(IconName.REDO, "重做", self.redo_clicked.emit)
+        self.clear_btn = self._button(
+            IconName.CLEAR,
+            "清空画布",
+            self.clear_clicked.emit,
+        )
+        self.fit_btn = self._button(
+            IconName.FIT,
+            "画布适合内容",
+            self.fit_clicked.emit,
+        )
+        self.reset_zoom_btn = self._button(
+            IconName.ZOOM_RESET,
+            "恢复 100% 缩放",
+            self.reset_zoom_clicked.emit,
+        )
         self.undo_btn.setEnabled(False)
         self.redo_btn.setEnabled(False)
         for button in (
+            self.save_btn,
             self.undo_btn,
             self.redo_btn,
+            self.fit_btn,
+            self.reset_zoom_btn,
             self._button(IconName.MOVE_UP, "上移节点", self.move_up_clicked.emit),
             self._button(IconName.MOVE_DOWN, "下移节点", self.move_down_clicked.emit),
             self._button(IconName.EDIT, "修改节点", self.edit_clicked.emit),
             self._button(IconName.LOOP, "将选中节点设为循环", self.repeat_clicked.emit),
             self._button(IconName.DELETE, "删除选中节点", self.delete_clicked.emit),
+            self.clear_btn,
         ):
-            layout.addWidget(button)
+            self.edit_command_row.addWidget(button)
+        self.edit_command_row.addStretch(1)
 
-        layout.addSpacing(8)
-        self.start_btn = self._button(IconName.PLAY, "开始执行", self.start_clicked.emit)
-        self.pause_btn = self._button(IconName.PAUSE, "暂停执行", self.pause_clicked.emit)
-        self.stop_btn = self._button(
+        self.start_btn = self._execution_button(
+            IconName.PLAY,
+            "开始执行",
+            self.start_clicked.emit,
+        )
+        self.pause_btn = self._execution_button(
+            IconName.PAUSE,
+            "暂停执行",
+            self.pause_clicked.emit,
+        )
+        self.stop_btn = self._execution_button(
             IconName.STOP,
             "停止任务",
             self.stop_clicked.emit,
-            hit_size=44,
         )
-        self.quick_stop_btn = self._button(
+        self.quick_stop_btn = self._execution_button(
             IconName.QUICK_STOP,
             "快速停止",
             self.quick_stop_clicked.emit,
-            hit_size=44,
         )
-        self.emergency_stop_btn = self._button(
+        self.emergency_stop_btn = self._execution_button(
             IconName.EMERGENCY,
             "设备急停",
             self.emergency_stop_clicked.emit,
-            hit_size=44,
         )
         set_theme_role(self.start_btn, "success")
         set_theme_role(self.pause_btn, "warning")
@@ -93,8 +136,22 @@ class ControlPanel(QWidget):
             self.quick_stop_btn,
             self.emergency_stop_btn,
         ):
-            layout.addWidget(button)
-        layout.addStretch(1)
+            self.execution_command_row.addWidget(button)
+        self.execution_command_row.addStretch(1)
+
+    @staticmethod
+    def _execution_button(
+        icon: IconName,
+        tooltip: str,
+        callback: Callable[[], None],
+    ) -> IconToolButton:
+        return IconToolButton(
+            icon,
+            tooltip,
+            callback=callback,
+            hit_size=EXECUTION_COMMAND_HIT_SIZE,
+            icon_size=EXECUTION_COMMAND_ICON_SIZE,
+        )
 
     @staticmethod
     def _button(
@@ -109,7 +166,7 @@ class ControlPanel(QWidget):
             tooltip,
             callback=callback,
             hit_size=hit_size,
-            icon_size=19 if hit_size >= 44 else 17,
+            icon_size=20 if hit_size >= 44 else TOOL_BUTTON_ICON_SIZE,
         )
 
     def set_undo_redo_enabled(self, can_undo: bool, can_redo: bool) -> None:

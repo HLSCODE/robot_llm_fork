@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QSize, Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -17,7 +17,30 @@ from .icons import IconName, themed_icon
 
 
 TOOL_BUTTON_HIT_SIZE = 32
-TOOL_BUTTON_ICON_SIZE = 17
+TOOL_BUTTON_ICON_SIZE = 18
+
+
+def icon_foreground(widget: QWidget, role: str | None = None) -> QColor:
+    """Return a readable semantic icon color for the active application palette."""
+    resolved_role = role or widget.property("themeRole")
+    if not widget.isEnabled():
+        return widget.palette().color(
+            QPalette.ColorGroup.Disabled,
+            QPalette.ColorRole.ButtonText,
+        )
+    if resolved_role in {"primary", "success", "danger", "dangerStrong"}:
+        return QColor("#ffffff")
+    if resolved_role == "warning":
+        return QColor("#111827")
+
+    is_light_surface = (
+        widget.palette().color(QPalette.ColorRole.Window).lightnessF() > 0.5
+    )
+    if resolved_role == "statusSuccess":
+        return QColor("#15803d" if is_light_surface else "#4ade80")
+    if resolved_role == "statusDanger":
+        return QColor("#dc2626" if is_light_surface else "#f87171")
+    return widget.palette().color(QPalette.ColorRole.WindowText)
 
 
 class IconToolButton(QToolButton):
@@ -65,24 +88,17 @@ class IconToolButton(QToolButton):
             QEvent.Type.PaletteChange,
             QEvent.Type.ApplicationPaletteChange,
             QEvent.Type.DynamicPropertyChange,
+            QEvent.Type.EnabledChange,
         }:
             self._refresh_icon()
 
     def _refresh_icon(self) -> None:
-        role = self.property("themeRole")
-        color = {
-            "primary": QColor("#ffffff"),
-            "success": QColor("#ffffff"),
-            "warning": QColor("#111827"),
-            "danger": QColor("#ffffff"),
-            "dangerStrong": QColor("#ffffff"),
-        }.get(role)
         self.setIcon(
             themed_icon(
                 self,
                 self._icon_name,
                 size=self._icon_size,
-                color=color,
+                color=icon_foreground(self),
             )
         )
 

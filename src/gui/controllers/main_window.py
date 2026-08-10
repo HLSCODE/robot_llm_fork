@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QColor, QIcon
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
 )
 
 from ..bridges.execution import ExecutionBridge
@@ -68,8 +69,17 @@ from ..views.workflow import (
 from ..views.workflow_canvas import WorkflowCanvasWidget
 from ..views.workbench import WorkbenchPage, WorkbenchView
 from ..theme import ThemeController, ThemeMode
-from ..icons import IconName
+from ..icons import IconName, themed_icon
+from ..shortcuts import ShortcutRegistry
 from ..workbench_layout import WorkbenchLayoutStore
+
+
+_WORKFLOW_FILE_SUFFIX = ".workflow.json"
+
+
+def _display_task_name(task_name: str) -> str:
+    """Hide the persistence suffix without changing the stored task identity."""
+    return task_name.removesuffix(_WORKFLOW_FILE_SUFFIX)
 
 
 class MainWindow(QMainWindow):
@@ -86,6 +96,8 @@ class MainWindow(QMainWindow):
         self._services = services
         self._theme_controller = theme_controller
         self._layout_store = layout_store
+        self._shortcut_registry = ShortcutRegistry(parent=self)
+        self._menu_actions: dict[str, QAction] = {}
         self._theme_controller.setParent(self)
         self._execution_bridge = ExecutionBridge(services)
         self._device_view_model = DeviceViewModel(services.devices)
@@ -369,6 +381,9 @@ class MainWindow(QMainWindow):
         self.action_library_view = ActionLibraryView()
         self.ai_assistant_view = AIAssistantWidget(self._services)
         self.workflow_view = WorkflowEditorView()
+        canvas_scale_provider = self.workflow_view.sequence_list.display_scale
+        self.task_library_view.set_canvas_scale_provider(canvas_scale_provider)
+        self.action_library_view.set_canvas_scale_provider(canvas_scale_provider)
         self.device_status_view = DeviceHealthView()
         self.device_pose_view = DevicePoseView()
         self.device_control_view = DeviceControlView()
@@ -428,6 +443,8 @@ class MainWindow(QMainWindow):
         )
 
         workflow = self.workflow_view
+        workflow.save_requested.connect(self.save_task)
+        workflow.clear_requested.connect(self.clear_sequence)
         workflow.start_requested.connect(self.start_execution)
         workflow.pause_requested.connect(self.toggle_pause)
         workflow.stop_requested.connect(self.stop_execution)
@@ -452,6 +469,9 @@ class MainWindow(QMainWindow):
         workflow.insert_subworkflow_requested.connect(
             self._insert_subworkflow_by_name
         )
+        workflow.insert_subworkflow_in_loop_requested.connect(
+            self._insert_subworkflow_into_loop_by_name
+        )
         self.device_pose_view.refresh_requested.connect(self.refresh_arm_poses)
         self.device_pose_view.copy_pose_requested.connect(self.copy_robot_pose)
         controls = self.device_control_view
@@ -463,78 +483,78 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
 
         file_menu = menubar.addMenu("文件")
-
-        save_task_action = QAction("保存任务序列", self)
-        save_task_action.setShortcut("Ctrl+S")
-        save_task_action.triggered.connect(self.save_task)
-        file_menu.addAction(save_task_action)
-
-        load_task_action = QAction("加载任务序列", self)
-        load_task_action.setShortcut("Ctrl+O")
-        load_task_action.triggered.connect(self.load_task)
-        file_menu.addAction(load_task_action)
+        self._add_menu_action(file_menu, "file.save", "保存当前任务", self.save_task)
+        self._add_menu_action(file_menu, "file.save_as", "另存为任务", self.save_task_as)
+        self._add_menu_action(file_menu, "file.open", "加载任务", self.load_task)
 
         file_menu.addSeparator()
-
-        exit_action = QAction("退出", self)
-        exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        self._add_menu_action(file_menu, "file.exit", "退出", self.close)
 
         edit_menu = menubar.addMenu("编辑")
-        for label, shortcut, callback in (
-            ("撤销", "Ctrl+Z", self.workflow_view.sequence_list.undo),
-            ("重做", "Ctrl+Y", self.workflow_view.sequence_list.redo),
-            ("修改节点", "Enter", self.edit_sequence_item),
-            ("删除节点", "Delete", self.delete_item),
-            ("清空工作流", "Ctrl+Shift+Delete", self.clear_sequence),
+        for command_id, label, callback in (
+            ("edit.undo", "撤销", self.workflow_view.sequence_list.undo),
+            ("edit.redo", "重做", self.workflow_view.sequence_list.redo),
+            ("edit.modify", "修改节点", self.edit_sequence_item),
+            ("edit.delete", "删除节点", self.delete_item),
+            ("edit.clear", "清空工作流", self.clear_sequence),
         ):
-            action = QAction(label, self)
-            action.setShortcut(shortcut)
-            action.triggered.connect(callback)
-            edit_menu.addAction(action)
+            self._add_menu_action(edit_menu, command_id, label, callback)
 
         view_menu = menubar.addMenu("视图")
-        side_bar_action = QAction("资源侧栏", self)
-        side_bar_action.setShortcut("Ctrl+B")
-        side_bar_action.triggered.connect(
+        self._add_menu_action(
+            view_menu,
+            "view.sidebar",
+            "资源侧栏",
             self.workbench_view.toggle_last_side_page
         )
-        view_menu.addAction(side_bar_action)
         panel_menu = view_menu.addMenu("底部面板")
+        panel_actions: dict[str, QAction] = {}
         for label, key in (
             ("设备", "devices"),
             ("机械臂位姿", "poses"),
             ("基础控制", "controls"),
             ("运行日志", "logs"),
         ):
-            action = QAction(label, self)
-            action.triggered.connect(
-                lambda _checked=False, page_key=key: (
-                    self.workbench_view.toggle_bottom_page(page_key)
-                )
+            def toggle_panel(
+                _checked: bool = False,
+                *,
+                page_key: str = key,
+            ) -> None:
+                self.workbench_view.toggle_bottom_page(page_key)
+
+            command_id = f"view.{key}"
+            panel_actions[key] = self._add_menu_action(
+                panel_menu,
+                command_id,
+                label,
+                toggle_panel,
             )
-            panel_menu.addAction(action)
         view_menu.addSeparator()
         theme_menu = view_menu.addMenu("主题")
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
-        for label, mode in (
-            ("跟随系统", ThemeMode.SYSTEM),
-            ("浅色", ThemeMode.LIGHT),
-            ("深色", ThemeMode.DARK),
+        for command_id, label, mode in (
+            ("view.theme_system", "跟随系统", ThemeMode.SYSTEM),
+            ("view.theme_light", "浅色", ThemeMode.LIGHT),
+            ("view.theme_dark", "深色", ThemeMode.DARK),
         ):
-            action = QAction(label, self)
-            action.setCheckable(True)
+            def apply_theme(
+                _checked: bool = False,
+                *,
+                selected: ThemeMode = mode,
+            ) -> None:
+                self._theme_controller.set_mode(selected)
+
+            action = self._add_menu_action(
+                theme_menu,
+                command_id,
+                label,
+                apply_theme,
+                checkable=True,
+            )
             action.setData(mode.value)
             action.setChecked(mode is self._theme_controller.mode)
-            action.triggered.connect(
-                lambda _checked=False, selected=mode: (
-                    self._theme_controller.set_mode(selected)
-                )
-            )
             theme_group.addAction(action)
-            theme_menu.addAction(action)
         self._theme_actions = {
             ThemeMode(action.data()): action
             for action in theme_group.actions()
@@ -544,31 +564,55 @@ class MainWindow(QMainWindow):
             Qt.ConnectionType.QueuedConnection,
         )
         view_menu.addSeparator()
-        reset_layout_action = QAction("恢复默认布局", self)
-        reset_layout_action.triggered.connect(self.workbench_view.reset_layout)
-        view_menu.addAction(reset_layout_action)
+        self._add_menu_action(
+            view_menu,
+            "view.reset_layout",
+            "恢复默认布局",
+            self.workbench_view.reset_layout,
+        )
+        self._add_menu_action(
+            view_menu,
+            "view.shortcuts",
+            "快捷键设置…",
+            lambda: self._shortcut_registry.open_editor(self),
+        )
 
         execution_menu = menubar.addMenu("执行")
-        for label, callback in (
-            ("开始执行", self.start_execution),
-            ("暂停/恢复", self.toggle_pause),
-            ("停止任务", self.stop_execution),
-            ("快速停止", lambda: self.request_safety_stop(StopMode.QUICK)),
-            ("设备急停", lambda: self.request_safety_stop(StopMode.EMERGENCY)),
+        for command_id, label, callback in (
+            ("execution.start", "开始执行", self.start_execution),
+            ("execution.pause", "暂停/恢复", self.toggle_pause),
+            ("execution.stop", "停止任务", self.stop_execution),
+            ("execution.quick_stop", "快速停止", lambda: self.request_safety_stop(StopMode.QUICK)),
+            ("execution.emergency", "设备急停", lambda: self.request_safety_stop(StopMode.EMERGENCY)),
         ):
-            action = QAction(label, self)
-            action.triggered.connect(callback)
-            execution_menu.addAction(action)
+            self._add_menu_action(execution_menu, command_id, label, callback)
 
         device_menu = menubar.addMenu("设备")
-        refresh_pose_action = QAction("刷新机械臂位姿", self)
-        refresh_pose_action.triggered.connect(self.refresh_arm_poses)
-        device_menu.addAction(refresh_pose_action)
-        show_controls_action = QAction("打开基础控制", self)
-        show_controls_action.triggered.connect(
-            lambda: self.workbench_view.toggle_bottom_page("controls")
+        self._add_menu_action(
+            device_menu,
+            "device.refresh_pose",
+            "刷新机械臂位姿",
+            self.refresh_arm_poses,
         )
-        device_menu.addAction(show_controls_action)
+        device_menu.addAction(panel_actions["controls"])
+
+    def _add_menu_action(
+        self,
+        menu: QMenu,
+        command_id: str,
+        label: str,
+        callback: Callable[[], object],
+        *,
+        checkable: bool = False,
+    ) -> QAction:
+        """Create one menu action bound through the application shortcut registry."""
+        action = QAction(label, self)
+        action.setCheckable(checkable)
+        action.triggered.connect(callback)
+        self._shortcut_registry.register(command_id, action)
+        menu.addAction(action)
+        self._menu_actions[command_id] = action
+        return action
 
     def _sync_theme_menu(self, mode: object) -> None:
         if isinstance(mode, ThemeMode):
@@ -922,8 +966,8 @@ class MainWindow(QMainWindow):
         return names
 
     def create_action(self) -> None:
-        current_tab = self.action_library_view.action_tabs.currentIndex()
-        resolved = self._resolve_action_type_for_current_tab(current_tab)
+        category = self.action_library_view.current_category_type()
+        resolved = self._resolve_action_type_for_current_category(category)
         if resolved is None:
             return
         action_type, move_target = resolved if isinstance(resolved, tuple) else (resolved, None)
@@ -1016,43 +1060,7 @@ class MainWindow(QMainWindow):
         self._notifications.info(f"轨迹动作已创建: {name}")
 
     def delete_action(self) -> None:
-        current_tab = self.action_library_view.action_tabs.currentIndex()
-        
-        # 移动类 Tab 需要特殊处理，因为包含多种类型
-        if current_tab == 0:
-            current_item = self.action_library_view.action_list(ActionType.MOVE).currentItem()
-            if current_item is None:
-                self._notifications.warning("请先选择一个要删除的动作")
-                return
-            
-            action = current_item.data(Qt.ItemDataRole.UserRole)
-            if action and action.type in self.actions:
-                self._services.composition.delete_action(
-                    action.id,
-                    origin="gui",
-                )
-            return
-        
-        action_type_map = {
-            1: ActionType.MANIPULATE,
-            2: ActionType.INSPECT,
-            3: ActionType.CHANGE_GUN,
-            4: ActionType.VISION_CAPTURE,
-            5: ActionType.TRAJECTORY
-        }
-        action_type = action_type_map.get(current_tab)
-        if action_type is None:
-            return
-
-        list_map = {
-            ActionType.MANIPULATE: self.action_library_view.action_list(ActionType.MANIPULATE),
-            ActionType.INSPECT: self.action_library_view.action_list(ActionType.INSPECT),
-            ActionType.CHANGE_GUN: self.action_library_view.action_list(ActionType.CHANGE_GUN),
-            ActionType.VISION_CAPTURE: self.action_library_view.action_list(ActionType.VISION_CAPTURE),
-            ActionType.TRAJECTORY: self.action_library_view.action_list(ActionType.TRAJECTORY)
-        }
-        action_list = list_map[action_type]
-
+        action_list = self.action_library_view.current_action_list()
         current_item = action_list.currentItem()
         if current_item is None:
             self._notifications.warning("请先选择一个要删除的动作")
@@ -1259,17 +1267,16 @@ class MainWindow(QMainWindow):
         for action in self.actions[ActionType.WAIT]:
             self.action_library_view.action_list(ActionType.MANIPULATE).add_action(action)
 
-    def _resolve_action_type_for_current_tab(
+    def _resolve_action_type_for_current_category(
         self,
-        current_tab: int,
+        category: ActionType,
     ) -> ActionType | tuple[ActionType, str] | None:
         action_type_map = {
-            0: ActionType.MOVE,  # 移动类 Tab，需要进一步选择
-            2: ActionType.INSPECT,
-            3: ActionType.CHANGE_GUN,
-            5: ActionType.TRAJECTORY
+            ActionType.INSPECT: ActionType.INSPECT,
+            ActionType.CHANGE_GUN: ActionType.CHANGE_GUN,
+            ActionType.TRAJECTORY: ActionType.TRAJECTORY,
         }
-        if current_tab == 1:
+        if category is ActionType.MANIPULATE:
             options = ["执行器动作", "等待"]
             selected, ok = QInputDialog.getItem(
                 self,
@@ -1284,7 +1291,7 @@ class MainWindow(QMainWindow):
             return ActionType.WAIT if selected == "等待" else ActionType.MANIPULATE
         
         # 移动类 Tab 需要选择具体类型
-        if current_tab == 0:
+        if category is ActionType.MOVE:
             options = ["机械臂移动", "身体移动", "底盘移动"]
             selected, ok = QInputDialog.getItem(
                 self,
@@ -1301,7 +1308,7 @@ class MainWindow(QMainWindow):
             else:
                 return (ActionType.MOVE, selected)
 
-        if current_tab == 4:
+        if category is ActionType.VISION_CAPTURE:
             options = ["视觉抓取", "视觉重定位"]
             selected, ok = QInputDialog.getItem(
                 self,
@@ -1315,60 +1322,47 @@ class MainWindow(QMainWindow):
                 return None
             return ActionType.VISION_RELOCALIZE if selected == "视觉重定位" else ActionType.VISION_CAPTURE
 
-        return action_type_map.get(current_tab)
+        return action_type_map.get(category)
 
     def _get_current_action_list_widget(self) -> ActionListWidget | None:
-        current_tab = self.action_library_view.action_tabs.currentIndex()
-        tab_list_map = {
-            0: self.action_library_view.action_list(ActionType.MOVE),
-            1: self.action_library_view.action_list(ActionType.MANIPULATE),
-            2: self.action_library_view.action_list(ActionType.INSPECT),
-            3: self.action_library_view.action_list(ActionType.CHANGE_GUN),
-            4: self.action_library_view.action_list(ActionType.VISION_CAPTURE),
-            5: self.action_library_view.action_list(ActionType.TRAJECTORY)
-        }
-        return tab_list_map.get(current_tab)
+        return self.action_library_view.current_action_list()
 
     def refresh_task_library(self) -> None:
         self.task_library_view.task_library_list.clear()
         for summary in self._services.composition.list_tasks():
             task_name = summary.name
+            display_name = _display_task_name(task_name)
             step_count = summary.step_count
-            item = QListWidgetItem(f"{task_name} ({step_count} 步)")
+            item = QListWidgetItem(f"{display_name} ({step_count} 步)")
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            item.setSizeHint(QSize(100, 36))
+            item.setSizeHint(QSize(100, 40))
             item.setIcon(self._create_task_list_icon())
-            item.setToolTip(f"{task_name}\n步骤数: {step_count}\n拖到组合计划中")
+            item.setToolTip(f"{display_name}\n步骤数: {step_count}\n拖到组合计划中")
             item.setData(Qt.ItemDataRole.UserRole, task_name)
             self.task_library_view.task_library_list.addItem(item)
 
     def _create_task_list_icon(self) -> QIcon:
-        from PySide6.QtGui import QFont, QPainter, QPixmap
-
-        pixmap = QPixmap(28, 28)
-        pixmap.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(59, 130, 246))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(2, 2, 24, 24, 6, 6)
-        # emoji 居中
-        font = QFont()
-        font.setPointSize(12)
-        painter.setFont(font)
-        painter.setPen(QColor(255, 255, 255))
-        from PySide6.QtCore import QRectF
-        painter.drawText(QRectF(0, 0, 28, 28), Qt.AlignmentFlag.AlignCenter, "📋")
-        painter.end()
-        return QIcon(pixmap)
+        task_list = self.task_library_view.task_library_list
+        return themed_icon(
+            task_list,
+            IconName.WORKFLOW,
+            size=20,
+            color=task_list.palette().highlight().color(),
+        )
 
     def save_task(self) -> None:
+        self._save_task(force_new_name=False)
+
+    def save_task_as(self) -> None:
+        self._save_task(force_new_name=True)
+
+    def _save_task(self, *, force_new_name: bool) -> None:
         state = self._services.workflow_editing.snapshot()
         if not state.document.to_entries():
             self._notifications.warning("序列为空，无需保存")
             return
         try:
-            if state.workflow_name:
+            if state.workflow_name and not force_new_name:
                 stored_name, _ = self._services.workflow_editing.save()
             else:
                 filename, _ = QFileDialog.getSaveFileName(
@@ -1417,12 +1411,32 @@ class MainWindow(QMainWindow):
         self.workflow_view.sequence_list.insert_entry(subworkflow, insert_at)
 
     def _insert_subworkflow_by_name(self, task_name: str, index: int) -> None:
-        try:
-            subworkflow = self._services.workflow_editing.instantiate(task_name)
-        except (FileNotFoundError, ValueError):
-            self._notifications.warning(f"任务不存在: {task_name}")
+        subworkflow = self._instantiate_subworkflow(task_name)
+        if subworkflow is None:
             return
         self.workflow_view.sequence_list.insert_entry(subworkflow, index)
+
+    def _insert_subworkflow_into_loop_by_name(
+        self,
+        task_name: str,
+        loop_uuid: str,
+        child_index: int,
+    ) -> None:
+        subworkflow = self._instantiate_subworkflow(task_name)
+        if subworkflow is None:
+            return
+        self.workflow_view.sequence_list.insert_subworkflow_into_loop(
+            loop_uuid,
+            child_index,
+            subworkflow,
+        )
+
+    def _instantiate_subworkflow(self, task_name: str) -> SubworkflowBlock | None:
+        try:
+            return self._services.workflow_editing.instantiate(task_name)
+        except (FileNotFoundError, ValueError):
+            self._notifications.warning(f"任务不存在: {task_name}")
+            return None
 
     def _selected_task_name(self) -> str | None:
         item = self.task_library_view.task_library_list.currentItem()

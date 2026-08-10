@@ -2,6 +2,28 @@
   <qresource prefix="/icons">
     <file alias="tasks.svg">assets/icons/tasks.svg</file>
     <file alias="actions.svg">assets/icons/actions.svg</file>
+    <file alias="action-move.svg">assets/icons/action-move.svg</file>
+    <file alias="action-arm-move.svg">assets/icons/action-arm-move.svg</file>
+    <file alias="action-arm-relative.svg">assets/icons/action-arm-relative.svg</file>
+    <file alias="action-body-lift.svg">assets/icons/action-body-lift.svg</file>
+    <file alias="action-base-move.svg">assets/icons/action-base-move.svg</file>
+    <file alias="action-manipulate.svg">assets/icons/action-manipulate.svg</file>
+    <file alias="action-tool-changer.svg">assets/icons/action-tool-changer.svg</file>
+    <file alias="action-relay.svg">assets/icons/action-relay.svg</file>
+    <file alias="action-gripper.svg">assets/icons/action-gripper.svg</file>
+    <file alias="action-pipette.svg">assets/icons/action-pipette.svg</file>
+    <file alias="action-neck.svg">assets/icons/action-neck.svg</file>
+    <file alias="action-circle-dispense.svg">assets/icons/action-circle-dispense.svg</file>
+    <file alias="action-powder.svg">assets/icons/action-powder.svg</file>
+    <file alias="action-smart-powder.svg">assets/icons/action-smart-powder.svg</file>
+    <file alias="action-expression.svg">assets/icons/action-expression.svg</file>
+    <file alias="action-wait.svg">assets/icons/action-wait.svg</file>
+    <file alias="action-inspect.svg">assets/icons/action-inspect.svg</file>
+    <file alias="action-tool-change.svg">assets/icons/action-tool-change.svg</file>
+    <file alias="action-vision.svg">assets/icons/action-vision.svg</file>
+    <file alias="action-locate.svg">assets/icons/action-locate.svg</file>
+    <file alias="action-trajectory.svg">assets/icons/action-trajectory.svg</file>
+    <file alias="workflow.svg">assets/icons/workflow.svg</file>
     <file alias="assistant.svg">assets/icons/assistant.svg</file>
     <file alias="composer.svg">assets/icons/composer.svg</file>
     <file alias="devices.svg">assets/icons/devices.svg</file>
@@ -9,10 +31,12 @@
     <file alias="controls.svg">assets/icons/controls.svg</file>
     <file alias="logs.svg">assets/icons/logs.svg</file>
     <file alias="open.svg">assets/icons/open.svg</file>
+    <file alias="save.svg">assets/icons/save.svg</file>
     <file alias="insert.svg">assets/icons/insert.svg</file>
     <file alias="add.svg">assets/icons/add.svg</file>
     <file alias="edit.svg">assets/icons/edit.svg</file>
     <file alias="delete.svg">assets/icons/delete.svg</file>
+    <file alias="clear.svg">assets/icons/clear.svg</file>
     <file alias="camera.svg">assets/icons/camera.svg</file>
     <file alias="fit.svg">assets/icons/fit.svg</file>
     <file alias="zoom-reset.svg">assets/icons/zoom-reset.svg</file>
@@ -27,7 +51,10 @@
     <file alias="quick-stop.svg">assets/icons/quick-stop.svg</file>
     <file alias="emergency.svg">assets/icons/emergency.svg</file>
     <file alias="close.svg">assets/icons/close.svg</file>
+    <file alias="shortcuts.svg">assets/icons/shortcuts.svg</file>
     <file alias="chevron-down-on-light.svg">assets/icons/chevron-down-on-light.svg</file>
     <file alias="chevron-down-on-dark.svg">assets/icons/chevron-down-on-dark.svg</file>
+    <file alias="chevron-up-on-light.svg">assets/icons/chevron-up-on-light.svg</file>
+    <file alias="chevron-up-on-dark.svg">assets/icons/chevron-up-on-dark.svg</file>
   </qresource>
 </RCC>

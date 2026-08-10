@@ -23,6 +23,12 @@ COMBO_POPUP_GAP = 4
 COMBO_POPUP_RADIUS = 8.0
 COMBO_POPUP_COORDINATOR_OBJECT_NAME = "comboBoxPopupCoordinator"
 
+# Qt owns these objects at the C++ level after installation.  Python virtual
+# callbacks still require a live Python wrapper, so retain one reference per
+# QApplication for the lifetime of the process.
+_APPLICATION_STYLES: dict[int, ConsistentWidgetStyle] = {}
+_APPLICATION_POPUP_COORDINATORS: dict[int, ComboBoxPopupCoordinator] = {}
+
 
 class ConsistentWidgetStyle(QProxyStyle):
     """Keep Fusion rendering while making combo boxes behave as drop-downs."""
@@ -48,6 +54,14 @@ class ConsistentWidgetStyle(QProxyStyle):
 
 def create_consistent_widget_style() -> ConsistentWidgetStyle:
     return ConsistentWidgetStyle()
+
+
+def retain_application_style(
+    application: QApplication,
+    style: ConsistentWidgetStyle,
+) -> None:
+    """Keep the Python QProxyStyle wrapper alive while Qt calls its overrides."""
+    _APPLICATION_STYLES[id(application)] = style
 
 
 class ComboBoxPopupCoordinator(QObject):
@@ -84,8 +98,11 @@ def install_combo_box_popup_coordinator(
             isinstance(child, ComboBoxPopupCoordinator)
             and child.objectName() == COMBO_POPUP_COORDINATOR_OBJECT_NAME
         ):
+            _APPLICATION_POPUP_COORDINATORS[id(application)] = child
             return child
-    return ComboBoxPopupCoordinator(application)
+    coordinator = ComboBoxPopupCoordinator(application)
+    _APPLICATION_POPUP_COORDINATORS[id(application)] = coordinator
+    return coordinator
 
 
 def _is_combo_popup(candidate: QObject) -> TypeGuard[QWidget]:

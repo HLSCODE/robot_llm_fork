@@ -37,7 +37,8 @@ class WorkflowCanvasView(QGraphicsView):
     select_all_requested = Signal()
     clear_selection_requested = Signal()
     drag_cancel_requested = Signal()
-    external_drag_moved = Signal(float, float)
+    external_action_drag_moved = Signal(float, float)
+    external_task_drag_moved = Signal(float, float)
     external_drag_finished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -70,13 +71,19 @@ class WorkflowCanvasView(QGraphicsView):
 
     def dragEnterEvent(self, event: QDragEnterEvent | None) -> None:  # noqa: N802
         if self._accept_action_drop(event) and event is not None:
-            self._publish_external_drag_position(event.position().toPoint())
+            self._publish_external_drag_position(
+                event.position().toPoint(),
+                is_action=event.mimeData().hasFormat("application/x-action"),
+            )
         else:
             self.external_drag_finished.emit()
 
     def dragMoveEvent(self, event: QDragMoveEvent | None) -> None:  # noqa: N802
         if self._accept_action_drop(event) and event is not None:
-            self._publish_external_drag_position(event.position().toPoint())
+            self._publish_external_drag_position(
+                event.position().toPoint(),
+                is_action=event.mimeData().hasFormat("application/x-action"),
+            )
         else:
             self.external_drag_finished.emit()
 
@@ -266,9 +273,19 @@ class WorkflowCanvasView(QGraphicsView):
             event.ignore()
             return False
 
-    def _publish_external_drag_position(self, view_position: QPoint) -> None:
+    def _publish_external_drag_position(
+        self,
+        view_position: QPoint,
+        *,
+        is_action: bool,
+    ) -> None:
         scene_position = self.mapToScene(view_position)
-        self.external_drag_moved.emit(
+        signal = (
+            self.external_action_drag_moved
+            if is_action
+            else self.external_task_drag_moved
+        )
+        signal.emit(
             scene_position.x(),
             scene_position.y(),
         )

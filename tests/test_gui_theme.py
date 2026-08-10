@@ -75,6 +75,8 @@ class GuiThemeTests(unittest.TestCase):
             "QComboBox::down-arrow",
             "QComboBoxPrivateContainer",
             "QComboBox QAbstractItemView::item",
+            "QSpinBox::up-arrow",
+            "QDoubleSpinBox::down-arrow",
             "QMenuBar::item:pressed",
             "QMenu::separator",
             "QMenu::right-arrow",
@@ -83,14 +85,18 @@ class GuiThemeTests(unittest.TestCase):
             self.assertIn(selector, light_stylesheet)
         self.assertIn(f"border: 1px solid {LIGHT_COLORS.border}", light_stylesheet)
         self.assertIn(":/icons/chevron-down-on-light.svg", light_stylesheet)
+        self.assertIn(":/icons/chevron-up-on-light.svg", light_stylesheet)
         self.assertTrue(QFile.exists(":/icons/chevron-down-on-light.svg"))
+        self.assertTrue(QFile.exists(":/icons/chevron-up-on-light.svg"))
 
         ThemeController(self.application, ThemeMode.DARK)
         dark_stylesheet = self.application.styleSheet()
         self.assertIn(f"background: {DARK_COLORS.surface}", dark_stylesheet)
         self.assertIn(f"border: 1px solid {DARK_COLORS.border}", dark_stylesheet)
         self.assertIn(":/icons/chevron-down-on-dark.svg", dark_stylesheet)
+        self.assertIn(":/icons/chevron-up-on-dark.svg", dark_stylesheet)
         self.assertTrue(QFile.exists(":/icons/chevron-down-on-dark.svg"))
+        self.assertTrue(QFile.exists(":/icons/chevron-up-on-dark.svg"))
 
     def test_combo_popup_uses_dropdown_behavior_below_the_input(self) -> None:
         ThemeController(self.application, ThemeMode.LIGHT)

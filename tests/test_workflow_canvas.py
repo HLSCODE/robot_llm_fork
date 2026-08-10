@@ -3,8 +3,15 @@ from __future__ import annotations
 import gc
 import unittest
 
-from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
-from PySide6.QtGui import QColor, QHelpEvent, QPalette, QWheelEvent
+from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt
+from PySide6.QtGui import (
+    QColor,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QHelpEvent,
+    QPalette,
+    QWheelEvent,
+)
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
@@ -27,6 +34,7 @@ from src.domain.models import (
 )
 from src.domain.workflow import WorkflowDocument
 from src.gui.views import WorkflowCanvasWidget
+from src.gui.tooltips import install_tooltip_service
 from src.gui.views.workflow_canvas.items import (
     InsertionItem,
     NodeDragPreviewItem,
@@ -34,6 +42,16 @@ from src.gui.views.workflow_canvas.items import (
     WorkflowNodeItem,
 )
 from src.gui.views.workflow_canvas.tokens import (
+    ControlFlowKind,
+    INSERT_HOVER_TRANSITION_MS,
+    LOOP_CHILD_GAP,
+    LOOP_CHILD_HEIGHT,
+    LOOP_HEADER_HEIGHT,
+    LOOP_NODE_WIDTH,
+    LOOP_SECTION_GAP,
+    NODE_DRAG_THRESHOLD,
+    NODE_HEIGHT,
+    NODE_WIDTH,
     PARALLEL_BRANCH_HEADER_HEIGHT,
     PARALLEL_BRANCH_PADDING,
     PARALLEL_BRANCH_WIDTH,
@@ -41,6 +59,7 @@ from src.gui.views.workflow_canvas.tokens import (
     PARALLEL_HEADER_HEIGHT,
     PARALLEL_SECTION_GAP,
     contrasting_text,
+    control_flow_colors,
 )
 
 
@@ -172,6 +191,28 @@ class WorkflowCanvasTests(unittest.TestCase):
 
         self.assertEqual([0, 1], requested)
 
+    def test_insertion_target_animates_and_labels_mouse_hover(self) -> None:
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((_item("first"),))
+        self.canvas.show()
+        QApplication.processEvents()
+        insertion = self.canvas._insertion_items[0]  # noqa: SLF001
+        target = self.canvas.view.mapFromScene(
+            insertion.scenePos() + QPointF(22.0, 22.0)
+        )
+
+        QTest.mouseMove(self.canvas.view.viewport(), target, delay=20)
+        QTest.qWait(INSERT_HOVER_TRANSITION_MS + 30)
+
+        self.assertTrue(insertion.is_hovered)
+        self.assertGreater(insertion.hover_phase, 0.9)
+        self.assertEqual("在此处插入动作", insertion.toolTip())
+
+        QTest.mouseMove(self.canvas.view.viewport(), QPoint(2, 2), delay=20)
+        QTest.qWait(INSERT_HOVER_TRANSITION_MS + 30)
+        self.assertFalse(insertion.is_hovered)
+        self.assertLess(insertion.hover_phase, 0.1)
+
     def test_loop_container_supports_count_edit_and_unwrap(self) -> None:
         self.canvas.render_entries((_item("first"), _item("second")))
         self.canvas.set_selected_entry_rows((0, 1))
@@ -191,6 +232,29 @@ class WorkflowCanvasTests(unittest.TestCase):
             tuple(entry.uuid for entry in self.canvas.get_entries()),
         )
 
+    def test_subworkflow_and_parallel_nodes_can_be_wrapped_in_a_loop(self) -> None:
+        task = SubworkflowBlock(
+            uuid="saved-task",
+            name="已保存任务",
+            items=[_item("task-action")],
+        )
+        parallel = ParallelBlock(
+            uuid="parallel",
+            branches=[ParallelBranch("branch", [_item("parallel-action")])],
+        )
+        self.canvas.render_entries((task, parallel))
+        self.canvas.set_selected_entry_rows((0, 1))
+
+        total_steps = self.canvas.wrap_selected_in_loop(3)
+
+        self.assertEqual(6, total_steps)
+        entries = self.canvas.get_entries()
+        self.assertEqual(1, len(entries))
+        self.assertIsInstance(entries[0], LoopBlock)
+        assert isinstance(entries[0], LoopBlock)
+        self.assertIsInstance(entries[0].items[0], SubworkflowBlock)
+        self.assertIsInstance(entries[0].items[1], ParallelBlock)
+
     def test_loop_is_expanded_and_supports_precise_child_insertion(self) -> None:
         loop = LoopBlock(
             uuid="loop",
@@ -204,16 +268,28 @@ class WorkflowCanvasTests(unittest.TestCase):
 
         self.assertGreater(node.node_width, 300)
         self.assertGreater(node.node_height, 200)
+        self.assertLessEqual(NODE_HEIGHT, 60.0)
+        self.assertGreaterEqual((LOOP_NODE_WIDTH - NODE_WIDTH) / 2.0, 80.0)
         self.assertEqual(
             0,
             node._loop_insertion_index_at(  # noqa: SLF001
-                QPointF(node.node_width / 2.0, 102.0),
+                QPointF(
+                    node.node_width / 2.0,
+                    LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP / 2.0,
+                ),
             ),
         )
         self.assertEqual(
             2,
             node._loop_insertion_index_at(  # noqa: SLF001
-                QPointF(node.node_width / 2.0, 358.0),
+                QPointF(
+                    node.node_width / 2.0,
+                    LOOP_HEADER_HEIGHT
+                    + LOOP_SECTION_GAP
+                    + 2 * LOOP_CHILD_HEIGHT
+                    + LOOP_CHILD_GAP
+                    + LOOP_SECTION_GAP / 2.0,
+                ),
             ),
         )
         requested: list[tuple[str, int]] = []
@@ -221,7 +297,12 @@ class WorkflowCanvasTests(unittest.TestCase):
             lambda loop_uuid, index: requested.append((loop_uuid, index))
         )
         first_insert_position = self.canvas.view.mapFromScene(
-            node.mapToScene(QPointF(node.node_width / 2.0, 102.0))
+            node.mapToScene(
+                QPointF(
+                    node.node_width / 2.0,
+                    LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP / 2.0,
+                )
+            )
         )
         QTest.mouseClick(
             self.canvas.view.viewport(),
@@ -246,6 +327,415 @@ class WorkflowCanvasTests(unittest.TestCase):
         restored = self.canvas.get_entries()[0]
         assert isinstance(restored, LoopBlock)
         self.assertEqual(["first", "second"], [item.uuid for item in restored.items])
+
+    def test_loop_insertion_marker_tooltip_takes_priority_over_loop_details(self) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("inside")],
+            repeat_count=2,
+        )
+        self.canvas.render_entries((loop,))
+        self.canvas.show()
+        QApplication.processEvents()
+        node = self.canvas._node_items["loop"]  # noqa: SLF001
+        marker_position = QPointF(
+            LOOP_NODE_WIDTH / 2.0,
+            LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP / 2.0,
+        )
+
+        self.assertEqual("在此处插入动作", node.tooltip_at(marker_position))
+        viewport_position = self.canvas.view.mapFromScene(
+            node.mapToScene(marker_position)
+        )
+        tooltip_service = install_tooltip_service(self.application)
+        tooltip_event = QHelpEvent(
+            QEvent.Type.ToolTip,
+            viewport_position,
+            self.canvas.view.viewport().mapToGlobal(viewport_position),
+        )
+        QApplication.sendEvent(self.canvas.view.viewport(), tooltip_event)
+        QApplication.processEvents()
+        self.assertEqual("在此处插入动作", tooltip_service.bubble.text)
+
+    def test_loop_child_can_be_selected_and_double_clicked_for_editing(self) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("child")],
+            repeat_count=2,
+        )
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((loop,))
+        self.canvas.show()
+        QApplication.processEvents()
+        node = self.canvas._node_items["loop"]  # noqa: SLF001
+        child_position = self.canvas.view.mapFromScene(
+            node.mapToScene(
+                QPointF(
+                    node.node_width / 2.0,
+                    LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+                )
+            )
+        )
+        edit_requests: list[str] = []
+        self.canvas.edit_requested.connect(lambda: edit_requests.append("edit"))
+        node.setSelected(True)
+        self.canvas._current_item_uuid = "loop"  # noqa: SLF001
+
+        QTest.mouseClick(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=child_position,
+        )
+        current = self.canvas.current_sequence_item()
+        self.assertIsNotNone(current)
+        assert current is not None
+        self.assertEqual("child", current.uuid)
+        self.assertEqual("child", node._active_child_uuid)  # noqa: SLF001
+
+        QTest.mouseDClick(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=child_position,
+        )
+        self.assertEqual(["edit"], edit_requests)
+
+    def test_delete_targets_selected_loop_child_before_loop_container(self) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("first-child"), _item("second-child")],
+            repeat_count=2,
+        )
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((loop,))
+        self.canvas.show()
+        QApplication.processEvents()
+        node = self.canvas._node_items["loop"]  # noqa: SLF001
+        first_child_position = self.canvas.view.mapFromScene(
+            node.mapToScene(
+                QPointF(
+                    node.node_width / 2.0,
+                    LOOP_HEADER_HEIGHT
+                    + LOOP_SECTION_GAP
+                    + LOOP_CHILD_HEIGHT / 2.0,
+                )
+            )
+        )
+
+        QTest.mouseClick(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=first_child_position,
+        )
+        self.assertEqual("first-child", self.canvas.current_entry().uuid)
+
+        self.assertTrue(self.canvas.delete_selected())
+        entries = self.canvas.get_entries()
+        self.assertEqual(1, len(entries))
+        self.assertIsInstance(entries[0], LoopBlock)
+        assert isinstance(entries[0], LoopBlock)
+        self.assertEqual(["second-child"], [item.uuid for item in entries[0].items])
+
+        self.canvas.undo()
+        restored = self.canvas.get_entries()
+        assert isinstance(restored[0], LoopBlock)
+        self.assertEqual(
+            ["first-child", "second-child"],
+            [item.uuid for item in restored[0].items],
+        )
+        self.canvas.redo()
+        redone = self.canvas.get_entries()
+        assert isinstance(redone[0], LoopBlock)
+        self.assertEqual(["second-child"], [item.uuid for item in redone[0].items])
+
+        self.canvas.set_current_entry_row(0)
+        self.assertTrue(self.canvas.delete_selected())
+        self.assertEqual([], self.canvas.get_entries())
+
+    def test_loop_child_uses_its_own_tooltip_and_drag_thumbnail(self) -> None:
+        child = _item("child")
+        child.definition.parameters["target"] = "sample"
+        loop = LoopBlock(uuid="loop", items=[child], repeat_count=2)
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((loop,))
+        self.canvas.show()
+        QApplication.processEvents()
+        node = self.canvas._node_items["loop"]  # noqa: SLF001
+        child_position = self.canvas.view.mapFromScene(
+            node.mapToScene(
+                QPointF(
+                    node.node_width / 2.0,
+                    LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+                )
+            )
+        )
+
+        child_local_position = QPointF(
+            node.node_width / 2.0,
+            LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+        )
+        self.assertIn("child", node.tooltip_at(child_local_position))
+        self.assertNotIn("循环 2 次", node.tooltip_at(child_local_position))
+        tooltip_service = install_tooltip_service(self.application)
+        tooltip_event = QHelpEvent(
+            QEvent.Type.ToolTip,
+            child_position,
+            self.canvas.view.viewport().mapToGlobal(child_position),
+        )
+        QApplication.sendEvent(self.canvas.view.viewport(), tooltip_event)
+        QApplication.processEvents()
+        self.assertIn("child", tooltip_service.bubble.text)
+
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=child_position,
+        )
+        QTest.mouseMove(
+            self.canvas.view.viewport(),
+            child_position + QPoint(0, NODE_DRAG_THRESHOLD + 4),
+            delay=20,
+        )
+        QApplication.processEvents()
+        preview = node.drag_preview
+        self.assertIsNotNone(preview)
+        assert preview is not None
+        self.assertEqual("child", preview.node_id)
+        self.assertLess(preview.pixmap().height(), 100)
+        self.assertEqual(1.0, node.opacity())
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=child_position + QPoint(0, NODE_DRAG_THRESHOLD + 4),
+        )
+
+    def test_loop_container_drag_keeps_full_thumbnail_and_reorders(self) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("inside-first"), _item("inside-second")],
+            repeat_count=2,
+        )
+        self.canvas.resize(620, 900)
+        self.canvas.render_entries((_item("before"), loop, _item("after")))
+        self.canvas.show()
+        QApplication.processEvents()
+        loop_node = self.canvas._node_items["loop"]  # noqa: SLF001
+        header_position = self.canvas.view.mapFromScene(
+            loop_node.mapToScene(QPointF(loop_node.node_width / 2.0, 20.0))
+        )
+        insertion = self.canvas._insertion_items[-1]  # noqa: SLF001
+        target = self.canvas.view.mapFromScene(
+            insertion.scenePos() + QPointF(22.0, 22.0)
+        )
+
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=header_position,
+        )
+        QTest.mouseMove(self.canvas.view.viewport(), target, delay=20)
+        QApplication.processEvents()
+        preview = loop_node.drag_preview
+        self.assertIsNotNone(preview)
+        assert preview is not None
+        self.assertEqual("loop", preview.node_id)
+        self.assertGreater(preview.pixmap().height(), 100)
+        self.assertLess(loop_node.opacity(), 0.5)
+
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=target,
+        )
+        QApplication.processEvents()
+        self.assertEqual(
+            ("before", "after", "loop"),
+            tuple(entry.uuid for entry in self.canvas.get_entries()),
+        )
+
+    def test_loop_container_cannot_be_dropped_into_its_own_body(self) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("inside-first"), _item("inside-second")],
+            repeat_count=2,
+        )
+        self.canvas.render_entries((_item("before"), loop, _item("after")))
+        loop_node = self.canvas._node_items["loop"]  # noqa: SLF001
+        target = loop_node.mapToScene(
+            QPointF(
+                loop_node.node_width / 2.0,
+                LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+            )
+        )
+
+        self.canvas._on_node_drag_position("loop", target.x(), target.y())  # noqa: SLF001
+        self.assertIsNone(self.canvas._active_loop_drop)  # noqa: SLF001
+        self.canvas._on_node_drag_ended("loop", True)  # noqa: SLF001
+        self.canvas._on_node_moved("loop", target.y())  # noqa: SLF001
+
+        entries = self.canvas.get_entries()
+        self.assertEqual(("before", "loop", "after"), tuple(item.uuid for item in entries))
+        assert isinstance(entries[1], LoopBlock)
+        self.assertEqual(
+            ("inside-first", "inside-second"),
+            tuple(item.uuid for item in entries[1].items),
+        )
+
+    def test_container_cannot_be_moved_into_its_descendant_loop(self) -> None:
+        nested_loop = LoopBlock(
+            uuid="nested-loop",
+            items=[_item("inside")],
+            repeat_count=2,
+        )
+        task = SubworkflowBlock(
+            uuid="task",
+            name="包含循环的任务",
+            items=[nested_loop],
+        )
+        self.canvas.render_entries((task, _item("after")))
+
+        moved = self.canvas._move_root_item_to_loop(  # noqa: SLF001
+            "task",
+            "nested-loop",
+            1,
+        )
+
+        self.assertFalse(moved)
+        entries = self.canvas.get_entries()
+        self.assertEqual(("task", "after"), tuple(item.uuid for item in entries))
+        assert isinstance(entries[0], SubworkflowBlock)
+        self.assertEqual(("nested-loop",), tuple(item.uuid for item in entries[0].items))
+
+    def test_double_clicking_subworkflow_inside_loop_enters_its_scope(self) -> None:
+        subworkflow = SubworkflowBlock(
+            uuid="nested-task",
+            name="嵌套任务",
+            items=[_item("nested-action")],
+        )
+        loop = LoopBlock(
+            uuid="loop",
+            items=[subworkflow],
+            repeat_count=2,
+        )
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((loop,))
+        self.canvas.show()
+        QApplication.processEvents()
+        node = self.canvas._node_items["loop"]  # noqa: SLF001
+        node.setSelected(True)
+        self.canvas._current_item_uuid = "loop"  # noqa: SLF001
+        subworkflow_position = self.canvas.view.mapFromScene(
+            node.mapToScene(
+                QPointF(
+                    node.node_width / 2.0,
+                    LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+                )
+            )
+        )
+
+        QTest.mouseDClick(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=subworkflow_position,
+        )
+
+        self.assertEqual(1, self.canvas.entry_count())
+        self.assertEqual("nested-action", self.canvas._entries[0].uuid)  # noqa: SLF001
+        self.canvas.leave_scope()
+        self.assertIsInstance(self.canvas.get_entries()[0], LoopBlock)
+        self.assertEqual(1, self.canvas.entry_count())
+        self.assertIn("loop", self.canvas._node_items)  # noqa: SLF001
+        self.assertFalse(self.canvas.root_scope_button.isVisible())
+
+    def test_dragging_actions_across_loop_boundary_preserves_entries(self) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("inside")],
+            repeat_count=2,
+        )
+        self.canvas.resize(620, 800)
+        self.canvas.render_entries((_item("outside"), loop))
+        self.canvas.show()
+        QApplication.processEvents()
+        loop_node = self.canvas._node_items["loop"]  # noqa: SLF001
+        child_center = loop_node.mapToScene(
+            QPointF(
+                loop_node.node_width / 2.0,
+                LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+            )
+        )
+        root_node = self.canvas._node_items["outside"]  # noqa: SLF001
+
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=self.canvas.view.mapFromScene(root_node.sceneBoundingRect().center()),
+        )
+        QTest.mouseMove(self.canvas.view.viewport(), self.canvas.view.mapFromScene(child_center), delay=20)
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=self.canvas.view.mapFromScene(child_center),
+        )
+        QApplication.processEvents()
+
+        moved_into_loop = self.canvas.get_entries()
+        self.assertEqual(1, len(moved_into_loop))
+        assert isinstance(moved_into_loop[0], LoopBlock)
+        self.assertEqual(["inside", "outside"], [item.uuid for item in moved_into_loop[0].items])
+
+        loop_node = self.canvas._node_items["loop"]  # noqa: SLF001
+        child_center = loop_node.mapToScene(
+            QPointF(
+                loop_node.node_width / 2.0,
+                LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+            )
+        )
+        insertion = self.canvas._insertion_items[-1]  # noqa: SLF001
+        root_target = insertion.scenePos() + QPointF(22.0, 22.0)
+        QTest.mousePress(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=self.canvas.view.mapFromScene(child_center),
+        )
+        QTest.mouseMove(self.canvas.view.viewport(), self.canvas.view.mapFromScene(root_target), delay=20)
+        QTest.mouseRelease(
+            self.canvas.view.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=self.canvas.view.mapFromScene(root_target),
+        )
+        QApplication.processEvents()
+
+        moved_out_of_loop = self.canvas.get_entries()
+        assert isinstance(moved_out_of_loop[0], LoopBlock)
+        self.assertEqual(["outside"], [item.uuid for item in moved_out_of_loop[0].items])
+        self.assertEqual("inside", moved_out_of_loop[1].uuid)
+
+    def test_dragging_root_subworkflow_into_loop_preserves_the_subworkflow(self) -> None:
+        loop = LoopBlock(uuid="loop", items=[_item("inside")], repeat_count=2)
+        task = SubworkflowBlock(
+            uuid="task",
+            name="可复用任务",
+            items=[_item("task-action")],
+        )
+        self.canvas.render_entries((loop, task))
+        loop_node = self.canvas._node_items["loop"]  # noqa: SLF001
+        target = loop_node.mapToScene(
+            QPointF(
+                loop_node.node_width / 2.0,
+                LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + LOOP_CHILD_HEIGHT / 2.0,
+            )
+        )
+
+        self.canvas._on_node_drag_position("task", target.x(), target.y())  # noqa: SLF001
+        self.assertEqual(("loop", 1), self.canvas._active_loop_drop)  # noqa: SLF001
+        self.canvas._on_node_drag_ended("task", True)  # noqa: SLF001
+        self.canvas._on_node_moved("task", target.y())  # noqa: SLF001
+
+        entries = self.canvas.get_entries()
+        self.assertEqual(1, len(entries))
+        self.assertIsInstance(entries[0], LoopBlock)
+        assert isinstance(entries[0], LoopBlock)
+        self.assertEqual(["inside", "task"], [entry.uuid for entry in entries[0].items])
 
     def test_compiled_event_mapping_updates_action_and_loop_progress(self) -> None:
         loop = LoopBlock(
@@ -273,6 +763,9 @@ class WorkflowCanvasTests(unittest.TestCase):
         assert isinstance(rendered_loop, LoopBlock)
         self.assertIs(SequenceItemStatus.RUNNING, rendered_loop.items[0].status)
         self.assertEqual(1, rendered_loop.current_iteration)
+        self.assertTrue(
+            self.canvas._node_items["loop"].execution_pulse_active  # noqa: SLF001
+        )
         before = tuple(entry.uuid for entry in self.canvas.get_entries())
         self.canvas.insert_action(_action("ignored-during-run"))
         self.assertEqual(before, tuple(entry.uuid for entry in self.canvas.get_entries()))
@@ -442,12 +935,40 @@ class WorkflowCanvasTests(unittest.TestCase):
                 self.canvas.render_entries((_parallel(),))
                 QApplication.processEvents()
                 node = self.canvas._node_items["parallel"]  # noqa: SLF001
-                self.assertGreater(node.node_width, 500.0)
+                self.assertGreater(node.node_width, 400.0)
                 self.assertGreater(node.node_height, 200.0)
                 self.assertTrue(node.isVisible())
                 self.assertGreater(self.canvas.scene.itemsBoundingRect().width(), 0)
         finally:
             QApplication.setPalette(original)
+            QApplication.processEvents()
+
+    def test_existing_cached_nodes_repaint_immediately_after_palette_change(self) -> None:
+        original = QApplication.palette()
+        try:
+            light = _palette("#f1f5f9", "#ffffff", "#1e293b")
+            dark = _palette("#0f172a", "#111827", "#f1f5f9")
+            QApplication.setPalette(light)
+            self.canvas.resize(900, 700)
+            self.canvas.render_entries((_item("theme-refresh"),))
+            self.canvas.show()
+            QApplication.processEvents()
+
+            node = self.canvas._node_items["theme-refresh"]  # noqa: SLF001
+            sample_point = self.canvas.view.mapFromScene(
+                node.scenePos() + QPointF(node.node_width - 18.0, 16.0)
+            )
+            before = self.canvas.view.viewport().grab().toImage().pixelColor(sample_point)
+
+            QApplication.setPalette(dark)
+            QApplication.processEvents()
+            after = self.canvas.view.viewport().grab().toImage().pixelColor(sample_point)
+
+            self.assertEqual(QColor("#ffffff"), before)
+            self.assertEqual(QColor("#111827"), after)
+        finally:
+            QApplication.setPalette(original)
+            self.canvas.close()
             QApplication.processEvents()
 
     def test_canvas_uses_lightweight_items_and_versioned_document(self) -> None:
@@ -466,9 +987,6 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertFalse(
             any(isinstance(item, QGraphicsProxyWidget) for item in self.canvas.scene.items())
         )
-        self.assertEqual("", self.canvas.fit_button.text())
-        self.assertFalse(self.canvas.fit_button.icon().isNull())
-        self.assertEqual("画布适合内容", self.canvas.fit_button.toolTip())
 
     def test_canvas_follows_light_and_dark_system_palettes(self) -> None:
         original = QApplication.palette()
@@ -499,6 +1017,19 @@ class WorkflowCanvasTests(unittest.TestCase):
             QApplication.setPalette(original)
             QApplication.processEvents()
 
+    def test_control_flow_nodes_have_distinct_theme_aware_visual_semantics(self) -> None:
+        light = _palette("#f3f4f6", "#ffffff", "#111827")
+        dark = _palette("#111827", "#1f2937", "#f9fafb")
+
+        light_loop = control_flow_colors(ControlFlowKind.LOOP, light)
+        dark_loop = control_flow_colors(ControlFlowKind.LOOP, dark)
+        light_parallel = control_flow_colors(ControlFlowKind.PARALLEL, light)
+
+        self.assertNotEqual(light_loop.header, dark_loop.header)
+        self.assertNotEqual(light_loop.accent, light_parallel.accent)
+        self.assertGreater(light_loop.header.lightnessF(), 0.75)
+        self.assertLess(dark_loop.header.lightnessF(), 0.35)
+
     def test_offscreen_size_matrix_preserves_accessible_canvas_controls(self) -> None:
         self.canvas.render_entries(tuple(_item(f"node-{index}") for index in range(20)))
 
@@ -507,8 +1038,6 @@ class WorkflowCanvasTests(unittest.TestCase):
             QApplication.processEvents()
             self.assertEqual("任务工作流画布", self.canvas.view.accessibleName())
             self.assertTrue(self.canvas.view.accessibleDescription())
-            self.assertGreaterEqual(self.canvas.fit_button.height(), 32)
-            self.assertFalse(self.canvas.zoom_button.icon().isNull())
             self.assertGreater(self.canvas.scene.itemsBoundingRect().height(), 0)
 
     def test_ctrl_left_drag_pans_while_plain_left_drag_does_not(self) -> None:
@@ -880,7 +1409,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         insertion = self.canvas._insertion_items[1]  # noqa: SLF001
         scene_position = insertion.scenePos() + QPointF(22.0, 22.0)
 
-        self.canvas.view.external_drag_moved.emit(
+        self.canvas.view.external_action_drag_moved.emit(
             scene_position.x(),
             scene_position.y(),
         )
@@ -895,7 +1424,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertFalse(insertion.is_pulsing)
         self.assertEqual("", insertion.target_label)
 
-        self.canvas.view.external_drag_moved.emit(
+        self.canvas.view.external_action_drag_moved.emit(
             scene_position.x(),
             scene_position.y() + 10_000.0,
         )
@@ -907,7 +1436,7 @@ class WorkflowCanvasTests(unittest.TestCase):
             )
         )
 
-        self.canvas.view.external_drag_moved.emit(
+        self.canvas.view.external_action_drag_moved.emit(
             scene_position.x() + 10_000.0,
             scene_position.y(),
         )
@@ -918,6 +1447,41 @@ class WorkflowCanvasTests(unittest.TestCase):
                 for item in self.canvas._insertion_items  # noqa: SLF001
             )
         )
+
+    def test_native_action_drag_events_activate_the_nearest_insertion_pulse(self) -> None:
+        self.canvas.resize(620, 700)
+        self.canvas.render_entries((_item("first"),))
+        self.canvas.show()
+        QApplication.processEvents()
+        insertion = self.canvas._insertion_items[0]  # noqa: SLF001
+        target = self.canvas.view.mapFromScene(
+            insertion.scenePos() + QPointF(22.0, 22.0)
+        )
+        mime = QMimeData()
+        mime.setData("application/x-action", b"{}")
+        enter_event = QDragEnterEvent(
+            target,
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        move_event = QDragMoveEvent(
+            target,
+            Qt.DropAction.CopyAction,
+            mime,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+
+        self.canvas.view.dragEnterEvent(enter_event)
+        self.canvas.view.dragMoveEvent(move_event)
+
+        self.assertTrue(enter_event.isAccepted())
+        self.assertTrue(move_event.isAccepted())
+        self.assertTrue(insertion.is_drop_target_active)
+        self.assertTrue(insertion.is_pulsing)
+        self.assertEqual("插入到第 1 位", insertion.target_label)
 
     def test_external_action_drop_commits_to_the_highlighted_top_level_target(
         self,
@@ -931,7 +1495,7 @@ class WorkflowCanvasTests(unittest.TestCase):
         insertion = self.canvas._insertion_items[0]  # noqa: SLF001
         marker = insertion.scenePos() + QPointF(22.0, 22.0)
 
-        self.canvas.view.external_drag_moved.emit(marker.x(), marker.y())
+        self.canvas.view.external_action_drag_moved.emit(marker.x(), marker.y())
         self.assertTrue(insertion.is_drop_target_active)
         self.canvas.view.action_dropped.emit(
             _action("top-level"),
@@ -950,8 +1514,13 @@ class WorkflowCanvasTests(unittest.TestCase):
 
         self.canvas.render_entries((loop,))
         node = self.canvas._node_items["loop"]  # noqa: SLF001
-        deep_inside_loop = node.mapToScene(QPointF(node.node_width / 2.0, 190.0))
-        self.canvas.view.external_drag_moved.emit(
+        deep_inside_loop = node.mapToScene(
+            QPointF(
+                node.node_width / 2.0,
+                LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + 10.0,
+            )
+        )
+        self.canvas.view.external_action_drag_moved.emit(
             deep_inside_loop.x(),
             deep_inside_loop.y(),
         )
@@ -961,6 +1530,8 @@ class WorkflowCanvasTests(unittest.TestCase):
                 for item in self.canvas._insertion_items  # noqa: SLF001
             )
         )
+        self.assertEqual(("loop", 0), self.canvas._active_loop_drop)  # noqa: SLF001
+        self.assertTrue(node.is_loop_drop_pulsing)
         self.canvas.view.action_dropped.emit(
             _action("loop-child"),
             deep_inside_loop.x(),
@@ -971,9 +1542,53 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertIsInstance(entries[0], LoopBlock)
         assert isinstance(entries[0], LoopBlock)
         self.assertEqual(
-            ["child", "loop-child"],
+            ["loop-child", "child"],
             [item.definition.id for item in entries[0].items],
         )
+
+    def test_external_saved_task_pulses_and_inserts_at_loop_target(self) -> None:
+        loop = LoopBlock(
+            uuid="loop",
+            items=[_item("existing-child")],
+            repeat_count=2,
+        )
+        self.canvas.render_entries((loop,))
+        node = self.canvas._node_items["loop"]  # noqa: SLF001
+        target = node.mapToScene(
+            QPointF(
+                node.node_width / 2.0,
+                LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + 10.0,
+            )
+        )
+        requests: list[tuple[str, str, int]] = []
+        self.canvas.insert_subworkflow_in_loop_requested.connect(
+            lambda task_name, loop_uuid, child_index: requests.append(
+                (task_name, loop_uuid, child_index)
+            )
+        )
+
+        self.canvas.view.external_task_drag_moved.emit(target.x(), target.y())
+
+        self.assertEqual(("loop", 0), self.canvas._active_loop_drop)  # noqa: SLF001
+        self.assertTrue(node.is_loop_drop_pulsing)
+
+        self.canvas.view.task_dropped.emit("saved-task", target.x(), target.y())
+
+        self.assertEqual([("saved-task", "loop", 0)], requests)
+        inserted = SubworkflowBlock(
+            uuid="saved-task-instance",
+            name="saved-task",
+            items=[_item("nested-action")],
+        )
+        self.assertTrue(self.canvas.insert_subworkflow_into_loop("loop", 0, inserted))
+        entries = self.canvas.get_entries()
+        self.assertEqual(1, len(entries))
+        assert isinstance(entries[0], LoopBlock)
+        self.assertEqual(
+            ("saved-task-instance", "existing-child"),
+            tuple(item.uuid for item in entries[0].items),
+        )
+        self.assertIsInstance(entries[0].items[0], SubworkflowBlock)
 
     def test_insertion_target_release_outside_circle_does_not_insert(self) -> None:
         scene = QGraphicsScene()
@@ -1046,6 +1661,17 @@ class WorkflowCanvasTests(unittest.TestCase):
     def test_semantic_status_text_uses_contrasting_foreground(self) -> None:
         self.assertEqual(QColor("#111827"), contrasting_text(QColor("#f59e0b")))
         self.assertEqual(QColor("#ffffff"), contrasting_text(QColor("#dc2626")))
+
+
+def _palette(window: str, base: str, text: str) -> QPalette:
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(window))
+    palette.setColor(QPalette.ColorRole.Base, QColor(base))
+    palette.setColor(QPalette.ColorRole.Text, QColor(text))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor("#94a3b8"))
+    palette.setColor(QPalette.ColorRole.Mid, QColor("#64748b"))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor("#2563eb"))
+    return palette
 
 
 def _action(action_id: str) -> ActionDefinition:
