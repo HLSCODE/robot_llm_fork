@@ -8,13 +8,15 @@ from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
+from .drag_preview_style import (
+    DRAG_CARD_MAX_SCALE,
+    DRAG_CARD_MIN_SCALE,
+    DRAG_CARD_OPACITY,
+    DRAG_CARD_RELATIVE_SCALE,
+)
 from .views.workflow_canvas.tokens import NODE_HEIGHT, NODE_WIDTH
 
 
-DRAG_CARD_RELATIVE_SCALE = 0.88
-DRAG_CARD_MIN_SCALE = 0.65
-DRAG_CARD_MAX_SCALE = 1.25
-DRAG_CARD_OPACITY = 0.84
 _REFERENCE_WIDTH = NODE_WIDTH * DRAG_CARD_RELATIVE_SCALE
 _REFERENCE_HEIGHT = NODE_HEIGHT * DRAG_CARD_RELATIVE_SCALE
 _REFERENCE_HOTSPOT_X = 24.0

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import ceil
 
 from PySide6.QtCore import (
     QAbstractAnimation,
@@ -38,14 +37,15 @@ from ....domain.models import (
     SequenceItemStatus,
     SubworkflowBlock,
 )
+from ...drag_preview_style import (
+    DRAG_CARD_OPACITY,
+    DRAG_SOURCE_OPACITY,
+    bounded_drag_preview_scale,
+)
 from ...icons import IconName, action_icon
 from .tokens import (
     ACTION_COLORS,
     ControlFlowKind,
-    DRAG_PREVIEW_MAX_HEIGHT,
-    DRAG_PREVIEW_MAX_WIDTH,
-    DRAG_PREVIEW_OPACITY,
-    DRAG_SOURCE_OPACITY,
     EXECUTION_PULSE_DURATION_MS,
     INSERT_TARGET_SIZE,
     INSERT_TARGET_HINT_WIDTH,
@@ -139,7 +139,7 @@ class NodeDragPreviewItem(QGraphicsPixmapItem):
         super().__init__(pixmap)
         self.node_id = node_id
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-        self.setOpacity(DRAG_PREVIEW_OPACITY)
+        self.setOpacity(DRAG_CARD_OPACITY)
         self.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         self.setZValue(100.0)
 
@@ -502,13 +502,12 @@ class WorkflowNodeItem(QGraphicsObject):
     def _begin_drag_preview(self, scene_position: QPointF) -> None:
         preview_entry = self._drag_preview_entry()
         preview_rect = self._drag_preview_rect()
-        preview_scale = min(
-            1.0,
-            DRAG_PREVIEW_MAX_WIDTH / preview_rect.width(),
-            DRAG_PREVIEW_MAX_HEIGHT / preview_rect.height(),
+        preview_scale = bounded_drag_preview_scale(
+            preview_rect.width(),
+            preview_rect.height(),
         )
-        preview_width = max(1, ceil(preview_rect.width() * preview_scale))
-        preview_height = max(1, ceil(preview_rect.height() * preview_scale))
+        preview_width = max(1, round(preview_rect.width() * preview_scale))
+        preview_height = max(1, round(preview_rect.height() * preview_scale))
         pixmap = QPixmap(preview_width, preview_height)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -516,11 +515,14 @@ class WorkflowNodeItem(QGraphicsObject):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
             painter.scale(preview_scale, preview_scale)
-            if preview_entry is self.entry:
+            if preview_entry is self.entry and isinstance(
+                preview_entry,
+                (LoopBlock, ParallelBlock),
+            ):
                 self.paint(painter, QStyleOptionGraphicsItem(), None)
             else:
                 colors = canvas_colors(QApplication.palette())
-                self._paint_parallel_child(
+                self._paint_compact_entry_card(
                     painter,
                     preview_entry,
                     QRectF(0.0, 0.0, preview_rect.width(), preview_rect.height()),
@@ -826,7 +828,7 @@ class WorkflowNodeItem(QGraphicsObject):
             if is_dragged_child:
                 painter.save()
                 painter.setOpacity(DRAG_SOURCE_OPACITY)
-            self._paint_parallel_child(
+            self._paint_compact_entry_card(
                 painter,
                 child,
                 child_rect,
@@ -1021,7 +1023,7 @@ class WorkflowNodeItem(QGraphicsObject):
                     PARALLEL_BRANCH_WIDTH - 16.0,
                     PARALLEL_CHILD_HEIGHT,
                 )
-                self._paint_parallel_child(
+                self._paint_compact_entry_card(
                     painter,
                     child,
                     child_rect,
@@ -1051,7 +1053,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawText(footer_rect, Qt.AlignmentFlag.AlignCenter, "并行汇合")
         self._paint_parallel_paths(painter, header_rect, footer_rect, branch_top)
 
-    def _paint_parallel_child(
+    def _paint_compact_entry_card(
         self,
         painter: QPainter,
         entry: SequenceEntry,

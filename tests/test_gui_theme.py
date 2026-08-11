@@ -86,6 +86,8 @@ class GuiThemeTests(unittest.TestCase):
         self.assertIn(f"border: 1px solid {LIGHT_COLORS.border}", light_stylesheet)
         self.assertIn(":/icons/chevron-down-on-light.svg", light_stylesheet)
         self.assertIn(":/icons/chevron-up-on-light.svg", light_stylesheet)
+        self.assertIn("width: 24px; height: 14px", light_stylesheet)
+        self.assertNotIn("height: 50%", light_stylesheet)
         self.assertTrue(QFile.exists(":/icons/chevron-down-on-light.svg"))
         self.assertTrue(QFile.exists(":/icons/chevron-up-on-light.svg"))
 

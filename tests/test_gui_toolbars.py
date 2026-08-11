@@ -6,7 +6,7 @@ from typing import ClassVar
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
-from src.domain.models import ActionType
+from src.domain.models import ActionDefinition, ActionType
 from src.gui.icons import ACTION_TYPE_ICONS, IconName, themed_icon
 from src.gui.theme import ThemeController, ThemeMode
 from src.gui.toolbars import icon_foreground
@@ -78,6 +78,38 @@ class GuiToolbarTests(unittest.TestCase):
 
         self.assertFalse(view.camera_test_button.isEnabled())
         self.assertEqual("相机测试运行中", view.camera_test_button.toolTip())
+
+    def test_action_library_context_menu_exposes_item_operations(self) -> None:
+        view = ActionLibraryView()
+        action = ActionDefinition(
+            id="action-1",
+            name="测试动作",
+            type=ActionType.MOVE,
+            parameters={},
+        )
+        action_list = view.current_action_list()
+        action_list.add_action(action)
+        action_list.setCurrentRow(0)
+        inserted: list[ActionDefinition] = []
+        edited: list[bool] = []
+        deleted: list[bool] = []
+        view.action_insert_requested.connect(inserted.append)
+        view.edit_requested.connect(lambda: edited.append(True))
+        view.delete_requested.connect(lambda: deleted.append(True))
+
+        menu = view._create_action_context_menu(action_list, action)
+        actions = [entry for entry in menu.actions() if not entry.isSeparator()]
+
+        self.assertEqual(
+            ["插入到画布", "修改动作", "删除动作"],
+            [entry.text() for entry in actions],
+        )
+        self.assertTrue(all(not entry.icon().isNull() for entry in actions))
+        for entry in actions:
+            entry.trigger()
+        self.assertEqual([action], inserted)
+        self.assertEqual([True], edited)
+        self.assertEqual([True], deleted)
 
     def test_workflow_commands_are_above_canvas_and_keep_semantic_actions(self) -> None:
         view = WorkflowEditorView()

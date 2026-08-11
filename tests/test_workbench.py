@@ -170,6 +170,26 @@ class WorkbenchViewTests(unittest.TestCase):
         self.assertIsNone(self.workbench.active_bottom_page)
         self.assertFalse(self.workbench.detail_panel.isVisible())
 
+    def test_floating_panel_closes_only_for_left_clicks_outside_it(self) -> None:
+        self.workbench.toggle_bottom_page("devices")
+        QApplication.processEvents()
+
+        QTest.mouseClick(
+            self.workbench.detail_panel.title_label,
+            Qt.MouseButton.LeftButton,
+        )
+        QApplication.processEvents()
+        self.assertEqual("devices", self.workbench.active_bottom_page)
+
+        QTest.mouseClick(
+            self.editor.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=QPoint(20, 20),
+        )
+        QApplication.processEvents()
+        self.assertIsNone(self.workbench.active_bottom_page)
+        self.assertFalse(self.workbench.detail_panel.isVisible())
+
     def test_escape_reaches_canvas_unless_detail_panel_is_visible(self) -> None:
         cancellations: list[bool] = []
         self.editor.drag_cancel_requested.connect(lambda: cancellations.append(True))

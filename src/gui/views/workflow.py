@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...domain.models import ActionType
+from ...domain.models import ActionDefinition, ActionType
 from ...devices import StopMode
 from .action_list import ActionListWidget
 from .control_panel import ControlPanel
@@ -140,6 +140,15 @@ class ActionLibraryView(QWidget):
             action_list.action_selected.connect(
                 self.action_insert_requested.emit
             )
+            action_list.setContextMenuPolicy(
+                Qt.ContextMenuPolicy.CustomContextMenu
+            )
+            action_list.customContextMenuRequested.connect(
+                lambda position, target=action_list: self._show_action_context_menu(
+                    target,
+                    position,
+                )
+            )
         for action_type, title in ACTION_LIBRARY_CATEGORIES:
             self.category_selector.addItem(title, action_type)
             self.action_stack.addWidget(self.action_lists[action_type])
@@ -169,6 +178,49 @@ class ActionLibraryView(QWidget):
         label = "相机测试运行中" if running else "测试相机"
         self.camera_test_button.setToolTip(label)
         self.camera_test_button.setAccessibleName(label)
+
+    def _show_action_context_menu(
+        self,
+        action_list: ActionListWidget,
+        position: QPoint,
+    ) -> None:
+        item = action_list.itemAt(position)
+        if item is None:
+            return
+        action = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(action, ActionDefinition):
+            return
+        action_list.setCurrentItem(item)
+        menu = self._create_action_context_menu(action_list, action)
+        menu.exec(action_list.viewport().mapToGlobal(position))
+
+    def _create_action_context_menu(
+        self,
+        action_list: ActionListWidget,
+        action: ActionDefinition,
+    ) -> QMenu:
+        menu = QMenu(self)
+        insert = menu.addAction(
+            themed_icon(action_list, IconName.INSERT, size=16),
+            "插入到画布",
+        )
+        insert.triggered.connect(
+            lambda _checked=False: self.action_insert_requested.emit(action)
+        )
+        edit = menu.addAction(
+            themed_icon(action_list, IconName.EDIT, size=16),
+            "修改动作",
+        )
+        edit.triggered.connect(lambda _checked=False: self.edit_requested.emit())
+        menu.addSeparator()
+        delete = menu.addAction(
+            themed_icon(action_list, IconName.DELETE, size=16),
+            "删除动作",
+        )
+        delete.triggered.connect(
+            lambda _checked=False: self.delete_requested.emit()
+        )
+        return menu
 
 
 class TaskLibraryView(QWidget):

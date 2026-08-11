@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QEvent, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPen, QResizeEvent, QShortcut
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor,
+    QHideEvent,
+    QKeySequence,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QResizeEvent,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -314,6 +324,7 @@ class WorkbenchView(QWidget):
         self._selected_bottom_page = self._default_bottom_page
         self._active_side_page: str | None = side_pages[0].key
         self._active_bottom_page: str | None = None
+        self._outside_click_filter_installed = False
         self._last_side_width = SIDE_BAR_DEFAULT_WIDTH
         self._layout_store = layout_store
         self.layout_recovery_reason: str | None = None
@@ -399,6 +410,7 @@ class WorkbenchView(QWidget):
         self._show_bottom_page(page_key)
 
     def close_bottom_page(self) -> None:
+        self._set_outside_click_filter_enabled(False)
         self._close_panel_shortcut.setEnabled(False)
         if self._active_bottom_page is None:
             return
@@ -412,6 +424,7 @@ class WorkbenchView(QWidget):
         self._selected_bottom_page = self._default_bottom_page
         self._last_side_width = SIDE_BAR_DEFAULT_WIDTH
         self.detail_panel.hide()
+        self._set_outside_click_filter_enabled(False)
         self._close_panel_shortcut.setEnabled(False)
         self._active_bottom_page = None
         self.status_bar.render_active_panel(None)
@@ -455,6 +468,7 @@ class WorkbenchView(QWidget):
         self._position_detail_panel()
         self.detail_panel.show()
         self.detail_panel.raise_()
+        self._set_outside_click_filter_enabled(True)
         self._close_panel_shortcut.setEnabled(True)
         self._selected_bottom_page = page_key
         self._active_bottom_page = page_key
@@ -509,6 +523,55 @@ class WorkbenchView(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._position_detail_panel()
+
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
+        self._set_outside_click_filter_enabled(False)
+        super().hideEvent(event)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if (
+            self._active_bottom_page is not None
+            and event.type() is QEvent.Type.MouseButtonPress
+            and isinstance(event, QMouseEvent)
+            and event.button() is Qt.MouseButton.LeftButton
+            and self._is_workbench_outside_detail_click(
+                QApplication.widgetAt(event.globalPosition().toPoint())
+            )
+        ):
+            self.close_bottom_page()
+        return super().eventFilter(watched, event)
+
+    def _is_workbench_outside_detail_click(
+        self,
+        target: QWidget | None,
+    ) -> bool:
+        if target is None:
+            return False
+        if not self._is_within(target, self):
+            return False
+        return not (
+            self._is_within(target, self.detail_panel)
+            or self._is_within(target, self.status_bar)
+        )
+
+    @staticmethod
+    def _is_within(target: QWidget, container: QWidget) -> bool:
+        current: QWidget | None = target
+        while current is not None:
+            if current is container:
+                return True
+            current = current.parentWidget()
+        return False
+
+    def _set_outside_click_filter_enabled(self, enabled: bool) -> None:
+        application = QApplication.instance()
+        if application is None or enabled == self._outside_click_filter_installed:
+            return
+        if enabled:
+            application.installEventFilter(self)
+        else:
+            application.removeEventFilter(self)
+        self._outside_click_filter_installed = enabled
 
     def _position_detail_panel(self) -> None:
         available_width = max(1, self.width() - (2 * DETAIL_PANEL_MARGIN))

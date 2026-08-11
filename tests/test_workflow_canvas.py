@@ -33,6 +33,7 @@ from src.domain.models import (
     SubworkflowBlock,
 )
 from src.domain.workflow import WorkflowDocument
+from src.gui.drag_preview_style import DRAG_CARD_OPACITY, DRAG_CARD_RELATIVE_SCALE
 from src.gui.views import WorkflowCanvasWidget
 from src.gui.tooltips import install_tooltip_service
 from src.gui.views.workflow_canvas.items import (
@@ -500,7 +501,14 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertIsNotNone(preview)
         assert preview is not None
         self.assertEqual("child", preview.node_id)
-        self.assertLess(preview.pixmap().height(), 100)
+        self.assertEqual(
+            (
+                round(NODE_WIDTH * DRAG_CARD_RELATIVE_SCALE),
+                round(NODE_HEIGHT * DRAG_CARD_RELATIVE_SCALE),
+            ),
+            (preview.pixmap().width(), preview.pixmap().height()),
+        )
+        self.assertEqual(DRAG_CARD_OPACITY, preview.opacity())
         self.assertEqual(1.0, node.opacity())
         QTest.mouseRelease(
             self.canvas.view.viewport(),
@@ -1227,6 +1235,14 @@ class WorkflowCanvasTests(unittest.TestCase):
         preview = first.drag_preview
         self.assertIsInstance(preview, NodeDragPreviewItem)
         assert preview is not None
+        self.assertEqual(
+            (
+                round(NODE_WIDTH * DRAG_CARD_RELATIVE_SCALE),
+                round(NODE_HEIGHT * DRAG_CARD_RELATIVE_SCALE),
+            ),
+            (preview.pixmap().width(), preview.pixmap().height()),
+        )
+        self.assertEqual(DRAG_CARD_OPACITY, preview.opacity())
         self.assertIs(self.canvas.scene, preview.scene())
         self.assertEqual(original_position, first.scenePos())
         self.assertLess(first.opacity(), 0.5)

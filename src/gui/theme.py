@@ -247,18 +247,18 @@ QSpinBox, QDoubleSpinBox {{ padding: 5px 30px 5px 8px; }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {colors.accent}; }}
 QSpinBox::up-button, QDoubleSpinBox::up-button {{
     subcontrol-origin: border; subcontrol-position: top right;
-    width: 24px; height: 50%; background: transparent; border: none;
+    width: 24px; height: 14px; background: transparent; border: none;
     border-top-right-radius: 6px;
 }}
 QSpinBox::down-button, QDoubleSpinBox::down-button {{
     subcontrol-origin: border; subcontrol-position: bottom right;
-    width: 24px; height: 50%; background: transparent; border: none;
+    width: 24px; height: 14px; background: transparent; border: none;
     border-bottom-right-radius: 6px;
 }}
 QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
 QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {colors.selection}; }}
-QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({spin_arrow_up}); width: 12px; height: 8px; }}
-QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({spin_arrow_down}); width: 12px; height: 8px; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({spin_arrow_up}); width: 10px; height: 6px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({spin_arrow_down}); width: 10px; height: 6px; }}
 QComboBox {{ padding: 6px 34px 6px 10px; min-height: 18px; }}
 QComboBox:hover, QComboBox:focus, QComboBox:on {{ background: {colors.surface}; border-color: {colors.accent}; }}
 QComboBox:disabled {{ background: {colors.disabled_surface}; color: {colors.disabled_text}; }}

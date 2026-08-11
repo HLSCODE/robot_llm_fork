@@ -3,17 +3,22 @@ from __future__ import annotations
 from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import QApplication, QWidget
 
-from src.gui.drag_preview import (
+from src.gui.drag_preview import create_drag_card_preview
+from src.gui.drag_preview_style import (
     DRAG_CARD_MAX_SCALE,
     DRAG_CARD_MIN_SCALE,
     DRAG_CARD_OPACITY,
-    create_drag_card_preview,
+    DRAG_CARD_RELATIVE_SCALE,
+    DRAG_PREVIEW_MAX_HEIGHT,
+    DRAG_PREVIEW_MAX_WIDTH,
+    bounded_drag_preview_scale,
 )
 
 
 def test_drag_card_preview_tracks_canvas_scale_with_bounded_size() -> None:
     application = QApplication.instance() or QApplication([])
     widget = QWidget()
+
     def create(scale: float):
         return create_drag_card_preview(
             widget,
@@ -42,3 +47,10 @@ def test_drag_card_preview_tracks_canvas_scale_with_bounded_size() -> None:
     assert normal.hotspot.y() > normal.pixmap.height()
     widget.close()
     application.processEvents()
+
+
+def test_in_canvas_drag_preview_uses_shared_relative_scale_and_bounds() -> None:
+    assert bounded_drag_preview_scale(232.0, 58.0) == DRAG_CARD_RELATIVE_SCALE
+    large_scale = bounded_drag_preview_scale(500.0, 500.0)
+    assert 500.0 * large_scale <= DRAG_PREVIEW_MAX_WIDTH
+    assert 500.0 * large_scale <= DRAG_PREVIEW_MAX_HEIGHT
