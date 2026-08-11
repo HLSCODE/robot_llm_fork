@@ -6,7 +6,9 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, Callable, List, Optional, Sequence
 
+from ...configuration.settings import TaskRouteSettings
 from ..base import BaseLLMClient
+from ..response_pipeline import ResponsePipeline
 from ..types import LLMCapability, LLMChatResult, LLMContentPart, LLMMessage, LLMStreamEvent
 from .profiles import TaskProfile
 
@@ -19,13 +21,11 @@ VISION_FUSION_PROFILE = TaskProfile(
     version="1.0.0",
     temperature=0.1,
     max_tokens=512,
-    default_provider="minicpm",
     required_capabilities=(
         LLMCapability.CHAT,
         LLMCapability.STREAM_CHAT,
         LLMCapability.VISION_CHAT,
     ),
-    response_mode="voice_stream",
     enable_thinking=False,
     system_prompt_template="""你是机器人多摄像头视觉融合模块。
 
@@ -46,9 +46,7 @@ BALANCE_READING_PROFILE = TaskProfile(
     version="1.0.0",
     temperature=0.0,
     max_tokens=16,
-    default_provider="dashscope",
     required_capabilities=(LLMCapability.CHAT, LLMCapability.VISION_CHAT),
-    response_mode="text",
     enable_thinking=False,
     system_prompt_template="""你是电子秤读数识别模块。
 
@@ -64,10 +62,14 @@ class VisionFusionTask:
         llm: Optional[BaseLLMClient] = None,
         profile: TaskProfile = VISION_FUSION_PROFILE,
         client_resolver: Optional[ClientResolver] = None,
+        response_pipeline: ResponsePipeline | None = None,
+        route_resolver: Callable[[TaskProfile], TaskRouteSettings] | None = None,
     ) -> None:
         self._llm = llm
         self._profile = profile
         self._client_resolver = client_resolver
+        self._response_pipeline = response_pipeline
+        self._route_resolver = route_resolver
 
     def _build_observe_messages(
         self,
@@ -142,17 +144,18 @@ class VisionFusionTask:
     ) -> AsyncIterator[LLMStreamEvent]:
         active_profile = profile or self._profile
         llm = self._resolve_llm(active_profile, provider)
-        async for event in llm.stream_chat(
-            self._build_observe_messages(
-                images=images,
-                question=question,
-                system_prompt=system_prompt,
-                profile=active_profile,
-            ),
-            **active_profile.stream_options(
-                voice_response=voice_response,
-                **chat_options,
-            ),
+        messages = self._build_observe_messages(
+            images=images,
+            question=question,
+            system_prompt=system_prompt,
+            profile=active_profile,
+        )
+        async for event in self._stream_response(
+            llm,
+            messages,
+            active_profile,
+            voice_response,
+            chat_options,
         ):
             yield event
 
@@ -186,16 +189,43 @@ class VisionFusionTask:
     ) -> AsyncIterator[LLMStreamEvent]:
         active_profile = profile or self._profile
         llm = self._resolve_llm(active_profile, provider)
-        async for event in llm.stream_chat(
-            self._build_chat_messages(
-                messages=messages,
-                system_prompt=system_prompt,
-                profile=active_profile,
-            ),
-            **active_profile.stream_options(
-                voice_response=voice_response,
-                **chat_options,
-            ),
+        final_messages = self._build_chat_messages(
+            messages=messages,
+            system_prompt=system_prompt,
+            profile=active_profile,
+        )
+        async for event in self._stream_response(
+            llm,
+            final_messages,
+            active_profile,
+            voice_response,
+            chat_options,
+        ):
+            yield event
+
+    async def _stream_response(
+        self,
+        llm: BaseLLMClient,
+        messages: Sequence[LLMMessage],
+        profile: TaskProfile,
+        voice_response: bool,
+        chat_options: dict[str, Any],
+    ) -> AsyncIterator[LLMStreamEvent]:
+        if self._response_pipeline is None or self._route_resolver is None:
+            async for event in llm.stream_chat(
+                list(messages),
+                **profile.stream_options(**chat_options),
+            ):
+                yield event
+            return
+        route = self._route_resolver(profile)
+        async for event in self._response_pipeline.stream(
+            llm,
+            messages,
+            profile,
+            route,
+            voice_response=voice_response,
+            chat_options=chat_options,
         ):
             yield event
 

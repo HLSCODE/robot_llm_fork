@@ -19,9 +19,11 @@ REPEAT_PROFILE = TaskProfile(
     version="1.0.0",
     temperature=0.0,
     max_tokens=512,
-    default_provider="minicpm",
-    required_capabilities=(LLMCapability.CHAT, LLMCapability.STREAM_CHAT),
-    response_mode="voice_stream",
+    required_capabilities=(
+        LLMCapability.CHAT,
+        LLMCapability.STREAM_CHAT,
+        LLMCapability.TTS,
+    ),
     enable_thinking=False,
     system_prompt_template="""你是一个文本原样返回模块。
 
@@ -96,7 +98,8 @@ class RepeatTask:
                 LLMMessage(role="user", content=text),
             ],
             **active_profile.stream_options(
-                voice_response=voice_response,
+                tts_enabled=voice_response,
+                use_tts_template=voice_response,
                 **chat_options,
             ),
         ):

@@ -39,9 +39,9 @@ uv run robot-llm --config config/profiles/simulation.toml --check-config
 
 ## TOML 规则
 
-- 根节点必须包含 `schema_version = 1`。
+- 根节点必须包含 `schema_version = 2`；v1 不再兼容。
 - 表名对应 `ApplicationSettings` 分组：`runtime`、`gui`、`logging`、`data`、
-  `data_collection`、`localization`、`server`、`execution`、`llm`、`robot`、
+  `data_collection`、`localization`、`server`、`execution`、`llm`、`model_routing`、`robot`、
   `devices`、`vision` 和 `voice`。
 - TOML 中的未知表和未知字段会使启动失败，避免拼写错误被静默忽略。
 - 数字、布尔值和数组必须使用 TOML 原生类型，不能用字符串代替。
@@ -50,10 +50,17 @@ uv run robot-llm --config config/profiles/simulation.toml --check-config
 示例：
 
 ```toml
-schema_version = 1
+schema_version = 2
 
 [runtime]
 simulation_mode = true
+
+[model_routing.general_chat]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text_then_tts"
+speech_provider = "minicpm"
+speech_fallback_providers = []
 
 [robot]
 robot_provider = "realman"
@@ -67,6 +74,14 @@ websocket_host = "127.0.0.1"
 websocket_port = 8765
 websocket_allowed_origins = []
 ```
+
+`model_routing` 的子表名称对应稳定的 `TaskProfile.name`。每条路由分别配置推理 provider、推理降级顺序和输出策略：
+
+- `text`：只输出文字，不调用语音模型；
+- `native_audio`：推理 provider 必须支持 TTS，并在同一条流中直接输出语音；
+- `text_then_tts`：先保留推理模型的流式文字，再把最终文本交给 `speech_provider` 合成语音。
+
+`fallback_providers` 与 `speech_fallback_providers` 相互独立。修改 Prompt 或业务语义只改 `TaskProfile`；切换厂商、模型部署和语音链路只改 TOML。
 
 `.env` 仅保存敏感信息或临时部署覆盖：
 

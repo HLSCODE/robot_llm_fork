@@ -18,6 +18,9 @@ LLM 只产生对话或计划，不持有设备能力，也不能绕过 `CommandR
 ```text
 TaskRunner / Classifier / SkillPlanner / Vision / Repeat
                          |
+                  ResponsePipeline
+               text / native / text+TTS
+                         |
                   RoutedLLMClient
               /          |           \
       candidate order  health      provenance
@@ -36,14 +39,15 @@ TaskRunner / Classifier / SkillPlanner / Vision / Repeat
 
 ## 3. 路由、降级与熔断规则
 
-主 provider 的优先级保持为：
+主 provider 的优先级为：
 
 1. 单次调用显式传入的 `provider`。
-2. `TaskProfile.default_provider`。
-3. `LLM_DEFAULT_PROVIDER`。
+2. `[model_routing.<TaskProfile.name>].provider`。
+3. `LLM_DEFAULT_PROVIDER`（仅用于未登记的自定义 profile）。
 
-只有调用方没有显式指定 provider 时，才允许继续按
-`LLM_FALLBACK_PROVIDERS` 的顺序尝试降级。默认配置为空，即默认不把请求跨厂商
+只有调用方没有显式指定 provider 时，才允许继续按该 task 的
+`fallback_providers` 顺序尝试降级。未登记的自定义 profile 使用
+`LLM_FALLBACK_PROVIDERS`。默认配置为空，即默认不把请求跨厂商
 转发。显式 provider 失败会直接返回错误，不会暗中改用其他厂商。
 
 每个候选 provider 在调用前依次检查：
@@ -148,16 +152,29 @@ runner 完全离线，不读取 API Key、不访问网络，输出稳定 JSON �
 
 ## 7. 配置
 
-```dotenv
-# 未显式指定 provider 的调用才允许按此顺序降级；空值表示关闭跨厂商降级。
-LLM_FALLBACK_PROVIDERS=
+```toml
+[model_routing.general_chat]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text_then_tts"
+speech_provider = "minicpm"
+speech_fallback_providers = []
 
-# 连续运行时失败达到阈值后熔断。
-LLM_CIRCUIT_FAILURE_THRESHOLD=3
+[model_routing.vision_fusion]
+provider = "minicpm"
+fallback_providers = []
+output_mode = "native_audio"
+speech_provider = ""
+speech_fallback_providers = []
 
-# 熔断后等待多少秒进入半开探测。
-LLM_CIRCUIT_RECOVERY_SECONDS=30
+[llm]
+llm_circuit_failure_threshold = 3
+llm_circuit_recovery_seconds = 30.0
 ```
 
-配置中的未知 provider、非正数恢复时间或小于 1 的失败阈值会在
+`output_mode` 支持 `text`、`native_audio`、`text_then_tts`。后者将最终文本交给
+`speech_provider`，推理和语音拥有独立 fallback；前者不会加载语音 provider。
+`native_audio` 要求推理 provider 自身声明 TTS 能力。
+
+配置中的未知 provider、非法输出模式、不满足语音能力的组合、非正数恢复时间或小于 1 的失败阈值会在
 `LLMRegistry` 初始化时立即报错，不使用隐式默认值掩盖错误。

@@ -5,7 +5,7 @@
 > 最近更新：2026-08-11
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：156/161（154 DONE + 2 DROPPED，96.9%）
+> 计划进度：157/162（155 DONE + 2 DROPPED，96.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -645,6 +645,9 @@ src/
   Voice 共享 provider、健康、熔断和指标；附加服务只释放会话，应用宿主最终关闭。
 - 所有 task 通过统一路由代理执行；provider health、熔断、显式 fallback 和
   Prompt/provider/model/技能目录来源追踪已贯通非流式、流式和命令预览。
+- TaskProfile 已移除部署 provider 与输出模式硬编码；schema v2 的
+  `[model_routing.*]` 分别配置推理、语音、两级 fallback 和 text/native_audio/
+  text_then_tts 输出策略，ResponsePipeline 统一组合文本与语音事件。
 - 已建立严格 schema v1 的离线 golden 数据集和 runner，固定验证分类、规划、
   Prompt 快照、技能目录及动作展开。
 - 唯一 LLMRegistry 已统一聚合逻辑调用结果、延迟、fallback、token 和 provider
@@ -689,6 +692,7 @@ src/
 | E-014 | P1 | DONE | Planner 已升级为 `ActionCommand | SkillCommand | WorkflowCommand | ExecutionControlCommand` 严格联合模型；GUI 文本、语音与 WebSocket 共享 Voice router、CommandRuntime、错误语义和通用 `command_info` 预览，不在入口分派硬件 |
 | E-015 | P1 | DONE | 夹爪、机械臂 base 坐标有界相对移动和底盘相对位移已建立标准 Action schema、显式左右臂消歧、单位换算、限幅和控制策略；默认步长/最大值来自强类型配置，歧义或越界不回退给 LLM 猜测 |
 | E-016 | P2 | DONE | CommandCatalog 聚合 Action/Skill/Workflow/ExecutionControl 及 examples/aliases；确定性解析优先、LLM 仅处理未匹配自然语言，两者产出相同 typed command 并进入同一预览、风险确认和 ExecutionManager 链路 |
+| E-017 | P1 | DONE | 配置 schema 升级 v2；TaskProfile 只保留语义、版本与能力需求，固定 task 的推理 provider、独立 fallback、输出模式、speech provider 与 speech fallback 统一迁入 `[model_routing.*]`；ResponsePipeline 支持纯文本、模型原生语音及“文本模型 + 可替换 SpeechSynthesizer”，不保留 v1 或 profile provider 兼容层 |
 
 ### 10.5 完成标准
 
@@ -1379,6 +1383,7 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-07 | M8 | G | 全仓手写 Python 静态门禁收口 | G-034 → DONE | 从 Mypy 初始基线 570 errors / 72 files 逐模块收窄动态与第三方边界，默认门禁扩展为全部手写 `src/` 与 `scripts/`；唯一排除 Qt 自动生成的 `resources_rc.py`；Ruff 同步覆盖 `src/`、`scripts/`、`tests/`；新增视觉算法 4 项回归以及 DI 加载协议、深度 PNG、确定性超时回归 | 默认 Mypy 286 个 `src` + `scripts` 文件、0 errors；Ruff 全通过；统一门禁 514 passed + 48 subtests，coverage 65.71%，LLM golden 14/14，性能 9/9，Wheel smoke 及 GUI/Server/Hardware optional import smoke 全通过；真实硬件验收仍独立跟踪 |
 | 2026-08-07 | M8 | D/G | GUI icon-only 工具栏、详情浮层与拖放反馈收口 | D-031 → DONE | Task/Action/Workflow 命令与 fit/zoom 统一迁至 Qt Resource SVG 工具栏，区分 32 px 编辑与 44 px 安全命中区；删除 Bottom Panel 垂直 Splitter，以 Status Bar 入口打开右下锚定非模态浮层并直接升级布局 schema v2；节点拖动新增 ghost、原位占位及二维合法插入点发光/脉冲/位置标签，无目标释放恢复原位，外部拖入提交复用相同 resolver，Esc/失焦/失去抓取统一清理且有效放置只提交一次 UndoCommand；批准保留原生标题栏及其下客户区菜单 | 本批 5 个 GUI 变更测试文件 63 passed + 26 subtests；完整门禁 Compile/Ruff 通过，Mypy 287 source files / 0 errors，Pytest 529 passed + 74 subtests，coverage 66.09%，LLM golden 14/14，performance 9/9，wheel smoke 通过 |
 | 2026-08-10 | M8 | D/G | GUI 视觉、快捷键与任务入口一致性收口 | D-032 → DONE | 恢复任务资源页保存当前流程入口；建立集中式可编辑快捷键注册表；动作分类下拉化；数值控件、状态栏、SVG 与浅/深主题可读性收口；画布节点紧凑化并移除粗实线选择框 | 聚焦 GUI 回归 73 passed + 28 subtests；MainWindow/快捷键回归 17 passed + 25 subtests；全仓 Mypy（288 源文件）、Ruff 与 Pytest 532 passed + 101 subtests 通过 |
+| 2026-08-11 | M8 | E/G | LLM 推理与语音输出路由配置化 | E-017 → DONE | 配置 schema 直接升级 v2；删除 TaskProfile 内 provider/response_mode；新增强类型 model_routing 与 ResponsePipeline，支持 text、native_audio、text_then_tts，并将推理与语音 provider/fallback 独立配置；启动校验覆盖所有被引用 provider，配置、README、治理与语音文档同步迁移 | 全仓 Mypy 294 source files / 0 errors，Ruff 通过，Pytest 574 passed + 138 subtests，新增路由集成专项 27 passed；v1 不兼容且无历史分支 |
 
 ## 22. 建议的首批实施顺序
 

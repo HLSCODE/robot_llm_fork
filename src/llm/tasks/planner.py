@@ -30,9 +30,7 @@ ROBOT_PLANNER_PROFILE = TaskProfile(
     temperature=0.3,
     max_tokens=800,
     response_format="json",
-    default_provider="dashscope",
     required_capabilities=(LLMCapability.CHAT, LLMCapability.PLANNING),
-    response_mode="text",
     enable_thinking=False,
     system_prompt_template="""你是一个机器人动作规划助手。
 

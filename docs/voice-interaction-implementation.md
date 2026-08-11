@@ -251,10 +251,13 @@ async def _route(self, text: str, intent: dict):
 
 ## 10. 响应模式
 
-每个 `TaskProfile` 需要声明响应模式：
+响应模式属于部署配置，不再写入 `TaskProfile`：
 
-- `response_mode="voice_stream"`：用户可听见的任务，例如普通聊天、复述、视觉问答。语音会话中传 `voice_response=True` 时，MiniCPM 等支持 TTS 的 provider 会返回 `audio_delta`。
-- `response_mode="text"`：结构化或内部任务，例如 `InstructionClassifier`、`CommandPlanner`。这类任务始终走文本结果，并会剔除误传的 TTS 选项，避免语音模板污染 JSON 或规划格式。
+- `output_mode="text"`：只返回文字，适用于分类、规划等结构化任务；
+- `output_mode="native_audio"`：推理模型在同一次调用中直接产生音频；
+- `output_mode="text_then_tts"`：推理模型先生成文字，`ResponsePipeline` 再调用独立 `SpeechSynthesizer`。当前适配器可复用 MiniCPM，后续专用 TTS 只需实现同一协议。
+
+当调用方传入 `voice_response=False` 时，任何路由都会退化为纯文字且不会调用语音 provider。
 - `enable_thinking=False`：推荐用于 JSON、原样返回、视觉融合观察等格式敏感任务，避免模型输出推理过程或影响固定响应格式。
 - `command`、`session_control` 和 `execution_control` 仍应返回可理解的控制结果；
   固定反馈文本在启用 TTS 时可通过 `RepeatTask.stream_repeat()` 播报。
@@ -262,16 +265,16 @@ async def _route(self, text: str, intent: dict):
 推荐默认划分：
 
 ```text
-TaskRunner / GENERAL_CHAT_PROFILE       -> voice_stream
-RepeatTask / REPEAT_PROFILE             -> voice_stream
-VisionFusionTask / VISION_FUSION_PROFILE -> voice_stream
+TaskRunner / GENERAL_CHAT_PROFILE        -> text_then_tts
+RepeatTask / REPEAT_PROFILE              -> native_audio
+VisionFusionTask / VISION_FUSION_PROFILE -> native_audio
 InstructionClassifier                    -> text
 CommandPlanner                           -> text
 ```
 
 ## 11. Chat 处理
 
-普通聊天只调用通用对话 task。语音会话中使用 `voice_response=True`，router 内部还应判断当前 provider 是否支持 TTS：
+普通聊天只调用通用对话 task。语音会话中使用 `voice_response=True`；registry 根据路由判断原生语音或独立 speech provider 是否可用：
 
 ```python
 async def _handle_chat(self, text: str):
@@ -563,11 +566,11 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 
 含义：
 
-- `LLM_DEFAULT_PROVIDER`：默认 LLM provider。具体 task 可通过 `TaskProfile.default_provider` 覆盖，单次调用也可传 `provider` 覆盖。
+- `LLM_DEFAULT_PROVIDER`：未登记的自定义 profile 的兜底 provider；固定 task 使用 `[model_routing.<task>]`，单次调用仍可显式覆盖推理 provider。
 - `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/devices/cameras/` 支持的 `realsense` / `opencv`。
 - `VISION_CAMERA_NAME`：视觉问答默认使用的相机名称或序列号；为空时使用所有在线相机。
 - `VOICE_SESSION_TIMEOUT_S`：唤醒后无交互多久自动休眠。
-- `VOICE_TTS_ENABLED`：是否在 `voice_stream` task 中请求模型生成语音回复。`classifier/planner` 等文本 task 不受该配置影响。
+- `VOICE_TTS_ENABLED`：是否请求语音回复；实际采用原生语音还是“文字 + TTS”由 task 的 `output_mode` 决定，`classifier/planner` 等文本 task 不受影响。
 - `VOICE_INPUT_ENABLED`：是否启用真实语音输入；true 时同时启用唤醒词和 ASR，false 时二者都不加载。
 
 手动调试配置：
@@ -575,6 +578,13 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 ```toml
 [llm]
 llm_default_provider = "minicpm"
+
+[model_routing.general_chat]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text_then_tts"
+speech_provider = "minicpm"
+speech_fallback_providers = []
 
 [vision]
 camera_provider = "realsense"

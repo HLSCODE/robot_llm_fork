@@ -6,6 +6,8 @@
 > [LLM Provider 治理](llm-provider-governance.md)、
 > [语音交互实现说明](voice-interaction-implementation.md) 和
 > [项目重构总计划](project-refactor-master-plan.md) 为准。
+> 本文早期示例中的 `TaskProfile.default_provider`、`response_mode` 也已废弃；
+> 现行部署策略统一位于 `config/config.toml` 的 `[model_routing.*]`。
 
 ## 1. 背景
 
@@ -261,14 +263,13 @@ CUSTOM_PLANNER_PROFILE = TaskProfile(
     temperature=0.2,
     max_tokens=800,
     response_format="json",
-    default_provider="dashscope",
     enable_thinking=False,
 )
 ```
 
 语义边界：
 
-- `TaskProfile` 管提示词模板、默认 provider 和模型调用参数。
+- `TaskProfile` 管提示词模板、版本、能力需求和模型调用参数；provider 属于部署路由。
 - `enable_thinking` / `reasoning_effort` 属于 task 级语义配置，调用时仍可覆盖；具体如何映射到请求体由 provider 负责。
 - `TaskRunner` 管普通 LLM 调用的消息构造和 profile 注入。
 - `SkillPlanner`、`InstructionClassifier` 管业务输入构造和结果解析。
@@ -709,13 +710,13 @@ class LLMRegistry:
         ...
 ```
 
-后续通过 `TaskProfile.default_provider` 和调用时 `provider` 覆盖选择不同模型：
+现行实现通过 `[model_routing.*]` 和调用时 `provider` 覆盖选择不同模型：
 
 ```env
 LLM_DEFAULT_PROVIDER=minicpm
 ```
 
-第一阶段只保留 `LLM_DEFAULT_PROVIDER` 作为全局默认 provider。
+`LLM_DEFAULT_PROVIDER` 只作为未登记自定义 profile 的兜底 provider。
 
 ## 15. 配置建议
 
@@ -747,24 +748,27 @@ LLM_DEFAULT_PROVIDER=minicpm
 - `openai` / `deepseek` / `dashscope`：OpenAI-compatible HTTP provider
 - `minicpm`：MiniCPM Realtime WebSocket provider
 
-### 15.2 第二阶段：Provider Registry + TaskProfile 默认 provider
+### 15.2 现行方案：Provider Registry + 配置化 task 路由
 
-当业务需要“某个 task 默认用 MiniCPM，某次调用临时用 DashScope”时，不再新增环境变量，而是在 profile 或调用参数中声明：
+当业务需要“某个 task 默认用 MiniCPM，某次调用临时用 DashScope”时，在 TOML 路由或调用参数中声明：
+
+```toml
+[model_routing.vision_fusion]
+provider = "minicpm"
+fallback_providers = []
+output_mode = "native_audio"
+speech_provider = ""
+speech_fallback_providers = []
+```
 
 ```python
-TaskProfile(
-    name="vision_fusion",
-    default_provider="minicpm",
-    response_mode="voice_stream",
-)
-
 await registry.chat(
     user_text="你好",
     provider="dashscope",
 )
 ```
 
-此时 `LLM_DEFAULT_PROVIDER` 是全局默认 provider。
+此时固定 task 使用其显式路由；`LLM_DEFAULT_PROVIDER` 只处理未登记 profile。
 
 ## 16. 迁移计划
 

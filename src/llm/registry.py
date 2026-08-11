@@ -5,7 +5,7 @@ LLMRegistry owns provider singletons and resolves the concrete client for each
 task call. Resolution priority is:
 
 1. Explicit provider passed by the caller.
-2. TaskProfile.default_provider.
+2. The task route from ``ModelRoutingSettings``.
 3. LLM_DEFAULT_PROVIDER from config.
 
 Calls without an explicit provider may use the configured fallback provider
@@ -18,11 +18,17 @@ from collections.abc import AsyncIterator
 from threading import RLock
 from typing import Any, Dict, Optional, Sequence
 
-from ..configuration.settings import LLMSettings, SecretSettings
+from ..configuration.settings import (
+    LLMSettings,
+    ModelRoutingSettings,
+    SecretSettings,
+    TaskRouteSettings,
+)
 from .base import BaseLLMClient
 from .metrics import LLMMetrics, LLMMetricsSnapshot
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
+from .response_pipeline import LLMSpeechSynthesizer, ResponsePipeline
 from .routing import (
     ProviderHealthSnapshot,
     ProviderHealthTracker,
@@ -41,7 +47,13 @@ from .tasks import (
     TaskRunner,
     VisionFusionTask,
 )
-from .types import LLMChatResult, LLMContentPart, LLMMessage, LLMStreamEvent
+from .types import (
+    LLMCapability,
+    LLMChatResult,
+    LLMContentPart,
+    LLMMessage,
+    LLMStreamEvent,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,12 +70,14 @@ class LLMRegistry:
         settings: LLMSettings,
         secrets: SecretSettings,
         default_provider: str = "openai",
+        model_routing: ModelRoutingSettings | None = None,
         providers: Optional[Dict[str, BaseLLMClient]] = None,
         metrics: LLMMetrics | None = None,
     ) -> None:
         self._settings = settings
         self._secrets = secrets
         self.default_provider = self._normalize_provider(default_provider)
+        self._model_routing = model_routing or ModelRoutingSettings()
         self._providers: Dict[str, BaseLLMClient] = {}
         self._lock = RLock()
         self._closed = False
@@ -86,9 +100,13 @@ class LLMRegistry:
         self._validate_configured_providers()
 
         self.repeat_task = RepeatTask(client_resolver=self.get_client_for_profile)
+        self.response_pipeline = ResponsePipeline(
+            LLMSpeechSynthesizer(self._get_speech_client, REPEAT_PROFILE)
+        )
         self.task_runner = TaskRunner(
             client_resolver=self.get_client_for_profile,
-            voice_repeater=self.repeat_task,
+            response_pipeline=self.response_pipeline,
+            route_resolver=self.get_route_for_profile,
         )
         self.command_planner = CommandPlanner(
             client_resolver=self.get_client_for_profile
@@ -96,19 +114,25 @@ class LLMRegistry:
         self.instruction_classifier = InstructionClassifier(
             client_resolver=self.get_client_for_profile
         )
-        self.vision_fusion = VisionFusionTask(client_resolver=self.get_client_for_profile)
+        self.vision_fusion = VisionFusionTask(
+            client_resolver=self.get_client_for_profile,
+            response_pipeline=self.response_pipeline,
+            route_resolver=self.get_route_for_profile,
+        )
 
     @classmethod
     def from_settings(
         cls,
         settings: LLMSettings,
         secrets: SecretSettings,
+        model_routing: ModelRoutingSettings | None = None,
     ) -> "LLMRegistry":
         """Create a registry from immutable LLM and secret snapshots."""
         registry = cls(
             settings=settings,
             secrets=secrets,
             default_provider=settings.llm_default_provider or "openai",
+            model_routing=model_routing,
         )
         logger.info(
             "LLMRegistry 初始化完成: default=%s, providers=%s",
@@ -275,14 +299,43 @@ class LLMRegistry:
         profile: TaskProfile,
         provider: Optional[str] = None,
     ) -> BaseLLMClient:
+        route = self.get_route_for_profile(profile)
         provider_name = self._normalize_provider(
-            provider or profile.default_provider or self.default_provider
+            provider or route.provider or self.default_provider
+        )
+        fallback_providers = (
+            () if provider is not None else route.fallback_providers
         )
         return RoutedLLMClient(
             profile=profile,
             primary_provider=provider_name,
-            fallback_providers=self._fallback_providers,
+            fallback_providers=fallback_providers,
             explicit_provider=provider is not None,
+            provider_loader=self.get_provider,
+            health=self._health,
+            metrics=self._metrics,
+        )
+
+    def get_route_for_profile(self, profile: TaskProfile) -> TaskRouteSettings:
+        route = self._model_routing.for_profile(profile.name)
+        if route is not None:
+            return route
+        return TaskRouteSettings(
+            provider=self.default_provider,
+            fallback_providers=self._fallback_providers,
+        )
+
+    def _get_speech_client(
+        self,
+        profile: TaskProfile,
+        provider: str,
+        fallback_providers: tuple[str, ...],
+    ) -> BaseLLMClient:
+        return RoutedLLMClient(
+            profile=profile,
+            primary_provider=self._normalize_provider(provider),
+            fallback_providers=fallback_providers,
+            explicit_provider=False,
             provider_loader=self.get_provider,
             health=self._health,
             metrics=self._metrics,
@@ -329,11 +382,23 @@ class LLMRegistry:
 
     def _validate_configured_providers(self) -> None:
         known = set(SUPPORTED_PROVIDERS) | set(self._providers)
+        route_providers = tuple(
+            provider
+            for _name, route in self._model_routing.entries()
+            for provider in (
+                route.provider,
+                *route.fallback_providers,
+                route.speech_provider,
+                *route.speech_fallback_providers,
+            )
+            if provider
+        )
         unknown = [
             provider
             for provider in (
                 self.default_provider,
                 *self._fallback_providers,
+                *route_providers,
             )
             if provider not in known
         ]
@@ -359,6 +424,19 @@ class LLMRegistry:
 
     def get_feedback_client(self, provider: Optional[str] = None) -> BaseLLMClient:
         return self.get_client_for_profile(VOICE_FEEDBACK_PROFILE, provider)
+
+    def supports_voice_output(self, profile: TaskProfile) -> bool:
+        route = self.get_route_for_profile(profile)
+        if route.output_mode == "text":
+            return False
+        provider = (
+            route.speech_provider
+            if route.output_mode == "text_then_tts"
+            else route.provider
+        )
+        if not provider:
+            return False
+        return LLMCapability.TTS in self.get_provider(provider).capabilities()
 
     async def chat(
         self,

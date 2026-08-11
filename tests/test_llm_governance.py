@@ -23,7 +23,6 @@ TEST_PROFILE = TaskProfile(
     name="governance_test",
     version="1.0.0",
     system_prompt_template="You are a test model.",
-    default_provider="openai",
     required_capabilities=(
         LLMCapability.CHAT,
         LLMCapability.STREAM_CHAT,

@@ -20,9 +20,7 @@ INSTRUCTION_CLASSIFIER_PROFILE = TaskProfile(
     temperature=0.1,
     max_tokens=200,
     response_format="json",
-    default_provider="dashscope",
     required_capabilities=(LLMCapability.CHAT,),
-    response_mode="text",
     enable_thinking=False,
     system_prompt_template="""你是机器人对话入口的意图识别模块。
 

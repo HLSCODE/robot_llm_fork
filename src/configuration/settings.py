@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import MISSING, dataclass, fields
+from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypedDict, TypeVar, cast
@@ -171,6 +171,69 @@ class LLMSettings:
     minicpm_ask_enabled: bool = True
     minicpm_ask_base_url: str = ""
     minicpm_ask_model: str = "gpt-4o-mini"
+
+
+@dataclass(frozen=True, slots=True)
+class TaskRouteSettings:
+    """Deployment policy for one semantic LLM task profile."""
+
+    provider: str
+    fallback_providers: tuple[str, ...] = ()
+    output_mode: str = "text"
+    speech_provider: str = ""
+    speech_fallback_providers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ModelRoutingSettings:
+    """Inference and speech routes keyed by stable TaskProfile names."""
+
+    instruction_classifier: TaskRouteSettings = field(
+        default_factory=lambda: TaskRouteSettings(provider="dashscope")
+    )
+    general_chat: TaskRouteSettings = field(
+        default_factory=lambda: TaskRouteSettings(
+            provider="dashscope",
+            output_mode="text_then_tts",
+            speech_provider="minicpm",
+        )
+    )
+    robot_command_planner: TaskRouteSettings = field(
+        default_factory=lambda: TaskRouteSettings(provider="dashscope")
+    )
+    vision_fusion: TaskRouteSettings = field(
+        default_factory=lambda: TaskRouteSettings(
+            provider="minicpm",
+            output_mode="native_audio",
+        )
+    )
+    voice_feedback: TaskRouteSettings = field(
+        default_factory=lambda: TaskRouteSettings(
+            provider="dashscope",
+            output_mode="text_then_tts",
+            speech_provider="minicpm",
+        )
+    )
+    repeat: TaskRouteSettings = field(
+        default_factory=lambda: TaskRouteSettings(
+            provider="minicpm",
+            output_mode="native_audio",
+        )
+    )
+    balance_reading: TaskRouteSettings = field(
+        default_factory=lambda: TaskRouteSettings(provider="dashscope")
+    )
+
+    def for_profile(self, profile_name: str) -> TaskRouteSettings | None:
+        """Return the configured route for one known profile."""
+        route = getattr(self, profile_name, None)
+        return route if isinstance(route, TaskRouteSettings) else None
+
+    def entries(self) -> tuple[tuple[str, TaskRouteSettings], ...]:
+        return tuple(
+            (definition.name, getattr(self, definition.name))
+            for definition in fields(self)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -673,6 +736,7 @@ class ApplicationSettings:
     secrets: SecretSettings
     execution: ExecutionSettings
     llm: LLMSettings
+    model_routing: ModelRoutingSettings
     robot: RobotSettings
     devices: DeviceSettings
     vision: VisionSettings
@@ -704,6 +768,7 @@ class ApplicationSettings:
             secrets=_snapshot(SecretSettings, config),
             execution=_snapshot(ExecutionSettings, config),
             llm=_snapshot(LLMSettings, config),
+            model_routing=_snapshot(ModelRoutingSettings, config),
             robot=_snapshot(RobotSettings, config),
             devices=_snapshot(DeviceSettings, config),
             vision=_snapshot(VisionSettings, config),
@@ -723,6 +788,7 @@ class ApplicationSettings:
             secrets=SecretSettings(),
             execution=ExecutionSettings(),
             llm=LLMSettings(),
+            model_routing=ModelRoutingSettings(),
             robot=RobotSettings(),
             devices=DeviceSettings(),
             vision=VisionSettings(),

@@ -217,7 +217,7 @@ realsense_device_names = ""
 | `WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS` | 慢发送监控阈值 | 默认 0.5 秒；达到阈值计入 `slow_sends_total` |
 | `AUXILIARY_SERVICE_START_TIMEOUT_SECONDS` | 单个附加服务启动超时 | 默认 5 秒 |
 | `AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS` | 单个附加服务停止超时 | 默认 10 秒 |
-| `LLM_DEFAULT_PROVIDER` | 默认 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；`TaskProfile.default_provider` 或请求里的 `provider` 可以覆盖 |
+| `LLM_DEFAULT_PROVIDER` | 未登记 profile 的兜底 LLM provider | `openai` / `deepseek` / `dashscope` / `minicpm`；固定任务由 `[model_routing.*]` 配置，请求里的 `provider` 可以覆盖推理 provider |
 | `LLM_FALLBACK_PROVIDERS` | 未显式指定 provider 时的降级顺序 | 逗号分隔；默认留空，不跨厂商转发 |
 | `LLM_CIRCUIT_FAILURE_THRESHOLD` | provider 连续失败熔断阈值 | 默认 3 |
 | `LLM_CIRCUIT_RECOVERY_SECONDS` | 熔断后的半开探测等待时间 | 默认 30 秒 |
@@ -2110,7 +2110,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 - AI 规划和 `minicpm_instruction` 不是同一个概念。
 - `minicpm_instruction` 只表示“这句话被判定为机器人指令”，不代表任务序列已经生成。
 - 真正的任务序列只会出现在 `ai_preview_ready.sequence` 中。
-- AI 规划依赖 `TaskProfile.default_provider` 或 `LLM_DEFAULT_PROVIDER` 解析出的 provider；如果 provider 不可用，`ai_chat` 会直接返回 `error`，聊天链路触发时则可能只看到 `minicpm_instruction`，看不到后续规划事件。
+- AI 规划依赖 `[model_routing.robot_command_planner].provider` 解析出的 provider；如果 provider 不可用，`ai_chat` 会直接返回 `error`，聊天链路触发时则可能只看到 `minicpm_instruction`，看不到后续规划事件。
 
 ### 11.0 AI 规划完整事件流
 
@@ -2859,7 +2859,7 @@ function toImageSrc(frame) {
 说明：
 
 - 调用前必须先 `chat_connect`
-- 每次 `chat` 时服务端调用解析后的 provider 的 `stream_chat`：请求 `provider` > `GENERAL_CHAT_PROFILE.default_provider` > `LLM_DEFAULT_PROVIDER`
+- 每次 `chat` 时服务端调用解析后的 provider 的 `stream_chat`：请求 `provider` > `[model_routing.general_chat].provider` > `LLM_DEFAULT_PROVIDER`
 - 如果聊天 provider 是 MiniCPM，MiniCPM 上游 WebSocket 由 `src/llm/providers/minicpm_realtime.py` 内部维护
 - 但前端与本服务的聊天会话状态仍保持
 

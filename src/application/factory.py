@@ -65,7 +65,11 @@ def create_application_services(
     workflow_editing = WorkflowEditingSession(composition)
     device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
-    llm = LLMRegistry.from_settings(settings.llm, settings.secrets)
+    llm = LLMRegistry.from_settings(
+        settings.llm,
+        settings.secrets,
+        settings.model_routing,
+    )
     camera_access = CameraAccessService(device_runtime, resources)
     register_balance_reader(
         device_runtime,

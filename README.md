@@ -71,7 +71,7 @@ Copy-Item .env.example .env
 按实际环境修改 `config/config.toml`。最常用配置项：
 
 ```toml
-schema_version = 1
+schema_version = 2
 
 [runtime]
 simulation_mode = false
@@ -88,6 +88,13 @@ websocket_port = 8765
 llm_default_provider = "dashscope"
 openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 openai_model = "qwen-turbo"
+
+[model_routing.general_chat]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text_then_tts"
+speech_provider = "minicpm"
+speech_fallback_providers = []
 
 [robot]
 robot1_ip = "192.168.3.19"
@@ -254,7 +261,7 @@ AI 规划流程：
 4. 用户确认后发送 `ai_confirm`
 5. 服务端执行序列并推送执行事件
 
-LLM 配置通过 `LLM_DEFAULT_PROVIDER` 选择默认 provider，支持 `openai`、`deepseek`、`dashscope` 和 `minicpm`。OpenAI-compatible provider 使用 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL`；MiniCPM Realtime provider 使用 `MINICPM_GATEWAY_*` 配置。固定任务需要指定模型时，由对应 `TaskProfile` 显式声明。
+LLM provider 的连接参数位于 `[llm]`；各固定任务实际使用哪个推理模型、是否降级，以及语音由推理模型直接输出还是交给独立语音模型，统一由 `[model_routing.<task>]` 配置。`TaskProfile` 只保留 Prompt、版本和能力需求，不再硬编码部署 provider。当前支持 `openai`、`deepseek`、`dashscope` 和 `minicpm`。
 
 ## 相机与视觉
 
@@ -330,7 +337,7 @@ uv run robot-llm --simulation
 
 ### AI 规划不可用
 
-检查 `[llm].llm_default_provider` 及对应模型配置是否正确，并调用 `ai_status` 查看服务端状态。
+检查对应的 `[model_routing.<task>]`、其中引用的 `[llm]` provider 连接参数，并调用 `ai_status` 查看服务端状态。
 
 ### 相机没有画面
 

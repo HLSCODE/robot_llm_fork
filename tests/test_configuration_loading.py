@@ -34,7 +34,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 1
+                schema_version = 2
                 [gui]
                 theme = "light"
                 [server]
@@ -62,7 +62,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_dotenv_is_loaded_without_overriding_process_environment(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 1\n")
+            config_path = self._write(root, "schema_version = 2\n")
             env_path = root / ".env"
             env_path.write_text(
                 'OPENAI_API_KEY="file-secret"\nGUI_THEME="light"\n',
@@ -76,8 +76,8 @@ class ConfigurationLoadingTests(unittest.TestCase):
 
     def test_unknown_table_and_field_are_rejected(self) -> None:
         documents = (
-            "schema_version = 1\n[unknown]\nvalue = 1\n",
-            "schema_version = 1\n[gui]\ntheme = \"dark\"\ntypo = true\n",
+            "schema_version = 2\n[unknown]\nvalue = 1\n",
+            "schema_version = 2\n[gui]\ntheme = \"dark\"\ntypo = true\n",
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -91,7 +91,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             root = Path(temporary_directory)
             config_path = self._write(
                 root,
-                'schema_version = 1\n[secrets]\nopenai_api_key = "do-not-store"\n',
+                'schema_version = 2\n[secrets]\nopenai_api_key = "do-not-store"\n',
             )
             with self.assertRaisesRegex(ConfigLoadError, "敏感字段不得写入 TOML"):
                 load_application_settings(config_path, env_file=root / "missing.env")
@@ -99,8 +99,8 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_schema_version_and_field_types_are_strict(self) -> None:
         documents = (
             "[gui]\ntheme = \"dark\"\n",
-            "schema_version = 2\n",
-            'schema_version = 1\n[server]\nwebsocket_port = "8765"\n',
+            "schema_version = 1\n",
+            'schema_version = 2\n[server]\nwebsocket_port = "8765"\n',
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -112,7 +112,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_invalid_environment_value_names_field_without_echoing_secret(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 1\n")
+            config_path = self._write(root, "schema_version = 2\n")
             with (
                 patch.dict(
                     os.environ,

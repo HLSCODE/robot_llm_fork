@@ -28,6 +28,7 @@ def _config(root: Path, **overrides):
         "LOG_LEVEL": "INFO",
         "LLM_DEFAULT_PROVIDER": "minicpm",
         "OPENAI_API_KEY": "",
+        "DASHSCOPE_API_KEY": "test-dashscope-key",
         "WEBSOCKET_SECURITY_ENABLED": True,
         "WEBSOCKET_AUTH_TOKEN": "",
         "WEBSOCKET_CONTROL_LEASE_SECONDS": 30.0,
@@ -358,7 +359,7 @@ class ConfigurationValidationTests(unittest.TestCase):
         ):
             with TemporaryDirectory() as temporary_directory:
                 config_path = Path(temporary_directory) / "config.toml"
-                config_path.write_text("schema_version = 1\n", encoding="utf-8")
+                config_path.write_text("schema_version = 2\n", encoding="utf-8")
                 with self.assertRaises(ConfigLoadError) as error:
                     load_application_settings(config_path)
 
@@ -375,7 +376,7 @@ class ConfigurationValidationTests(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             config_path = root / "config.toml"
-            config_path.write_text("schema_version = 1\n", encoding="utf-8")
+            config_path.write_text("schema_version = 2\n", encoding="utf-8")
             with patch.dict("os.environ", legacy_environment, clear=True):
                 settings = load_application_settings(
                     config_path,

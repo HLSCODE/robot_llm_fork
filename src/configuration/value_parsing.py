@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from dataclasses import MISSING, fields, is_dataclass
 from types import UnionType
-from typing import Union, get_args, get_origin
+from typing import Union, get_args, get_origin, get_type_hints
 
 from .errors import ConfigLoadError
 
@@ -34,6 +35,31 @@ def coerce_value(value: object, expected_type: object, field_name: str) -> objec
             raise _type_error(field_name, expected_type)
         item_type = arguments[0] if arguments else object
         return tuple(coerce_value(item, item_type, field_name) for item in value)
+
+    if isinstance(expected_type, type) and is_dataclass(expected_type):
+        if not isinstance(value, dict):
+            raise _type_error(field_name, expected_type)
+        field_types = get_type_hints(expected_type)
+        unknown_fields = set(value) - set(field_types)
+        if unknown_fields:
+            rendered = ", ".join(sorted(unknown_fields))
+            raise ConfigLoadError(f"未知配置项 {field_name} 字段: {rendered}")
+        values: dict[str, object] = {}
+        for definition in fields(expected_type):
+            nested_name = f"{field_name}.{definition.name}"
+            if definition.name in value:
+                values[definition.name] = coerce_value(
+                    value[definition.name],
+                    field_types[definition.name],
+                    nested_name,
+                )
+            elif definition.default is not MISSING:
+                values[definition.name] = definition.default
+            elif definition.default_factory is not MISSING:
+                values[definition.name] = definition.default_factory()
+            else:
+                raise ConfigLoadError(f"配置项 {nested_name} 不能为空")
+        return expected_type(**values)
 
     if expected_type is bool:
         if type(value) is not bool:

@@ -15,10 +15,7 @@ from ..types import LLMCapability
 
 
 ResponseFormat = Union[str, Dict[str, Any]]
-ResponseMode = Literal["text", "voice_stream"]
 ReasoningEffort = Literal["low", "medium", "high"]
-ProviderName = str
-VOICE_OPTION_KEYS = {"tts", "tts_enabled", "use_tts_template"}
 
 
 @dataclass(frozen=True)
@@ -31,9 +28,7 @@ class TaskProfile:
     temperature: float = 0.3
     max_tokens: int = 512
     response_format: Optional[ResponseFormat] = None
-    default_provider: Optional[ProviderName] = None
     required_capabilities: Tuple[LLMCapability, ...] = ()
-    response_mode: ResponseMode = "text"
     enable_thinking: Optional[bool] = None
     reasoning_effort: Optional[ReasoningEffort] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -78,22 +73,14 @@ class TaskProfile:
             if value is not None:
                 options[key] = value
 
-        if self.response_mode == "text":
-            for key in VOICE_OPTION_KEYS:
-                options.pop(key, None)
         return options
 
     def stream_options(
         self,
-        voice_response: bool = False,
         **overrides: Any,
     ) -> Dict[str, Any]:
-        """Return stream options and enable TTS for voice-stream tasks when requested."""
-        options = self.chat_options(**overrides)
-        if voice_response and self.response_mode == "voice_stream":
-            options.setdefault("tts_enabled", True)
-            options.setdefault("use_tts_template", True)
-        return options
+        """Return model stream options without deployment/output policy."""
+        return self.chat_options(**overrides)
 
 
 GENERAL_CHAT_PROFILE = TaskProfile(
@@ -101,9 +88,7 @@ GENERAL_CHAT_PROFILE = TaskProfile(
     version="1.0.0",
     temperature=0.7,
     max_tokens=512,
-    default_provider="dashscope",
     required_capabilities=(LLMCapability.CHAT, LLMCapability.STREAM_CHAT),
-    response_mode="text",
     system_prompt_template="""你是明德博士，一个具身机器人助手。
 
 请用自然、亲切、清晰的中文和用户对话，回复要适合直接通过语音说出口。
@@ -124,9 +109,7 @@ VOICE_FEEDBACK_PROFILE = TaskProfile(
     version="1.0.0",
     temperature=0.4,
     max_tokens=80,
-    default_provider="dashscope",
     required_capabilities=(LLMCapability.CHAT, LLMCapability.STREAM_CHAT),
-    response_mode="text",
     enable_thinking=False,
     system_prompt_template="""你是机器人语音反馈模块。
 

@@ -14,11 +14,13 @@ from ...application.command_catalog import CommandResolutionStatus
 from ...domain.commands import ExecutionControlAction, ExecutionControlCommand
 from ...execution import ExecutionStateError
 from ...llm import (
+    GENERAL_CHAT_PROFILE,
+    VISION_FUSION_PROFILE,
     VOICE_FEEDBACK_PROFILE,
-    LLMCapability,
     LLMMessage,
     CommandPlanResult,
     LLMStreamEvent,
+    TaskProfile,
 )
 from ..adapters import CameraCaptureError
 from .session import VoiceSession
@@ -329,43 +331,41 @@ class VoiceIntentRouter:
         )
 
     def _chat_voice_response_enabled(self) -> bool:
-        return self._repeat_voice_response_enabled("chat")
+        return self._profile_voice_response_enabled(
+            GENERAL_CHAT_PROFILE,
+            "chat",
+        )
 
     def _vision_voice_response_enabled(self) -> bool:
-        return self._voice_response_enabled("get_vision_client", "vision")
+        return self._profile_voice_response_enabled(
+            VISION_FUSION_PROFILE,
+            "vision",
+        )
 
     def _feedback_voice_response_enabled(self) -> bool:
-        return self._repeat_voice_response_enabled("feedback")
+        return self._profile_voice_response_enabled(
+            VOICE_FEEDBACK_PROFILE,
+            "feedback",
+        )
 
-    def _repeat_voice_response_enabled(self, task_name: str) -> bool:
-        if not self.tts_enabled:
-            return False
-        if not self._registry_client_supports_tts("get_repeat_client"):
-            logger.info("%s TTS disabled: provider lacks TTS", task_name)
-            return False
-        return True
-
-    def _voice_response_enabled(
+    def _profile_voice_response_enabled(
         self,
-        getter_name: str,
+        profile: TaskProfile,
         task_name: str,
     ) -> bool:
         if not self.tts_enabled:
             return False
-        if not self._registry_client_supports_tts(getter_name):
-            logger.info("%s TTS disabled: provider lacks TTS", task_name)
-            return False
-        return True
-
-    def _registry_client_supports_tts(self, getter_name: str) -> bool:
-        getter = getattr(self.llm_registry, getter_name, None)
-        if getter is None:
+        supports_voice = getattr(self.llm_registry, "supports_voice_output", None)
+        if supports_voice is None:
             return False
         try:
-            return LLMCapability.TTS in getter().capabilities()
+            available = bool(supports_voice(profile))
         except Exception:
-            logger.debug("cannot inspect provider TTS capability", exc_info=True)
+            logger.debug("cannot inspect response voice capability", exc_info=True)
             return False
+        if not available:
+            logger.info("%s voice output disabled by route capability", task_name)
+        return available
 
     async def _stream_feedback(
         self,

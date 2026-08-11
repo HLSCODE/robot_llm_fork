@@ -7,6 +7,12 @@ from .metrics import LLMCallOutcome, LLMMetrics, LLMMetricsSnapshot, LLMUsage
 from .providers.minicpm_realtime import MiniCPMRealtimeClient
 from .providers.openai_compatible import OpenAICompatibleClient
 from .registry import LLMRegistry
+from .response_pipeline import (
+    LLMSpeechSynthesizer,
+    ResponseOutputMode,
+    ResponsePipeline,
+    SpeechSynthesizer,
+)
 from .routing import ProviderHealthSnapshot, ProviderHealthStatus
 from .tasks import (
     BALANCE_READING_PROFILE,
@@ -17,10 +23,8 @@ from .tasks import (
     VISION_FUSION_PROFILE,
     VOICE_FEEDBACK_PROFILE,
     InstructionClassifier,
-    ProviderName,
     ReasoningEffort,
     RepeatTask,
-    ResponseMode,
     CommandPlanner,
     TaskProfile,
     TaskRunner,
@@ -57,9 +61,11 @@ __all__ = [
     "CommandPlanner",
     "InstructionClassifier",
     "TaskProfile",
-    "ProviderName",
     "ReasoningEffort",
-    "ResponseMode",
+    "ResponseOutputMode",
+    "ResponsePipeline",
+    "SpeechSynthesizer",
+    "LLMSpeechSynthesizer",
     "GENERAL_CHAT_PROFILE",
     "VOICE_FEEDBACK_PROFILE",
     "ROBOT_PLANNER_PROFILE",
