@@ -353,15 +353,18 @@ class ConfigurationValidationTests(unittest.TestCase):
 
     def test_config_parse_error_does_not_echo_rejected_value(self) -> None:
         with patch(
-            "src.configuration.config_loader._EnvironmentConfig._load_unchecked",
+            "src.configuration.config_loader.load_toml_sections",
             side_effect=ValueError("very-secret-invalid-value"),
         ):
-            with self.assertRaises(ConfigLoadError) as error:
-                load_application_settings()
+            with TemporaryDirectory() as temporary_directory:
+                config_path = Path(temporary_directory) / "config.toml"
+                config_path.write_text("schema_version = 1\n", encoding="utf-8")
+                with self.assertRaises(ConfigLoadError) as error:
+                    load_application_settings(config_path)
 
         self.assertNotIn("very-secret-invalid-value", str(error.exception))
 
-    def test_removed_single_camera_calibration_variables_are_ignored(self) -> None:
+    def test_unknown_environment_variables_are_ignored(self) -> None:
         legacy_environment = {
             "VISION_RELOCALIZATION_CAMERA_MATRIX": "1,0,0,0,1,0,0,0,1",
             "VISION_RELOCALIZATION_CAMERA_MATRIX_RESOLUTION": "1,1",
@@ -369,11 +372,15 @@ class ConfigurationValidationTests(unittest.TestCase):
             "VISION_RELOCALIZATION_MARKER_WIDTH": "9.9",
             "VISION_RELOCALIZATION_MARKER_HEIGHT": "9.9",
         }
-        with (
-            patch.dict("os.environ", legacy_environment, clear=True),
-            patch("src.configuration.config_loader.load_dotenv"),
-        ):
-            settings = load_application_settings().vision
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = root / "config.toml"
+            config_path.write_text("schema_version = 1\n", encoding="utf-8")
+            with patch.dict("os.environ", legacy_environment, clear=True):
+                settings = load_application_settings(
+                    config_path,
+                    env_file=root / "missing.env",
+                ).vision
 
         self.assertNotEqual(
             (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
@@ -425,6 +432,30 @@ class ConfigurationValidationTests(unittest.TestCase):
 
         self.assertEqual(0, exit_code)
         run_gui.assert_not_called()
+
+    def test_config_argument_is_forwarded_to_toml_loader(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            config_path = Path(temporary_directory) / "site.toml"
+            config = _config(
+                Path(temporary_directory),
+                SIMULATION_MODE=True,
+                WEBSOCKET_ENABLED=False,
+            )
+            with (
+                patch(
+                    "sys.argv",
+                    ["robot-llm", "--config", str(config_path), "--check-config"],
+                ),
+                patch(
+                    "src.bootstrap.launcher.load_application_settings",
+                    return_value=config,
+                ) as loader,
+                patch("src.bootstrap.launcher.configure_logging"),
+            ):
+                exit_code = main()
+
+        self.assertEqual(0, exit_code)
+        loader.assert_called_once_with(str(config_path))
 
 
 if __name__ == "__main__":

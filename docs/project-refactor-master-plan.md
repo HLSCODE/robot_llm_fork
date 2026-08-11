@@ -2,10 +2,10 @@
 
 > 文档状态：Active  
 > 创建日期：2026-07-27  
-> 最近更新：2026-08-07
+> 最近更新：2026-08-11
 >
 > 当前里程碑：M8 — 用户数据模型与自然语言命令收敛（进行中）
-> 计划进度：155/160（153 DONE + 2 DROPPED，96.9%）
+> 计划进度：156/161（154 DONE + 2 DROPPED，96.9%）
 > 维护方式：本文件作为项目级重构总入口；专项设计和实施细节通过关联文档维护
 
 ## 1. 文档定位
@@ -26,7 +26,7 @@
 | F. 数据采集 | [数据采集说明](data-collection.md) |
 | F. 智能加粉 | [智能闭环加粉 Agent](powder_dispense_agent.md) |
 | D. GUI 应用架构 | [GUI 应用架构](gui-application-architecture.md)、[GUI 工作流画布重构计划](gui-refactor-plan.md) |
-| G. 工程与数据治理 | [工程质量门禁](quality-gates.md)、[依赖、配置与用户数据治理](data-config-governance.md) |
+| G. 工程与数据治理 | [配置系统](configuration.md)、[工程质量门禁](quality-gates.md)、[依赖、配置与用户数据治理](data-config-governance.md) |
 
 本计划覆盖的是当前仓库可确认的问题。后续发现的新问题应进入对应 Track 的 backlog，不能因为没有列在首版文档中而被忽略。
 
@@ -163,7 +163,6 @@ ActionEngine -------- DeviceRuntime ----- SafetyService
 - `src/robot_server/ws_server.py` 的传输宿主继续按连接、投递和会话职责细分。
 - `src/gui/controllers/main_window.py` 的页面协调逻辑继续按稳定业务域下沉 controller。
 - `src/execution/engine.py`
-- `src/configuration/config_loader.py` 的超长环境变量解析可继续按领域 settings 拆分。
 - `src/devices/robots/realman/driver.py` 的厂商驱动内部职责细分和错误模型。
 - 第二种机械臂供应商 adapter 的接入与真实硬件契约验收。
 
@@ -793,11 +792,13 @@ src/
 
 ### 12.1 配置
 
-当前问题：
+当前状态：
 
-- 环境变量解析仍集中在组合根使用的 `_EnvironmentConfig` 适配器中，但该对象不再作为
-  单例导出，也没有业务层调用方。
-- 运行时配置已拆分为不可变的 Runtime、Data、DataCollection、Server、Secret、
+- 主配置已从 296 项扁平 `config.env` 一次性切换为 schema v1 TOML；未知表、未知字段、
+  错误类型和 TOML 内敏感字段均在启动边界拒绝，不保留旧主格式读取。
+- `config/config.toml` 保存结构化非敏感配置，`.env`/系统环境保存密钥与部署覆盖；
+  来源优先级固定为 typed defaults < TOML < environment < CLI。
+- 运行时配置拆分为不可变的 Runtime、Data、DataCollection、Server、Secret、
   Execution、LLM、Robot、Device、Vision、Voice settings。
 - GUI、WebSocket、Application Service、执行 handler、设备 factory、视觉、语音和 LLM
   均接收显式配置快照；数据采集、视觉天平和低层设备不再读取环境变量。
@@ -918,6 +919,7 @@ src/
 | G-032 | P1 | DONE | Action/Skill/Workflow 显式迁移均已完成；`robot-workflow-data` 默认 dry-run，临时生成、重新加载和目标冲突校验后原子发布，17 个旧任务及 `.bak` 已移入可恢复归档；runtime 旧集合、`.task` 和旧 `.workflow` 入口全部删除 |
 | G-033 | P2 | DONE | `actions/`、`skills/`、`workflows/`、`drafts/`、四个目录级配置、三个版本控制内 JSON Schema、`$schema`、内置资源和 wheel package-data 已落地；GUI 文件对话框与 WebSocket 任务名统一使用 `*.workflow.json` |
 | G-034 | P1 | DONE | 全仓手写 Python 静态检查历史问题清零；Mypy 从 72 个文件的 570 个错误收敛为默认检查全部 `src/` 与 `scripts/`，仅排除自动生成的 `src/gui/resources_rc.py`；Ruff 默认检查 `src/`、`scripts/` 和 `tests/`，并以边界测试禁止白名单和扩大排除范围回归 |
+| G-035 | P1 | DONE | 296 项扁平 `config.env` 一次迁移为 schema v1 `config/config.toml`；默认值只保留在不可变 Settings，TOML/环境来源拆分、未知字段与原生类型严格校验、密钥禁止进入 TOML、`.env`/系统环境覆盖和 `--config` 入口均已落地，旧主格式及 1200 行逐项解析器直接删除 |
 
 完成标准：
 
@@ -940,7 +942,7 @@ src/
 | ADR-M-004 | Accepted | 资源冲突 | 使用显式资源租约，冲突立即拒绝 |
 | ADR-M-005 | Accepted | 内部迁移策略 | 直接切换，不保留 legacy/v2 双实现、转发模块或兼容开关 |
 | ADR-M-006 | Accepted | simulation | 替换设备实现，不替换状态机 |
-| ADR-M-007 | Accepted | 配置模型 | 组合根一次解析环境，向业务层注入不可变领域 settings；敏感配置独立快照 |
+| ADR-M-007 | Accepted | 配置模型 | 组合根按 typed defaults < TOML < environment < CLI 一次装配不可变领域 settings；TOML 只含非敏感配置，密钥仅允许来自 `.env`/系统环境；不保留旧 `config.env` 主格式 |
 | ADR-M-008 | Accepted | 数据目录 | built-in catalog 与可配置 user data root 分离；只初始化缺失文件 |
 | ADR-M-009 | Accepted | GUI 状态管理 | application service + Qt adapter/view-model；业务状态不由 QWidget 持有 |
 | ADR-M-010 | Rejected | 四 Agent 粉末方案 | 当前不立项、不预埋框架；满足版本化数据、量化收益、确定性安全边界和离线回放条件后作为独立项目重新评审 |
@@ -1290,6 +1292,7 @@ M7 GUI 工作台信息架构与空间收敛
 
 | 日期 | 里程碑 | Track | 工作项 | 状态变化 | 说明 | 提交/PR |
 |---|---|---|---|---|---|---|
+| 2026-08-11 | M8 | G | TOML 配置系统一次迁移 | G-035 TODO → DONE | 296 项扁平 ENV 主配置迁入 schema v1 TOML；环境仅承担密钥/部署覆盖，新增严格字段/类型/版本校验和 `--config`，删除旧格式及巨型逐项解析器 | 564 tests + 138 subtests；Ruff/Mypy/wheel smoke |
 | 2026-07-27 | M0 | Program | 创建项目级总计划 | TODO → DONE | 汇总当前全部主要重构域 | - |
 | 2026-07-27 | M0 | A | 创建执行运行时专项计划 | TODO → DONE | 建立执行重构阶段、验收和回滚计划 | - |
 | 2026-07-27 | M1/M2 | A/B/D/F | 统一执行与设备运行时首轮落地 | TODO → DOING | ApplicationServices、ExecutionManager、DeviceRuntime、ResourceArbiter、TeleoperationService；GUI/AI/WS 直接切换并删除旧执行器 | - |

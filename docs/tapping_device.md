@@ -16,18 +16,16 @@
 
 ## 配置文件
 
-配置项在 `config.env` 或 `src/configuration/config_loader.py` 中设置：
+配置项在 `config/config.toml` 的 `[devices]` 表中设置：
 
-```ini
-# 串口
-TAPPING_SERIAL_PORT=/dev/ttyACM0
-TAPPING_BAUDRATE=115200
-TAPPING_TIMEOUT=0.5
-
-# 设备地址
-TAPPING_GRIPPER_ADDRESS=9
-TAPPING_LIFT_ADDRESS=7
-TAPPING_ROTATION_ADDRESS=6
+```toml
+[devices]
+tapping_serial_port = "/dev/ttyACM0"
+tapping_baudrate = 115200
+tapping_timeout = 0.5
+tapping_gripper_address = 9
+tapping_lift_address = 7
+tapping_rotation_address = 6
 ```
 
 ---

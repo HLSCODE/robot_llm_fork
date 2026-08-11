@@ -572,21 +572,27 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 
 手动调试配置：
 
-```env
-LLM_DEFAULT_PROVIDER=minicpm
-CAMERA_PROVIDER=realsense
-VISION_CAMERA_NAME=monitor1
-VOICE_SESSION_TIMEOUT_S=30
-VOICE_TTS_ENABLED=false
-VOICE_INPUT_ENABLED=false
+```toml
+[llm]
+llm_default_provider = "minicpm"
+
+[vision]
+camera_provider = "realsense"
+vision_camera_name = "monitor1"
+
+[voice]
+voice_session_timeout_s = 30.0
+voice_tts_enabled = false
+voice_input_enabled = false
 ```
 
 真实语音监听配置：
 
-```env
-VOICE_INPUT_ENABLED=true
-VOICE_WAKE_ENGINE=sherpa
-VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
+```toml
+[voice]
+voice_input_enabled = true
+voice_wake_engine = "sherpa"
+voice_kws_keywords_file = "models/kws/keywords.txt"
 ```
 
 ## 18. 错误和取消

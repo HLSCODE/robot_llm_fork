@@ -376,6 +376,10 @@ def _shutdown_application(
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="机器人控制系统")
     parser.add_argument(
+        "--config",
+        help="TOML 配置文件路径，默认使用 config/config.toml",
+    )
+    parser.add_argument(
         "--websocket-host",
         help="WebSocket 监听地址，默认读取配置",
     )
@@ -409,7 +413,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = _build_parser().parse_args()
     try:
-        settings = load_application_settings()
+        settings = load_application_settings(args.config)
     except ConfigLoadError as exc:
         print(str(exc), file=sys.stderr)
         return 2

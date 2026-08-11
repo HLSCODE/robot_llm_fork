@@ -29,7 +29,7 @@ __pycache__/
 coverage.xml
 performance-report.json
 htmlcov/
-config.env
+config/config.toml
 env/
 venv/
 .env

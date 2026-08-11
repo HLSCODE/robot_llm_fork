@@ -36,6 +36,7 @@ DEFAULT_REF_AUDIO_PATH = (
     / "ref_audio"
     / "ref_minicpm_signature.wav"
 )
+REALTIME_CLOSE_TIMEOUT_SECONDS = 2.0
 
 
 class MiniCPMRealtimeClient(BaseLLMClient):
@@ -125,46 +126,12 @@ class MiniCPMRealtimeClient(BaseLLMClient):
             metrics=metrics,
         )
 
-    async def stream_chat(
+    def stream_chat(
         self,
         messages: List[LLMMessage],
         **options: Any,
     ) -> AsyncIterator[LLMStreamEvent]:
-        if not self.is_available():
-            yield LLMStreamEvent(type="error", error="MiniCPM Realtime 不可用")
-            return
-
-        url = self._build_realtime_url()
-        try:
-            async with websockets.connect(
-                url,
-                ssl=self._ssl_ctx(),
-                max_size=100 * 1024 * 1024,
-                open_timeout=min(self._timeout_s, 30.0),
-            ) as ws:
-                await self._wait_for_type(ws, "session.queue_done")
-                await self._send_json(ws, {"type": "session.init", "payload": {}})
-                created = await self._wait_for_type(ws, "session.created")
-                yield LLMStreamEvent(type="session_started", raw=created)
-
-                await self._send_json(ws, self._build_input_append(messages, options))
-
-                async for event in self._read_response_events(ws):
-                    yield event
-                    if event.type in ("done", "error"):
-                        break
-
-                await self._close_session(ws)
-        except asyncio.TimeoutError:
-            yield LLMStreamEvent(type="error", error="MiniCPM Realtime 响应超时")
-        except Exception as exc:
-            message = (
-                f"MiniCPM Realtime WebSocket 连接失败: {url} ({exc})。"
-                "请确认该网关支持 Realtime Chat，且 MINICPM_WS_SCHEME/MINICPM_GATEWAY_PORT/"
-                "MINICPM_GATEWAY_PATH_PREFIX/MINICPM_REALTIME_PATH 配置正确。"
-            )
-            logger.warning(message)
-            yield LLMStreamEvent(type="error", error=message)
+        return _MiniCPMRealtimeStream(self, messages, options)
 
     def _build_realtime_url(self) -> str:
         ws_scheme = self._ws_scheme
@@ -360,7 +327,7 @@ class MiniCPMRealtimeClient(BaseLLMClient):
                 parts.append(audio_part)
         return parts
 
-    async def _read_response_events(self, ws: Any) -> AsyncIterator[LLMStreamEvent]:
+    async def _read_response_event(self, ws: Any) -> LLMStreamEvent | None:
         while True:
             packet = await self._recv_json(ws)
             packet_type = packet.get("type")
@@ -368,13 +335,13 @@ class MiniCPMRealtimeClient(BaseLLMClient):
             if packet_type == "response.output.delta":
                 kind = packet.get("kind")
                 if kind == "text":
-                    yield LLMStreamEvent(
+                    return LLMStreamEvent(
                         type="text_delta",
                         text_delta=packet.get("text", ""),
                         raw=packet,
                     )
                 elif kind == "audio":
-                    yield LLMStreamEvent(
+                    return LLMStreamEvent(
                         type="audio_delta",
                         audio_data=packet.get("audio"),
                         raw=packet,
@@ -382,23 +349,21 @@ class MiniCPMRealtimeClient(BaseLLMClient):
                 else:
                     logger.debug("未知 MiniCPM delta kind: %s", kind)
             elif packet_type == "response.done":
-                yield LLMStreamEvent(
+                return LLMStreamEvent(
                     type="done",
                     text=packet.get("text", ""),
                     audio_data=packet.get("audio"),
                     metrics=packet.get("metrics"),
                     raw=packet,
                 )
-                return
             elif packet_type == "error":
-                yield LLMStreamEvent(
+                return LLMStreamEvent(
                     type="error",
                     error=packet.get("error") or packet.get("message") or "MiniCPM error",
                     raw=packet,
                 )
-                return
             elif packet_type == "session.closed":
-                return
+                return None
             else:
                 logger.debug("忽略 MiniCPM 事件: %s", packet_type)
 
@@ -407,3 +372,137 @@ class MiniCPMRealtimeClient(BaseLLMClient):
             await self._send_json(ws, {"type": "session.close", "reason": "turn_done"})
         except Exception:
             return
+
+
+class _MiniCPMRealtimeStream(AsyncIterator[LLMStreamEvent]):
+    """Explicitly own one MiniCPM connection without async-generator finalizers."""
+
+    def __init__(
+        self,
+        client: MiniCPMRealtimeClient,
+        messages: List[LLMMessage],
+        options: Dict[str, Any],
+    ) -> None:
+        self._client = client
+        self._messages = list(messages)
+        self._options = dict(options)
+        self._operation_lock = asyncio.Lock()
+        self._connection: Any | None = None
+        self._ws: Any | None = None
+        self._active_task: asyncio.Task[Any] | None = None
+        self._started = False
+        self._closed = False
+
+    def __aiter__(self) -> _MiniCPMRealtimeStream:
+        return self
+
+    async def __anext__(self) -> LLMStreamEvent:
+        async with self._operation_lock:
+            if self._closed:
+                raise StopAsyncIteration
+            self._active_task = asyncio.current_task()
+            try:
+                return await self._read_next_event()
+            except asyncio.CancelledError:
+                self._closed = True
+                await self._close_connection()
+                raise
+            except asyncio.TimeoutError:
+                self._closed = True
+                await self._close_connection()
+                return LLMStreamEvent(
+                    type="error",
+                    error="MiniCPM Realtime 响应超时",
+                )
+            except StopAsyncIteration:
+                raise
+            except Exception as exc:
+                self._closed = True
+                await self._close_connection()
+                message = self._connection_error_message(exc)
+                logger.warning(message)
+                return LLMStreamEvent(type="error", error=message)
+            finally:
+                self._active_task = None
+
+    async def aclose(self) -> None:
+        active_task = self._active_task
+        current_task = asyncio.current_task()
+        if (
+            active_task is not None
+            and active_task is not current_task
+            and not active_task.done()
+            and active_task.cancelling() == 0
+        ):
+            active_task.cancel()
+        async with self._operation_lock:
+            self._closed = True
+            await self._close_connection()
+
+    async def _read_next_event(self) -> LLMStreamEvent:
+        if not self._client.is_available():
+            self._closed = True
+            return LLMStreamEvent(type="error", error="MiniCPM Realtime 不可用")
+        if not self._started:
+            return await self._start_session()
+        if self._ws is None:
+            self._closed = True
+            raise StopAsyncIteration
+
+        event = await self._client._read_response_event(self._ws)
+        if event is None:
+            self._closed = True
+            await self._close_connection()
+            raise StopAsyncIteration
+        if event.type in {"done", "error"}:
+            await self._client._close_session(self._ws)
+            self._closed = True
+            await self._close_connection()
+        return event
+
+    async def _start_session(self) -> LLMStreamEvent:
+        url = self._client._build_realtime_url()
+        self._connection = websockets.connect(
+            url,
+            ssl=self._client._ssl_ctx(),
+            max_size=100 * 1024 * 1024,
+            open_timeout=min(self._client._timeout_s, 30.0),
+            close_timeout=min(
+                self._client._timeout_s,
+                REALTIME_CLOSE_TIMEOUT_SECONDS,
+            ),
+        )
+        self._ws = await self._connection.__aenter__()
+        await self._client._wait_for_type(self._ws, "session.queue_done")
+        await self._client._send_json(
+            self._ws,
+            {"type": "session.init", "payload": {}},
+        )
+        created = await self._client._wait_for_type(self._ws, "session.created")
+        await self._client._send_json(
+            self._ws,
+            self._client._build_input_append(self._messages, self._options),
+        )
+        self._started = True
+        return LLMStreamEvent(type="session_started", raw=created)
+
+    async def _close_connection(self) -> None:
+        connection = self._connection
+        self._connection = None
+        self._ws = None
+        if connection is None:
+            return
+        try:
+            await connection.__aexit__(None, None, None)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("MiniCPM Realtime connection close failed", exc_info=True)
+
+    def _connection_error_message(self, error: Exception) -> str:
+        url = self._client._build_realtime_url()
+        return (
+            f"MiniCPM Realtime WebSocket 连接失败: {url} ({error})。"
+            "请确认该网关支持 Realtime Chat，且 MINICPM_WS_SCHEME/MINICPM_GATEWAY_PORT/"
+            "MINICPM_GATEWAY_PATH_PREFIX/MINICPM_REALTIME_PATH 配置正确。"
+        )

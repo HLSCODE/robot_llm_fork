@@ -115,30 +115,26 @@ GUI/任务流
 
 ## 相关配置
 
-可在环境变量或 `src/configuration/config_loader.py` 中调整：
+在 `config/config.toml` 中调整：
 
-```ini
-# 加粉装置串口和地址
-TAPPING_SERIAL_PORT=/dev/ttyACM0
-TAPPING_BAUDRATE=115200
-TAPPING_TIMEOUT=0.5
-TAPPING_GRIPPER_ADDRESS=9
-TAPPING_LIFT_ADDRESS=7
-TAPPING_ROTATION_ADDRESS=6
-
-# 智能加粉位置
-TAPPING_LIFT_SAFE_POSITION=0
-TAPPING_LIFT_DISPENSE_POSITION=50000
-TAPPING_ROTATION_HOME_POSITION=0
-
-# 智能加粉步数策略
-POWDER_DISPENSE_LARGE_STEP=20000
-POWDER_DISPENSE_MEDIUM_STEP=8000
-POWDER_DISPENSE_SMALL_STEP=2000
-POWDER_DISPENSE_MICRO_STEP=500
-POWDER_DISPENSE_LARGE_STEP_THRESHOLD_MG=25
-POWDER_DISPENSE_MEDIUM_STEP_THRESHOLD_MG=10
-POWDER_DISPENSE_SMALL_STEP_THRESHOLD_MG=3
+```toml
+[devices]
+tapping_serial_port = "/dev/ttyACM0"
+tapping_baudrate = 115200
+tapping_timeout = 0.5
+tapping_gripper_address = 9
+tapping_lift_address = 7
+tapping_rotation_address = 6
+tapping_lift_safe_position = 0
+tapping_lift_dispense_position = 50000
+tapping_rotation_home_position = 0
+powder_dispense_large_step = 20000
+powder_dispense_medium_step = 8000
+powder_dispense_small_step = 2000
+powder_dispense_micro_step = 500
+powder_dispense_large_step_threshold_mg = 25.0
+powder_dispense_medium_step_threshold_mg = 10.0
+powder_dispense_small_step_threshold_mg = 3.0
 ```
 
 电子秤是 `DeviceRuntime` 中的正式设备能力。真实 Provider 通过
@@ -147,18 +143,22 @@ POWDER_DISPENSE_SMALL_STEP_THRESHOLD_MG=3
 
 相机与 LLM 使用项目现有统一配置，电子秤只增加以下选择和等待配置：
 
-```ini
+```toml
 # 名称可匹配受管相机返回的 serial 或 name；留空取首个有效画面
-BALANCE_CAMERA_NAME=
-BALANCE_CAMERA_WAIT_TIMEOUT_SECONDS=2
+[vision]
+balance_camera_name = ""
+balance_camera_wait_timeout_seconds = 2.0
 
 # balance_reading 默认使用 dashscope 视觉模型
-DASHSCOPE_API_KEY=你的key
-DASHSCOPE_MODEL=qwen-vl-max
+[llm]
+dashscope_model = "qwen-vl-max"
 ```
 
-摄像头索引、尺寸和 Provider 继续由 `CAMERA_PROVIDER`、`WEBCAM_*` 或
-`REALSENSE_*` 配置。所有值只在启动边界解析；设备 Provider 本身不读取环境变量。
+`DASHSCOPE_API_KEY` 必须写入 `.env`，不能写入 TOML。
+
+摄像头索引、尺寸和 Provider 继续由 `[vision]` 中的 `camera_provider`、
+`webcam_*` 或 `realsense_*` 字段配置。所有值只在启动边界解析；设备 Provider
+本身不读取环境变量。
 
 ## 安全保护
 

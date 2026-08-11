@@ -242,7 +242,7 @@ DATA_COLLECTION_STOP_TIMEOUT_SECONDS=5
 `DATA_COLLECTION_ARMS` 只接受逗号分隔的 `left`/`right` 且不能重复。Native
 格式必须只配置一条机械臂。外参是 4×4 齐次矩阵，按行填写 16 个有限数值。
 这些值在应用启动边界统一解析为不可变 `DataCollectionSettings`，采集用例通过
-显式注入获得配置，不会自行加载 `config.env` 或读取进程环境。
+显式注入获得配置，不会自行加载 TOML、`.env` 或读取进程环境。
 
 ## 10. 校验和受信 Native smoke test
 

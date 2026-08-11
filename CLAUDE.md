@@ -11,17 +11,18 @@
 - **视觉**: RealSense D435 + YOLO + SAM2
 - **串口设备**: 快换手、ADP 吸液枪、继电器、ModbusMotor、PWM 颈部双轴舵机
 - **AI/LLM**: OpenAI / DeepSeek API
-- **配置**: python-dotenv (`config.env`)
+- **配置**: TOML（`config/config.toml`）+ python-dotenv（`.env` 密钥/部署覆盖）
 
 ## 项目结构
 ```
-config.env          # 环境变量配置
+config/             # TOML 主配置与示例
+.env                # 本机密钥与部署覆盖（不提交）
 pyproject.toml      # Python 依赖唯一声明
 uv.lock             # 可重复安装锁文件
 src/
   core/
     launcher.py         # composition root，组装唯一 ApplicationServices
-    config_loader.py    # 进程边界环境变量解析器
+    config_loader.py    # TOML/环境覆盖的进程边界装配器
     settings.py         # 不可变、按领域拆分的 ApplicationSettings
     models.py           # ActionDefinition, SequenceItem 等数据模型
     storage.py          # 动作库/任务序列 JSON 持久化
@@ -89,6 +90,6 @@ uv run robot-llm --disable-websocket # 仅启动 GUI
   - `src/pwm_sdk/` — 第三方 SDK 源码（水平 360° + 垂直 180°）
   - `src/devices/pwm_neck.py` — 项目适配层 `PWMNeckController`
   - 由 `DeviceRuntime` 统一初始化和关闭
-  - 两种舵机参数独立可配（`PWM_NECK_H_*` / `PWM_NECK_V_*`，从 `config.env` 自动读取）
+  - 两种舵机参数在 `[devices]` 中独立配置，并可由 `PWM_NECK_H_*` / `PWM_NECK_V_*` 环境变量覆盖
 - [ ] 前端对接 WebSocket 服务
 - [ ] PWM 颈部舵机动作类型（`MOVE_NECK`）接入技能系统

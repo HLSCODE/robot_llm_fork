@@ -47,12 +47,13 @@ data/
 
 数据路径配置：
 
-```env
-ROBOT_DATA_DIR=data
-ACTIONS_LIBRARY_DIRECTORY=
-WORKFLOWS_DIRECTORY=
-WORKFLOW_DRAFTS_DIRECTORY=
-SKILL_LIBRARY_DIRECTORY=
+```toml
+[data]
+robot_data_dir = "data"
+actions_library_directory = ""
+workflows_directory = ""
+workflow_drafts_directory = ""
+skill_library_directory = ""
 ```
 
 四个覆盖项留空时从 `ROBOT_DATA_DIR` 推导。显式相对路径以项目根目录为基准；生产部署可以使用
@@ -204,14 +205,14 @@ WebSocket 暴露方式以及示例占位凭据。配置解析错误不会回显�
 
 ## 7. 敏感信息策略
 
-- `config.env` 仅属于本机环境并被版本库忽略。
+- `config/config.toml` 保存本机非敏感配置，`.env` 保存密钥与部署覆盖；两者均被版本库忽略。
 - 密钥、token、password、secret 和 credential 字段在诊断映射中统一显示为
   `<redacted>`。
 - 示例占位凭据会导致启动校验失败；空 WebSocket token 表示所有写操作保持锁定。
 - 非本机 WebSocket 监听会提示只读暴露或 `wss://` 反向代理要求。
 - 日志、异常和迁移错误只记录字段名、错误类别和文件名，不记录凭据或完整配置快照。
 
-环境解析仅在组合根执行一次，结果冻结为 Runtime、Data、DataCollection、Server、
+TOML 与环境覆盖仅在组合根解析一次，结果冻结为 Runtime、Data、DataCollection、Server、
 Secret、Execution、LLM、Robot、Device、Vision 和 Voice settings。业务模块只接收
 所需快照，不允许读取全局配置或在构造器中回退到环境变量。数据采集配置和视觉天平
 凭据也遵循同一入口；原 `Config` 公共单例和领域 `get_*` 方法已删除。

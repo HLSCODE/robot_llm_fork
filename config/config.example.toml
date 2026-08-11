@@ -1,0 +1,472 @@
+# Robot Action Orchestrator 配置模板
+#
+# 使用说明：
+# - 复制为 config/config.toml 后按本机环境修改；本文件保留可提交的示例值。
+# - 时间字段后缀：_s / _seconds 表示秒，_ms 表示毫秒。
+# - 距离字段后缀：_mm 表示毫米，_cm 表示厘米；机器人位姿平移通常使用米。
+# - 空字符串通常表示自动选择、使用默认值或禁用对应可选能力。
+# - API Key、认证 Token 等敏感值不要写入本文件，应配置在 .env 或系统环境变量中。
+# - 未声明的表或字段会导致配置校验失败。
+
+# 配置结构版本；当前只支持 1。
+schema_version = 1
+
+[runtime]
+# 是否使用仿真设备；true 时不连接真实硬件。
+simulation_mode = false
+# 单次自然语言交互的总超时。
+interaction_turn_timeout_s = 90.0
+# GUI/API 动作预览在确认执行前的有效期。
+command_preview_ttl_seconds = 120.0
+# 机械臂相对移动的默认步长与单次指令最大位移。
+command_arm_relative_step_mm = 10.0
+command_arm_relative_max_mm = 100.0
+# 移动底盘相对移动的默认步长与单次指令最大位移。
+command_base_relative_step_cm = 10.0
+command_base_relative_max_cm = 100.0
+
+[gui]
+# 主题："system"、"light" 或 "dark"。
+theme = "system"
+
+[logging]
+# 日志级别：DEBUG、INFO、WARNING、ERROR 或 CRITICAL。
+level = "INFO"
+# 日志目录；相对路径以项目根目录为基准。
+directory = "logs"
+# 日志文件保留天数。
+retention_days = 14
+
+[data]
+# 项目运行数据根目录。
+robot_data_dir = "data"
+# 以下目录为空时，分别使用 robot_data_dir 下的默认 actions、workflows、drafts、skills 目录。
+actions_library_directory = ""
+workflows_directory = ""
+workflow_drafts_directory = ""
+skill_library_directory = ""
+
+[data_collection]
+# 采集帧率及 OpenCV 摄像头索引。
+fps = 30
+camera_index = 0
+# 需要同步记录的机械臂逻辑 ID。
+arm_ids = ["left", "right"]
+# 数据集输出目录及数据格式变体。
+save_path = "data/demos"
+format_variant = "portable_simplified"
+# 启动录制要求的最小磁盘余量（字节）和空间预估放大系数。
+minimum_free_bytes = 1073741824
+storage_overhead_factor = 1.25
+# 超过该时长的未完成写入可视为陈旧任务。
+stale_write_seconds = 3600.0
+# 确定性抽样/划分使用的随机种子。
+random_seed = 42
+# 停止录制等待后台写入线程退出的最长时间。
+recording_stop_timeout_seconds = 5.0
+# 同一采集样本中不同数据源允许的最大时间偏差。
+maximum_sync_skew_ms = 100.0
+# 相机外参；空数组表示未配置。具体矩阵格式由采集格式定义。
+camera_extrinsics = []
+# 外参所基于的参考坐标系名称；空字符串表示未声明。
+camera_extrinsics_reference_frame = ""
+# 本次标定数据的稳定标识，用于数据追溯。
+calibration_id = ""
+
+[localization]
+# 外部定位 UDP 监听地址与端口；0.0.0.0 表示监听所有网卡。
+external_localization_host = "0.0.0.0"
+external_localization_port = 22222
+# 单次 UDP 接收缓冲区大小（字节）。
+external_localization_receive_size_bytes = 1024
+# Socket 轮询超时和服务停止时等待接收线程退出的时间。
+external_localization_socket_timeout_seconds = 0.2
+external_localization_join_timeout_seconds = 1.0
+
+[server]
+# 是否随 GUI 启动 WebSocket 附加服务。
+websocket_enabled = true
+# 是否启用 TLS、Token 和 Origin 等 WebSocket 安全策略；关闭时适合可信内网/本机调试。
+websocket_security_enabled = false
+# WebSocket 监听地址与端口；对外暴露前应同时启用安全策略。
+websocket_host = "127.0.0.1"
+websocket_port = 8765
+# 远程控制租约有效期，超时后释放控制权。
+websocket_control_lease_seconds = 30.0
+# 单条消息大小上限（字节）、每秒请求上限、并发请求上限和发送队列上限。
+websocket_max_message_size_bytes = 1048576
+websocket_max_requests_per_second = 120
+websocket_max_concurrent_requests = 16
+websocket_max_queued_messages = 16
+# 单次发送超时；超过 slow_send 阈值会记为慢发送。
+websocket_send_timeout_seconds = 2.0
+websocket_slow_send_threshold_seconds = 0.5
+# 允许的浏览器 Origin 精确列表；启用安全策略时远程部署必须明确配置。
+websocket_allowed_origins = []
+# TLS 证书链和私钥路径；仅在启用安全策略/TLS 时使用。认证 Token 放在 .env。
+websocket_tls_certificate_path = ""
+websocket_tls_private_key_path = ""
+# 位于可信反向代理后时启用；代理必须正确传递客户端与 Origin 信息。
+websocket_reverse_proxy_mode = false
+# 遥操作命令过期时间，超时命令不会继续下发硬件。
+teleoperation_command_timeout_seconds = 1.0
+# 附加服务（WebSocket、后续 HTTP 等）的启动和停止超时。
+auxiliary_service_start_timeout_seconds = 5.0
+auxiliary_service_stop_timeout_seconds = 10.0
+
+[execution]
+# 单个动作允许的最长执行时间。
+execution_action_timeout_seconds = 600.0
+# 机械臂动作最大尝试次数及重试间隔。
+execution_arm_move_max_attempts = 3
+execution_arm_move_retry_delay_seconds = 0.5
+# 身体轴状态轮询间隔。
+execution_body_poll_interval_seconds = 0.1
+# 夹爪动作最大尝试次数及重试间隔。
+execution_gripper_max_attempts = 3
+execution_gripper_retry_delay_seconds = 0.5
+# 轨迹完成状态轮询间隔。
+execution_trajectory_poll_interval_seconds = 0.5
+# 安全停止后等待执行线程确认退出的最长时间。
+safety_stop_wait_timeout_seconds = 2.0
+
+[llm]
+# OpenAI-compatible provider 的模型名与 API 基地址；Key 配置在 .env 的 OPENAI_API_KEY。
+openai_model = "qwen-turbo"
+openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+# DeepSeek 模型与基地址；空字符串使用 provider 默认值，Key 使用 DEEPSEEK_API_KEY。
+deepseek_model = ""
+deepseek_base_url = ""
+# DashScope 模型与基地址；空字符串使用 provider 默认值，Key 使用 DASHSCOPE_API_KEY。
+dashscope_model = ""
+dashscope_base_url = ""
+# 默认 provider 名称；应为已注册且可用的 provider。
+llm_default_provider = "dashscope"
+# 通用生成温度和最大输出 token 数。
+llm_default_temperature = 0.3
+llm_default_max_tokens = 512
+# 单次 LLM 请求超时。
+llm_request_timeout_s = 60.0
+# 主 provider 不可用时按顺序尝试的 provider 名称。
+llm_fallback_providers = []
+# 连续失败多少次后打开熔断器，以及熔断后的恢复探测等待时间。
+llm_circuit_failure_threshold = 3
+llm_circuit_recovery_seconds = 30.0
+# MiniCPM Realtime 网关地址、端口和协议；ws_scheme 可为 "ws" 或 "wss"。
+minicpm_gateway_host = "10.10.17.15"
+minicpm_gateway_port = 8006
+minicpm_ws_scheme = "wss"
+# 反向代理路径前缀及 Realtime API 路径。
+minicpm_gateway_path_prefix = ""
+minicpm_realtime_path = "/v1/realtime"
+# MiniCPM 对外显示的模型名。
+minicpm_model = "minicpm-o"
+# 是否启用 MiniCPM ASK 指令分类通道；Key 使用 MINICPM_ASK_API_KEY。
+minicpm_ask_enabled = true
+minicpm_ask_base_url = ""
+minicpm_ask_model = "qwen-turbo"
+
+[robot]
+# 机械臂 provider 与设备型号；provider 决定实际驱动实现。
+robot_provider = "realman"
+robot_model = "rm75-dual"
+# 左/右机械臂控制器地址。
+robot1_ip = "192.168.3.18"
+robot1_port = 8080
+# 初始 TCP 位姿：[x, y, z, rx, ry, rz]，平移单位米、旋转单位弧度。
+robot1_initial_pose = [-0.04844, -0.269769, -0.101888, 3.109, -0.094, -1.592]
+robot2_ip = "192.168.3.19"
+robot2_port = 8080
+robot2_initial_pose = [-0.053437, 0.24741, -0.120801, 3.114, -0.032, -2.935]
+# 负责工具架换装的机械臂："left" 或 "right"。
+robot_tool_rack_arm = "right"
+# 工具槽 1 的接近、安装、拆卸位姿，格式同 initial_pose。
+robot_tool_rack_slot_1_approach_pose = [-0.119418, -0.088287, -0.380201, 3.11, 0.001, -2.893]
+robot_tool_rack_slot_1_attach_pose = [-0.119418, -0.088287, -0.480201, 3.11, 0.001, -2.893]
+robot_tool_rack_slot_1_detach_pose = [-0.119418, -0.088287, -0.455201, 3.11, 0.001, -2.893]
+# 安装/拆卸到位后的保持时间。
+robot_tool_rack_slot_1_attach_dwell_seconds = 0.5
+robot_tool_rack_slot_1_detach_dwell_seconds = 1.0
+# 工具槽 2 的接近、安装、拆卸位姿及保持时间。
+robot_tool_rack_slot_2_approach_pose = [-0.117419, -0.066539, -0.380577, 3.135, -0.009, -2.869]
+robot_tool_rack_slot_2_attach_pose = [-0.117419, -0.066539, -0.480577, 3.135, -0.009, -2.869]
+robot_tool_rack_slot_2_detach_pose = [-0.117419, -0.066539, -0.465577, 3.135, -0.009, -2.869]
+robot_tool_rack_slot_2_attach_dwell_seconds = 0.5
+robot_tool_rack_slot_2_detach_dwell_seconds = 0.5
+# 移动底盘控制器服务端地址，以及可选的本地 UDP 绑定端口。
+move_controller_host = "192.168.3.216"
+move_controller_port = 12345
+move_controller_client_bind_port = 54321
+# 底盘协议参数：速度、转弯半径、连接模式和阻塞模式；取值遵循底盘协议。
+move_velocity = 10
+move_radius = 0
+move_connect = 0
+move_block = 1
+# 通用设备动作最大重试次数。
+max_attempts = 5
+# 夹爪抓取速度、力和超时；速度/力的量纲遵循机械臂 SDK，超时单位秒。
+gripper_pick_speed = 200
+gripper_pick_force = 1000
+gripper_pick_timeout = 3
+# 夹爪释放速度和超时。
+gripper_release_speed = 100
+gripper_release_timeout = 3
+
+[devices]
+# 身体升降轴 Modbus 串口、波特率、从站地址和响应超时（秒）。
+body_serial_port = "/dev/body"
+body_baudrate = 115200
+body_slave_id = 1
+body_timeout = 1
+# 是否使用身体轴 DI 输入作为到位判断。
+body_di_pan = false
+# 快换手设备串口参数。
+kuaihuanshou_serial_port = "/dev/hand"
+kuaihuanshou_baudrate = 115200
+kuaihuanshou_timeout = 3
+# ADP 设备串口参数和最大重试次数。
+adp_serial_port = "/dev/hand"
+adp_baudrate = 115200
+adp_timeout = 5
+adp_max_retries = 3
+# 继电器设备串口参数。
+relay_serial_port = "/dev/power"
+relay_baudrate = 38400
+relay_timeout = 1
+# 颈部 PWM 控制板串口参数。
+pwm_neck_serial_port = "/dev/neck"
+pwm_neck_baudrate = 9600
+# 水平舵机：通道 ID、初始脉宽、允许脉宽范围和默认动作时长（毫秒）。
+pwm_neck_h_servo_id = 0
+pwm_neck_h_initial_pwm = 1600
+pwm_neck_h_pwm_min = 1100
+pwm_neck_h_pwm_max = 2100
+pwm_neck_h_default_time = 1500
+# 垂直舵机参数，单位同水平舵机。
+pwm_neck_v_servo_id = 1
+pwm_neck_v_initial_pwm = 1600
+pwm_neck_v_pwm_min = 1200
+pwm_neck_v_pwm_max = 1700
+pwm_neck_v_default_time = 2500
+# 是否启用表情屏以及显示 provider 名称。
+expression_display_enabled = false
+expression_display_provider = "t5l_dgusii"
+# 可选的 provider 独立配置文件；为空时使用本节内联字段。
+expression_display_config = ""
+# 表情屏串口、波特率、读超时和写超时（秒）。
+expression_display_serial_port = "COM4"
+expression_display_baudrate = 115200
+expression_display_timeout = 0.5
+expression_display_write_timeout = 1.0
+# DGUS VP/SP 地址与显示控制值，使用十六进制字符串。
+expression_display_vp_addr = "0x5600"
+expression_display_sp_addr = "0x8000"
+expression_display_start_value = "0x0000"
+expression_display_stop_value = "0x0001"
+expression_display_hide_value = "0x0002"
+# 切换前清理动作："stop"、"hide" 或 provider 支持的值；空字符串表示不清理。
+expression_display_clear_before_switch = "stop"
+# 清理与切换之间的延迟（秒）。
+expression_display_switch_delay = 0.1
+# 切换表情时是否同步更新图标帧范围。
+expression_display_update_icon_range = true
+# 表情映射：name:icon_id:start_frame:end_frame，多个条目以逗号分隔。
+expression_display_expressions = "happy:24:0:63,sad:27:0:63,angry:30:0:63,speechless:33:0:63,default_1:36:0:63,default_2:39:0:63"
+# 切换时需要额外清空的 VP 地址列表；格式由显示 provider 解析。
+expression_display_clear_vps = ""
+# 表情屏测试轮换间隔和连续串口帧发送间隔（秒）。
+expression_display_test_interval = 1.5
+expression_display_tx_delay = 0.05
+# 敲击/加粉装置串口参数。
+tapping_serial_port = "/dev/ttyACM0"
+tapping_baudrate = 115200
+tapping_timeout = 0.5
+# 夹爪、升降和旋转三个执行器的总线地址。
+tapping_gripper_address = 9
+tapping_lift_address = 7
+tapping_rotation_address = 6
+# 升降安全位、加粉位和旋转原点；单位为设备步数。
+tapping_lift_safe_position = 0
+tapping_lift_dispense_position = 50000
+tapping_rotation_home_position = 0
+# 自适应加粉的四档电机步数。
+powder_dispense_large_step = 20000
+powder_dispense_medium_step = 8000
+powder_dispense_small_step = 2000
+powder_dispense_micro_step = 500
+# 根据剩余目标质量选择大/中/小步长的阈值（毫克）。
+powder_dispense_large_step_threshold_mg = 25.0
+powder_dispense_medium_step_threshold_mg = 10.0
+powder_dispense_small_step_threshold_mg = 3.0
+
+[vision]
+# 相机 provider；当前常用 "realsense" 或 "opencv"。
+camera_provider = "realsense"
+# RealSense 序列号与逻辑名称，均为英文逗号分隔且按位置一一对应。
+realsense_device_sn = "419522071147,420122071087,250222072950,327122072448"
+realsense_device_names = "monitor1,monitor2,monitor3,monitor4"
+# RealSense 彩色流和深度流分辨率。
+realsense_color_width = 1920
+realsense_color_height = 1080
+realsense_depth_width = 640
+realsense_depth_height = 480
+# RealSense 采集帧率、JPEG 质量（0-100）及是否将深度对齐到彩色图。
+realsense_fps = 15
+realsense_jpeg_quality = 85
+realsense_align_depth_to_color = true
+# 向网络/视觉消费者编码图像的目标帧率。
+camera_encode_fps = 5
+# 普通摄像头索引与逻辑名称，英文逗号分隔并按位置对应；名称为空时自动生成。
+webcam_device_indexes = "0"
+webcam_device_names = ""
+# 普通摄像头分辨率、帧率和 JPEG 质量（0-100）。
+webcam_width = 640
+webcam_height = 480
+webcam_fps = 30
+webcam_jpeg_quality = 85
+# 独立视觉相机服务的地址和端口。
+vision_camera_host = "localhost"
+vision_camera_port = 12345
+# 目标检测和分割模型文件路径。
+yolo_model_path = "models/best.pt"
+sam_model_path = "models/sam2.1_l.pt"
+# 视觉数据 schema、模型和标定版本，用于结果追溯及兼容性检查。
+vision_schema_version = 1
+vision_model_version = "default-model-v1"
+vision_calibration_version = "default-calibration-v1"
+# 调试图片保存目录、保留天数和最多保留运行批次。
+vision_debug_save_dir = "pictures"
+vision_debug_retention_days = 7
+vision_debug_max_runs = 100
+# 电子秤识别使用的相机逻辑名；为空时由服务选择。等待超时单位秒。
+balance_camera_name = ""
+balance_camera_wait_timeout_seconds = 2.0
+# 机器人/相机标定：3x3 旋转矩阵按行展开、3 元平移向量和末端姿态偏移。
+vision_rotation_matrix = [0.00215684, 0.97503835, 0.22202606, -0.99995231, -1.19e-05, 0.00976617, 0.00952503, -0.22203654, 0.97499182]
+vision_translation_vector = [-0.10273135, 0.03312807, -0.07214614]
+vision_gripper_offset = [3.146, 0.0, 3.128]
+# 视觉动作默认置信度、机械臂速度和夹爪长度（毫米）。
+vision_default_confidence = 0.7
+vision_default_velocity = 15
+vision_default_gripper_length = 150.0
+# 默认视觉流程名称和主相机逻辑名。
+vision_default_workflow = "bottle"
+vision_camera_name = "monitor1"
+# 抓取准备、抓取高度及瓶体目标平面偏移，单位米。
+vision_prep_offset_x = -0.07
+vision_grasp_z = -0.24
+vision_bottle_target_offset_x = -0.025
+vision_bottle_target_offset_y = 0.015
+# 点云/目标聚类使用的 GMM 分量数。
+vision_gmm_components = 1
+# 重定位站点配置文件及左右机械臂使用的相机名称。
+vision_relocalization_stations_file = "data/vision_stations/profiles.json"
+vision_relocalization_left_camera_name = "monitor1"
+vision_relocalization_right_camera_name = "monitor2"
+# 左右相机 3x3 内参矩阵，按行展开。
+vision_relocalization_left_camera_matrix = [1361.8900146484375, 0.0, 930.7236938476562, 0.0, 1361.31640625, 547.1578979492188, 0.0, 0.0, 1.0]
+vision_relocalization_right_camera_matrix = [1361.8900146484375, 0.0, 930.7236938476562, 0.0, 1361.31640625, 547.1578979492188, 0.0, 0.0, 1.0]
+# 内参标定时的图像分辨率：[width, height]。
+vision_relocalization_left_camera_matrix_resolution = [1920.0, 1080.0]
+vision_relocalization_right_camera_matrix_resolution = [1920.0, 1080.0]
+# 相机畸变系数，通常为 [k1, k2, p1, p2, k3]。
+vision_relocalization_left_dist_coeffs = [0.0, 0.0, 0.0, 0.0, 0.0]
+vision_relocalization_right_dist_coeffs = [0.0, 0.0, 0.0, 0.0, 0.0]
+# 默认定位标记实际宽高，单位米。
+vision_relocalization_default_marker_width = 0.158
+vision_relocalization_default_marker_height = 0.158
+# 输出位姿旋转表示和角度单位；常用 "rpy" 与 "rad"。
+vision_relocalization_pose_rotation_type = "rpy"
+vision_relocalization_pose_angle_unit = "rad"
+# 左右末端到相机的 4x4 齐次变换矩阵；空数组表示未配置。
+vision_relocalization_left_t_e_c = []
+vision_relocalization_right_t_e_c = []
+# 重定位模式及平面约束；当前常用 mode="planar"、constraint="none"。
+vision_relocalization_mode = "planar"
+vision_relocalization_planar_constraint = "none"
+# 是否保存重定位调试图片。
+vision_relocalization_save_debug_images = true
+# 视觉流程通用初始位姿及左右臂初始位姿，格式 [x,y,z,rx,ry,rz]。
+initial_pose = [-0.303379, 0.274441, -0.075986, -3.081, 0.137, -1.828]
+left_initial_pose = [-0.356, 0.309, -0.186, -3.141, 0.0, -1.89]
+right_initial_pose = [-0.372, 0.221, -0.186, -3.121, 0.0, -1.89]
+# 放置释放高度偏移（米）及三个固定放置/中转位姿。
+place_drop_height = 0.06
+place_above = [0.0637, -0.07351, -0.4182, 3.15, 0.0, 1.617]
+place_pos2 = [0.285488, -0.256408, -0.090654, 3.14, 0.0, 1.5]
+place_transfer_pose = [0.424, -0.092, -0.439, 3.15, 0.0, 1.618]
+# 视觉动作通用最大尝试次数。
+max_attempts = 5
+
+[voice]
+# 唤醒会话闲置超时和发送给 LLM 的最大历史轮数。
+voice_session_timeout_s = 30.0
+voice_session_history_turns = 6
+# GUI 初始化最多等待语音模型就绪的时间；超时后转为后台加载。
+voice_speech_startup_wait_timeout_s = 30.0
+# 是否请求 LLM/TTS 音频回复。
+voice_tts_enabled = false
+# 语音输入总开关；启用后同时装配 ASR 与关键词唤醒链路。
+voice_input_enabled = false
+# 输入音频采样率、声道数、单块时长和队列容量。
+voice_audio_sample_rate = 16000
+voice_audio_channels = 1
+voice_audio_block_ms = 100
+voice_audio_queue_size = 300
+# sounddevice 延迟模式："high"、"low" 或设备支持的秒数；空设备名使用系统默认输入。
+voice_audio_latency = "high"
+voice_audio_device = ""
+# 是否输出底层音频采集状态日志。
+voice_audio_show_status = false
+# VAD 模型标识和送入模型的音频块时长。
+voice_vad_model = "fsmn-vad"
+voice_vad_chunk_ms = 200
+# 一句话的最短/最长持续时间及判定结束所需静音时长。
+voice_min_utterance_ms = 500
+voice_max_utterance_ms = 30000
+voice_end_silence_ms = 800
+# 开始说话的 RMS 阈值，以及连续多少个音频块满足阈值才确认开始。
+voice_speech_start_rms_threshold = 0.025
+voice_speech_start_confirm_chunks = 1
+# 首轮和连续对话等待用户开口的超时。
+voice_listening_timeout_s = 8.0
+voice_follow_up_listening_timeout_s = 25.0
+# 两次唤醒触发之间的冷却时间。
+voice_wake_cooldown_s = 1.5
+# 是否播放/生成唤醒反馈及默认反馈文本。
+voice_wake_feedback_enabled = true
+voice_wake_feedback_text = "你好"
+# 是否在唤醒后执行欢迎任务；任务名为空时不执行。
+voice_wake_welcome_enabled = false
+voice_wake_welcome_task = ""
+# 静音 RMS 阈值；通常应低于 speech_start_rms_threshold。
+voice_silence_rms_threshold = 0.01
+# 是否抑制 ASR/唤醒模型直接向控制台输出，以及是否显示 ASR 耗时。
+voice_suppress_model_output = true
+voice_show_asr_timing = false
+# ASR 主模型、标点模型和计算设备；设备为空时由模型库自动选择。
+voice_asr_model = "iic/SenseVoiceSmall"
+voice_asr_punc_model = "ct-punc"
+voice_asr_device = ""
+# ASR 动态批处理的最大音频时长（秒）。
+voice_asr_batch_size_s = 60
+# 唤醒引擎："sherpa" 或 "openwakeword"。
+voice_wake_engine = "sherpa"
+# 是否绕过真实关键词，在启动后自动触发一次唤醒；仅建议调试使用。
+voice_wake_auto_trigger = false
+# sherpa-onnx KWS 的 encoder、decoder、joiner、tokens 和关键词文件路径。
+voice_kws_encoder = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+voice_kws_decoder = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+voice_kws_joiner = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx"
+voice_kws_tokens = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt"
+voice_kws_keywords_file = "models/kws/keywords.txt"
+# KWS 执行 provider、触发阈值、关键词分数、线程数和搜索活跃路径数。
+voice_kws_provider = "cpu"
+voice_kws_threshold = 0.35
+voice_kws_score = 1.5
+voice_kws_num_threads = 1
+voice_kws_max_active_paths = 4
+# openWakeWord 模型路径；多个路径使用英文逗号分隔。
+voice_openwakeword_model_paths = ""
+# openWakeWord 触发阈值，范围通常为 0-1。
+voice_openwakeword_threshold = 0.6

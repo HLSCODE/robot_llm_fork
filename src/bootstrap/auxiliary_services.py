@@ -181,6 +181,7 @@ class AuxiliaryServiceHost:
             try:
                 loop.run_until_complete(self._stop_services())
                 self._cancel_pending_tasks(loop)
+                loop.run_until_complete(loop.shutdown_asyncgens())
             finally:
                 loop.close()
                 with self._lock:

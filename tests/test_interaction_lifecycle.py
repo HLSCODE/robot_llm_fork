@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from threading import Event, Thread
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from src.application import CommandRuntime
 from src.configuration.settings import LLMSettings, SecretSettings
 from src.execution import ExecutionSnapshot, ExecutionState
 from src.llm.providers.openai_compatible import OpenAICompatibleClient
+from src.llm.providers.minicpm_realtime import MiniCPMRealtimeClient
 from src.llm.registry import LLMRegistry
+from src.llm.routing import ProviderHealthTracker, RoutedLLMClient
 from src.llm.tasks.classifier import normalize_instruction_classification
+from src.llm.tasks.profiles import GENERAL_CHAT_PROFILE
 from src.llm.types import LLMMessage
 from src.voice_interaction import VoiceInteractionController
+from src.gui.views.ai_assistant import VoiceSessionWorker
 
 
 class _Execution:
@@ -71,6 +78,68 @@ class _Completions:
 
     async def create(self, **_request):
         return self._stream
+
+
+class _BlockingVoiceController:
+    def __init__(self) -> None:
+        self.started = Event()
+        self.closed = Event()
+
+    async def handle_text(self, _text, *, require_awake):
+        del require_awake
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.closed.set()
+        if False:
+            yield None
+
+
+class _RealtimeWebSocket:
+    def __init__(self) -> None:
+        self._packets = iter((
+            {"type": "session.queue_done"},
+            {"type": "session.created"},
+            {"type": "response.done", "text": "ok"},
+        ))
+
+    async def recv(self):
+        return json.dumps(next(self._packets))
+
+    async def send(self, _payload):
+        return None
+
+
+class _RealtimeConnection:
+    def __init__(self, websocket: _RealtimeWebSocket) -> None:
+        self._websocket = websocket
+        self.close_count = 0
+
+    async def __aenter__(self):
+        return self._websocket
+
+    async def __aexit__(self, _exc_type, _exc, _traceback):
+        self.close_count += 1
+        return False
+
+
+class _BlockingRealtimeWebSocket(_RealtimeWebSocket):
+    def __init__(self) -> None:
+        super().__init__()
+        self._initial_packets = iter((
+            {"type": "session.queue_done"},
+            {"type": "session.created"},
+        ))
+        self.response_started = asyncio.Event()
+
+    async def recv(self):
+        try:
+            packet = next(self._initial_packets)
+        except StopIteration:
+            self.response_started.set()
+            await asyncio.Event().wait()
+        return json.dumps(packet)
 
 
 def _controller(
@@ -146,6 +215,22 @@ class InteractionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("interaction_busy", second[0].data["code"])
 
 
+class VoiceWorkerLifecycleTests(unittest.TestCase):
+    def test_stop_waits_for_root_task_and_async_generator_cleanup(self):
+        controller = _BlockingVoiceController()
+        worker = VoiceSessionWorker(controller, "hello", require_awake=False)
+        thread = Thread(target=worker.run, daemon=True)
+
+        thread.start()
+        self.assertTrue(controller.started.wait(timeout=1))
+        worker.stop()
+        worker.stop()
+        thread.join(timeout=2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(controller.closed.is_set())
+
+
 class ClassifierContractTests(unittest.TestCase):
     def test_session_and_execution_control_are_distinct(self):
         session = normalize_instruction_classification({
@@ -165,6 +250,100 @@ class ClassifierContractTests(unittest.TestCase):
 
 
 class LLMRegistryLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_routed_minicpm_cancellation_closes_connection_once(self):
+        websocket = _BlockingRealtimeWebSocket()
+        connection = _RealtimeConnection(websocket)
+        provider = MiniCPMRealtimeClient(
+            gateway_host="localhost",
+            gateway_port=8006,
+            ws_scheme="ws",
+        )
+        routed = RoutedLLMClient(
+            profile=GENERAL_CHAT_PROFILE,
+            primary_provider="minicpm",
+            fallback_providers=(),
+            explicit_provider=True,
+            provider_loader=lambda _name: provider,
+            health=ProviderHealthTracker(
+                failure_threshold=3,
+                recovery_seconds=30,
+            ),
+        )
+
+        async def consume() -> None:
+            async for _event in routed.stream_chat(
+                [LLMMessage(role="user", content="hello")]
+            ):
+                pass
+
+        with patch(
+            "src.llm.providers.minicpm_realtime.websockets",
+            SimpleNamespace(connect=lambda _url, **_options: connection),
+        ):
+            task = asyncio.create_task(consume())
+            await websocket.response_started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertEqual(1, connection.close_count)
+        await asyncio.get_running_loop().shutdown_asyncgens()
+
+    async def test_minicpm_close_cancels_active_read_without_asyncgen_race(self):
+        websocket = _BlockingRealtimeWebSocket()
+        connection = _RealtimeConnection(websocket)
+
+        client = MiniCPMRealtimeClient(
+            gateway_host="localhost",
+            gateway_port=8006,
+            ws_scheme="ws",
+        )
+        with patch(
+            "src.llm.providers.minicpm_realtime.websockets",
+            SimpleNamespace(connect=lambda _url, **_options: connection),
+        ):
+            stream = client.stream_chat(
+                [LLMMessage(role="user", content="hello")]
+            )
+            first_event = await anext(stream)
+            read_task = asyncio.create_task(anext(stream))
+            await websocket.response_started.wait()
+            await stream.aclose()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await read_task
+        self.assertEqual("session_started", first_event.type)
+        self.assertEqual(1, connection.close_count)
+        await asyncio.get_running_loop().shutdown_asyncgens()
+
+    async def test_minicpm_realtime_uses_bounded_transport_close(self):
+        websocket = _RealtimeWebSocket()
+        connect_options = {}
+
+        def connect(_url, **options):
+            connect_options.update(options)
+            return _RealtimeConnection(websocket)
+
+        client = MiniCPMRealtimeClient(
+            gateway_host="localhost",
+            gateway_port=8006,
+            ws_scheme="ws",
+            timeout_s=60,
+        )
+        with patch(
+            "src.llm.providers.minicpm_realtime.websockets",
+            SimpleNamespace(connect=connect),
+        ):
+            events = [
+                event
+                async for event in client.stream_chat(
+                    [LLMMessage(role="user", content="hello")]
+                )
+            ]
+
+        self.assertEqual(["session_started", "done"], [event.type for event in events])
+        self.assertEqual(2.0, connect_options["close_timeout"])
+
     async def test_close_is_idempotent_and_releases_loaded_providers(self):
         provider = _CloseableProvider()
         registry = LLMRegistry(

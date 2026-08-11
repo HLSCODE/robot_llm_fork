@@ -383,16 +383,17 @@ setTimeout(() => {
 
 遥操作使用 WebSocket 认证和控制租约配置：
 
-```env
-# config.env
-WEBSOCKET_ENABLED=true
-WEBSOCKET_HOST=127.0.0.1
-WEBSOCKET_PORT=8765
-WEBSOCKET_AUTH_TOKEN=<运行时强随机密钥>
-WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
-WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
-TELEOPERATION_COMMAND_TIMEOUT_SECONDS=1.0
+```toml
+[server]
+websocket_enabled = true
+websocket_host = "127.0.0.1"
+websocket_port = 8765
+websocket_control_lease_seconds = 30.0
+websocket_max_requests_per_second = 120
+teleoperation_command_timeout_seconds = 1.0
 ```
+
+认证密钥通过 `.env` 的 `WEBSOCKET_AUTH_TOKEN` 配置。
 
 当前 WebSocket API 版本为 `2.0`。包括 50Hz 关节指令在内的每个请求都必须
 携带 `api_version: "2.0"` 和唯一 `request_id`；默认每客户端上限为每秒

@@ -54,47 +54,50 @@ uv sync --frozen --extra full
 
 ### 2. 准备配置
 
-复制配置模板：
+复制 TOML 配置模板和密钥模板：
 
 ```bash
-cp config.env.example config.env
+cp config/config.example.toml config/config.toml
+cp .env.example .env
 ```
 
 Windows PowerShell：
 
 ```powershell
-Copy-Item config.env.example config.env
+Copy-Item config/config.example.toml config/config.toml
+Copy-Item .env.example .env
 ```
 
-按实际环境修改 `config.env`。最常用配置项：
+按实际环境修改 `config/config.toml`。最常用配置项：
 
-```env
-SIMULATION_MODE=false
-GUI_THEME=system  # system / light / dark
+```toml
+schema_version = 1
 
-WEBSOCKET_ENABLED=true
-WEBSOCKET_HOST=127.0.0.1
-WEBSOCKET_PORT=8765
+[runtime]
+simulation_mode = false
 
-OPENAI_API_KEY=
-LLM_DEFAULT_PROVIDER=dashscope
-OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-OPENAI_MODEL=qwen-turbo
+[gui]
+theme = "system" # system / light / dark
 
-ROBOT_DATA_DIR=data
+[server]
+websocket_enabled = true
+websocket_host = "127.0.0.1"
+websocket_port = 8765
 
-CAMERA_PROVIDER=realsense
-REALSENSE_DEVICE_SN=
-YOLO_MODEL_PATH=models/best.pt
-SAM_MODEL_PATH=models/sam2.1_l.pt
+[llm]
+llm_default_provider = "dashscope"
+openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+openai_model = "qwen-turbo"
 
-ROBOT1_IP=192.168.3.19
-ROBOT1_PORT=8080
-ROBOT2_IP=192.168.3.18
-ROBOT2_PORT=8080
+[robot]
+robot1_ip = "192.168.3.19"
+robot1_port = 8080
+robot2_ip = "192.168.3.18"
+robot2_port = 8080
 ```
 
-`config.env` 用于本机配置和密钥，默认不应提交到仓库。
+API Key、认证 Token 等敏感信息只写入 `.env`。`config/config.toml` 与 `.env`
+均为本机文件，默认不提交；系统环境变量和命令行参数可以继续覆盖配置。
 
 启动 GUI 或连接硬件前可以单独校验配置：
 
@@ -190,7 +193,9 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 
 ```text
 .
-├── config.env.example         # 配置模板
+├── config/
+│   └── config.example.toml    # 非敏感配置模板
+├── .env.example               # 密钥与部署覆盖模板
 ├── pyproject.toml             # Python 版本与依赖声明
 ├── uv.lock                    # 锁定的完整依赖图
 ├── docs/
@@ -202,7 +207,7 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 └── src/
     ├── application/           # 应用用例、组合根与跨设备编排
     ├── bootstrap/             # 进程入口、GUI 和附加服务生命周期
-    ├── configuration/         # 环境解析、不可变 settings 与启动校验
+    ├── configuration/         # TOML/环境解析、不可变 settings 与启动校验
     ├── domain/                # 动作模型、执行上下文等稳定领域定义
     ├── persistence/           # JSON 文档与工位配置持久化
     ├── execution/             # 统一执行运行时、handler API/Registry
@@ -302,7 +307,7 @@ uv run --frozen --group dev python scripts/run_quality_checks.py
 regression，并构建 wheel、隔离安装后调用标准命令。测试分层、静态检查范围和 CI 规则见
 [工程质量门禁](docs/quality-gates.md)。
 
-- 新增配置项：同步维护 `config.env.example`、环境适配器和对应领域 settings。
+- 新增配置项：同步维护对应领域 settings、`config/config.example.toml` 和环境变量映射。
 - 新增动作类型：更新 `ActionType`、动作参数 schema、GUI 表单和 WebSocket 执行器。
 - 新增技能：维护 `data/skills/skill_library.json`，或扩展默认技能定义。
 - 新增 WebSocket 接口：在领域 handler 和 route/payload schema 中注册，并同步更新 `docs/websocket-api.md`。
@@ -320,19 +325,21 @@ uv run robot-llm --simulation
 
 ### WebSocket 连不上
 
-确认 `WEBSOCKET_ENABLED=true`，并检查 `WEBSOCKET_HOST`、
-`WEBSOCKET_PORT` 或命令行 `--websocket-host`、`--websocket-port`。
+确认 `[server].websocket_enabled = true`，并检查 `websocket_host`、
+`websocket_port` 或命令行 `--websocket-host`、`--websocket-port`。
 
 ### AI 规划不可用
 
-检查 `LLM_DEFAULT_PROVIDER` 及对应模型配置是否正确，并调用 `ai_status` 查看服务端状态。
+检查 `[llm].llm_default_provider` 及对应模型配置是否正确，并调用 `ai_status` 查看服务端状态。
 
 ### 相机没有画面
 
-检查 `CAMERA_PROVIDER`、`REALSENSE_DEVICE_SN` 或 `WEBCAM_DEVICE_INDEXES`，并先调用 `camera_status` / `test_camera` 排查。
+检查 `[vision]` 中的 `camera_provider`、`realsense_device_sn` 或
+`webcam_device_indexes`，并先调用 `camera_status` / `test_camera` 排查。
 
 ## 参考文档
 
 - [WebSocket 接口手册](docs/websocket-api.md)
 - [依赖、配置与用户数据治理](docs/data-config-governance.md)
-- [配置模板](config.env.example)
+- [配置说明](docs/configuration.md)
+- [配置模板](config/config.example.toml)

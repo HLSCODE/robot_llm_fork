@@ -114,13 +114,13 @@ RealMan SDK、ctypes 绑定和平台原生库统一由 `robotic-arm` 可选依�
 
 工具架的三段运动和枪头弹出错误转换由 `RealManRobotAdapter` 负责；
 `RobotController` 只保留连接、SDK 生命周期和轨迹底层操作。通过
-`ROBOT_PROVIDER=realman` 选择当前实现。未知 Provider 在
+`[robot].robot_provider = "realman"` 选择当前实现。未知 Provider 在
 `DeviceRuntime` 组装阶段显式失败，不会回退到 RealMan。
 
 本次直接移除了 `GUN1_*`、`GUN2_*`、`MOVE_SPEED` 配置和旧的
 `arm_sdk/config.py`，不提供别名、转发或兼容读取。实际部署的
-`config.env` 如自定义过工具架点位，必须迁移到新的
-`ROBOT_TOOL_RACK_*` 键。
+旧环境配置如自定义过工具架点位，必须迁移到 `[robot]` 表中的
+`robot_tool_rack_*` 字段。
 
 ## 5. 新增供应商步骤
 

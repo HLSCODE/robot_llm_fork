@@ -4,7 +4,9 @@ AI助手 Tab 组件
 """
 import asyncio
 import logging
+from collections.abc import Callable, Coroutine
 from contextlib import AbstractContextManager
+from threading import Lock
 from time import monotonic
 from typing import Any
 
@@ -45,6 +47,59 @@ logger = logging.getLogger(__name__)
 INTERACTION_SHUTDOWN_TIMEOUT_SECONDS = 3.0
 
 
+class _OwnedAsyncioRunner:
+    """Own one worker event loop and stop its root task thread-safely."""
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task[None] | None = None
+        self._stop_requested = False
+
+    def run(self, coroutine_factory: Callable[[], Coroutine[Any, Any, None]]) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        task = loop.create_task(coroutine_factory())
+        with self._lock:
+            self._loop = loop
+            self._task = task
+            stop_requested = self._stop_requested
+        if stop_requested:
+            task.cancel()
+        try:
+            loop.run_until_complete(task)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._shutdown_loop(loop)
+            with self._lock:
+                self._task = None
+                self._loop = None
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._stop_requested:
+                return
+            self._stop_requested = True
+            loop = self._loop
+            task = self._task
+            if loop is None or task is None or loop.is_closed():
+                return
+            loop.call_soon_threadsafe(task.cancel)
+
+    @staticmethod
+    def _shutdown_loop(loop: asyncio.AbstractEventLoop) -> None:
+        pending = tuple(task for task in asyncio.all_tasks(loop) if not task.done())
+        for task in pending:
+            task.cancel()
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.run_until_complete(loop.shutdown_default_executor())
+
+
 class VoiceSessionWorker(QObject):
     """Run one text turn through the interaction controller in a background thread."""
 
@@ -63,15 +118,20 @@ class VoiceSessionWorker(QObject):
         self._controller = controller
         self._text = text
         self._require_awake = require_awake
+        self._runner = _OwnedAsyncioRunner()
 
     @Slot()
     def run(self) -> None:
         try:
-            asyncio.run(self._run_async())
+            self._runner.run(self._run_async)
         except Exception as exc:
             self.error_occurred.emit(str(exc))
         finally:
             self.finished.emit()
+
+    @Slot()
+    def stop(self) -> None:
+        self._runner.stop()
 
     async def _run_async(self) -> None:
         async for event in self._controller.handle_text(
@@ -100,11 +160,12 @@ class VoiceSpeechRuntimeWorker(QObject):
         self._audio_output_gate = audio_output_gate
         self._runtime: VoiceSpeechRuntime | None = None
         self._stop_requested = False
+        self._runner = _OwnedAsyncioRunner()
 
     @Slot()
     def run(self) -> None:
         try:
-            asyncio.run(self._run_async())
+            self._runner.run(self._run_async)
         except Exception as exc:
             self.error_occurred.emit(str(exc))
         finally:
@@ -115,6 +176,7 @@ class VoiceSpeechRuntimeWorker(QObject):
         self._stop_requested = True
         if self._runtime is not None:
             self._runtime.stop()
+        self._runner.stop()
 
     async def _run_async(self) -> None:
         from ..voice_interaction import build_voice_speech_runtime
@@ -563,7 +625,10 @@ class AIAssistantWidget(QWidget):
 
         # 检查API Key
         if not self._ai_controller.is_api_key_set():
-            self._add_system_message("请先配置 LLM 模型！\n请在项目根目录创建 config.env 文件，设置 LLM_DEFAULT_PROVIDER 及对应模型配置。")
+            self._add_system_message(
+                "请先配置 LLM 模型！\n"
+                "请在 config/config.toml 中设置 [llm]，并在 .env 中配置对应 API Key。"
+            )
             return
 
         # 添加用户消息
@@ -608,7 +673,10 @@ class AIAssistantWidget(QWidget):
             return True
 
         if not self._voice_config.get("speech_input_enabled"):
-            self._add_system_message("真实语音输入未启用。请在 config.env 中设置 VOICE_INPUT_ENABLED=true，并重启 GUI 后再启动监听。")
+            self._add_system_message(
+                "真实语音输入未启用。请在 config/config.toml 的 [voice] 中设置 "
+                "voice_input_enabled = true，并重启 GUI 后再启动监听。"
+            )
             self._update_speech_runtime_controls()
             return False
 
@@ -662,6 +730,7 @@ class AIAssistantWidget(QWidget):
         self.status_label.setText("状态: 对话处理中...")
 
         self._voice_thread = QThread(self)
+        self._voice_thread.setObjectName("VoiceSessionThread")
         self._voice_worker = VoiceSessionWorker(
             self._voice_controller,
             text,
@@ -1016,10 +1085,16 @@ class AIAssistantWidget(QWidget):
         self._shutdown_prepared = True
         if hasattr(self, "_voice_timeout_timer"):
             self._voice_timeout_timer.stop()
-        self._voice_controller.cancel_active_turn()
+        worker_stop_requested = False
+        if self._voice_worker is not None:
+            self._voice_worker.stop()
+            worker_stop_requested = True
         self._voice_audio_player.stop()
         if self._speech_worker is not None:
             self._speech_worker.stop()
+            worker_stop_requested = True
+        if not worker_stop_requested:
+            self._voice_controller.cancel_active_turn()
         for thread in (self._voice_thread, self._speech_thread):
             if thread is not None and thread.isRunning():
                 thread.quit()

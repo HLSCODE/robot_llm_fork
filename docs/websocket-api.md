@@ -101,13 +101,15 @@ uv sync --frozen
 
 ### 2.2 准备配置文件
 
-仓库当前不再提交 `config.env`，请从示例复制：
+仓库不提交本机配置，请复制 TOML 与密钥模板：
 
 ```bash
-cp config.env.example config.env
+cp config/config.example.toml config/config.toml
+cp .env.example .env
 ```
 
-也可以完全不创建 `config.env`，改用环境变量覆盖。
+也可以不创建本机文件，使用类型化默认值和系统环境变量覆盖；完整规则见
+[配置系统](configuration.md)。
 
 ### 2.3 启动命令
 
@@ -153,46 +155,44 @@ uv run robot-llm --simulation
 
 与接口能力直接相关的配置项如下：
 
-```env
-SIMULATION_MODE=false
+```toml
+[runtime]
+simulation_mode = false
 
-WEBSOCKET_ENABLED=true
-WEBSOCKET_SECURITY_ENABLED=false
-WEBSOCKET_HOST=127.0.0.1
-WEBSOCKET_PORT=8765
-WEBSOCKET_AUTH_TOKEN=
-WEBSOCKET_ALLOWED_ORIGINS=
-WEBSOCKET_TLS_CERTIFICATE_PATH=
-WEBSOCKET_TLS_PRIVATE_KEY_PATH=
-WEBSOCKET_REVERSE_PROXY_MODE=false
-WEBSOCKET_CONTROL_LEASE_SECONDS=30.0
-WEBSOCKET_MAX_MESSAGE_SIZE_BYTES=1048576
-WEBSOCKET_MAX_REQUESTS_PER_SECOND=120
-WEBSOCKET_MAX_CONCURRENT_REQUESTS=16
-WEBSOCKET_MAX_QUEUED_MESSAGES=16
-WEBSOCKET_SEND_TIMEOUT_SECONDS=2.0
-WEBSOCKET_SLOW_SEND_THRESHOLD_SECONDS=0.5
-AUXILIARY_SERVICE_START_TIMEOUT_SECONDS=5.0
-AUXILIARY_SERVICE_STOP_TIMEOUT_SECONDS=10.0
+[server]
+websocket_enabled = true
+websocket_security_enabled = false
+websocket_host = "127.0.0.1"
+websocket_port = 8765
+websocket_allowed_origins = []
+websocket_control_lease_seconds = 30.0
+websocket_max_message_size_bytes = 1048576
+websocket_max_requests_per_second = 120
+websocket_max_concurrent_requests = 16
+websocket_max_queued_messages = 16
+websocket_send_timeout_seconds = 2.0
+websocket_slow_send_threshold_seconds = 0.5
+auxiliary_service_start_timeout_seconds = 5.0
+auxiliary_service_stop_timeout_seconds = 10.0
 
-LLM_DEFAULT_PROVIDER=dashscope
-OPENAI_API_KEY=
-OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-OPENAI_MODEL=qwen-turbo
+[llm]
+llm_default_provider = "dashscope"
+openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+openai_model = "qwen-turbo"
+minicpm_gateway_host = "10.10.17.13"
+minicpm_gateway_port = 8006
+minicpm_ws_scheme = "wss"
+minicpm_realtime_path = "/v1/realtime"
+minicpm_ask_enabled = true
+minicpm_ask_base_url = ""
+minicpm_ask_model = "qwen-turbo"
 
-REALSENSE_DEVICE_SN=153122077516
-REALSENSE_DEVICE_NAMES=
-
-MINICPM_GATEWAY_HOST=10.10.17.13
-MINICPM_GATEWAY_PORT=8006
-MINICPM_WS_SCHEME=wss
-MINICPM_REALTIME_PATH=/v1/realtime
-
-MINICPM_ASK_ENABLED=true
-MINICPM_ASK_API_KEY=
-MINICPM_ASK_BASE_URL=
-MINICPM_ASK_MODEL=qwen-turbo
+[vision]
+realsense_device_sn = "153122077516"
+realsense_device_names = ""
 ```
+
+`OPENAI_API_KEY`、`MINICPM_ASK_API_KEY` 和 `WEBSOCKET_AUTH_TOKEN` 写入 `.env`。
 
 配置项说明：
 
@@ -2291,7 +2291,7 @@ WebSocket 返回；服务端内部日志仍记录诊断上下文。
 ```json
 {
   "event": "error",
-  "message": "LLM 不可用，请检查 config.env 中的模型配置"
+  "message": "LLM 不可用，请检查 TOML 与 .env 中的模型配置"
 }
 ```
 
@@ -3287,7 +3287,7 @@ function handleChatData(data) {
 ## 16. 运行约束与注意事项
 
 - 当前只使用 `uv run robot-llm`；WebSocket 由 GUI 应用宿主管理，不再维护独立 Server 启动入口
-- 仓库不再默认提交 `config.env`
+- 仓库不提交本机 `config/config.toml` 和 `.env`
 - 相机和 MiniCPM 功能现在优先走主控制 WebSocket 的 `action` 路由
 - 前端不要假设硬件一定在线
 - 前端不要写死动作编辑表单，应该优先使用 `get_action_schema`
