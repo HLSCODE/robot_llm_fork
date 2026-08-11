@@ -92,7 +92,13 @@ where = ["."]
 include = ["src*"]
 
 [tool.setuptools.package-data]
-"src.gui" = ["resources.qrc", "assets/icons/*.svg", "assets/icons/LICENSE.txt"]
+"src.gui" = [
+    "resources.qrc",
+    "assets/app/*.ico",
+    "assets/app/*.png",
+    "assets/icons/*.svg",
+    "assets/icons/LICENSE.txt",
+]
 "src" = [
     "builtin_catalogs/actions/*.json",
     "builtin_catalogs/skills/*/*.skill.json",

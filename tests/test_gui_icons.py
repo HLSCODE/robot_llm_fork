@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from typing import ClassVar
 
 from PySide6.QtCore import QSize
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon, QImage
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.domain.models import ActionDefinition, ActionType
@@ -11,6 +12,8 @@ from src.gui.icons import IconName, action_icon, themed_icon
 
 
 class GuiIconTests(unittest.TestCase):
+    application: ClassVar[QApplication]
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
@@ -22,6 +25,21 @@ class GuiIconTests(unittest.TestCase):
             self.assertFalse(icon.isNull(), name.value)
             for size in (QSize(16, 16), QSize(24, 24), QSize(32, 32)):
                 self.assertFalse(icon.pixmap(size).isNull(), (name.value, size))
+
+    def test_application_icon_resource_renders_at_desktop_sizes(self) -> None:
+        for resource in (
+            ":/app/app-icon-dark.png",
+            ":/app/app-icon-light.png",
+        ):
+            icon = QIcon(resource)
+            self.assertFalse(icon.isNull(), resource)
+            for size in (
+                QSize(16, 16),
+                QSize(32, 32),
+                QSize(48, 48),
+                QSize(256, 256),
+            ):
+                self.assertFalse(icon.pixmap(size).isNull(), (resource, size))
 
     def test_monochrome_svg_uses_requested_palette_color(self) -> None:
         widget = QWidget()
@@ -83,7 +101,7 @@ def _action(
     )
 
 
-def _contains_dominant_channel(image, *, channel: str) -> bool:
+def _contains_dominant_channel(image: QImage, *, channel: str) -> bool:
     for y in range(image.height()):
         for x in range(image.width()):
             color = image.pixelColor(x, y)

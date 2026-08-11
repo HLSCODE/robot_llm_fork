@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QColor, QIcon, QPalette
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import resources_rc as _resources_rc  # noqa: F401
@@ -144,9 +144,11 @@ class ThemeController(QObject):
         self.mode_changed.emit(mode)
 
     def apply(self) -> None:
-        colors = colors_for_mode(self.effective_mode)
+        effective_mode = self.effective_mode
+        colors = colors_for_mode(effective_mode)
         self._application.setPalette(build_palette(colors))
         self._application.setStyleSheet(build_stylesheet(colors))
+        self._application.setWindowIcon(application_icon_for_mode(effective_mode))
 
     def _on_system_color_scheme_changed(self, _scheme: Qt.ColorScheme) -> None:
         if self._mode is ThemeMode.SYSTEM:
@@ -157,6 +159,15 @@ def colors_for_mode(mode: ThemeMode) -> ThemeColors:
     if mode is ThemeMode.DARK:
         return DARK_COLORS
     return LIGHT_COLORS
+
+
+def application_icon_for_mode(mode: ThemeMode) -> QIcon:
+    resource = (
+        ":/app/app-icon-dark.png"
+        if mode is ThemeMode.DARK
+        else ":/app/app-icon-light.png"
+    )
+    return QIcon(resource)
 
 
 def apply_consistent_base_style(application: QApplication) -> None:

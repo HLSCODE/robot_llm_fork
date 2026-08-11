@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from typing import ClassVar
 
 from PySide6.QtCore import QFile, QPoint
 from PySide6.QtGui import QColor, QPalette
@@ -18,6 +19,8 @@ from src.gui.widget_style import COMBO_POPUP_GAP, QT_BASE_STYLE_NAME
 
 
 class GuiThemeTests(unittest.TestCase):
+    application: ClassVar[QApplication]
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
@@ -25,10 +28,12 @@ class GuiThemeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.original_palette = QApplication.palette()
         self.original_stylesheet = self.application.styleSheet()
+        self.original_window_icon = self.application.windowIcon()
 
     def tearDown(self) -> None:
         QApplication.setPalette(self.original_palette)
         self.application.setStyleSheet(self.original_stylesheet)
+        self.application.setWindowIcon(self.original_window_icon)
         QApplication.processEvents()
 
     def test_light_and_dark_modes_apply_one_application_palette(self) -> None:
@@ -38,6 +43,7 @@ class GuiThemeTests(unittest.TestCase):
             QColor(LIGHT_COLORS.window),
             QApplication.palette().color(QPalette.ColorRole.Window),
         )
+        light_icon_key = self.application.windowIcon().cacheKey()
         controller.set_mode(ThemeMode.DARK)
         self.assertEqual(ThemeMode.DARK, controller.mode)
         self.assertEqual(
@@ -52,6 +58,7 @@ class GuiThemeTests(unittest.TestCase):
             QColor(DARK_COLORS.tooltip),
             QApplication.palette().color(QPalette.ColorRole.ToolTipBase),
         )
+        self.assertNotEqual(light_icon_key, self.application.windowIcon().cacheKey())
         self.assertIn(
             'QPushButton[themeRole="danger"]',
             self.application.styleSheet(),

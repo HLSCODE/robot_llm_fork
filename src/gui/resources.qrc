@@ -1,4 +1,9 @@
 <RCC>
+  <qresource prefix="/app">
+    <file alias="app-icon.png">assets/app/app-icon.png</file>
+    <file alias="app-icon-dark.png">assets/app/app-icon-dark.png</file>
+    <file alias="app-icon-light.png">assets/app/app-icon-light.png</file>
+  </qresource>
   <qresource prefix="/icons">
     <file alias="tasks.svg">assets/icons/tasks.svg</file>
     <file alias="actions.svg">assets/icons/actions.svg</file>
