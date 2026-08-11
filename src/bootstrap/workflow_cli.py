@@ -8,9 +8,19 @@ from pathlib import Path
 import shutil
 from tempfile import TemporaryDirectory
 from typing import Mapping, Sequence
+from uuid import NAMESPACE_URL, uuid5
 
-from ..domain.models import SequenceEntry, sequence_entry_from_dict
+from ..domain.models import (
+    ActionType,
+    LoopBlock,
+    ParallelBlock,
+    SequenceEntry,
+    SequenceItem,
+    SubworkflowBlock,
+    sequence_entry_from_dict,
+)
 from ..domain.workflow import CanvasPosition, WorkflowDocument
+from ..geometry.pose_compensation import parse_pose
 from ..persistence.json_documents import read_json_document, write_json_atomic
 from ..persistence.storage import WORKFLOW_FILE_SUFFIX
 
@@ -26,12 +36,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, default=Path("data"))
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--normalize-active",
+        action="store_true",
+        help="Rewrite textual poses in active v4 workflows as numeric arrays.",
+    )
     args = parser.parse_args(argv)
     root = args.data_root.resolve()
     source_directory = root / "tasks"
     workflows_directory = root / "workflows"
     drafts_directory = root / "drafts"
     backup_directory = root / "migration-backups" / "workflow-v4"
+    if args.normalize_active:
+        changed = normalize_active_workflows(
+            workflows_directory,
+            root / "migration-backups" / "workflow-integrity-v1",
+        )
+        print(f"normalized {changed} active workflow documents")
+        return 0
+
     items = _plan(source_directory, workflows_directory, drafts_directory)
     print(f"legacy documents: {len(items)}")
     for item in items:
@@ -129,7 +152,10 @@ def _workflow_v1_document(path: Path) -> WorkflowDocument:
     order = [str(value) for value in raw_order]
     if len(order) != len(nodes) or set(order) != set(nodes):
         raise ValueError(f"{path.name}: order must reference every node exactly once")
-    entries = [nodes[node_id][0] for node_id in order]
+    entries = _normalize_entries(
+        [nodes[node_id][0] for node_id in order],
+        workflow_id=str(raw.get("workflow_id", "")).strip() or path.stem,
+    )
     positions = {entry.uuid: nodes[node_id][1] for node_id, entry in zip(order, entries)}
     return WorkflowDocument.from_entries(
         workflow_id=str(raw.get("workflow_id", "")).strip(),
@@ -141,7 +167,10 @@ def _workflow_v1_document(path: Path) -> WorkflowDocument:
 
 
 def _entries(path: Path, raw_entries: list[object]) -> list[SequenceEntry]:
-    return [_entry(path, raw_entry) for raw_entry in raw_entries]
+    return _normalize_entries(
+        [_entry(path, raw_entry) for raw_entry in raw_entries],
+        workflow_id=path.stem,
+    )
 
 
 def _entry(path: Path, raw_entry: object) -> SequenceEntry:
@@ -149,9 +178,119 @@ def _entry(path: Path, raw_entry: object) -> SequenceEntry:
         raise ValueError(f"{path.name}: entry must be an object")
     try:
         entry_data = dict(raw_entry)
-        return sequence_entry_from_dict(entry_data)
+        return _normalize_entry(sequence_entry_from_dict(entry_data))
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"{path.name}: invalid task entry") from exc
+
+
+def normalize_active_workflows(
+    workflows_directory: Path,
+    backup_directory: Path | None = None,
+) -> int:
+    """Rewrite valid v4 workflows to the canonical pose representation."""
+    if not workflows_directory.is_dir():
+        return 0
+
+    changes: list[tuple[Path, WorkflowDocument]] = []
+    for path in sorted(workflows_directory.glob(f"*{WORKFLOW_FILE_SUFFIX}")):
+        document = WorkflowDocument.from_dict(read_json_document(path))
+        entries = tuple(
+            _normalize_entries(
+                list(document.to_entries()),
+                workflow_id=document.workflow_id,
+            )
+        )
+        normalized = WorkflowDocument.from_entries(
+            workflow_id=document.workflow_id,
+            name=document.name,
+            revision=document.revision,
+            entries=entries,
+            positions=document.position_map(),
+        )
+        if normalized.to_dict() != document.to_dict():
+            changes.append((path, normalized))
+
+    if backup_directory is not None and changes:
+        collisions = [
+            backup_directory / path.name
+            for path, _document in changes
+            if (backup_directory / path.name).exists()
+        ]
+        if collisions:
+            raise FileExistsError(collisions[0])
+        backup_directory.mkdir(parents=True, exist_ok=True)
+        for path, _document in changes:
+            shutil.copy2(path, backup_directory / path.name)
+
+    for path, normalized in changes:
+        write_json_atomic(path, normalized.to_dict())
+    return len(changes)
+
+
+def _normalize_entry(entry: SequenceEntry) -> SequenceEntry:
+    if isinstance(entry, SequenceItem):
+        if entry.definition.type is ActionType.MOVE and "点位" in entry.definition.parameters:
+            entry.definition.parameters["点位"] = _parse_legacy_pose(
+                entry.definition.parameters["点位"]
+            )
+        return entry
+    if isinstance(entry, LoopBlock | SubworkflowBlock):
+        entry.items = [_normalize_entry(item) for item in entry.items]
+        return entry
+    if isinstance(entry, ParallelBlock):
+        for branch in entry.branches:
+            branch.items = [_normalize_entry(item) for item in branch.items]
+        return entry
+    raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
+
+
+def _parse_legacy_pose(value: object) -> list[float]:
+    if isinstance(value, str):
+        # Some legacy files captured the terminal bracketed-paste marker as text.
+        value = value.strip().removeprefix("[200~")
+    return parse_pose(value)
+
+
+def _normalize_entries(
+    entries: list[SequenceEntry],
+    *,
+    workflow_id: str,
+) -> list[SequenceEntry]:
+    normalized = [_normalize_entry(entry) for entry in entries]
+    used_uuids: set[str] = set()
+
+    def normalize_identity(entry: SequenceEntry, path: tuple[int, ...]) -> None:
+        entry_uuid = entry.uuid.strip()
+        if not entry_uuid or entry_uuid in used_uuids:
+            entry_uuid = str(
+                uuid5(
+                    NAMESPACE_URL,
+                    f"robot-llm/workflow/{workflow_id}/entry/{path}",
+                )
+            )
+            entry.uuid = entry_uuid
+        used_uuids.add(entry_uuid)
+
+        if isinstance(entry, SequenceItem):
+            if not entry.definition.id.strip():
+                entry.definition.id = f"legacy-{entry_uuid}"
+            if not entry.definition.name.strip():
+                entry.definition.name = f"未命名动作-{entry_uuid[:8]}"
+            return
+        if isinstance(entry, LoopBlock | SubworkflowBlock):
+            for index, child in enumerate(entry.items):
+                normalize_identity(child, (*path, index))
+            return
+        if isinstance(entry, ParallelBlock):
+            for branch_index, branch in enumerate(entry.branches):
+                for item_index, child in enumerate(branch.items):
+                    normalize_identity(child, (*path, branch_index, item_index))
+            return
+        raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
+
+    for index, entry in enumerate(normalized):
+        normalize_identity(entry, (index,))
+    return normalized
 
 
 def _apply(

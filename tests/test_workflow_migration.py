@@ -5,13 +5,76 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from src.bootstrap.workflow_cli import _apply, _plan
-from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.bootstrap.workflow_cli import _apply, _plan, normalize_active_workflows
+from src.domain.models import ActionDefinition, ActionType, LoopBlock, SequenceItem
 from src.domain.workflow import WorkflowDocument
 from src.persistence.json_documents import read_json_document
 
 
 class WorkflowMigrationTests(unittest.TestCase):
+    def test_active_workflow_text_poses_are_normalized_recursively(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            workflows = root / "workflows"
+            backups = root / "migration-backups" / "workflow-pose-v1"
+            workflows.mkdir()
+            move = SequenceItem(
+                uuid="move-1",
+                definition=ActionDefinition(
+                    id="",
+                    name="Move",
+                    type=ActionType.MOVE,
+                    parameters={
+                        "目标": "机械臂移动到指定点位",
+                        "臂": "左",
+                        "模式": "move_j",
+                        "点位": "[200~[1, 2, 3, 4, 5, 6]",
+                    },
+                ),
+            )
+            document = WorkflowDocument.from_entries(
+                workflow_id="demo",
+                name="demo",
+                revision=1,
+                entries=(
+                    LoopBlock(
+                        uuid="loop-1",
+                        items=[
+                            move,
+                            SequenceItem.from_dict(move.to_dict()),
+                        ],
+                        repeat_count=2,
+                    ),
+                ),
+            )
+            path = workflows / "demo.workflow.json"
+            path.write_text(
+                json.dumps(document.to_dict(), ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                1,
+                normalize_active_workflows(workflows, backups),
+            )
+
+            restored = WorkflowDocument.from_dict(read_json_document(path))
+            loop = restored.to_entries()[0]
+            self.assertIsInstance(loop, LoopBlock)
+            assert isinstance(loop, LoopBlock)
+            item = loop.items[0]
+            self.assertIsInstance(item, SequenceItem)
+            assert isinstance(item, SequenceItem)
+            self.assertEqual(
+                [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                item.definition.parameters["点位"],
+            )
+            self.assertTrue(item.definition.id.startswith("legacy-"))
+            duplicate = loop.items[1]
+            assert isinstance(duplicate, SequenceItem)
+            self.assertNotEqual(item.uuid, duplicate.uuid)
+            self.assertTrue((backups / path.name).is_file())
+
     def test_legacy_task_is_staged_verified_and_archived(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

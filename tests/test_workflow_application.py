@@ -336,6 +336,24 @@ class WorkflowCompilerTests(unittest.TestCase):
 
 
 class WorkflowPreflightTests(unittest.TestCase):
+    def test_ad_hoc_entries_use_the_same_device_readiness_check(self) -> None:
+        execution = _ExecutionProbe(
+            state=ExecutionState.IDLE,
+            resources=("robot_system",),
+        )
+        devices = _DeviceProbe({"robot_system": {"ready": False}})
+
+        result = WorkflowPreflightService(execution, devices).check_entries(
+            (_item("item-1"),)
+        )
+
+        self.assertFalse(result.ready)
+        self.assertEqual(("robot_system",), result.required_resources)
+        self.assertEqual(
+            (WorkflowPreflightIssueCode.DEVICE_NOT_READY,),
+            tuple(issue.code for issue in result.issues),
+        )
+
     def test_active_execution_and_device_readiness_are_reported_separately(self) -> None:
         compiled = WorkflowCompiler().compile(
             _document((_node("node-1", _item("item-1")),))

@@ -8,8 +8,8 @@
     },
     {
       "name": "robot_command_planner",
-      "version": "2.0.0",
-      "template_sha256": "5e590f8b7e65006d78ece67afcc47a290baddf1fcec874fe97b6f93a9d0d6f50"
+      "version": "2.1.0",
+      "template_sha256": "c058799299f0952fdf9ef793448a730c93a4c0b514abc53035e7e63b12ce0aa8"
     }
   ],
   "classification_cases": [

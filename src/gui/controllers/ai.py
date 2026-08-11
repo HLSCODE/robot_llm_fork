@@ -68,6 +68,14 @@ class AIController(QObject):
             return False
 
         sequence = list(command.sequence)
+        preflight = self._services.workflow_preflight.check_entries(sequence)
+        if not preflight.ready:
+            message = "；".join(issue.message for issue in preflight.issues)
+            self.error_occurred.emit(message)
+            self.execution_finished.emit(False, message)
+            self.status_changed.emit("设备未就绪")
+            return False
+
         self.status_changed.emit("执行中...")
         self.execution_started.emit()
         self.sequence_execution_started.emit(sequence)

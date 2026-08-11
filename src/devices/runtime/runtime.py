@@ -127,6 +127,25 @@ class DeviceRuntime:
         return {device_id: self.snapshot(device_id) for device_id in selected}
 
     def require(self, device_id: str, expected_type: type[T] | None = None) -> T:
+        record = self._record(device_id)
+        with record.lock:
+            if record.state is DeviceState.FAILED:
+                try:
+                    category = DeviceErrorCategory(record.error_category)
+                except ValueError:
+                    category = DeviceErrorCategory.UNAVAILABLE
+                raise DeviceOperationError(
+                    device_id=device_id,
+                    operation="device.require",
+                    category=category,
+                    user_message=record.error or "设备当前不可用",
+                    diagnostic_message=(
+                        f"device '{device_id}' has a cached initialization "
+                        "failure; explicit reinitialization is required"
+                    ),
+                    raw_error_code=record.raw_error_code,
+                )
+
         instance = self.initialize(device_id)
         if expected_type is not None and not isinstance(instance, expected_type):
             raise DeviceContractError(

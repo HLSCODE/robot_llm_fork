@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
 from ..domain.execution_plan import ExecutionPlan
+from ..domain.models import SequenceEntry
 from ..execution import ExecutionSnapshot
 from .workflow_compiler import CompiledWorkflow
 
@@ -64,6 +66,16 @@ class WorkflowPreflightService:
         self._devices = devices
 
     def check(self, workflow: CompiledWorkflow) -> WorkflowPreflightResult:
+        return self.check_plan(workflow.plan)
+
+    def check_entries(
+        self,
+        entries: Sequence[SequenceEntry],
+    ) -> WorkflowPreflightResult:
+        """Check an ad-hoc sequence, including AI-generated commands."""
+        return self.check_plan(ExecutionPlan.from_entries(entries))
+
+    def check_plan(self, plan: ExecutionPlan) -> WorkflowPreflightResult:
         issues: list[WorkflowPreflightIssue] = []
         snapshot = self._execution.snapshot()
         if snapshot.active:
@@ -75,7 +87,7 @@ class WorkflowPreflightService:
             )
 
         try:
-            resources = self._execution.required_resources(workflow.plan)
+            resources = self._execution.required_resources(plan)
         except (KeyError, TypeError, ValueError, RuntimeError) as exc:
             issues.append(
                 WorkflowPreflightIssue(

@@ -17,6 +17,7 @@ from src.llm.errors import LLMProviderError, LLMResponseParseError
 from src.llm.regression import run_regression_suite
 from src.llm.routing import ProviderHealthTracker
 from src.llm.tasks.classifier import InstructionClassifier
+from src.llm.tasks.planner import ROBOT_PLANNER_PROFILE
 
 
 TEST_PROFILE = TaskProfile(
@@ -383,6 +384,20 @@ class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
 
 
 class LLMPlanningRegressionTests(unittest.IsolatedAsyncioTestCase):
+    def test_planner_prompt_forbids_cross_kind_fields(self) -> None:
+        prompt = ROBOT_PLANNER_PROFILE.render_system_prompt(
+            command_catalog="[]"
+        )
+
+        self.assertIn(
+            "action_name` 和 `action_id` 只能出现在 kind=action",
+            prompt,
+        )
+        self.assertIn(
+            'Skill：{"kind":"skill","skill_id"',
+            prompt,
+        )
+
     async def test_planner_records_command_catalog_version(self):
         provider = _FakeProvider(
             "dashscope",

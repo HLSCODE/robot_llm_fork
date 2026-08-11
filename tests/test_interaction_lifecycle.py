@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from threading import Event, Thread
+from typing import Any
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -78,6 +79,23 @@ class _Completions:
 
     async def create(self, **_request):
         return self._stream
+
+
+class _RequestScopedOpenAIClient:
+    def __init__(self, result: Any) -> None:
+        self.chat = SimpleNamespace(completions=_Completions(result))
+        self.close_count = 0
+
+    async def close(self) -> None:
+        self.close_count += 1
+
+
+def _chat_response(text: str) -> Any:
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+        usage=None,
+        model_dump=lambda: {"text": text},
+    )
 
 
 class _BlockingVoiceController:
@@ -362,14 +380,12 @@ class LLMRegistryLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancelled_stream_closes_upstream_response(self):
         stream = _BlockingStream()
+        request_client = _RequestScopedOpenAIClient(stream)
         client = OpenAICompatibleClient(
             provider_name="test",
-            api_key="",
+            api_key="test-key",
+            client_factory=lambda: request_client,
         )
-        client._async_client = SimpleNamespace(
-            chat=SimpleNamespace(completions=_Completions(stream))
-        )
-        client._available = True
 
         async def consume() -> None:
             async for _event in client.stream_chat(
@@ -384,6 +400,32 @@ class LLMRegistryLifecycleTests(unittest.IsolatedAsyncioTestCase):
             await task
 
         self.assertEqual(1, stream.close_count)
+        self.assertEqual(1, request_client.close_count)
+
+
+class OpenAIEventLoopOwnershipTests(unittest.TestCase):
+    def test_request_transport_closes_before_its_event_loop(self) -> None:
+        request_clients: list[_RequestScopedOpenAIClient] = []
+
+        def create_client() -> _RequestScopedOpenAIClient:
+            client = _RequestScopedOpenAIClient(_chat_response("ok"))
+            request_clients.append(client)
+            return client
+
+        client = OpenAICompatibleClient(
+            provider_name="test",
+            api_key="test-key",
+            client_factory=create_client,
+        )
+
+        result = asyncio.run(
+            client.chat([LLMMessage(role="user", content="hello")])
+        )
+        asyncio.run(client.close())
+
+        self.assertEqual("ok", result.text)
+        self.assertEqual(1, len(request_clients))
+        self.assertEqual(1, request_clients[0].close_count)
 
 
 async def _collect(

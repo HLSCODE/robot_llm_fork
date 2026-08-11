@@ -17,6 +17,8 @@ from src.observability.logging_config import LoggingContextFilter
 from src.configuration.settings import ApplicationSettings
 from src.devices import (
     DeviceCapability,
+    DeviceErrorCategory,
+    DeviceOperationError,
     DeviceRegistration,
     DeviceRuntime,
     DeviceSafeStateStatus,
@@ -149,6 +151,43 @@ def _parallel_wait(action_id: str) -> SequenceItem:
 
 
 class DeviceRuntimeTests(unittest.TestCase):
+    def test_require_does_not_retry_a_known_failed_device(self):
+        runtime = DeviceRuntime()
+        attempts = 0
+
+        def failing_factory() -> _CloseTracker:
+            nonlocal attempts
+            attempts += 1
+            raise ConnectionError("robot is offline")
+
+        runtime.register(
+            DeviceRegistration(
+                device_id="offline-robot",
+                capabilities=frozenset({DeviceCapability.MOTION}),
+                factory=failing_factory,
+                close=lambda device: device.close(),
+            )
+        )
+
+        with self.assertRaises(DeviceOperationError):
+            runtime.initialize("offline-robot")
+        self.assertEqual(1, attempts)
+
+        with self.assertRaises(DeviceOperationError) as raised:
+            runtime.require("offline-robot")
+
+        self.assertEqual(1, attempts)
+        self.assertEqual("device.require", raised.exception.operation)
+        self.assertEqual(
+            DeviceErrorCategory.UNAVAILABLE,
+            raised.exception.category,
+        )
+
+        # A user-initiated reconnect remains possible through the explicit API.
+        with self.assertRaises(DeviceOperationError):
+            runtime.initialize("offline-robot")
+        self.assertEqual(2, attempts)
+
     def test_runtime_owns_one_instance_and_can_reinitialize_after_shutdown(self):
         runtime = DeviceRuntime()
         created: list[_CloseTracker] = []

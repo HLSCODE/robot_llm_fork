@@ -26,7 +26,7 @@ ClientResolver = Callable[[TaskProfile, Optional[str]], BaseLLMClient]
 
 ROBOT_PLANNER_PROFILE = TaskProfile(
     name="robot_command_planner",
-    version="2.0.0",
+    version="2.1.0",
     temperature=0.3,
     max_tokens=800,
     response_format="json",
@@ -40,25 +40,23 @@ $command_catalog
 
 请分析用户输入并返回一种明确的类型化命令。
 
-返回格式要求（必须严格遵循JSON格式）：
+返回格式要求（必须严格遵循 JSON 格式）：
 {
-  "command": {
-    "kind": "action | skill | workflow | execution_control",
-    "action_type": "action 命令使用标准 ActionType，否则省略",
-    "action_id": "已有动作 ID，可选",
-    "action_name": "动作展示名称，可选",
-    "skill_id": "skill 命令使用，否则省略",
-    "workflow_name": "workflow 命令使用，否则省略",
-    "action": "execution_control 使用 cancel | pause | resume，否则省略",
-    "parameters": {"严格使用目录中声明的参数字段": "值"}
-  },
+  "command": "下列四种对象之一，无法确定时为 null",
   "reasoning": "你的分析思路（1-2句话）",
   "confidence": 置信度0.0~1.0，低于0.5视为无法匹配
 }
 
+command 必须严格选择以下一种结构，不得混入其他 kind 的字段：
+1. Action：{"kind":"action","action_type":"标准 ActionType","parameters":{},"action_id":"可选","action_name":"可选"}
+2. Skill：{"kind":"skill","skill_id":"目录中的技能 ID","parameters":{}}
+3. Workflow：{"kind":"workflow","workflow_name":"目录中的流程名称"}
+4. ExecutionControl：{"kind":"execution_control","action":"cancel | pause | resume"}
+
 重要规则：
 - 只返回上述JSON格式，不要包含任何其他文字
 - 如果无法确定唯一命令，将 command 设置为 null 并说明歧义，不得猜测机械臂或设备
+- `action_name` 和 `action_id` 只能出现在 kind=action 中；skill/workflow/execution_control 禁止携带这两个字段
 - parameters 中的字段必须与 Action/Skill 目录一致
 - 只做规划，不得声称已经执行硬件动作""",
 )

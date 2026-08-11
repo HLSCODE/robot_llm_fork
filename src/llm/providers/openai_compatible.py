@@ -7,7 +7,7 @@ import asyncio
 import inspect
 import logging
 from collections.abc import AsyncIterator
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..base import BaseLLMClient
 from ..errors import LLMConfigError, LLMProviderError
@@ -23,7 +23,11 @@ logger = logging.getLogger(__name__)
 
 
 class OpenAICompatibleClient(BaseLLMClient):
-    """OpenAI Chat Completions 兼容 provider。"""
+    """OpenAI Chat Completions 兼容 provider。
+
+    Registry 会跨 GUI、语音和 WebSocket 事件循环共享此适配器，因此底层
+    AsyncOpenAI/httpx transport 必须按请求创建，并在所属事件循环内关闭。
+    """
 
     def __init__(
         self,
@@ -33,12 +37,13 @@ class OpenAICompatibleClient(BaseLLMClient):
         base_url: str = "",
         default_model: str = "gpt-4o",
         timeout_s: float = 60.0,
+        client_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._provider_name = provider_name
         self._api_key = api_key or ""
         self._model = model or default_model
         self._base_url = base_url or ""
-        self._async_client = None
+        self._client_factory: Callable[[], Any] | None = None
         self._available = False
 
         if not self._api_key:
@@ -46,15 +51,18 @@ class OpenAICompatibleClient(BaseLLMClient):
             return
 
         try:
-            from openai import AsyncOpenAI
-
             kwargs: Dict[str, Any] = {
                 "api_key": self._api_key,
                 "timeout": float(timeout_s),
             }
             if self._base_url:
                 kwargs["base_url"] = self._base_url
-            self._async_client = AsyncOpenAI(**kwargs)
+            if client_factory is None:
+                from openai import AsyncOpenAI
+
+                self._client_factory = lambda: AsyncOpenAI(**kwargs)
+            else:
+                self._client_factory = client_factory
             self._available = True
             url_info = f", base_url={self._base_url}" if self._base_url else ""
             logger.info(
@@ -69,7 +77,7 @@ class OpenAICompatibleClient(BaseLLMClient):
             logger.error("%s LLM 客户端初始化失败: %s", provider_name, exc)
 
     def is_available(self) -> bool:
-        return self._available and self._async_client is not None
+        return self._available and self._client_factory is not None
 
     def get_model_name(self) -> str:
         return self._model
@@ -95,10 +103,8 @@ class OpenAICompatibleClient(BaseLLMClient):
 
         request = self._build_chat_request(messages, options, stream=False)
 
+        client = self._create_client()
         try:
-            client = self._async_client
-            if client is None:
-                raise LLMConfigError(f"{self._provider_name} LLM 客户端未初始化")
             response = await client.chat.completions.create(**request)
             message = response.choices[0].message
             text = (message.content or "").strip()
@@ -113,6 +119,8 @@ class OpenAICompatibleClient(BaseLLMClient):
             raise
         except Exception as exc:
             raise LLMProviderError(str(exc)) from exc
+        finally:
+            await client.close()
 
     async def stream_chat(
         self,
@@ -129,11 +137,9 @@ class OpenAICompatibleClient(BaseLLMClient):
         request = self._build_chat_request(messages, options, stream=True)
         text_parts: List[str] = []
 
+        client = self._create_client()
         stream = None
         try:
-            client = self._async_client
-            if client is None:
-                raise LLMConfigError(f"{self._provider_name} LLM 客户端未初始化")
             stream = await client.chat.completions.create(**request)
             async for chunk in stream:
                 delta = chunk.choices[0].delta if chunk.choices else None
@@ -161,13 +167,17 @@ class OpenAICompatibleClient(BaseLLMClient):
                 result = close()
                 if inspect.isawaitable(result):
                     await result
+            await client.close()
 
     async def close(self) -> None:
-        client = self._async_client
-        self._async_client = None
+        self._client_factory = None
         self._available = False
-        if client is not None:
-            await client.close()
+
+    def _create_client(self) -> Any:
+        factory = self._client_factory
+        if not self._available or factory is None:
+            raise LLMConfigError(f"{self._provider_name} LLM 客户端未初始化")
+        return factory()
 
     def _build_chat_request(
         self,
