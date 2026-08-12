@@ -6,6 +6,7 @@ from functools import partial
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -15,6 +16,14 @@ from PySide6.QtWidgets import (
 )
 
 from ..view_models.models import DeviceViewState
+
+
+_DEVICE_STATUS_TITLES = {
+    "robot": "机械臂",
+    "body": "身体轴",
+    "pipette": "移液器",
+    "relay": "继电器",
+}
 
 
 class DeviceHealthView(QWidget):
@@ -28,30 +37,26 @@ class DeviceHealthView(QWidget):
     def _create_status_panel(self) -> QWidget:
         panel = QFrame()
         panel.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        panel.setMinimumHeight(72)
-        panel.setMaximumHeight(90)
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(4)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         title = QLabel("🔌 设备状态")
         title_font = title.font()
         title_font.setBold(True)
         title.setFont(title_font)
         layout.addWidget(title)
-        row = QHBoxLayout()
-        row.setSpacing(16)
+        status_grid = QGridLayout()
+        status_grid.setContentsMargins(0, 0, 0, 0)
+        status_grid.setHorizontalSpacing(24)
+        status_grid.setVerticalSpacing(8)
+        status_grid.setColumnStretch(0, 1)
+        status_grid.setColumnStretch(1, 1)
         self._statuses: dict[str, tuple[QLabel, QLabel]] = {}
-        for key, status_title in (
-            ("robot1", "R1"),
-            ("robot2", "R2"),
-            ("body", "body"),
-            ("pipette", "hand"),
-        ):
+        for index, (key, status_title) in enumerate(_DEVICE_STATUS_TITLES.items()):
             widget, indicator, text = self._create_status_item(status_title, key)
             self._statuses[key] = (indicator, text)
-            row.addWidget(widget)
-        row.addStretch()
-        layout.addLayout(row)
+            status_grid.addWidget(widget, index // 2, index % 2)
+        layout.addLayout(status_grid)
         return panel
 
     @staticmethod
@@ -72,16 +77,17 @@ class DeviceHealthView(QWidget):
 
     def render_state(self, state: DeviceViewState) -> None:
         readiness = {
-            "robot1": state.robot_ready,
-            "robot2": state.robot_ready,
+            "robot": state.robot_ready,
             "body": state.body_ready,
             "pipette": state.pipette_ready,
+            "relay": state.relay_ready,
         }
         for key, ready in readiness.items():
             indicator, label = self._statuses[key]
             color = "#22c55e" if ready else "#ef4444"
             indicator.setStyleSheet(f"background-color: {color}; border-radius: 8px;")
-            label.setText("已连接" if ready else "未连接")
+            status_text = "已连接" if ready else "未连接"
+            label.setText(f"{_DEVICE_STATUS_TITLES[key]}: {status_text}")
 
 
 class DevicePoseView(QWidget):
