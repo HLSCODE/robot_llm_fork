@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -108,12 +109,13 @@ class DevicePoseView(QWidget):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
         header = QHBoxLayout()
-        title = QLabel("📍 机械臂位姿")
+        title = QLabel("机械臂位姿")
         title_font = title.font()
         title_font.setBold(True)
         title.setFont(title_font)
         refresh = QPushButton("刷新")
-        refresh.setFixedHeight(24)
+        refresh.setObjectName("poseRefreshButton")
+        refresh.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         refresh.clicked.connect(lambda: self.refresh_requested.emit())
         header.addWidget(title)
         header.addStretch()
@@ -128,36 +130,51 @@ class DevicePoseView(QWidget):
 
     def _add_pose_row(self, parent: QVBoxLayout, title: str, robot_name: str) -> QLabel:
         row = QHBoxLayout()
+        row.setSpacing(8)
         label = QLabel(f"{title}:")
-        label.setFixedWidth(36)
         label_font = label.font()
         label_font.setBold(True)
         label.setFont(label_font)
         value = QLabel("--")
+        value.setObjectName(f"{robot_name}PoseValue")
+        value.setWordWrap(True)
+        value.setMinimumWidth(0)
+        value.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         copy = QPushButton("复制")
-        copy.setFixedHeight(24)
+        copy.setObjectName(f"{robot_name}PoseCopyButton")
+        copy.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         copy.clicked.connect(
             lambda _checked=False, name=robot_name: self.copy_pose_requested.emit(name)
         )
-        row.addWidget(label)
-        row.addWidget(value, stretch=1)
-        row.addWidget(copy)
+        row.addWidget(label, alignment=Qt.AlignmentFlag.AlignTop)
+        row.addWidget(value, stretch=1, alignment=Qt.AlignmentFlag.AlignTop)
+        row.addWidget(copy, alignment=Qt.AlignmentFlag.AlignTop)
         parent.addLayout(row)
         return value
 
     @staticmethod
     def _add_localization_row(parent: QVBoxLayout) -> QLabel:
         row = QHBoxLayout()
+        row.setSpacing(8)
         label = QLabel("底盘:")
-        label.setFixedWidth(36)
         label_font = label.font()
         label_font.setBold(True)
         label.setFont(label_font)
         value = QLabel("--")
+        value.setObjectName("localizationPoseValue")
+        value.setWordWrap(True)
+        value.setMinimumWidth(0)
+        value.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
         value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        row.addWidget(label)
-        row.addWidget(value, stretch=1)
+        row.addWidget(label, alignment=Qt.AlignmentFlag.AlignTop)
+        row.addWidget(value, stretch=1, alignment=Qt.AlignmentFlag.AlignTop)
         parent.addLayout(row)
         return value
 
