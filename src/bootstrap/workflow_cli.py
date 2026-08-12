@@ -32,6 +32,18 @@ class MigrationItem:
     document: WorkflowDocument
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowMigrationResult:
+    """Result of one idempotent legacy-workflow migration pass."""
+
+    migrated_files: tuple[Path, ...]
+    backup_directory: Path
+
+    @property
+    def migrated_count(self) -> int:
+        return len(self.migrated_files)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, default=Path("data"))
@@ -46,7 +58,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     source_directory = root / "tasks"
     workflows_directory = root / "workflows"
     drafts_directory = root / "drafts"
-    backup_directory = root / "migration-backups" / "workflow-v4"
     if args.normalize_active:
         changed = normalize_active_workflows(
             workflows_directory,
@@ -62,9 +73,58 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.apply:
         print("dry run; pass --apply to migrate")
         return 0
-    _apply(items, source_directory, workflows_directory, backup_directory)
-    print(f"migrated {len(items)} documents; originals archived in {backup_directory}")
+    result = migrate_legacy_workflows(
+        root,
+        workflows_directory=workflows_directory,
+        drafts_directory=drafts_directory,
+    )
+    print(
+        f"migrated {result.migrated_count} documents; "
+        f"originals archived in {result.backup_directory}"
+    )
     return 0
+
+
+def migrate_legacy_workflows(
+    data_root: Path,
+    *,
+    workflows_directory: Path | None = None,
+    drafts_directory: Path | None = None,
+) -> WorkflowMigrationResult:
+    """Migrate legacy files below ``data_root/tasks`` exactly once.
+
+    Active workflow and draft directories may be overridden independently by
+    configuration. Existing canonical workflows are never overwritten.
+    """
+    root = data_root.resolve()
+    source_directory = root / "tasks"
+    active_workflows_directory = (
+        workflows_directory.resolve()
+        if workflows_directory is not None
+        else root / "workflows"
+    )
+    active_drafts_directory = (
+        drafts_directory.resolve()
+        if drafts_directory is not None
+        else root / "drafts"
+    )
+    backup_directory = root / "migration-backups" / "workflow-v4"
+    items = _plan(
+        source_directory,
+        active_workflows_directory,
+        active_drafts_directory,
+    )
+    if items:
+        _apply(
+            items,
+            source_directory,
+            active_workflows_directory,
+            backup_directory,
+        )
+    return WorkflowMigrationResult(
+        migrated_files=tuple(item.target for item in items),
+        backup_directory=backup_directory,
+    )
 
 
 def _plan(
@@ -299,6 +359,20 @@ def _apply(
     workflows_directory: Path,
     backup_directory: Path,
 ) -> None:
+    workflows_directory.parent.mkdir(parents=True, exist_ok=True)
+    sources = tuple(
+        source
+        for source in sorted(source_directory.iterdir())
+        if source.is_file()
+    )
+    collisions = [
+        backup_directory / source.name
+        for source in sources
+        if (backup_directory / source.name).exists()
+    ]
+    if collisions:
+        raise FileExistsError(collisions[0])
+
     with TemporaryDirectory(prefix="workflow-v4-", dir=workflows_directory.parent) as raw_stage:
         stage = Path(raw_stage)
         staged: list[tuple[Path, MigrationItem]] = []
@@ -314,12 +388,8 @@ def _apply(
             staged_path.replace(item.target)
 
     backup_directory.mkdir(parents=True, exist_ok=True)
-    for source in sorted(source_directory.iterdir()):
-        if not source.is_file():
-            continue
+    for source in sources:
         destination = backup_directory / source.name
-        if destination.exists():
-            raise FileExistsError(destination)
         shutil.move(str(source), destination)
 
 

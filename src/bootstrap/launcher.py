@@ -16,8 +16,10 @@ from ..configuration.config_validation import (
     StartupOptions,
     validate_startup_configuration,
 )
+from ..configuration.data_paths import ApplicationDataPaths
 from ..observability.logging_config import configure_logging
 from ..configuration.settings import ApplicationSettings
+from .workflow_cli import WorkflowMigrationResult, migrate_legacy_workflows
 
 
 if TYPE_CHECKING:
@@ -25,6 +27,18 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+def migrate_startup_workflows(
+    settings: ApplicationSettings,
+) -> WorkflowMigrationResult:
+    """Upgrade legacy user workflows before repositories read active data."""
+    paths = ApplicationDataPaths.from_settings(settings.data)
+    return migrate_legacy_workflows(
+        paths.root,
+        workflows_directory=paths.workflows_directory,
+        drafts_directory=paths.workflow_drafts_directory,
+    )
 
 
 class _QtThreadHandle(Protocol):
@@ -151,9 +165,16 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     try:
         startup_card.set_progress(
             8,
-            "正在创建应用服务...",
-            "加载配置、动作库、技能库与统一执行运行时",
+            "正在检查任务数据...",
+            "迁移旧版任务并加载动作库、技能库与统一执行运行时",
         )
+        migration = migrate_startup_workflows(settings)
+        if migration.migrated_count:
+            logger.info(
+                "旧任务迁移完成: count=%d backup=%s",
+                migration.migrated_count,
+                migration.backup_directory,
+            )
         services = create_application_services(
             settings,
             simulation=args.simulation,

@@ -1,17 +1,74 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from src.bootstrap.workflow_cli import _apply, _plan, normalize_active_workflows
+from src.bootstrap.workflow_cli import (
+    _apply,
+    _plan,
+    migrate_legacy_workflows,
+    normalize_active_workflows,
+)
+from src.bootstrap.launcher import migrate_startup_workflows
+from src.configuration.settings import ApplicationSettings
 from src.domain.models import ActionDefinition, ActionType, LoopBlock, SequenceItem
 from src.domain.workflow import WorkflowDocument
 from src.persistence.json_documents import read_json_document
 
 
 class WorkflowMigrationTests(unittest.TestCase):
+    def test_startup_migration_discovers_tasks_below_data_root(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            tasks = root / "tasks"
+            workflows = root / "configured-workflows"
+            drafts = root / "configured-drafts"
+            tasks.mkdir()
+            item = SequenceItem(
+                uuid="step-1",
+                definition=ActionDefinition(
+                    id="wait",
+                    name="Wait",
+                    type=ActionType.WAIT,
+                    parameters={"wait_seconds": 1.0},
+                ),
+            )
+            (tasks / "legacy.task").write_text(
+                json.dumps([item.to_dict()]),
+                encoding="utf-8",
+            )
+
+            defaults = ApplicationSettings.defaults()
+            settings = replace(
+                defaults,
+                data=replace(
+                    defaults.data,
+                    robot_data_dir=str(root),
+                    workflows_directory=str(workflows),
+                    workflow_drafts_directory=str(drafts),
+                ),
+            )
+            result = migrate_startup_workflows(settings)
+
+            target = workflows / "legacy.workflow.json"
+            self.assertEqual(1, result.migrated_count)
+            self.assertEqual((target,), result.migrated_files)
+            self.assertTrue(target.is_file())
+            self.assertTrue(
+                (result.backup_directory / "legacy.task").is_file()
+            )
+            self.assertEqual(
+                0,
+                migrate_legacy_workflows(
+                    root,
+                    workflows_directory=workflows,
+                    drafts_directory=drafts,
+                ).migrated_count,
+            )
+
     def test_active_workflow_text_poses_are_normalized_recursively(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
