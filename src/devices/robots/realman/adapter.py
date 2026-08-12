@@ -20,6 +20,7 @@ from ...runtime.arm_models import (
     TrajectorySaveResult,
 )
 from ...runtime.models import StopMode
+from .state import realman_state_error_codes
 
 _GRAM_FORCE_TO_NEWTONS = 0.00980665
 
@@ -242,7 +243,13 @@ class RealManRobotAdapter:
             connected=selected.connected,
             blocking=selected.blocking,
         )
-        self._ensure_success("move_to_pose", arm, code)
+        if code != 0:
+            raise RobotOperationError(
+                "move_to_pose",
+                arm,
+                code=int(code),
+                detail=self._motion_rejection_detail(arm, pose, mode),
+            )
 
     def read_arm_state(self, arm: ArmId) -> ArmState:
         response = self._controller.read_state(self._arm_key(arm))
@@ -481,17 +488,13 @@ class RealManRobotAdapter:
                 arm,
                 detail="SDK returned an invalid state payload",
             )
-        device_error = max(
-            int(state.get("error_code", 0)),
-            int(state.get("arm_err", 0)),
-            int(state.get("sys_err", 0)),
-        )
-        if device_error:
+        state_errors = realman_state_error_codes(state)
+        if state_errors:
             raise RobotOperationError(
                 "read_arm_state",
                 arm,
-                code=device_error,
-                detail="device reported an error",
+                code=state_errors[0],
+                detail=f"device reported errors {state_errors}",
             )
         pose = CartesianPose.from_iterable(state.get("pose", ()))
         raw_joints = state.get("joint")
@@ -504,8 +507,39 @@ class RealManRobotAdapter:
             arm=arm,
             pose=pose,
             joints=joints,
-            device_error_code=device_error,
+            device_error_code=0,
         )
+
+    def _motion_rejection_detail(
+        self,
+        arm: ArmId,
+        target_pose: CartesianPose,
+        mode: MotionMode,
+    ) -> str:
+        details = [
+            "controller returned false; check target reachability, joint limits, "
+            "emergency-stop/enable state and active robot mode",
+            f"mode={mode.value}",
+            f"target_pose={target_pose.to_list()}",
+        ]
+        try:
+            response = self._controller.read_state(self._arm_key(arm))
+        except Exception as exc:
+            details.append(f"state_read_failed={type(exc).__name__}: {exc}")
+            return "; ".join(details)
+        if response is None:
+            details.append("state_read_failed=arm busy")
+            return "; ".join(details)
+        state_code, state = response
+        if state_code != 0 or not isinstance(state, dict):
+            details.append(f"state_return_code={state_code}")
+            return "; ".join(details)
+        state_errors = realman_state_error_codes(state)
+        details.append(f"controller_errors={state_errors or 'none reported'}")
+        current_pose = state.get("pose")
+        if isinstance(current_pose, (list, tuple)):
+            details.append(f"current_pose={list(current_pose)}")
+        return "; ".join(details)
 
     def _telemetry_from_payload(
         self,

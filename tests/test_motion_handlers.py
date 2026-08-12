@@ -14,6 +14,7 @@ from src.devices import (
     DeviceRegistration,
     DeviceRuntime,
     MotionMode,
+    RobotOperationError,
 )
 from src.devices.runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
 from src.execution import (
@@ -33,8 +34,14 @@ from src.execution.handlers import (
 
 
 class _RecordingArmMotion:
-    def __init__(self, failures_before_success: int = 0) -> None:
+    def __init__(
+        self,
+        failures_before_success: int = 0,
+        *,
+        rejection: RobotOperationError | None = None,
+    ) -> None:
         self.failures_before_success = failures_before_success
+        self.rejection = rejection
         self.calls: list[tuple[ArmId, CartesianPose, MotionMode]] = []
 
     def move_to_pose(
@@ -45,6 +52,8 @@ class _RecordingArmMotion:
         _options=None,
     ) -> None:
         self.calls.append((arm, pose, mode))
+        if self.rejection is not None:
+            raise self.rejection
         if len(self.calls) <= self.failures_before_success:
             raise RuntimeError("transient motion failure")
 
@@ -231,6 +240,48 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
         self.assertEqual(MotionMode.JOINT, mode)
         self.assertEqual(0.2, pose.z_m)
         self.assertIn(("机械臂移动执行完成", "info"), logs)
+
+    def test_explicit_robot_rejection_is_not_retried(self):
+        rejection = RobotOperationError(
+            "move_to_pose",
+            ArmId.LEFT,
+            code=1,
+            detail="controller returned false",
+        )
+        arm_motion = _RecordingArmMotion(rejection=rejection)
+        runtime = _runtime_with(
+            ROBOT_SYSTEM,
+            DeviceCapability.ARM_MOTION,
+            arm_motion,
+        )
+        handler = RobotMoveActionHandler(
+            runtime,
+            ExecutionContext(),
+            MotionHandlerOptions(
+                arm_move_max_attempts=3,
+                arm_move_retry_delay_seconds=0,
+            ),
+            VisionSettings(),
+            lambda **_kwargs: None,
+        )
+        context, logs = _action_context()
+
+        result = handler(
+            {
+                "臂": "左",
+                "模式": "move_j",
+                "点位": [0, 0.1, 0.2, 0, 0, 0],
+            },
+            context,
+        )
+
+        self.assertFalse(result.successful)
+        self.assertEqual(ActionResultCode.OPERATION_REJECTED, result.code)
+        self.assertEqual(1, len(arm_motion.calls))
+        self.assertIn(
+            ("机械臂拒绝执行移动命令，已停止重试", "warn"),
+            logs,
+        )
 
     def test_invalid_arm_parameters_fail_before_device_motion(self):
         arm_motion = _RecordingArmMotion()

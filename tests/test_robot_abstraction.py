@@ -44,6 +44,7 @@ class _FakeSdkRobot:
         self.state_code = 0
         self.quick_stop_code = 0
         self.emergency_stop_code = 0
+        self.move_code = 0
         self.state = {
             "pose": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
             "joint": [1, 2, 3, 4, 5, 6],
@@ -52,11 +53,11 @@ class _FakeSdkRobot:
 
     def rm_movej_p(self, pose, **kwargs):
         self.calls.append(("movej", pose, kwargs))
-        return 0
+        return self.move_code
 
     def rm_movel(self, pose, **kwargs):
         self.calls.append(("movel", pose, kwargs))
-        return 0
+        return self.move_code
 
     def rm_get_current_arm_state(self):
         return self.state_code, self.state
@@ -450,6 +451,39 @@ class RealManRobotAdapterTests(unittest.TestCase):
         self.assertEqual(_pose(10).to_list(), tool_calls[0][1])
         self.assertEqual(_pose(30).to_list(), tool_calls[1][1])
         self.assertEqual(_pose(10).to_list(), tool_calls[2][1])
+
+    def test_motion_rejection_includes_sdk_state_diagnostics(self):
+        robot = self.controller.robot1_ctrl.robot
+        robot.move_code = 1
+        robot.state = {
+            "pose": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            "joint": [1, 2, 3, 4, 5, 6],
+            "err": {"err_len": 1, "err": ["4109"]},
+        }
+        target = CartesianPose.from_iterable((0.2, 0.3, 0.4, 1, 2, 3))
+
+        with self.assertRaises(RobotOperationError) as raised:
+            self.adapter.move_to_pose(
+                ArmId.LEFT,
+                target,
+                MotionMode.JOINT,
+            )
+
+        self.assertEqual(1, raised.exception.code)
+        self.assertIn("controller_errors=(4109,)", raised.exception.detail)
+        self.assertIn("current_pose=[0.1, 0.2, 0.3", raised.exception.detail)
+
+    def test_nested_sdk_state_errors_are_rejected(self):
+        self.controller.robot2_ctrl.robot.state = {
+            "pose": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            "joint": [1, 2, 3, 4, 5, 6],
+            "err": {"err_len": 1, "err": ["4109"]},
+        }
+
+        with self.assertRaises(RobotOperationError) as raised:
+            self.adapter.read_arm_state(ArmId.RIGHT)
+
+        self.assertEqual(4109, raised.exception.code)
 
     def test_adapter_reports_real_telemetry_and_derives_velocity(self):
         with (

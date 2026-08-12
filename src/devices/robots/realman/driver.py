@@ -7,6 +7,8 @@ from typing import Any, Protocol, TypeAlias
 
 from Robotic_Arm.rm_robot_interface import RoboticArm, rm_send_project_t, rm_thread_mode_e
 
+from .state import realman_state_error_codes
+
 
 RobotState: TypeAlias = dict[str, Any]
 ArmStateResult: TypeAlias = tuple[int, RobotState]
@@ -148,8 +150,11 @@ class SimpleRobotArm:
                 if ret != 0:
                     raise Exception(f"获取{self.robot_name}状态失败，错误码：{ret}")
 
-                if state.get('error_code', 0) != 0:
-                    raise Exception(f"{self.robot_name}存在错误，错误码：{state['error_code']}")
+                state_errors = realman_state_error_codes(state)
+                if state_errors:
+                    raise RuntimeError(
+                        f"{self.robot_name}存在错误，错误码：{state_errors}"
+                    )
 
                 self.is_connected = True
                 print(f"{self.robot_name}连接成功")
@@ -459,9 +464,13 @@ class RobotController:
                 print("通常表示与控制器通信异常，请检查机器人上电、网线/IP、控制器是否被其他程序占用。")
                 return False
 
-            state_error = state.get("error_code", 0) if isinstance(state, dict) else 0
-            if state_error != 0:
-                print(f"机械臂当前存在错误, error_code: {state_error}")
+            state_errors = (
+                realman_state_error_codes(state)
+                if isinstance(state, dict)
+                else ()
+            )
+            if state_errors:
+                print(f"机械臂当前存在错误, error_codes: {state_errors}")
                 print("请先在示教器或控制器端清除机械臂错误后再下发项目。")
                 return False
 

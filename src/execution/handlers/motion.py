@@ -15,6 +15,7 @@ from ...devices import (
     DeviceRuntime,
     MobileBase,
     MotionMode,
+    RobotOperationError,
 )
 from ...devices.runtime.ids import BODY_AXIS, MOBILE_BASE, ROBOT_SYSTEM
 from ..handler_api import (
@@ -178,6 +179,10 @@ class RobotMoveActionHandler:
                 )
             except (ActionCancelledError, ActionTimeoutError):
                 raise
+            except RobotOperationError as exc:
+                last_error = exc
+                context.log("机械臂拒绝执行移动命令，已停止重试", "warn")
+                break
             except Exception as exc:
                 last_error = exc
                 context.log(
