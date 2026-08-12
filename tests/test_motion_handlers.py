@@ -266,14 +266,15 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
         )
         context, logs = _action_context()
 
-        result = handler(
-            {
-                "臂": "左",
-                "模式": "move_j",
-                "点位": [0, 0.1, 0.2, 0, 0, 0],
-            },
-            context,
-        )
+        with self.assertLogs("src.execution.handler_api", level="WARNING") as captured:
+            result = handler(
+                {
+                    "臂": "左",
+                    "模式": "move_j",
+                    "点位": [0, 0.1, 0.2, 0, 0, 0],
+                },
+                context,
+            )
 
         self.assertFalse(result.successful)
         self.assertEqual(ActionResultCode.OPERATION_REJECTED, result.code)
@@ -282,6 +283,10 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
             ("机械臂拒绝执行移动命令，已停止重试", "warn"),
             logs,
         )
+        rejection_log = "\n".join(captured.output)
+        self.assertIn("category=rejected", rejection_log)
+        self.assertIn("controller returned false", rejection_log)
+        self.assertNotIn("Traceback", rejection_log)
 
     def test_invalid_arm_parameters_fail_before_device_motion(self):
         arm_motion = _RecordingArmMotion()

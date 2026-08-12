@@ -50,6 +50,13 @@ class _FakeSdkRobot:
             "joint": [1, 2, 3, 4, 5, 6],
             "error_code": 0,
         }
+        self.run_mode = (0, 1)
+        self.joint_enable = (0, [1, 1, 1, 1, 1, 1])
+        self.joint_errors = {
+            "return_code": 0,
+            "err_flag": [0, 0, 0, 0, 0, 0],
+            "brake_state": [0, 0, 0, 0, 0, 0],
+        }
 
     def rm_movej_p(self, pose, **kwargs):
         self.calls.append(("movej", pose, kwargs))
@@ -61,6 +68,15 @@ class _FakeSdkRobot:
 
     def rm_get_current_arm_state(self):
         return self.state_code, self.state
+
+    def rm_get_arm_run_mode(self):
+        return self.run_mode
+
+    def rm_get_joint_en_state(self):
+        return self.joint_enable
+
+    def rm_get_joint_err_flag(self):
+        return self.joint_errors
 
     def rm_get_gripper_state(self):
         return 0, {
@@ -195,6 +211,16 @@ class _FakeRealManController:
             }
         finally:
             backend.sdk_lock.release()
+
+    def read_motion_diagnostics(self, arm):
+        backend = self._arm_controller(arm)
+        with backend.sdk_lock:
+            robot = backend.robot
+            return {
+                "run_mode": robot.rm_get_arm_run_mode(),
+                "joint_enable": robot.rm_get_joint_en_state(),
+                "joint_errors": robot.rm_get_joint_err_flag(),
+            }
 
     def release_gripper(self, arm, *, speed, timeout_s):
         backend = self._arm_controller(arm)
@@ -472,6 +498,15 @@ class RealManRobotAdapterTests(unittest.TestCase):
         self.assertEqual(1, raised.exception.code)
         self.assertIn("controller_errors=(4109,)", raised.exception.detail)
         self.assertIn("current_pose=[0.1, 0.2, 0.3", raised.exception.detail)
+        self.assertIn("run_mode=real(code=0)", raised.exception.detail)
+        self.assertIn(
+            "joint_enable=[1, 1, 1, 1, 1, 1](code=0)",
+            raised.exception.detail,
+        )
+        self.assertIn(
+            "joint_errors=[0, 0, 0, 0, 0, 0](code=0)",
+            raised.exception.detail,
+        )
 
     def test_nested_sdk_state_errors_are_rejected(self):
         self.controller.robot2_ctrl.robot.state = {

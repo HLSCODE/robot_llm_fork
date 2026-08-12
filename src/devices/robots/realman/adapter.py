@@ -56,6 +56,8 @@ class RealManDriver(Protocol):
         blocking: bool = True,
     ) -> dict[str, Any] | None: ...
 
+    def read_motion_diagnostics(self, arm: str) -> dict[str, object]: ...
+
     def release_gripper(self, arm: str, *, speed: int, timeout_s: int) -> int: ...
 
     def grip(
@@ -539,6 +541,16 @@ class RealManRobotAdapter:
         current_pose = state.get("pose")
         if isinstance(current_pose, (list, tuple)):
             details.append(f"current_pose={list(current_pose)}")
+        try:
+            diagnostics = self._controller.read_motion_diagnostics(
+                self._arm_key(arm)
+            )
+        except Exception as exc:
+            details.append(
+                f"motion_diagnostics_failed={type(exc).__name__}: {exc}"
+            )
+        else:
+            details.extend(_format_motion_diagnostics(diagnostics))
         return "; ".join(details)
 
     def _telemetry_from_payload(
@@ -719,4 +731,30 @@ def _numeric_tuple(
         )
     values = tuple(float(value) for value in payload)
     return values
+
+
+def _format_motion_diagnostics(
+    diagnostics: dict[str, object],
+) -> tuple[str, ...]:
+    formatted: list[str] = []
+    run_mode = diagnostics.get("run_mode")
+    if isinstance(run_mode, tuple) and len(run_mode) == 2:
+        return_code, mode = run_mode
+        mode_name = {0: "simulation", 1: "real"}.get(mode, str(mode))
+        formatted.append(f"run_mode={mode_name}(code={return_code})")
+    joint_enable = diagnostics.get("joint_enable")
+    if isinstance(joint_enable, tuple) and len(joint_enable) == 2:
+        return_code, states = joint_enable
+        formatted.append(f"joint_enable={states}(code={return_code})")
+    joint_errors = diagnostics.get("joint_errors")
+    if isinstance(joint_errors, dict):
+        formatted.append(
+            "joint_errors="
+            f"{joint_errors.get('err_flag', 'unknown')}"
+            f"(code={joint_errors.get('return_code', 'unknown')})"
+        )
+        formatted.append(
+            f"brake_state={joint_errors.get('brake_state', 'unknown')}"
+        )
+    return tuple(formatted)
 

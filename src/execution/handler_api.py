@@ -292,20 +292,30 @@ class ActionExecutionContext:
                 and code is ActionResultCode.DEVICE_OPERATION_FAILED
             ):
                 code = ActionResultCode.OPERATION_REJECTED
-            logger.error(
-                "Device failure: device_id=%s operation=%s category=%s "
-                "raw_error_code=%s diagnostic=%s",
+            log_arguments = (
                 device_id,
                 operation,
                 error_category,
                 raw_error_code,
                 normalized.diagnostic_message,
-                exc_info=(
-                    type(error),
-                    error,
-                    error.__traceback__,
-                ),
             )
+            if normalized.category is DeviceErrorCategory.INTERNAL:
+                logger.error(
+                    "Unexpected device failure: device_id=%s operation=%s "
+                    "category=%s raw_error_code=%s diagnostic=%s",
+                    *log_arguments,
+                    exc_info=(
+                        type(error),
+                        error,
+                        error.__traceback__,
+                    ),
+                )
+            else:
+                logger.warning(
+                    "Device operation failed: device_id=%s operation=%s category=%s "
+                    "raw_error_code=%s diagnostic=%s",
+                    *log_arguments,
+                )
         if log:
             self.log(message, "error")
         return ActionHandlerResult.failed(
@@ -330,4 +340,3 @@ class ActionHandler(Protocol):
         parameters: ActionParameters,
         context: ActionExecutionContext,
     ) -> ActionHandlerResult: ...
-

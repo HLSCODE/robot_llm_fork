@@ -38,6 +38,12 @@ class _RobotSdk(Protocol):
 
     def rm_get_current_arm_state(self) -> ArmStateResult: ...
 
+    def rm_get_arm_run_mode(self) -> tuple[int, int]: ...
+
+    def rm_get_joint_en_state(self) -> tuple[int, list[int]]: ...
+
+    def rm_get_joint_err_flag(self) -> dict[str, Any]: ...
+
     def rm_set_arm_stop(self) -> int: ...
 
     def rm_set_arm_slow_stop(self) -> int: ...
@@ -281,6 +287,25 @@ class RobotController:
             }
         finally:
             controller.sdk_lock.release()
+
+    def read_motion_diagnostics(self, arm: str) -> dict[str, object]:
+        """Read controller motion prerequisites without changing device state."""
+        controller, robot = self._arm_controller(arm)
+        with controller.sdk_lock:
+            return {
+                "run_mode": self._optional_sdk_call(
+                    robot,
+                    "rm_get_arm_run_mode",
+                ),
+                "joint_enable": self._optional_sdk_call(
+                    robot,
+                    "rm_get_joint_en_state",
+                ),
+                "joint_errors": self._optional_sdk_call(
+                    robot,
+                    "rm_get_joint_err_flag",
+                ),
+            }
 
     @staticmethod
     def _optional_sdk_call(robot: _RobotSdk, method_name: str) -> object | None:
