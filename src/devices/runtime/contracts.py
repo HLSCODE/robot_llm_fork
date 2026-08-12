@@ -113,11 +113,20 @@ class ToolRackControl(Protocol):
 class RobotSystem(
     ArmMotion,
     ArmStateReader,
-    GripperControl,
     CloseableDevice,
     Protocol,
 ):
-    """Core robot capabilities that every vendor adapter must implement."""
+    """Core capabilities shared by every robot vendor adapter.
+
+    Grippers, telemetry, teaching and trajectory playback are optional
+    capabilities.  Callers must request those protocols through DeviceRuntime
+    instead of assuming that every arm product provides them.
+    """
+
+
+@runtime_checkable
+class GrippingRobotSystem(RobotSystem, GripperControl, Protocol):
+    """Robot core combined with an integrated gripper capability."""
 
 
 @runtime_checkable

@@ -15,7 +15,7 @@ from ...devices import (
     DepthCameraSource,
     MotionMode,
     MotionOptions,
-    RobotSystem,
+    GrippingRobotSystem,
 )
 from .grasp import (
     load_sam_model,
@@ -72,7 +72,7 @@ def detect_target(
 
 
 def capture_and_move(
-    robot_system: RobotSystem,
+    robot_system: GrippingRobotSystem,
     camera: DepthCameraSource,
     arm: ArmId,
     settings: VisionSettings,
@@ -197,7 +197,7 @@ def capture_and_move(
 
 
 def _place_at_fixed_position(
-    robot_system: RobotSystem,
+    robot_system: GrippingRobotSystem,
     arm: ArmId,
     settings: VisionSettings,
     motion_options: MotionOptions,

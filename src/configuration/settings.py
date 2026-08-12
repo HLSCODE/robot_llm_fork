@@ -270,6 +270,10 @@ class RobotSettings:
     gripper_pick_timeout: int = 3
     gripper_release_speed: int = 100
     gripper_release_timeout: int = 3
+    tianji_controller_ip: str = "192.168.1.190"
+    tianji_kinematics_config: str = "ccs_m6_40.MvKDCfg"
+    tianji_acceleration_percent: int = 50
+    tianji_linear_acceleration_m_s2: float = 0.5
 
     def move_controller_config(self) -> dict[str, object]:
         return {

@@ -7,6 +7,7 @@ from ...devices import (
     CameraSource,
     DepthCameraSource,
     DeviceRuntime,
+    GrippingRobotSystem,
     RobotSystem,
 )
 from ...devices.runtime.ids import CAMERA, ROBOT_SYSTEM
@@ -24,7 +25,7 @@ from ..handler_api import (
 class VisionOperations(Protocol):
     def capture(
         self,
-        robot_system: RobotSystem,
+        robot_system: GrippingRobotSystem,
         camera: DepthCameraSource,
         parameters: dict[str, object],
         log: Callable[[str], None],
@@ -64,7 +65,7 @@ class VisionCaptureActionHandler:
             )
             robot_system = self._device_runtime.require(
                 ROBOT_SYSTEM,
-                RobotSystem,
+                GrippingRobotSystem,
             )
         except Exception as exc:
             message = f"视觉抓取设备不可用: {exc}"

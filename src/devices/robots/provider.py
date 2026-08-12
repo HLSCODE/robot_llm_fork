@@ -25,7 +25,6 @@ class RobotProviderDefinition:
             DeviceCapability.MOTION,
             DeviceCapability.ARM_MOTION,
             DeviceCapability.ARM_STATE,
-            DeviceCapability.GRIPPER,
         }
         missing = required - self.capabilities
         if missing:

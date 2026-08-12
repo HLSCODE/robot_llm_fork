@@ -8,7 +8,12 @@ from typing import Protocol
 from ..domain.execution_context import ExecutionContext
 from ..configuration.settings import VisionSettings
 from ..persistence.vision_station_storage import VisionStationStorage
-from ..devices import CameraSource, DepthCameraSource, RobotSystem
+from ..devices import (
+    CameraSource,
+    DepthCameraSource,
+    GrippingRobotSystem,
+    RobotSystem,
+)
 from .artifacts import VisionArtifactStore
 from .models import (
     VisionOperation,
@@ -25,7 +30,7 @@ VisionLog = Callable[[str], None]
 class CapturePipeline(Protocol):
     def __call__(
         self,
-        robot_system: RobotSystem,
+        robot_system: GrippingRobotSystem,
         camera: DepthCameraSource,
         parameters: dict[str, object],
         settings: VisionSettings,
@@ -89,7 +94,7 @@ class VisionService:
 
     def capture(
         self,
-        robot_system: RobotSystem,
+        robot_system: GrippingRobotSystem,
         camera: DepthCameraSource,
         parameters: dict[str, object],
         log: VisionLog,

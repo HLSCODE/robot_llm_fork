@@ -227,7 +227,7 @@ speech_provider = ""
 speech_fallback_providers = []
 
 [robot]
-# 机械臂 provider 与设备型号；provider 决定实际驱动实现。
+# 机械臂 provider 与设备型号；provider 可选 "realman" 或 "tianji"。
 robot_provider = "realman"
 robot_model = "rm75-dual"
 # 左/右机械臂控制器地址。
@@ -271,6 +271,14 @@ gripper_pick_timeout = 3
 # 夹爪释放速度和超时。
 gripper_release_speed = 100
 gripper_release_timeout = 3
+# 天机双臂共用一个控制器地址。仅 robot_provider="tianji" 时生效。
+tianji_controller_ip = "192.168.1.190"
+# wheel 内置运动学配置文件名；必须与实际天机机型匹配。
+tianji_kinematics_config = "ccs_m6_40.MvKDCfg"
+# 关节运动加速度百分比（1..100）。
+tianji_acceleration_percent = 50
+# 直线运动加速度，单位 m/s²（0.0001..0.5）。
+tianji_linear_acceleration_m_s2 = 0.5
 
 [devices]
 # 身体升降轴 Modbus 串口、波特率、从站地址和响应超时（秒）。

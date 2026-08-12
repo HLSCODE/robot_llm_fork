@@ -9,10 +9,12 @@ from ...configuration.settings import RobotSettings
 from ..runtime.models import DeviceInitializationError
 from .provider import RobotProviderDefinition
 from .realman.provider import REALMAN_PROVIDER
+from .tianji.provider import TIANJI_PROVIDER
 
 
 ROBOT_PROVIDERS: Mapping[str, RobotProviderDefinition] = MappingProxyType({
     REALMAN_PROVIDER.name: REALMAN_PROVIDER,
+    TIANJI_PROVIDER.name: TIANJI_PROVIDER,
 })
 
 

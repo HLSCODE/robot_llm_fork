@@ -10,14 +10,14 @@ from __future__ import annotations
 from typing import Callable, Literal, cast
 
 from ...configuration.settings import VisionSettings
-from ...devices import DepthCameraSource, RobotSystem
+from ...devices import DepthCameraSource, GrippingRobotSystem
 from ..models import VisionPipelineResult
 
 # log_fn: str -> None
 
 
 def execute_vision_capture(
-    robot_system: RobotSystem,
+    robot_system: GrippingRobotSystem,
     camera: DepthCameraSource,
     parameters: dict[str, object],
     settings: VisionSettings,
@@ -31,7 +31,7 @@ def execute_vision_capture(
     2. 创建只依赖项目能力接口的 VisionCaptureAction 并执行
 
     Args:
-        robot_system: DeviceRuntime 提供的 RobotSystem
+        robot_system: DeviceRuntime 提供的 GrippingRobotSystem
         parameters: 动作参数字典（与 ActionDefinition.parameters 一致）
                    - 目标机械臂 (str): robot1 / robot2
                    - 工作流 (str): bottle / vertical

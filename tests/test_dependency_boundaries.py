@@ -283,6 +283,29 @@ class DependencyBoundaryTests(unittest.TestCase):
 
         self.assertEqual([], violations, "\n".join(violations))
 
+    def test_tianji_sdk_is_confined_to_tianji_directory(self):
+        violations: list[str] = []
+        tianji_root = PROJECT_ROOT / "src/devices/robots/tianji"
+        for path in (PROJECT_ROOT / "src").rglob("*.py"):
+            if path.is_relative_to(tianji_root):
+                continue
+            module_name = ".".join(
+                path.relative_to(PROJECT_ROOT).with_suffix("").parts
+            )
+            package = module_name.rpartition(".")[0]
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), str(path))
+            for node in ast.walk(tree):
+                for imported in self._imported_modules(node, package):
+                    if imported == "tj_robot_proj" or imported.startswith(
+                        "tj_robot_proj."
+                    ):
+                        violations.append(
+                            f"{path.relative_to(PROJECT_ROOT)}:{node.lineno} "
+                            f"imports {imported}"
+                        )
+
+        self.assertEqual([], violations, "\n".join(violations))
+
     def test_realman_adapter_does_not_call_vendor_sdk(self):
         adapter_path = (
             PROJECT_ROOT / "src/devices/robots/realman/adapter.py"

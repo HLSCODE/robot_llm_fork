@@ -37,7 +37,7 @@ from ...devices import (
     DepthCameraSource,
     MotionMode,
     MotionOptions,
-    RobotSystem,
+    GrippingRobotSystem,
 )
 
 # ---------------------------------------------------------------
@@ -199,7 +199,7 @@ def detect_and_segment(
 # 标定 / 运动参数（由 VisionSettings 注入）
 # ---------------------------------------------------------------
 def run_pingzi_capture(
-    robot_system: RobotSystem,
+    robot_system: GrippingRobotSystem,
     camera: DepthCameraSource,
     arm: ArmId,
     settings: VisionSettings,
@@ -239,7 +239,7 @@ class VisionCaptureAction:
     使用方式：
 
         action = VisionCaptureAction(
-            robot_system=runtime.require(ROBOT_SYSTEM, RobotSystem),
+            robot_system=runtime.require(ROBOT_SYSTEM, GrippingRobotSystem),
             camera=runtime.require(CAMERA, DepthCameraSource),
             workflow="bottle",
         )
@@ -248,7 +248,7 @@ class VisionCaptureAction:
 
     def __init__(
         self,
-        robot_system: RobotSystem,
+        robot_system: GrippingRobotSystem,
         camera: DepthCameraSource,
         settings: VisionSettings,
         yolo_model_path: str | None = None,

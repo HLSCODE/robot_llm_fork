@@ -2335,6 +2335,7 @@ full = [
     { name = "sherpa-onnx" },
     { name = "sherpa-onnx-core" },
     { name = "sounddevice" },
+    { name = "tj-robot-proj", marker = "python_full_version < '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'" },
     { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
     { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
     { name = "torchaudio", version = "2.11.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
@@ -2351,6 +2352,7 @@ hardware = [
     { name = "pyrealsense2" },
     { name = "pyserial" },
     { name = "robotic-arm" },
+    { name = "tj-robot-proj", marker = "python_full_version < '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'" },
 ]
 kws = [
     { name = "sherpa-onnx" },
@@ -2431,6 +2433,8 @@ requires-dist = [
     { name = "sherpa-onnx-core", marker = "extra == 'voice'", specifier = ">=1.13.4" },
     { name = "sounddevice", marker = "extra == 'full'", specifier = ">=0.5" },
     { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.5" },
+    { name = "tj-robot-proj", marker = "python_full_version == '3.12.*' and platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'full'", path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl" },
+    { name = "tj-robot-proj", marker = "python_full_version == '3.12.*' and platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'hardware'", path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl" },
     { name = "torch", marker = "extra == 'full'", specifier = ">=2.3", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "extra == 'voice'", specifier = ">=2.3", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchaudio", marker = "extra == 'full'", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cpu" },
@@ -2914,6 +2918,26 @@ wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/96/d9/dfd086aa2d918c563a140720e0ce296cada1634efd2783d5cf51e05f984e/tiktoken-0.13.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:6644c9c2b5cf3916f5a3641d7d12fdb3f006a7b3d9ff6acdaec44e29ab1ff91e", size = 1181863, upload-time = "2026-05-15T04:51:15.025Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/2f/68/a18b4f307086954fdae32714cb4f85562e34f9d34ab206e61f1816aa6018/tiktoken-0.13.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:5cb65b60b9408563676d874a3a4ee573370066f0dc4e29d84e82e989c6517424", size = 1239218, upload-time = "2026-05-15T04:51:16.103Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/16/5b/f2aa703a4fc5d2dff73460a7d46cc2f3f44aa0f3dd8eeb20d2a0ecf68862/tiktoken-0.13.0-cp314-cp314t-win_amd64.whl", hash = "sha256:85b78cc3a2c3d48723ca751fa981f1fedccd54194ca0471b957364353a898b07", size = 918110, upload-time = "2026-05-15T04:51:17.237Z" },
+]
+
+[[package]]
+name = "tj-robot-proj"
+version = "0.1.0"
+source = { path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl" }
+dependencies = [
+    { name = "matplotlib", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
+    { name = "numpy", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
+    { name = "opencv-python", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
+]
+wheels = [
+    { filename = "tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:bb4ebd0d5f47c2d157a4d556c1d1c74b84a103ba9430ffc20fa4a27a9448c3fd" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib", specifier = ">=3.5" },
+    { name = "numpy", specifier = ">=1.21" },
+    { name = "opencv-python", specifier = ">=4.5" },
 ]
 
 [[package]]
