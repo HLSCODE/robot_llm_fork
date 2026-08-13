@@ -637,6 +637,7 @@ class SchemaActionForm(QWidget):
         self._pose_reader = pose_reader
         self._localization_reader = localization_reader
         self._station_choices_reader = station_choices_reader
+        self._locked_variant = initial_variant
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Fixed,
@@ -645,15 +646,22 @@ class SchemaActionForm(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        description = QLabel(self._type_schema.get("description", ""))
+        variants = self._type_schema.get("variants")
+        if self._locked_variant is not None and (
+            variants is None or self._locked_variant not in variants
+        ):
+            raise ValueError(f"unknown action variant: {self._locked_variant}")
+        description_text = self._type_schema.get("description", "")
+        if variants is not None and self._locked_variant is not None:
+            description_text = variants[self._locked_variant]["description"]
+        description = QLabel(description_text)
         description.setWordWrap(True)
         layout.addWidget(description)
 
         self._variant_combo: QComboBox | None = None
-        variants = self._type_schema.get("variants")
-        if variants is not None:
+        if variants is not None and self._locked_variant is None:
             variant_key = self._type_schema["variant_key"]
-            selected = self._values.get(variant_key) or initial_variant
+            selected = self._values.get(variant_key)
             self._variant_combo = QComboBox()
             for variant_name, variant_schema in variants.items():
                 self._variant_combo.addItem(
@@ -695,15 +703,16 @@ class SchemaActionForm(QWidget):
 
     @property
     def variant_names(self) -> tuple[str, ...]:
+        if self._locked_variant is not None:
+            return (self._locked_variant,)
         variants = self._type_schema.get("variants", {})
         return tuple(variants)
 
     def parameters(self) -> dict[str, Any]:
         values: dict[str, Any] = {}
-        if self._variant_combo is not None:
-            values[self._type_schema["variant_key"]] = (
-                self._variant_combo.currentData()
-            )
+        variants = self._type_schema.get("variants")
+        if variants is not None:
+            values[self._type_schema["variant_key"]] = self._selected_variant_name()
         for field_name, widget in self._field_widgets.items():
             try:
                 value = self._widget_value(widget, self._field_schemas[field_name])
@@ -790,8 +799,13 @@ class SchemaActionForm(QWidget):
         variants = self._type_schema.get("variants")
         if variants is None:
             return self._type_schema.get("fields", {})
+        return variants[self._selected_variant_name()]["fields"]
+
+    def _selected_variant_name(self) -> str:
+        if self._locked_variant is not None:
+            return self._locked_variant
         assert self._variant_combo is not None
-        return variants[str(self._variant_combo.currentData())]["fields"]
+        return str(self._variant_combo.currentData())
 
     def _create_widget(
         self,
@@ -1065,5 +1079,6 @@ def _normalize_initial_variant(value: str | None) -> str | None:
         return None
     return {
         "机械臂移动": "机械臂",
+        "机械臂相对移动": "机械臂相对",
         "身体移动": "身体",
     }.get(value, value)

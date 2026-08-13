@@ -1315,7 +1315,12 @@ class MainWindow(QMainWindow):
         
         # 移动类 Tab 需要选择具体类型
         if category is ActionType.MOVE:
-            options = ["机械臂移动", "身体移动", "底盘移动"]
+            options = [
+                "机械臂移动",
+                "机械臂相对移动",
+                "身体移动",
+                "底盘移动",
+            ]
             selected, ok = QInputDialog.getItem(
                 self,
                 "选择移动类型",

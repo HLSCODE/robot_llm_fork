@@ -326,7 +326,7 @@ class SchemaActionFormTests(unittest.TestCase):
     def test_action_dialog_shrinks_after_switching_to_a_shorter_variant(self) -> None:
         dialog = ActionConfigDialog(
             ActionType.MANIPULATE,
-            initial_variant="智能加粉",
+            {"parameters": {"执行器": "智能加粉"}},
         )
         dialog.show()
         QApplication.processEvents()
@@ -348,6 +348,28 @@ class SchemaActionFormTests(unittest.TestCase):
             dialog.action_form.sizePolicy().verticalPolicy(),
         )
         dialog.close()
+
+    def test_preselected_move_target_is_locked_without_a_duplicate_selector(self) -> None:
+        dialog = ActionConfigDialog(
+            ActionType.MOVE,
+            initial_variant="身体移动",
+        )
+
+        self.assertIsNone(dialog.action_form._variant_combo)
+        self.assertEqual(("身体",), dialog.action_form.variant_names)
+        self.assertEqual("身体", dialog.action_form.parameters()["目标"])
+        self.assertEqual(("位置",), dialog.action_form.field_names)
+        dialog.deleteLater()
+
+    def test_relative_arm_move_can_be_preselected_directly(self) -> None:
+        dialog = ActionConfigDialog(
+            ActionType.MOVE,
+            initial_variant="机械臂相对移动",
+        )
+
+        self.assertEqual("机械臂相对", dialog.action_form.parameters()["目标"])
+        self.assertIn("x_mm", dialog.action_form.field_names)
+        dialog.deleteLater()
 
 
 class GuiNotificationCenterTests(unittest.TestCase):
