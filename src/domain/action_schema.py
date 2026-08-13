@@ -161,7 +161,11 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         required=True,
                         placeholder=("例如: [-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]"),
                     ),
-                    "补偿": _field("object", "补偿配置"),
+                    "补偿": _field(
+                        "compensation",
+                        "补偿方式",
+                        default={"mode": "none"},
+                    ),
                 },
             ),
             "机械臂相对": _variant(
@@ -1044,7 +1048,66 @@ def _validate_field_value(
                 field=field_name,
                 message=f"动作参数 {field_name} 不在允许选项中",
             )
+    if field_type == "compensation":
+        return _validate_compensation(field_name, value)
     return None
+
+
+def _validate_compensation(
+    field_name: str,
+    value: Any,
+) -> ActionParameterIssue | None:
+    if not isinstance(value, dict):
+        return ActionParameterIssue(
+            code=ActionParameterIssueCode.INVALID_TYPE,
+            field=field_name,
+            message=f"动作参数 {field_name} 必须是补偿配置对象",
+        )
+    mode = value.get("mode")
+    if mode not in {"none", "udp", "vision"}:
+        return ActionParameterIssue(
+            code=ActionParameterIssueCode.INVALID_OPTION,
+            field=field_name,
+            message="补偿方式必须是不补偿、UDP 定位补偿或视觉重定位补偿",
+        )
+    expected_fields = {"mode"} if mode == "none" else {"mode", mode}
+    if set(value) != expected_fields:
+        return ActionParameterIssue(
+            code=ActionParameterIssueCode.UNKNOWN_FIELD,
+            field=field_name,
+            message=f"补偿配置 {mode} 包含未知或缺失字段",
+        )
+    if mode == "udp":
+        udp = value.get("udp")
+        teach_offset = udp.get("teach_offset") if isinstance(udp, dict) else None
+        if not isinstance(teach_offset, dict) or not _has_finite_numbers(
+            teach_offset,
+            ("x", "y", "angle"),
+        ):
+            return ActionParameterIssue(
+                code=ActionParameterIssueCode.INVALID_TYPE,
+                field=field_name,
+                message="UDP 定位补偿必须包含有效的创建时定位基准",
+            )
+    if mode == "vision":
+        vision = value.get("vision")
+        station_id = vision.get("station_id") if isinstance(vision, dict) else None
+        if not isinstance(station_id, str) or not station_id.strip():
+            return ActionParameterIssue(
+                code=ActionParameterIssueCode.MISSING_FIELD,
+                field=field_name,
+                message="视觉重定位补偿必须选择视觉工位",
+            )
+    return None
+
+
+def _has_finite_numbers(mapping: dict[str, Any], fields: tuple[str, ...]) -> bool:
+    return all(
+        isinstance(mapping.get(field), (int, float))
+        and not isinstance(mapping.get(field), bool)
+        and math.isfinite(float(mapping[field]))
+        for field in fields
+    )
 
 
 def _matches_field_type(value: Any, field_type: str) -> bool:
@@ -1059,7 +1122,7 @@ def _matches_field_type(value: Any, field_type: str) -> bool:
         )
     if field_type == "boolean":
         return isinstance(value, bool)
-    if field_type == "object":
+    if field_type in {"object", "compensation"}:
         return isinstance(value, dict)
     if field_type == "pose":
         return (

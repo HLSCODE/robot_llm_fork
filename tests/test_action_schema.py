@@ -79,6 +79,49 @@ class ActionSchemaTests(unittest.TestCase):
             {issue.code for issue in result.issues},
         )
 
+    def test_move_compensation_schema_validates_supported_nested_modes(self):
+        base = {
+            "目标": "机械臂",
+            "臂": "左",
+            "模式": "move_j",
+            "点位": [0, 0, 0, 0, 0, 0],
+        }
+        udp = validate_action_parameters(
+            ActionType.MOVE,
+            {
+                **base,
+                "补偿": {
+                    "mode": "udp",
+                    "udp": {
+                        "teach_offset": {
+                            "x": 1.0,
+                            "y": 2.0,
+                            "angle": 3.0,
+                        }
+                    },
+                },
+            },
+        )
+        vision = validate_action_parameters(
+            ActionType.MOVE,
+            {
+                **base,
+                "补偿": {
+                    "mode": "vision",
+                    "vision": {"station_id": "station-a", "arm": "left"},
+                },
+            },
+        )
+        invalid = validate_action_parameters(
+            ActionType.MOVE,
+            {**base, "补偿": {"mode": "vision", "vision": {}}},
+        )
+
+        self.assertTrue(udp.is_valid)
+        self.assertTrue(vision.is_valid)
+        self.assertFalse(invalid.is_valid)
+        self.assertIn("选择视觉工位", invalid.message)
+
     def test_text_field_requires_string(self):
         result = validate_action_parameters(
             ActionType.INSPECT,

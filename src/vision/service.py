@@ -92,6 +92,10 @@ class VisionService:
     def metrics_snapshot(self) -> VisionMetricsSnapshot:
         return self._metrics.snapshot()
 
+    def list_station_choices(self, arm: str | None = None) -> list[tuple[str, str]]:
+        """Return configured relocalization stations for one arm."""
+        return self._station_storage.list_station_choices(arm)
+
     def capture(
         self,
         robot_system: GrippingRobotSystem,

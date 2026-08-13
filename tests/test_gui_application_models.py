@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 
 from PySide6.QtCore import QThread, QTimer, Qt
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QPushButton, QSizePolicy
 
 from src.application import (
     CompositionService,
@@ -20,7 +20,12 @@ from src.persistence.storage import JsonCompositionRepository
 from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from src.execution import ExecutionEvent, ExecutionEventType, ExecutionState
 from src.gui.bridges.execution import ExecutionBridge
-from src.gui.views.dialogs import SchemaActionForm
+from src.gui.views.dialogs import (
+    CompensationEditor,
+    ContentSizedStackedWidget,
+    PoseEditor,
+    SchemaActionForm,
+)
 from src.gui.bridges.notifications import (
     GuiNotificationCenter,
     GuiNotificationLevel,
@@ -153,6 +158,125 @@ class SchemaActionFormTests(unittest.TestCase):
                     form.parameters()[variant_key],
                 )
                 form.deleteLater()
+
+    def test_move_compensation_uses_guided_editor_and_reads_udp_snapshot(self) -> None:
+        calls: list[dict[str, float]] = []
+
+        def read_localization(**options: float) -> dict[str, float]:
+            calls.append(options)
+            return {
+                "id": 7,
+                "x": 1.25,
+                "y": -2.5,
+                "angle": 30.0,
+                "timestamp": 10.0,
+            }
+
+        form = SchemaActionForm(
+            ActionType.MOVE,
+            {
+                "目标": "机械臂",
+                "臂": "左",
+                "模式": "move_j",
+                "点位": [0, 0, 0, 0, 0, 0],
+            },
+            localization_reader=read_localization,
+        )
+        editor = form.findChild(CompensationEditor, "compensationEditor")
+        assert editor is not None
+        editor.mode_combo.setCurrentIndex(editor.mode_combo.findData("udp"))
+        button = editor.findChild(QPushButton, "captureLocalizationButton")
+        assert button is not None
+        button.click()
+
+        compensation = form.parameters()["补偿"]
+
+        self.assertEqual([{"max_age": 2.0, "wait_timeout": 0.0}], calls)
+        self.assertEqual("udp", compensation["mode"])
+        self.assertEqual(1.25, compensation["udp"]["teach_offset"]["x"])
+        form.deleteLater()
+
+    def test_visual_compensation_loads_stations_for_selected_arm(self) -> None:
+        requested_arms: list[str | None] = []
+
+        def station_choices(arm: str | None) -> list[tuple[str, str]]:
+            requested_arms.append(arm)
+            return [("station-a", "装粉工位（左臂）")]
+
+        form = SchemaActionForm(
+            ActionType.MOVE,
+            {
+                "目标": "机械臂",
+                "臂": "左",
+                "模式": "move_j",
+                "点位": [0, 0, 0, 0, 0, 0],
+                "补偿": {
+                    "mode": "vision",
+                    "vision": {"station_id": "station-a", "arm": "left"},
+                },
+            },
+            station_choices_reader=station_choices,
+        )
+        editor = form.findChild(CompensationEditor, "compensationEditor")
+        assert editor is not None
+
+        compensation = form.parameters()["补偿"]
+
+        self.assertIn("left", requested_arms)
+        self.assertEqual(
+            {
+                "mode": "vision",
+                "vision": {"station_id": "station-a", "arm": "left"},
+            },
+            compensation,
+        )
+        form.deleteLater()
+
+    def test_compensation_stack_sizes_itself_from_the_visible_page(self) -> None:
+        form = SchemaActionForm(ActionType.MOVE, {"目标": "机械臂"})
+        editor = form.findChild(CompensationEditor, "compensationEditor")
+        assert editor is not None
+        stack = editor.findChild(ContentSizedStackedWidget, "compensationPages")
+        assert stack is not None
+
+        for mode in ("none", "udp", "vision"):
+            editor.mode_combo.setCurrentIndex(editor.mode_combo.findData(mode))
+            QApplication.processEvents()
+            current = stack.currentWidget()
+            assert current is not None
+            self.assertEqual(current.sizeHint(), stack.sizeHint())
+            self.assertEqual(
+                QSizePolicy.Policy.Fixed,
+                stack.sizePolicy().verticalPolicy(),
+            )
+        form.deleteLater()
+
+    def test_pose_editor_reads_the_selected_arm_without_blocking_the_form(self) -> None:
+        requested_arms: list[str] = []
+
+        def read_pose(arm: str) -> list[float]:
+            requested_arms.append(arm)
+            return [0.1, -0.2, 0.3, 1.0, -1.1, 1.2]
+
+        form = SchemaActionForm(
+            ActionType.MOVE,
+            {"目标": "机械臂", "臂": "右"},
+            pose_reader=read_pose,
+        )
+        editor = form.findChild(PoseEditor, "poseEditor")
+        assert editor is not None
+
+        editor.read_button.click()
+        self.assertTrue(
+            _process_events_until(lambda: editor.read_button.isEnabled())
+        )
+
+        self.assertEqual(["右"], requested_arms)
+        self.assertEqual(
+            [0.1, -0.2, 0.3, 1.0, -1.1, 1.2],
+            form.parameters()["点位"],
+        )
+        form.deleteLater()
 
 
 class GuiNotificationCenterTests(unittest.TestCase):

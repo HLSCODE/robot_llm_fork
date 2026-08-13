@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
+from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import uuid4
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QObject, QSize, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -21,6 +24,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSpinBox,
+    QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -32,7 +37,9 @@ from ...domain.action_schema import (
     validate_action_parameters,
 )
 from ...domain.models import ActionDefinition, ActionType
+from ..icons import IconName
 from ..theme import set_theme_role
+from ..toolbars import IconToolButton
 
 
 class ActionPreviewDialog(QDialog):
@@ -122,7 +129,447 @@ class ActionPreviewDialog(QDialog):
         self.accept()
 
 
-FieldWidget = QLineEdit | QComboBox | QSpinBox | QDoubleSpinBox | QCheckBox
+LocalizationReader = Callable[..., dict[str, Any] | None]
+StationChoicesReader = Callable[[str | None], list[tuple[str, str]]]
+PoseReader = Callable[[str], Sequence[float] | None]
+
+
+class PoseReadWorker(QObject):
+    """Read one arm pose away from the GUI thread."""
+
+    succeeded = Signal(str, object)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, reader: PoseReader, arm: str) -> None:
+        super().__init__()
+        self._reader = reader
+        self._arm = arm
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            pose = self._reader(self._arm)
+            if pose is None:
+                raise RuntimeError(
+                    f"{self._arm}臂当前位姿不可用，请确认设备已连接并完成初始化"
+                )
+            values = _validated_pose_values(pose)
+        except Exception as exc:
+            self.failed.emit(str(exc) or type(exc).__name__)
+        else:
+            self.succeeded.emit(self._arm, values)
+        finally:
+            self.finished.emit()
+
+
+class PoseEditor(QWidget):
+    """Edit a pose or explicitly capture the selected arm's live pose."""
+
+    def __init__(
+        self,
+        current: object = None,
+        *,
+        arm: str = "左",
+        pose_reader: PoseReader | None = None,
+        placeholder: str = "",
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("poseEditor")
+        self._arm = arm
+        self._pose_reader = pose_reader
+        self._read_thread: QThread | None = None
+        self._read_worker: PoseReadWorker | None = None
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self.input = QLineEdit(self)
+        self.input.setObjectName("poseInput")
+        self.input.setPlaceholderText(placeholder)
+        if current is not None:
+            self.input.setText(json.dumps(current, ensure_ascii=False))
+        layout.addWidget(self.input, 1)
+
+        self.read_button = IconToolButton(
+            IconName.POSES,
+            "读取当前机械臂位姿",
+            callback=self.read_current_pose,
+            parent=self,
+            object_name="paneToolButton",
+        )
+        self.read_button.setProperty("featureName", "poseReadButton")
+        self.read_button.setEnabled(pose_reader is not None)
+        layout.addWidget(self.read_button)
+        self._update_button_description()
+
+    def set_arm(self, arm: str) -> None:
+        self._arm = arm
+        self._update_button_description()
+
+    def text(self) -> str:
+        return self.input.text()
+
+    def read_current_pose(self) -> None:
+        if self._pose_reader is None or self._read_thread is not None:
+            return
+        arm = self._arm
+        if self.input.text().strip():
+            answer = QMessageBox.question(
+                self,
+                "替换点位",
+                f"是否使用{arm}臂当前位姿替换已有点位？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        thread = QThread(QApplication.instance())
+        thread.setObjectName(f"PoseReadThread-{arm}")
+        worker = PoseReadWorker(self._pose_reader, arm)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._apply_pose)
+        worker.failed.connect(self._show_read_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(self._finish_read)
+        thread.finished.connect(thread.deleteLater)
+        self._read_thread = thread
+        self._read_worker = worker
+        self.read_button.setEnabled(False)
+        self.read_button.setToolTip(f"正在读取{arm}臂当前位姿…")
+        self.read_button.setAccessibleName(self.read_button.toolTip())
+        thread.start()
+
+    @Slot(str, object)
+    def _apply_pose(self, arm: str, pose: object) -> None:
+        if arm != self._arm or not isinstance(pose, list):
+            return
+        self.input.setText(
+            "[" + ", ".join(f"{float(value):.6f}" for value in pose) + "]"
+        )
+
+    @Slot(str)
+    def _show_read_error(self, message: str) -> None:
+        QMessageBox.warning(self, "读取机械臂位姿", message)
+
+    @Slot()
+    def _finish_read(self) -> None:
+        self._read_thread = None
+        self._read_worker = None
+        self.read_button.setEnabled(self._pose_reader is not None)
+        self._update_button_description()
+
+    def _update_button_description(self) -> None:
+        description = f"读取{self._arm}臂当前位姿"
+        self.read_button.setToolTip(description)
+        self.read_button.setAccessibleName(description)
+
+
+def _validated_pose_values(pose: Sequence[float]) -> list[float]:
+    if isinstance(pose, (str, bytes)):
+        raise ValueError("机械臂返回的当前位姿不是数值数组")
+    if len(pose) != 6:
+        raise ValueError("机械臂返回的当前位姿不是 6 维数组")
+    if any(isinstance(value, bool) for value in pose):
+        raise ValueError("机械臂返回的当前位姿包含无效数值")
+    values = [float(value) for value in pose]
+    if not all(math.isfinite(value) for value in values):
+        raise ValueError("机械臂返回的当前位姿包含无效数值")
+    return values
+
+
+class ContentSizedStackedWidget(QStackedWidget):
+    """Report the visible page's height instead of the tallest page's height."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+        self.currentChanged.connect(self.refresh_current_size)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return self.sizeHint()
+
+    def refresh_current_size(self) -> None:
+        current = self.currentWidget()
+        if current is not None:
+            current.adjustSize()
+        self.updateGeometry()
+        parent = self.parentWidget()
+        if parent is not None:
+            parent.updateGeometry()
+
+
+class CompensationEditor(QWidget):
+    """Edit the canonical move compensation object without exposing JSON."""
+
+    def __init__(
+        self,
+        current: object = None,
+        *,
+        arm: str = "左",
+        localization_reader: LocalizationReader | None = None,
+        station_choices_reader: StationChoicesReader | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("compensationEditor")
+        self._localization_reader = localization_reader
+        self._station_choices_reader = station_choices_reader
+        self._arm = arm
+        config = dict(current) if isinstance(current, dict) else {"mode": "none"}
+        self._localization_reference = self._read_teach_offset(config)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        self.mode_combo = QComboBox(self)
+        self.mode_combo.setObjectName("compensationModeCombo")
+        for label, mode in (
+            ("不补偿", "none"),
+            ("UDP 定位补偿", "udp"),
+            ("视觉重定位补偿", "vision"),
+        ):
+            self.mode_combo.addItem(label, mode)
+        selected_mode = str(config.get("mode") or "none")
+        self.mode_combo.setCurrentIndex(max(0, self.mode_combo.findData(selected_mode)))
+        layout.addWidget(self.mode_combo)
+
+        self.pages = ContentSizedStackedWidget(self)
+        self.pages.setObjectName("compensationPages")
+        self.pages.addWidget(self._build_none_page())
+        self.pages.addWidget(self._build_udp_page())
+        self.pages.addWidget(self._build_vision_page(config))
+        layout.addWidget(self.pages)
+        self.mode_combo.currentIndexChanged.connect(self._sync_mode_page)
+        self._sync_mode_page()
+
+    def value(self) -> dict[str, Any]:
+        mode = str(self.mode_combo.currentData())
+        if mode == "none":
+            return {"mode": "none"}
+        if mode == "udp":
+            if self._localization_reference is None:
+                raise ValueError("UDP 定位补偿需要先读取当前定位基准")
+            return {
+                "mode": "udp",
+                "udp": {
+                    "teach_offset": dict(self._localization_reference),
+                    "udp_linear_unit": "cm",
+                    "udp_angle_unit": "deg",
+                    "pose_linear_unit": "m",
+                    "pose_angle_unit": "rad",
+                },
+            }
+        station_id = self._selected_station_id()
+        if not station_id:
+            raise ValueError("视觉重定位补偿需要选择视觉工位")
+        return {
+            "mode": "vision",
+            "vision": {
+                "station_id": station_id,
+                "arm": self._normalized_arm(),
+            },
+        }
+
+    def set_arm(self, arm: str) -> None:
+        arm_changed = self._normalized_arm() != self._normalize_arm_value(arm)
+        self._arm = arm
+        if arm_changed:
+            self._station_id = ""
+            if hasattr(self, "station_combo"):
+                self.station_combo.setEditText("")
+        self._refresh_station_choices()
+
+    def _build_none_page(self) -> QWidget:
+        page = QWidget(self)
+        page.setObjectName("compensationNonePage")
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        label = QLabel("目标点位将直接发送给机械臂", page)
+        set_theme_role(label, "muted")
+        layout.addWidget(label)
+        layout.addStretch(1)
+        return page
+
+    def _build_udp_page(self) -> QWidget:
+        page = QWidget(self)
+        page.setObjectName("compensationUdpPage")
+        layout = QHBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        title = QLabel("UDP 基准", page)
+        title.setObjectName("compensationSectionLabel")
+        self.localization_status = QLabel(page)
+        self.localization_status.setObjectName("localizationReferenceStatus")
+        set_theme_role(self.localization_status, "muted")
+        self._render_localization_reference()
+        capture_button = QPushButton("读取当前定位", page)
+        capture_button.setObjectName("captureLocalizationButton")
+        capture_button.clicked.connect(self._capture_localization_reference)
+        layout.addWidget(title)
+        layout.addWidget(self.localization_status, stretch=1)
+        layout.addWidget(capture_button)
+        return page
+
+    def _build_vision_page(self, config: dict[str, Any]) -> QWidget:
+        page = QWidget(self)
+        page.setObjectName("compensationVisionPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        title = QLabel("视觉工位", page)
+        title.setObjectName("compensationSectionLabel")
+        self.station_combo = QComboBox(page)
+        self.station_combo.setObjectName("visionStationCombo")
+        self.station_combo.setEditable(True)
+        self.station_status = QLabel(page)
+        self.station_status.setObjectName("visionStationStatus")
+        self.station_status.setWordWrap(True)
+        set_theme_role(self.station_status, "muted")
+        vision = config.get("vision")
+        self._station_id = str(
+            vision.get("station_id") if isinstance(vision, dict) else ""
+        ).strip()
+        self._refresh_station_choices()
+        layout.addWidget(title)
+        layout.addWidget(self.station_combo)
+        layout.addWidget(self.station_status)
+        hint = QLabel("请先执行同一工位和机械臂的视觉重定位动作", page)
+        hint.setWordWrap(True)
+        set_theme_role(hint, "muted")
+        layout.addWidget(hint)
+        return page
+
+    def _sync_mode_page(self) -> None:
+        mode = str(self.mode_combo.currentData())
+        self.pages.setCurrentIndex({"none": 0, "udp": 1, "vision": 2}[mode])
+        self.pages.refresh_current_size()
+        self.updateGeometry()
+        window = self.window()
+        if isinstance(window, QDialog):
+            QTimer.singleShot(0, window.adjustSize)
+
+    def _capture_localization_reference(self) -> None:
+        if self._localization_reader is None:
+            QMessageBox.warning(self, "定位补偿", "定位服务未注入")
+            return
+        try:
+            position = self._localization_reader(
+                max_age=2.0,
+                wait_timeout=0.0,
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "定位补偿", f"读取 UDP 定位失败：\n{exc}")
+            return
+        if position is None:
+            QMessageBox.warning(
+                self,
+                "定位补偿",
+                "未收到当前有效定位数据，请确认 UDP Tag 已检测到",
+            )
+            return
+        try:
+            reference = {
+                "id": position.get("id", -99),
+                "x": float(position["x"]),
+                "y": float(position["y"]),
+                "angle": float(position["angle"]),
+                "timestamp": float(position.get("timestamp", 0.0)),
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            QMessageBox.warning(self, "定位补偿", f"UDP 定位数据格式无效：\n{exc}")
+            return
+        self._localization_reference = reference
+        self._render_localization_reference()
+
+    def _render_localization_reference(self) -> None:
+        reference = self._localization_reference
+        if reference is None:
+            self.localization_status.setText("尚未读取基准")
+            return
+        self.localization_status.setText(
+            f"ID={reference.get('id', -99)}  "
+            f"X={float(reference['x']):.3f} cm  "
+            f"Y={float(reference['y']):.3f} cm  "
+            f"角度={float(reference['angle']):.3f}°"
+        )
+
+    def _refresh_station_choices(self) -> None:
+        if not hasattr(self, "station_combo"):
+            return
+        current = self._selected_station_id() or self._station_id
+        self.station_combo.blockSignals(True)
+        self.station_combo.clear()
+        try:
+            choices = (
+                self._station_choices_reader(self._normalized_arm())
+                if self._station_choices_reader is not None
+                else []
+            )
+        except Exception as exc:
+            choices = []
+            self.station_status.setText(f"视觉工位加载失败：{exc}")
+            set_theme_role(self.station_status, "danger")
+        else:
+            self.station_status.setText(
+                "" if choices else "当前机械臂尚未配置视觉工位"
+            )
+            set_theme_role(self.station_status, "muted")
+        for station_id, label in choices:
+            self.station_combo.addItem(f"{label} · {station_id}", station_id)
+        if current:
+            index = self.station_combo.findData(current)
+            if index >= 0:
+                self.station_combo.setCurrentIndex(index)
+            else:
+                self.station_combo.setEditText(current)
+        elif self.station_combo.count() == 0:
+            self.station_combo.setEditText("")
+        self.station_combo.blockSignals(False)
+
+    def _selected_station_id(self) -> str:
+        if not hasattr(self, "station_combo"):
+            return ""
+        data = self.station_combo.currentData()
+        if data:
+            return str(data).strip()
+        return self.station_combo.currentText().strip()
+
+    def _normalized_arm(self) -> str:
+        return self._normalize_arm_value(self._arm)
+
+    @staticmethod
+    def _normalize_arm_value(arm: str) -> str:
+        return "right" if arm in {"右", "右臂", "right"} else "left"
+
+    @staticmethod
+    def _read_teach_offset(config: dict[str, Any]) -> dict[str, Any] | None:
+        udp = config.get("udp")
+        if not isinstance(udp, dict):
+            return None
+        reference = udp.get("teach_offset")
+        return dict(reference) if isinstance(reference, dict) else None
+
+
+FieldWidget = (
+    QLineEdit
+    | QComboBox
+    | QSpinBox
+    | QDoubleSpinBox
+    | QCheckBox
+    | PoseEditor
+    | CompensationEditor
+)
 
 
 class SchemaActionForm(QWidget):
@@ -134,6 +581,9 @@ class SchemaActionForm(QWidget):
         parameters: dict[str, Any] | None = None,
         *,
         initial_variant: str | None = None,
+        pose_reader: PoseReader | None = None,
+        localization_reader: LocalizationReader | None = None,
+        station_choices_reader: StationChoicesReader | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -142,6 +592,9 @@ class SchemaActionForm(QWidget):
         self._values = dict(parameters or {})
         self._field_widgets: dict[str, FieldWidget] = {}
         self._field_schemas: dict[str, ActionFieldSchema] = {}
+        self._pose_reader = pose_reader
+        self._localization_reader = localization_reader
+        self._station_choices_reader = station_choices_reader
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -229,6 +682,21 @@ class SchemaActionForm(QWidget):
             self._fields_layout.addRow(f"{label}{suffix}{required}:", widget)
             self._field_widgets[field_name] = widget
             self._field_schemas[field_name] = field_schema
+        arm_widget = self._field_widgets.get("臂")
+        pose_widget = self._field_widgets.get("点位")
+        compensation_widget = self._field_widgets.get("补偿")
+        if isinstance(arm_widget, QComboBox) and isinstance(
+            pose_widget,
+            PoseEditor,
+        ):
+            arm_widget.currentTextChanged.connect(pose_widget.set_arm)
+            pose_widget.set_arm(arm_widget.currentText())
+        if isinstance(arm_widget, QComboBox) and isinstance(
+            compensation_widget,
+            CompensationEditor,
+        ):
+            arm_widget.currentTextChanged.connect(compensation_widget.set_arm)
+            compensation_widget.set_arm(arm_widget.currentText())
 
     def _selected_fields(self) -> dict[str, ActionFieldSchema]:
         variants = self._type_schema.get("variants")
@@ -264,15 +732,29 @@ class SchemaActionForm(QWidget):
             widget.setDecimals(6)
             widget.setRange(float(schema.get("min", -1e12)), float(schema.get("max", 1e12)))
             widget.setValue(float(value or 0.0))
+        elif field_type == "compensation":
+            arm_widget = self._field_widgets.get("臂")
+            arm = arm_widget.currentText() if isinstance(arm_widget, QComboBox) else "左"
+            widget = CompensationEditor(
+                value,
+                arm=arm,
+                localization_reader=self._localization_reader,
+                station_choices_reader=self._station_choices_reader,
+            )
+        elif field_type == "pose":
+            arm_widget = self._field_widgets.get("臂")
+            arm = arm_widget.currentText() if isinstance(arm_widget, QComboBox) else "左"
+            widget = PoseEditor(
+                value,
+                arm=arm,
+                pose_reader=self._pose_reader,
+                placeholder=schema.get("placeholder", ""),
+            )
         else:
             widget = QLineEdit()
-            if field_type in {"object", "pose"}:
+            if field_type == "object":
                 widget.setText("" if value is None else json.dumps(value, ensure_ascii=False))
-                widget.setPlaceholderText(
-                    "JSON 对象，例如：{}"
-                    if field_type == "object"
-                    else "JSON 数组，例如：[x, y, z, rx, ry, rz]"
-                )
+                widget.setPlaceholderText("JSON 对象，例如：{}")
             else:
                 widget.setText("" if value is None else str(value))
                 widget.setPlaceholderText(schema.get("placeholder", ""))
@@ -281,6 +763,20 @@ class SchemaActionForm(QWidget):
 
     @staticmethod
     def _widget_value(widget: FieldWidget, schema: ActionFieldSchema) -> Any:
+        if isinstance(widget, CompensationEditor):
+            return widget.value()
+        if isinstance(widget, PoseEditor):
+            text = widget.text().strip()
+            if not text:
+                return []
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError("点位必须是合法 JSON 数组") from exc
+            try:
+                return _validated_pose_values(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("点位必须包含 6 个有效数值") from exc
         if isinstance(widget, QComboBox):
             return widget.currentData()
         if isinstance(widget, QCheckBox):
@@ -298,23 +794,6 @@ class SchemaActionForm(QWidget):
             if not isinstance(value, dict):
                 raise ValueError(f"{schema.get('label', '对象字段')} 必须是 JSON 对象")
             return value
-        if schema["type"] == "pose":
-            if not text:
-                return []
-            try:
-                value = json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise ValueError("点位必须是合法 JSON 数组") from exc
-            if (
-                not isinstance(value, list)
-                or len(value) != 6
-                or any(
-                    not isinstance(item, (int, float)) or isinstance(item, bool)
-                    for item in value
-                )
-            ):
-                raise ValueError("点位必须包含 6 个数值")
-            return [float(item) for item in value]
         if not text and not schema.get("required") and "default" not in schema:
             return None
         return text
@@ -331,6 +810,9 @@ class ActionConfigDialog(QDialog):
         *,
         existing_names: set[str] | None = None,
         initial_variant: str | None = None,
+        pose_reader: PoseReader | None = None,
+        localization_reader: LocalizationReader | None = None,
+        station_choices_reader: StationChoicesReader | None = None,
     ) -> None:
         super().__init__(parent)
         self.action_type = action_type
@@ -352,6 +834,9 @@ class ActionConfigDialog(QDialog):
             action_type,
             self.action_data.get("parameters", {}),
             initial_variant=_normalize_initial_variant(initial_variant),
+            pose_reader=pose_reader,
+            localization_reader=localization_reader,
+            station_choices_reader=station_choices_reader,
         )
         layout.addWidget(self.action_form)
         buttons = QDialogButtonBox(

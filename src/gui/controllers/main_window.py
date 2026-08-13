@@ -823,6 +823,14 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
+    def _read_current_arm_pose_for_form(self, arm: str) -> list[float]:
+        state = self._services.robot_query.try_read_state(arm)
+        if state is None:
+            raise RuntimeError(
+                f"{arm}臂当前位姿不可用，请确认设备已连接并完成初始化"
+            )
+        return state.pose.to_list()
+
     def format_pose_text(self, pose: Sequence[float]) -> str:
         x_mm = pose[0] * 1000
         y_mm = pose[1] * 1000
@@ -989,6 +997,9 @@ class MainWindow(QMainWindow):
             action_type,
             existing_names=self._collect_action_names(),
             initial_variant=move_target,
+            pose_reader=self._read_current_arm_pose_for_form,
+            localization_reader=self._services.external_localization.latest,
+            station_choices_reader=self._services.vision.list_station_choices,
         )
         if dialog.exec():
             action = dialog.get_action_definition()
@@ -1107,6 +1118,9 @@ class MainWindow(QMainWindow):
             action_data,
             self,
             existing_names=self._collect_action_names(),
+            pose_reader=self._read_current_arm_pose_for_form,
+            localization_reader=self._services.external_localization.latest,
+            station_choices_reader=self._services.vision.list_station_choices,
         )
         if not dialog.exec():
             return
@@ -1810,6 +1824,9 @@ class MainWindow(QMainWindow):
             action_def.type,
             action_data,
             self,
+            pose_reader=self._read_current_arm_pose_for_form,
+            localization_reader=self._services.external_localization.latest,
+            station_choices_reader=self._services.vision.list_station_choices,
         )
         if not dialog.exec():
             return

@@ -245,6 +245,7 @@ QLabel[themeRole="muted"] {{ color: {colors.text_muted}; }}
 QLabel[themeRole="success"] {{ color: {colors.success}; font-weight: 700; }}
 QLabel[themeRole="warning"] {{ color: {colors.warning}; font-weight: 700; }}
 QLabel[themeRole="danger"] {{ color: {colors.danger}; font-weight: 700; }}
+QLabel#compensationSectionLabel {{ color: {colors.text}; font-weight: 600; }}
 QTabWidget::pane {{ border: none; background: {colors.surface}; }}
 QTabBar::tab {{ background: transparent; border: none; border-radius: 6px; padding: 6px 14px; color: {colors.text_muted}; }}
 QTabBar::tab:selected {{ background: {colors.selection}; color: {colors.accent}; font-weight: 700; }}

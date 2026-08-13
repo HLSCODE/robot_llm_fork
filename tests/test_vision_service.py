@@ -141,6 +141,31 @@ class VisionServiceTests(unittest.TestCase):
         self.assertTrue(second.final_directory.exists())
         self.assertFalse(stale.exists())
 
+    def test_station_choices_are_exposed_through_the_vision_service(self) -> None:
+        storage = VisionStationStorage(
+            self.root / "stations.json",
+            configuration=vision_configuration(self.settings),
+        )
+        storage.upsert_profile(
+            {
+                "station_id": "station-left",
+                "station_name": "装粉工位",
+                "arm": "left",
+                "T_B0_M": [[1.0]],
+            }
+        )
+        service = VisionService(
+            self.settings,
+            ExecutionContext(),
+            station_storage=storage,
+        )
+
+        self.assertEqual(
+            [("station-left", "装粉工位 (左臂)")],
+            service.list_station_choices("left"),
+        )
+        self.assertEqual([], service.list_station_choices("right"))
+
 
 class VisionStationStorageTests(unittest.TestCase):
     def test_profiles_require_versioned_document_and_active_calibration(self) -> None:
