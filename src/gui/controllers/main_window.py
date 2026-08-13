@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bridges.execution import ExecutionBridge
+from ..menus import PositionedSubMenu
 from ...application import (
     ApplicationServices,
     CompositionChangeType,
@@ -507,7 +508,8 @@ class MainWindow(QMainWindow):
             "资源侧栏",
             self.workbench_view.toggle_last_side_page
         )
-        panel_menu = view_menu.addMenu("底部面板")
+        panel_menu = PositionedSubMenu("底部面板", view_menu)
+        view_menu.addMenu(panel_menu)
         panel_actions: dict[str, QAction] = {}
         for label, key in (
             ("设备", "devices"),
@@ -530,7 +532,8 @@ class MainWindow(QMainWindow):
                 toggle_panel,
             )
         view_menu.addSeparator()
-        theme_menu = view_menu.addMenu("主题")
+        theme_menu = PositionedSubMenu("主题", view_menu)
+        view_menu.addMenu(theme_menu)
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
         for command_id, label, mode in (
