@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import uuid4
 
-from PySide6.QtCore import QObject, QSize, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -615,6 +615,8 @@ FieldWidget = (
 class SchemaActionForm(QWidget):
     """Render one action parameter form solely from the canonical schema."""
 
+    content_size_changed = Signal()
+
     def __init__(
         self,
         action_type: ActionType,
@@ -635,9 +637,14 @@ class SchemaActionForm(QWidget):
         self._pose_reader = pose_reader
         self._localization_reader = localization_reader
         self._station_choices_reader = station_choices_reader
+        self.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         description = QLabel(self._type_schema.get("description", ""))
         description.setWordWrap(True)
         layout.addWidget(description)
@@ -663,6 +670,10 @@ class SchemaActionForm(QWidget):
             layout.addLayout(variant_form)
 
         self._fields_widget = QWidget()
+        self._fields_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
         self._fields_layout = QFormLayout(self._fields_widget)
         layout.addWidget(self._fields_widget)
         note = self._type_schema.get("note")
@@ -730,6 +741,9 @@ class SchemaActionForm(QWidget):
     def _change_variant(self) -> None:
         self._values = self.parameters()
         self._render_fields()
+        self.adjustSize()
+        self.updateGeometry()
+        self.content_size_changed.emit()
 
     def _render_fields(self) -> None:
         while self._fields_layout.rowCount():
@@ -941,6 +955,7 @@ class ActionConfigDialog(QDialog):
         self.setWindowTitle(f"配置 {schema.get('label', action_type.value)} 动作")
         self.setMinimumWidth(440)
         layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         form = QFormLayout()
         self.name_input = QLineEdit(current_name)
         form.addRow(
@@ -960,6 +975,9 @@ class ActionConfigDialog(QDialog):
             station_choices_reader=station_choices_reader,
         )
         layout.addWidget(self.action_form)
+        self.action_form.content_size_changed.connect(
+            self._schedule_content_resize
+        )
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -967,6 +985,17 @@ class ActionConfigDialog(QDialog):
         buttons.accepted.connect(self._validate_and_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        QTimer.singleShot(0, self._adjust_to_content)
+
+    def _schedule_content_resize(self) -> None:
+        QTimer.singleShot(0, self._adjust_to_content)
+
+    def _adjust_to_content(self) -> None:
+        layout = self.layout()
+        if layout is not None:
+            layout.activate()
+        self.action_form.adjustSize()
+        self.adjustSize()
 
     def _validate_and_accept(self) -> None:
         name = self.name_input.text().strip()

@@ -9,7 +9,14 @@ import unittest
 from unittest.mock import patch
 
 from PySide6.QtCore import QThread, QTimer, Qt
-from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QSizePolicy
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSizePolicy,
+)
 
 from src.application import (
     CompositionService,
@@ -315,6 +322,32 @@ class SchemaActionFormTests(unittest.TestCase):
 
         self.assertEqual("error", editor.input.property("validationState"))
         form.deleteLater()
+
+    def test_action_dialog_shrinks_after_switching_to_a_shorter_variant(self) -> None:
+        dialog = ActionConfigDialog(
+            ActionType.MANIPULATE,
+            initial_variant="智能加粉",
+        )
+        dialog.show()
+        QApplication.processEvents()
+        tall_height = dialog.height()
+        variant_combo = dialog.action_form.findChild(QComboBox)
+        assert variant_combo is not None
+
+        variant_combo.setCurrentIndex(variant_combo.findData("快换手"))
+        self.assertTrue(
+            _process_events_until(
+                lambda: dialog.height() < tall_height,
+            )
+        )
+
+        self.assertLess(dialog.height(), tall_height)
+        self.assertLessEqual(dialog.height(), dialog.sizeHint().height() + 2)
+        self.assertEqual(
+            QSizePolicy.Policy.Fixed,
+            dialog.action_form.sizePolicy().verticalPolicy(),
+        )
+        dialog.close()
 
 
 class GuiNotificationCenterTests(unittest.TestCase):
