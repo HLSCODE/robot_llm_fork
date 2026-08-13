@@ -249,6 +249,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         for command_id, action in self.window._menu_actions.items():
             with self.subTest(command=command_id):
                 self.assertFalse(action.shortcut().isEmpty())
+                self.assertIn(self.window, action.associatedObjects())
 
     def test_buttons_drive_pause_resume_and_cancel_through_shared_runtime(self) -> None:
         item = SequenceItem.from_definition(

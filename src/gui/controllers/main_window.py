@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bridges.execution import ExecutionBridge
-from ..menus import PositionedSubMenu
+from ..menus import ApplicationMenuBar
 from ...application import (
     ApplicationServices,
     CompositionChangeType,
@@ -481,7 +481,9 @@ class MainWindow(QMainWindow):
         controls.pipette_eject_requested.connect(self.eject_pipette_tip)
 
     def create_menu(self) -> None:
-        menubar = self.menuBar()
+        menubar = ApplicationMenuBar(self)
+        self.setMenuWidget(menubar)
+        self.application_menu_bar = menubar
 
         file_menu = menubar.addMenu("文件")
         self._add_menu_action(file_menu, "file.save", "保存当前任务", self.save_task)
@@ -508,7 +510,7 @@ class MainWindow(QMainWindow):
             "资源侧栏",
             self.workbench_view.toggle_last_side_page
         )
-        panel_menu = PositionedSubMenu("底部面板", view_menu)
+        panel_menu = QMenu("底部面板", view_menu)
         view_menu.addMenu(panel_menu)
         panel_actions: dict[str, QAction] = {}
         for label, key in (
@@ -532,7 +534,7 @@ class MainWindow(QMainWindow):
                 toggle_panel,
             )
         view_menu.addSeparator()
-        theme_menu = PositionedSubMenu("主题", view_menu)
+        theme_menu = QMenu("主题", view_menu)
         view_menu.addMenu(theme_menu)
         theme_group = QActionGroup(self)
         theme_group.setExclusive(True)
@@ -613,6 +615,10 @@ class MainWindow(QMainWindow):
         action.setCheckable(checkable)
         action.triggered.connect(callback)
         self._shortcut_registry.register(command_id, action)
+        # The logical QMenu is not a visible native menu. Associate every
+        # command with the window explicitly so its centralized shortcut stays
+        # active while the in-window overlay is closed.
+        self.addAction(action)
         menu.addAction(action)
         self._menu_actions[command_id] = action
         return action

@@ -355,7 +355,7 @@ QMenuBar::item {{ background: transparent; padding: 6px 10px; margin: 1px; borde
 QMenuBar::item:selected, QMenuBar::item:pressed {{ background: {colors.selection}; color: {colors.text}; }}
 QMenu {{
     background: {colors.surface}; color: {colors.text};
-    border: 1px solid {colors.border}; border-radius: 8px; padding: 6px;
+    border: 1px solid {colors.border}; padding: 6px;
 }}
 QMenu::item {{ min-width: 150px; padding: 7px 28px; margin: 1px 0; border-radius: 5px; }}
 QMenu::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
@@ -363,6 +363,41 @@ QMenu::item:disabled {{ color: {colors.disabled_text}; }}
 QMenu::separator {{ height: 1px; background: {colors.border}; margin: 5px 8px; }}
 QMenu::indicator {{ width: 14px; height: 14px; left: 8px; }}
 QMenu::right-arrow {{ width: 9px; height: 9px; margin-right: 8px; }}
+QFrame#applicationMenuBar {{
+    background: {colors.surface}; border: none;
+}}
+QToolButton#applicationMenuButton {{
+    background: transparent; color: {colors.text}; border: none;
+    border-radius: 5px; padding: 6px 10px;
+}}
+QToolButton#applicationMenuButton:hover,
+QToolButton#applicationMenuButton:checked {{
+    background: {colors.selection}; color: {colors.text};
+}}
+QFrame#applicationMenuPanel {{
+    background: {colors.surface}; color: {colors.text};
+    border: 1px solid {colors.border}; border-radius: 9px;
+}}
+QFrame#applicationMenuRow {{
+    background: transparent; border: none; border-radius: 5px;
+}}
+QFrame#applicationMenuRow:hover,
+QFrame#applicationMenuRow[keyboardFocus="true"] {{
+    background: {colors.selection};
+}}
+QFrame#applicationMenuRow:disabled {{ background: transparent; }}
+QLabel#applicationMenuIndicator,
+QLabel#applicationMenuLabel,
+QLabel#applicationMenuShortcut,
+QLabel#applicationMenuArrow {{
+    background: transparent; border: none; color: {colors.text};
+}}
+QLabel#applicationMenuLabel {{ color: {colors.text}; font-weight: 500; }}
+QLabel#applicationMenuShortcut {{ color: {colors.text}; }}
+QFrame#applicationMenuRow:disabled QLabel {{ color: {colors.text_muted}; }}
+QFrame#applicationMenuSeparator {{
+    background: {colors.border}; border: none; margin: 4px 6px;
+}}
 QToolButton::menu-indicator {{ width: 9px; height: 9px; subcontrol-position: bottom right; }}
 QWidget#aiStatusCard {{ background: {colors.surface_subtle}; border: none; border-radius: 8px; }}
 QWidget#startupProgressWindow {{ background: transparent; }}
