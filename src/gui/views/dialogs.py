@@ -134,6 +134,38 @@ StationChoicesReader = Callable[[str | None], list[tuple[str, str]]]
 PoseReader = Callable[[str], Sequence[float] | None]
 
 
+class FormFieldLabel(QWidget):
+    """Render a form label with a semantic required indicator."""
+
+    def __init__(
+        self,
+        text: str,
+        *,
+        required: bool = False,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        layout.addWidget(QLabel(text, self))
+        if required:
+            indicator = QLabel("*", self)
+            indicator.setObjectName("requiredFieldIndicator")
+            indicator.setAccessibleName("必填")
+            set_theme_role(indicator, "danger")
+            layout.addWidget(indicator)
+        layout.addWidget(QLabel("：", self))
+
+
+def _set_widget_validation_state(widget: QWidget, invalid: bool) -> None:
+    widget.setProperty("validationState", "error" if invalid else "")
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+    widget.update()
+
+
 class PoseReadWorker(QObject):
     """Read one arm pose away from the GUI thread."""
 
@@ -372,7 +404,9 @@ class CompensationEditor(QWidget):
             }
         station_id = self._selected_station_id()
         if not station_id:
+            _set_widget_validation_state(self.station_combo, True)
             raise ValueError("视觉重定位补偿需要选择视觉工位")
+        _set_widget_validation_state(self.station_combo, False)
         return {
             "mode": "vision",
             "vision": {
@@ -432,6 +466,12 @@ class CompensationEditor(QWidget):
         self.station_combo = QComboBox(page)
         self.station_combo.setObjectName("visionStationCombo")
         self.station_combo.setEditable(True)
+        self.station_combo.currentTextChanged.connect(
+            lambda _text: _set_widget_validation_state(
+                self.station_combo,
+                False,
+            )
+        )
         self.station_status = QLabel(page)
         self.station_status.setObjectName("visionStationStatus")
         self.station_status.setWordWrap(True)
@@ -654,10 +694,38 @@ class SchemaActionForm(QWidget):
                 self._variant_combo.currentData()
             )
         for field_name, widget in self._field_widgets.items():
-            value = self._widget_value(widget, self._field_schemas[field_name])
+            try:
+                value = self._widget_value(widget, self._field_schemas[field_name])
+            except ValueError:
+                self._set_field_invalid(widget, True)
+                self._validation_target(widget).setFocus()
+                raise
             if value is not None:
                 values[field_name] = value
         return values
+
+    def mark_missing_required_fields(self) -> tuple[str, ...]:
+        """Mark every empty schema-required field and return their names."""
+        missing: list[str] = []
+        for field_name, schema in self._field_schemas.items():
+            if not schema.get("required"):
+                continue
+            widget = self._field_widgets[field_name]
+            is_missing = not self._field_has_value(widget)
+            self._set_field_invalid(widget, is_missing)
+            if is_missing:
+                missing.append(field_name)
+        return tuple(missing)
+
+    def mark_fields_invalid(self, field_names: Sequence[str]) -> None:
+        invalid_names = set(field_names)
+        for field_name, widget in self._field_widgets.items():
+            self._set_field_invalid(widget, field_name in invalid_names)
+
+    def focus_field(self, field_name: str) -> None:
+        widget = self._field_widgets.get(field_name)
+        if widget is not None:
+            self._validation_target(widget).setFocus()
 
     def _change_variant(self) -> None:
         self._values = self.parameters()
@@ -677,11 +745,17 @@ class SchemaActionForm(QWidget):
             widget = self._create_widget(field_schema, self._values.get(field_name))
             label = field_schema.get("label", field_name)
             unit = field_schema.get("unit", "")
-            required = " *" if field_schema.get("required") else ""
             suffix = f" ({unit})" if unit else ""
-            self._fields_layout.addRow(f"{label}{suffix}{required}:", widget)
+            self._fields_layout.addRow(
+                FormFieldLabel(
+                    f"{label}{suffix}",
+                    required=bool(field_schema.get("required")),
+                ),
+                widget,
+            )
             self._field_widgets[field_name] = widget
             self._field_schemas[field_name] = field_schema
+            self._connect_validation_reset(widget)
         arm_widget = self._field_widgets.get("臂")
         pose_widget = self._field_widgets.get("点位")
         compensation_widget = self._field_widgets.get("补偿")
@@ -798,6 +872,47 @@ class SchemaActionForm(QWidget):
             return None
         return text
 
+    @staticmethod
+    def _validation_target(widget: FieldWidget) -> QWidget:
+        if isinstance(widget, PoseEditor):
+            return widget.input
+        return widget
+
+    @classmethod
+    def _set_field_invalid(cls, widget: FieldWidget, invalid: bool) -> None:
+        target = cls._validation_target(widget)
+        _set_widget_validation_state(target, invalid)
+
+    @classmethod
+    def _field_has_value(cls, widget: FieldWidget) -> bool:
+        target = cls._validation_target(widget)
+        if isinstance(target, QLineEdit):
+            return bool(target.text().strip())
+        if isinstance(target, QComboBox):
+            return target.currentIndex() >= 0 and bool(target.currentText().strip())
+        if isinstance(target, QCheckBox):
+            return target.isChecked()
+        return True
+
+    def _connect_validation_reset(self, widget: FieldWidget) -> None:
+        target = self._validation_target(widget)
+        if isinstance(target, QLineEdit):
+            target.textChanged.connect(
+                lambda _text, field=widget: self._set_field_invalid(field, False)
+            )
+        elif isinstance(target, QComboBox):
+            target.currentIndexChanged.connect(
+                lambda _index, field=widget: self._set_field_invalid(field, False)
+            )
+        elif isinstance(target, (QSpinBox, QDoubleSpinBox)):
+            target.valueChanged.connect(
+                lambda _value, field=widget: self._set_field_invalid(field, False)
+            )
+        elif isinstance(target, QCheckBox):
+            target.toggled.connect(
+                lambda _checked, field=widget: self._set_field_invalid(field, False)
+            )
+
 
 class ActionConfigDialog(QDialog):
     """Create or edit an action using the canonical schema-driven form."""
@@ -828,7 +943,13 @@ class ActionConfigDialog(QDialog):
         layout = QVBoxLayout(self)
         form = QFormLayout()
         self.name_input = QLineEdit(current_name)
-        form.addRow("动作名称 *:", self.name_input)
+        form.addRow(
+            FormFieldLabel("动作名称", required=True),
+            self.name_input,
+        )
+        self.name_input.textChanged.connect(
+            lambda _text: self._set_name_invalid(False)
+        )
         layout.addLayout(form)
         self.action_form = SchemaActionForm(
             action_type,
@@ -849,11 +970,25 @@ class ActionConfigDialog(QDialog):
 
     def _validate_and_accept(self) -> None:
         name = self.name_input.text().strip()
-        if not name:
-            QMessageBox.warning(self, "警告", "动作名称不能为空")
-            self.name_input.setFocus()
+        name_missing = not name
+        self._set_name_invalid(name_missing)
+        missing_fields = self.action_form.mark_missing_required_fields()
+        if name_missing or missing_fields:
+            missing_labels = (["动作名称"] if name_missing else []) + list(
+                missing_fields
+            )
+            QMessageBox.warning(
+                self,
+                "请填写必填项",
+                "请填写：" + "、".join(missing_labels),
+            )
+            if name_missing:
+                self.name_input.setFocus()
+            else:
+                self.action_form.focus_field(missing_fields[0])
             return
         if name in self._existing_names:
+            self._set_name_invalid(True)
             QMessageBox.warning(self, "警告", f"动作名称已存在: {name}")
             self.name_input.selectAll()
             return
@@ -864,6 +999,10 @@ class ActionConfigDialog(QDialog):
             return
         validation = validate_action_parameters(self.action_type, parameters)
         if not validation.is_valid:
+            invalid_fields = tuple(issue.field for issue in validation.issues)
+            self.action_form.mark_fields_invalid(invalid_fields)
+            if invalid_fields:
+                self.action_form.focus_field(invalid_fields[0])
             QMessageBox.warning(self, "参数错误", validation.message)
             return
         self._definition = ActionDefinition(
@@ -873,6 +1012,9 @@ class ActionConfigDialog(QDialog):
             parameters=validation.parameters,
         )
         self.accept()
+
+    def _set_name_invalid(self, invalid: bool) -> None:
+        _set_widget_validation_state(self.name_input, invalid)
 
     def get_action_definition(self) -> ActionDefinition:
         if self._definition is None:

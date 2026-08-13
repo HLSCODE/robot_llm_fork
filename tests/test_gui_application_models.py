@@ -6,9 +6,10 @@ from threading import Event, Thread
 from time import monotonic, sleep
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from PySide6.QtCore import QThread, QTimer, Qt
-from PySide6.QtWidgets import QApplication, QPushButton, QSizePolicy
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QSizePolicy
 
 from src.application import (
     CompositionService,
@@ -21,6 +22,7 @@ from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from src.execution import ExecutionEvent, ExecutionEventType, ExecutionState
 from src.gui.bridges.execution import ExecutionBridge
 from src.gui.views.dialogs import (
+    ActionConfigDialog,
     CompensationEditor,
     ContentSizedStackedWidget,
     PoseEditor,
@@ -276,6 +278,42 @@ class SchemaActionFormTests(unittest.TestCase):
             [0.1, -0.2, 0.3, 1.0, -1.1, 1.2],
             form.parameters()["点位"],
         )
+        form.deleteLater()
+
+    def test_required_fields_use_red_indicators_and_error_borders(self) -> None:
+        dialog = ActionConfigDialog(ActionType.MOVE)
+        indicators = dialog.findChildren(QLabel, "requiredFieldIndicator")
+
+        with patch.object(QMessageBox, "warning") as warning:
+            dialog._validate_and_accept()
+
+        pose_editor = dialog.findChild(PoseEditor, "poseEditor")
+        assert pose_editor is not None
+        self.assertEqual(2, len(indicators))
+        self.assertTrue(all(label.property("themeRole") == "danger" for label in indicators))
+        self.assertEqual("error", dialog.name_input.property("validationState"))
+        self.assertEqual("error", pose_editor.input.property("validationState"))
+        warning.assert_called_once()
+
+        dialog.name_input.setText("move-current-pose")
+        pose_editor.input.setText("[0, 0, 0, 0, 0, 0]")
+        self.assertEqual("", dialog.name_input.property("validationState"))
+        self.assertEqual("", pose_editor.input.property("validationState"))
+        dialog.deleteLater()
+
+    def test_invalid_required_pose_keeps_its_error_border(self) -> None:
+        form = SchemaActionForm(
+            ActionType.MOVE,
+            {"目标": "机械臂", "点位": [0, 0, 0, 0, 0, 0]},
+        )
+        editor = form.findChild(PoseEditor, "poseEditor")
+        assert editor is not None
+        editor.input.setText("not-json")
+
+        with self.assertRaisesRegex(ValueError, "JSON 数组"):
+            form.parameters()
+
+        self.assertEqual("error", editor.input.property("validationState"))
         form.deleteLater()
 
 

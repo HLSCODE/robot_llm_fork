@@ -253,6 +253,14 @@ QTabBar::tab:hover:!selected {{ background: {colors.selection}; color: {colors.a
 QGroupBox {{ font-weight: 700; border: none; margin-top: 14px; padding: 14px 8px 8px; background: {colors.surface}; }}
 QGroupBox::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {colors.accent}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{ background: {colors.surface_subtle}; color: {colors.text}; border: 1px solid transparent; border-radius: 6px; }}
+QLineEdit[validationState="error"], QSpinBox[validationState="error"],
+QDoubleSpinBox[validationState="error"], QComboBox[validationState="error"] {{
+    border: 1px solid {colors.danger};
+}}
+QLineEdit[validationState="error"]:focus, QSpinBox[validationState="error"]:focus,
+QDoubleSpinBox[validationState="error"]:focus, QComboBox[validationState="error"]:focus {{
+    border: 1px solid {colors.danger};
+}}
 QTextEdit, QListWidget {{ background: {colors.surface}; color: {colors.text}; border: none; border-radius: 6px; }}
 QLineEdit {{ padding: 5px 8px; }}
 QSpinBox, QDoubleSpinBox {{ padding: 5px 30px 5px 8px; }}
