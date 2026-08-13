@@ -56,6 +56,9 @@
     <file alias="quick-stop.svg">assets/icons/quick-stop.svg</file>
     <file alias="emergency.svg">assets/icons/emergency.svg</file>
     <file alias="close.svg">assets/icons/close.svg</file>
+    <file alias="window-minimize.svg">assets/icons/window-minimize.svg</file>
+    <file alias="window-maximize.svg">assets/icons/window-maximize.svg</file>
+    <file alias="window-restore.svg">assets/icons/window-restore.svg</file>
     <file alias="shortcuts.svg">assets/icons/shortcuts.svg</file>
     <file alias="chevron-down-on-light.svg">assets/icons/chevron-down-on-light.svg</file>
     <file alias="chevron-down-on-dark.svg">assets/icons/chevron-down-on-dark.svg</file>

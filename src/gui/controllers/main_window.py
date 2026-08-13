@@ -12,7 +12,6 @@ from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -20,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bridges.execution import ExecutionBridge
-from ..menus import ApplicationMenuBar
+from ..app_dialogs import ask_integer, ask_text, choose_item
 from ...application import (
     ApplicationServices,
     CompositionChangeType,
@@ -73,6 +72,7 @@ from ..theme import ThemeController, ThemeMode
 from ..icons import IconName, themed_icon
 from ..shortcuts import ShortcutRegistry
 from ..workbench_layout import WorkbenchLayoutStore
+from ..window_chrome import ApplicationTitleBar
 
 
 _WORKFLOW_FILE_SUFFIX = ".workflow.json"
@@ -375,6 +375,7 @@ class MainWindow(QMainWindow):
 
     def init_ui(self) -> None:
         self.setWindowTitle("机器人动作编排器")
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setMinimumSize(540, 800)
         self.resize(900, 960)
 
@@ -481,8 +482,10 @@ class MainWindow(QMainWindow):
         controls.pipette_eject_requested.connect(self.eject_pipette_tip)
 
     def create_menu(self) -> None:
-        menubar = ApplicationMenuBar(self)
-        self.setMenuWidget(menubar)
+        title_bar = ApplicationTitleBar(self)
+        menubar = title_bar.menu_bar
+        self.setMenuWidget(title_bar)
+        self.application_title_bar = title_bar
         self.application_menu_bar = menubar
 
         file_menu = menubar.addMenu("文件")
@@ -1010,13 +1013,11 @@ class MainWindow(QMainWindow):
 
     def create_trajectory_action(self) -> None:
         options = ["录制 R1", "录制 R2", "使用已有文件"]
-        selected, ok = QInputDialog.getItem(
+        selected, ok = choose_item(
             self,
             "轨迹动作",
             "创建轨迹动作:",
             options,
-            0,
-            False
         )
         if not ok:
             return
@@ -1037,13 +1038,11 @@ class MainWindow(QMainWindow):
             if not file_path:
                 return
             robot_options = ["R1", "R2"]
-            robot_selected, robot_ok = QInputDialog.getItem(
+            robot_selected, robot_ok = choose_item(
                 self,
                 "轨迹执行机械臂",
                 "选择执行轨迹的机械臂:",
                 robot_options,
-                0,
-                False
             )
             if not robot_ok:
                 return
@@ -1053,11 +1052,11 @@ class MainWindow(QMainWindow):
             return
 
         default_name = f"{robot_name.upper()} {Path(file_path).stem}"
-        name, name_ok = QInputDialog.getText(
+        name, name_ok = ask_text(
             self,
             "轨迹动作名称",
             "动作名称:",
-            text=default_name
+            text=default_name,
         )
         if not name_ok:
             return
@@ -1301,13 +1300,11 @@ class MainWindow(QMainWindow):
         }
         if category is ActionType.MANIPULATE:
             options = ["执行器动作", "等待"]
-            selected, ok = QInputDialog.getItem(
+            selected, ok = choose_item(
                 self,
                 "选择动作类型",
                 "在执行类下创建:",
                 options,
-                0,
-                False
             )
             if not ok:
                 return None
@@ -1321,13 +1318,11 @@ class MainWindow(QMainWindow):
                 "身体移动",
                 "底盘移动",
             ]
-            selected, ok = QInputDialog.getItem(
+            selected, ok = choose_item(
                 self,
                 "选择移动类型",
                 "创建移动类动作:",
                 options,
-                0,
-                False
             )
             if not ok:
                 return None
@@ -1338,13 +1333,11 @@ class MainWindow(QMainWindow):
 
         if category is ActionType.VISION_CAPTURE:
             options = ["视觉抓取", "视觉重定位"]
-            selected, ok = QInputDialog.getItem(
+            selected, ok = choose_item(
                 self,
                 "选择视觉动作",
                 "创建视觉类动作:",
                 options,
-                0,
-                False
             )
             if not ok:
                 return None
@@ -1749,7 +1742,7 @@ class MainWindow(QMainWindow):
             else 2
         )
 
-        repeat_count, ok = QInputDialog.getInt(
+        repeat_count, ok = ask_integer(
             self,
             "循环执行",
             "循环次数 n:",
@@ -1804,7 +1797,7 @@ class MainWindow(QMainWindow):
             if loop is None:
                 self._notifications.warning("请先选择要修改的序列项")
                 return
-            repeat_count, accepted = QInputDialog.getInt(
+            repeat_count, accepted = ask_integer(
                 self,
                 "修改循环次数",
                 "循环次数:",

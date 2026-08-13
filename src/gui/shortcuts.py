@@ -8,17 +8,16 @@ from dataclasses import dataclass
 from PySide6.QtCore import QObject, QSettings, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLabel,
-    QMessageBox,
     QKeySequenceEdit,
     QPushButton,
     QScrollArea,
-    QVBoxLayout,
     QWidget,
 )
+
+from .app_dialogs import AppDialog, create_dialog_button_box, show_warning
 
 
 SHORTCUT_SETTINGS_GROUP = "shortcuts"
@@ -169,7 +168,7 @@ class ShortcutRegistry(QObject):
             self._settings.endGroup()
 
 
-class ShortcutSettingsDialog(QDialog):
+class ShortcutSettingsDialog(AppDialog):
     """Edit all registered shortcuts in one conflict-checked form."""
 
     def __init__(
@@ -182,7 +181,7 @@ class ShortcutSettingsDialog(QDialog):
         self.setWindowTitle("快捷键设置")
         self.setMinimumWidth(420)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         hint = QLabel("点击输入框后按下新的组合键。所有菜单命令都必须使用唯一快捷键。")
         hint.setWordWrap(True)
         hint.setProperty("themeRole", "muted")
@@ -207,9 +206,9 @@ class ShortcutSettingsDialog(QDialog):
         scroll.setWidget(content)
         layout.addWidget(scroll, stretch=1)
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save
-            | QDialogButtonBox.StandardButton.Cancel
+        buttons = create_dialog_button_box(
+            self.content,
+            accept_text="保存",
         )
         reset_button = QPushButton("恢复默认", buttons)
         buttons.addButton(
@@ -236,6 +235,6 @@ class ShortcutSettingsDialog(QDialog):
                 }
             )
         except ValueError as error:
-            QMessageBox.warning(self, "快捷键设置", str(error))
+            show_warning(self, "快捷键设置", str(error))
             return
         self.accept()

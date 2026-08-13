@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
-    QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
@@ -21,7 +20,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QSpinBox,
     QSizePolicy,
@@ -37,12 +35,18 @@ from ...domain.action_schema import (
     validate_action_parameters,
 )
 from ...domain.models import ActionDefinition, ActionType
+from ..app_dialogs import (
+    AppDialog,
+    ask_confirmation,
+    create_dialog_button_box,
+    show_warning,
+)
 from ..icons import IconName
 from ..theme import set_theme_role
 from ..toolbars import IconToolButton
 
 
-class ActionPreviewDialog(QDialog):
+class ActionPreviewDialog(AppDialog):
     """Show an AI-expanded action sequence before explicit confirmation."""
 
     confirmed = Signal(bool)
@@ -69,7 +73,7 @@ class ActionPreviewDialog(QDialog):
         self.setWindowTitle(f"动作预览 - {command_name} ({len(self._items)}步)")
         self.setMinimumSize(500, 420)
 
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         description = self._command_info.get("description", "")
         header = QLabel(f"{command_name}\n类型：{command_kind}\n{description}")
         header.setWordWrap(True)
@@ -109,7 +113,7 @@ class ActionPreviewDialog(QDialog):
         buttons = QHBoxLayout()
         cancel = QPushButton("取消")
         cancel.clicked.connect(self.reject)
-        confirm = QPushButton("✅ 确认执行")
+        confirm = QPushButton("确认执行")
         set_theme_role(confirm, "success")
         confirm.clicked.connect(self.accept_and_emit)
         buttons.addWidget(cancel)
@@ -123,7 +127,7 @@ class ActionPreviewDialog(QDialog):
             and self._risk_checkbox.isChecked()
         )
         if self._risk.get("requires_acknowledgement") and not acknowledged:
-            QMessageBox.warning(self, "需要风险确认", "请勾选风险确认后再执行。")
+            show_warning(self, "需要风险确认", "请勾选风险确认后再执行。")
             return
         self.confirmed.emit(acknowledged)
         self.accept()
@@ -248,14 +252,12 @@ class PoseEditor(QWidget):
             return
         arm = self._arm
         if self.input.text().strip():
-            answer = QMessageBox.question(
+            should_replace = ask_confirmation(
                 self,
                 "替换点位",
                 f"是否使用{arm}臂当前位姿替换已有点位？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
             )
-            if answer != QMessageBox.StandardButton.Yes:
+            if not should_replace:
                 return
         thread = QThread(QApplication.instance())
         thread.setObjectName(f"PoseReadThread-{arm}")
@@ -285,7 +287,7 @@ class PoseEditor(QWidget):
 
     @Slot(str)
     def _show_read_error(self, message: str) -> None:
-        QMessageBox.warning(self, "读取机械臂位姿", message)
+        show_warning(self, "读取机械臂位姿", message)
 
     @Slot()
     def _finish_read(self) -> None:
@@ -501,7 +503,7 @@ class CompensationEditor(QWidget):
 
     def _capture_localization_reference(self) -> None:
         if self._localization_reader is None:
-            QMessageBox.warning(self, "定位补偿", "定位服务未注入")
+            show_warning(self, "定位补偿", "定位服务未注入")
             return
         try:
             position = self._localization_reader(
@@ -509,10 +511,10 @@ class CompensationEditor(QWidget):
                 wait_timeout=0.0,
             )
         except Exception as exc:
-            QMessageBox.warning(self, "定位补偿", f"读取 UDP 定位失败：\n{exc}")
+            show_warning(self, "定位补偿", f"读取 UDP 定位失败：\n{exc}")
             return
         if position is None:
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "定位补偿",
                 "未收到当前有效定位数据，请确认 UDP Tag 已检测到",
@@ -527,7 +529,7 @@ class CompensationEditor(QWidget):
                 "timestamp": float(position.get("timestamp", 0.0)),
             }
         except (KeyError, TypeError, ValueError) as exc:
-            QMessageBox.warning(self, "定位补偿", f"UDP 定位数据格式无效：\n{exc}")
+            show_warning(self, "定位补偿", f"UDP 定位数据格式无效：\n{exc}")
             return
         self._localization_reference = reference
         self._render_localization_reference()
@@ -942,7 +944,7 @@ class SchemaActionForm(QWidget):
             )
 
 
-class ActionConfigDialog(QDialog):
+class ActionConfigDialog(AppDialog):
     """Create or edit an action using the canonical schema-driven form."""
 
     def __init__(
@@ -968,7 +970,7 @@ class ActionConfigDialog(QDialog):
         schema = get_action_schema()[action_type.value]
         self.setWindowTitle(f"配置 {schema.get('label', action_type.value)} 动作")
         self.setMinimumWidth(440)
-        layout = QVBoxLayout(self)
+        layout = self.content_layout
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         form = QFormLayout()
         self.name_input = QLineEdit(current_name)
@@ -992,10 +994,7 @@ class ActionConfigDialog(QDialog):
         self.action_form.content_size_changed.connect(
             self._schedule_content_resize
         )
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
+        buttons = create_dialog_button_box(self.content)
         buttons.accepted.connect(self._validate_and_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -1020,7 +1019,7 @@ class ActionConfigDialog(QDialog):
             missing_labels = (["动作名称"] if name_missing else []) + list(
                 missing_fields
             )
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "请填写必填项",
                 "请填写：" + "、".join(missing_labels),
@@ -1032,13 +1031,13 @@ class ActionConfigDialog(QDialog):
             return
         if name in self._existing_names:
             self._set_name_invalid(True)
-            QMessageBox.warning(self, "警告", f"动作名称已存在: {name}")
+            show_warning(self, "警告", f"动作名称已存在: {name}")
             self.name_input.selectAll()
             return
         try:
             parameters = self.action_form.parameters()
         except ValueError as exc:
-            QMessageBox.warning(self, "参数错误", str(exc))
+            show_warning(self, "参数错误", str(exc))
             return
         validation = validate_action_parameters(self.action_type, parameters)
         if not validation.is_valid:
@@ -1046,7 +1045,7 @@ class ActionConfigDialog(QDialog):
             self.action_form.mark_fields_invalid(invalid_fields)
             if invalid_fields:
                 self.action_form.focus_field(invalid_fields[0])
-            QMessageBox.warning(self, "参数错误", validation.message)
+            show_warning(self, "参数错误", validation.message)
             return
         self._definition = ActionDefinition(
             id=str(self.action_data.get("id") or uuid4()),

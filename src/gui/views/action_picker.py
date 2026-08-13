@@ -8,16 +8,15 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
-    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QVBoxLayout,
     QWidget,
 )
 
 from ...domain.models import ActionDefinition, ActionType
+from ..app_dialogs import AppDialog, create_dialog_button_box
 from .action_list import ACTION_TYPE_LABELS
 
 
@@ -44,7 +43,7 @@ def _create_list_item(
     return item
 
 
-class ActionPickerDialog(QDialog):
+class ActionPickerDialog(AppDialog):
     """Select one action through a stable category/action master-detail view."""
 
     def __init__(
@@ -63,9 +62,7 @@ class ActionPickerDialog(QDialog):
             if actions
         }
 
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(16, 16, 16, 16)
-        root_layout.setSpacing(12)
+        root_layout = self.content_layout
         root_layout.addWidget(QLabel("先选择动作类型，再选择要插入的动作"))
 
         lists_layout = QHBoxLayout()
@@ -86,10 +83,7 @@ class ActionPickerDialog(QDialog):
         lists_layout.addWidget(self.action_list, stretch=2)
         root_layout.addLayout(lists_layout, stretch=1)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
-        )
+        self.buttons = create_dialog_button_box(self.content)
         self.buttons.accepted.connect(self._accept_selection)
         self.buttons.rejected.connect(self.reject)
         root_layout.addWidget(self.buttons)

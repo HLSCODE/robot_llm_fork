@@ -64,6 +64,9 @@ class IconName(str, Enum):
     QUICK_STOP = "quick-stop"
     EMERGENCY = "emergency"
     CLOSE = "close"
+    WINDOW_MINIMIZE = "window-minimize"
+    WINDOW_MAXIMIZE = "window-maximize"
+    WINDOW_RESTORE = "window-restore"
     SHORTCUTS = "shortcuts"
 
 

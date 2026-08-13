@@ -220,6 +220,35 @@ def build_stylesheet(colors: ThemeColors) -> str:
     return f"""
 QWidget {{ color: {colors.text}; }}
 QMainWindow, QDialog {{ background: {colors.window}; }}
+QDialog#appDialogWindow {{ background: transparent; }}
+QFrame#appDialogSurface {{
+    background: {colors.surface}; color: {colors.text};
+    border: 1px solid {colors.border_strong}; border-radius: 12px;
+}}
+QWidget#appDialogTitleBar,
+QWidget#appDialogContent {{ background: transparent; border: none; }}
+QLabel#appDialogApplicationIcon,
+QLabel#appDialogTitle {{ background: transparent; border: none; color: {colors.text}; }}
+QLabel#appDialogTitle {{ font-weight: 650; }}
+QToolButton#appDialogCloseButton {{
+    background: transparent; border: none; border-radius: 6px; padding: 0;
+}}
+QToolButton#appDialogCloseButton:hover {{ background: {colors.selection}; }}
+QLabel#appMessageText {{
+    background: transparent; border: none; color: {colors.text};
+    font-size: 13px; padding: 4px 0;
+}}
+QLabel#appMessageIndicator {{
+    background: {colors.selection}; color: {colors.accent};
+    border: none; border-radius: 15px; font-size: 16px; font-weight: 700;
+}}
+QLabel#appMessageIndicator[messageKind="warning"] {{
+    background: {colors.disabled_surface}; color: {colors.warning};
+}}
+QLabel#appMessageIndicator[messageKind="error"],
+QLabel#appMessageIndicator[messageKind="critical"] {{
+    background: {colors.disabled_surface}; color: {colors.danger};
+}}
 QPushButton {{
     background: {colors.surface_subtle}; border: 1px solid transparent;
     border-radius: 6px; padding: 5px 12px; color: {colors.text};
@@ -373,7 +402,24 @@ QMenu::separator {{ height: 1px; background: {colors.border}; margin: 5px 8px; }
 QMenu::indicator {{ width: 14px; height: 14px; left: 8px; }}
 QMenu::right-arrow {{ width: 9px; height: 9px; margin-right: 8px; }}
 QFrame#applicationMenuBar {{
+    background: transparent; border: none;
+}}
+QFrame#applicationTitleBar {{
     background: {colors.surface}; border: none;
+}}
+QLabel#applicationTitleIcon,
+QLabel#applicationTitle {{
+    background: transparent; border: none; color: {colors.text};
+}}
+QLabel#applicationTitle {{ font-weight: 600; padding: 0 6px 0 2px; }}
+QToolButton#windowControlButton {{
+    background: transparent; border: none; border-radius: 0; padding: 0;
+}}
+QToolButton#windowControlButton:hover {{ background: {colors.selection}; }}
+QToolButton#windowControlButton:pressed {{ background: {colors.border}; }}
+QToolButton#windowControlButton[windowControl="close"]:hover,
+QToolButton#windowControlButton[windowControl="close"]:pressed {{
+    background: {colors.danger_strong};
 }}
 QToolButton#applicationMenuButton {{
     background: transparent; color: {colors.text}; border: none;

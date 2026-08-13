@@ -153,6 +153,31 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         ):
             self.assertFalse(hasattr(self.window, removed_alias))
 
+    def test_window_uses_custom_title_bar_with_embedded_menu(self) -> None:
+        title_bar = self.window.application_title_bar
+
+        self.assertTrue(
+            self.window.windowFlags() & Qt.WindowType.FramelessWindowHint
+        )
+        self.assertIs(title_bar.menu_bar, self.window.application_menu_bar)
+        self.assertFalse(title_bar.icon_label.pixmap().isNull())
+        self.assertEqual("最小化", title_bar.minimize_button.accessibleName())
+        self.assertEqual("最大化", title_bar.maximize_button.accessibleName())
+        self.assertEqual("关闭", title_bar.close_button.accessibleName())
+        self.assertFalse(self.window.mask().isEmpty())
+
+        title_bar.maximize_button.click()
+        QApplication.processEvents()
+        self.assertTrue(self.window.isMaximized())
+        self.assertEqual("还原", title_bar.maximize_button.accessibleName())
+        self.assertTrue(self.window.mask().isEmpty())
+
+        title_bar.maximize_button.click()
+        QApplication.processEvents()
+        self.assertFalse(self.window.isMaximized())
+        self.assertEqual("最大化", title_bar.maximize_button.accessibleName())
+        self.assertFalse(self.window.mask().isEmpty())
+
     def test_canvas_plus_click_opens_picker_and_inserts_selected_action(self) -> None:
         action = ActionDefinition(
             id="plus-click-action",
@@ -250,6 +275,19 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             with self.subTest(command=command_id):
                 self.assertFalse(action.shortcut().isEmpty())
                 self.assertIn(self.window, action.associatedObjects())
+
+    def test_window_shortcut_remains_active_with_custom_title_bar(self) -> None:
+        workbench = self.window.workbench_view
+        self.assertIsNotNone(workbench.active_side_page)
+
+        QTest.keyClick(
+            self.window,
+            Qt.Key.Key_B,
+            Qt.KeyboardModifier.ControlModifier,
+        )
+        QApplication.processEvents()
+
+        self.assertIsNone(workbench.active_side_page)
 
     def test_buttons_drive_pause_resume_and_cancel_through_shared_runtime(self) -> None:
         item = SequenceItem.from_definition(

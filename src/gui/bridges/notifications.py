@@ -9,7 +9,13 @@ from enum import Enum
 from typing import Protocol
 
 from PySide6.QtCore import QObject, Signal, Slot
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import QWidget
+
+from ..app_dialogs import (
+    MessageDialogKind,
+    ask_confirmation,
+    show_message,
+)
 
 
 class GuiNotificationLevel(str, Enum):
@@ -39,30 +45,25 @@ class NotificationDialogPresenter(Protocol):
     def confirm(self, parent: QWidget, title: str, message: str) -> bool: ...
 
 
-class QtMessageBoxPresenter:
-    """The only operational QMessageBox mapping used by the main window."""
+class AppDialogPresenter:
+    """Map application notifications to the shared cross-platform dialog."""
 
     def show(self, parent: QWidget, notification: GuiNotification) -> None:
-        handlers = {
-            GuiNotificationLevel.INFO: QMessageBox.information,
-            GuiNotificationLevel.WARNING: QMessageBox.warning,
-            GuiNotificationLevel.ERROR: QMessageBox.critical,
-            GuiNotificationLevel.CRITICAL: QMessageBox.critical,
+        kinds = {
+            GuiNotificationLevel.INFO: MessageDialogKind.INFO,
+            GuiNotificationLevel.WARNING: MessageDialogKind.WARNING,
+            GuiNotificationLevel.ERROR: MessageDialogKind.ERROR,
+            GuiNotificationLevel.CRITICAL: MessageDialogKind.CRITICAL,
         }
-        handlers[notification.level](
+        show_message(
             parent,
+            kinds[notification.level],
             notification.title,
             notification.message,
         )
 
     def confirm(self, parent: QWidget, title: str, message: str) -> bool:
-        response = QMessageBox.question(
-            parent,
-            title,
-            message,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        return response is QMessageBox.StandardButton.Yes
+        return ask_confirmation(parent, title, message)
 
 
 class GuiNotificationCenter(QObject):
@@ -85,7 +86,7 @@ class GuiNotificationCenter(QObject):
         self._parent = parent
         self._log_sink = log_sink
         self._status_sink = status_sink
-        self._presenter = presenter or QtMessageBoxPresenter()
+        self._presenter = presenter or AppDialogPresenter()
         self._history: deque[GuiNotification] = deque(maxlen=history_limit)
         self.notification_requested.connect(self._record_and_present)
 

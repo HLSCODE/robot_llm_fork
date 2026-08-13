@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QLabel,
-    QMessageBox,
     QPushButton,
     QSizePolicy,
 )
@@ -291,7 +290,7 @@ class SchemaActionFormTests(unittest.TestCase):
         dialog = ActionConfigDialog(ActionType.MOVE)
         indicators = dialog.findChildren(QLabel, "requiredFieldIndicator")
 
-        with patch.object(QMessageBox, "warning") as warning:
+        with patch("src.gui.views.dialogs.show_warning") as warning:
             dialog._validate_and_accept()
 
         pose_editor = dialog.findChild(PoseEditor, "poseEditor")
