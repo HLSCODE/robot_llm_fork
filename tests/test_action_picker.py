@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from src.domain.models import ActionDefinition, ActionType
 from src.gui.views.action_picker import ActionPickerDialog
@@ -37,6 +37,34 @@ class ActionPickerDialogTests(unittest.TestCase):
         self.assertIs(wait, dialog.selected_action)
 
         dialog.close()
+
+    def test_large_platform_font_keeps_category_and_action_rows_separate(self) -> None:
+        parent = QWidget()
+        font = parent.font()
+        font.setPointSize(16)
+        parent.setFont(font)
+        actions = [
+            _action(f"move-{index}", f"机械臂动作 {index}", ActionType.MOVE)
+            for index in range(12)
+        ]
+        dialog = ActionPickerDialog(
+            {ActionType.MOVE: actions},
+            title="插入动作",
+            parent=parent,
+        )
+        dialog.show()
+        self.application.processEvents()
+
+        for list_widget in (dialog.category_list, dialog.action_list):
+            minimum_row_height = list_widget.fontMetrics().lineSpacing() + 12
+            first_rect = list_widget.visualItemRect(list_widget.item(0))
+            self.assertGreaterEqual(first_rect.height(), minimum_row_height)
+            if list_widget.count() > 1:
+                second_rect = list_widget.visualItemRect(list_widget.item(1))
+                self.assertGreaterEqual(second_rect.top(), first_rect.bottom() + 1)
+
+        dialog.close()
+        parent.close()
 
 
 def _action(

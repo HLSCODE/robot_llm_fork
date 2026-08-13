@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
@@ -18,6 +19,29 @@ from PySide6.QtWidgets import (
 
 from ...domain.models import ActionDefinition, ActionType
 from .action_list import ACTION_TYPE_LABELS
+
+
+_LIST_ITEM_VERTICAL_PADDING = 12
+_LIST_ITEM_MINIMUM_HEIGHT = 28
+
+
+def _create_list_item(
+    list_widget: QListWidget,
+    text: str,
+) -> QListWidgetItem:
+    """Create an item whose layout includes stylesheet padding on every platform."""
+    item = QListWidgetItem(text)
+    line_height = list_widget.fontMetrics().lineSpacing()
+    item.setSizeHint(
+        QSize(
+            0,
+            max(
+                _LIST_ITEM_MINIMUM_HEIGHT,
+                line_height + _LIST_ITEM_VERTICAL_PADDING,
+            ),
+        )
+    )
+    return item
 
 
 class ActionPickerDialog(QDialog):
@@ -47,10 +71,17 @@ class ActionPickerDialog(QDialog):
         lists_layout = QHBoxLayout()
         lists_layout.setSpacing(12)
         self.category_list = QListWidget()
+        self.category_list.setObjectName("actionPickerCategoryList")
         self.category_list.setAccessibleName("动作类型")
         self.category_list.setMinimumWidth(170)
         self.action_list = QListWidget()
+        self.action_list.setObjectName("actionPickerActionList")
         self.action_list.setAccessibleName("分类内动作")
+        for list_widget in (self.category_list, self.action_list):
+            list_widget.setUniformItemSizes(True)
+            list_widget.setVerticalScrollMode(
+                QAbstractItemView.ScrollMode.ScrollPerPixel
+            )
         lists_layout.addWidget(self.category_list, stretch=1)
         lists_layout.addWidget(self.action_list, stretch=2)
         root_layout.addLayout(lists_layout, stretch=1)
@@ -97,7 +128,10 @@ class ActionPickerDialog(QDialog):
             actions = self._actions_by_type.get(action_type, ())
             if not actions:
                 continue
-            item = QListWidgetItem(f"{label}  ({len(actions)})")
+            item = _create_list_item(
+                self.category_list,
+                f"{label}  ({len(actions)})",
+            )
             item.setData(Qt.ItemDataRole.UserRole, action_type)
             self.category_list.addItem(item)
         if self.category_list.count():
@@ -116,7 +150,7 @@ class ActionPickerDialog(QDialog):
         if not isinstance(action_type, ActionType):
             return
         for action in self._actions_by_type.get(action_type, ()):
-            item = QListWidgetItem(action.name)
+            item = _create_list_item(self.action_list, action.name)
             item.setData(Qt.ItemDataRole.UserRole, action)
             item.setToolTip(f"{action.name}\n类型：{action.type.value}")
             self.action_list.addItem(item)
