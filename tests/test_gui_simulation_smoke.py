@@ -553,6 +553,35 @@ class StartupProgressCardTests(unittest.TestCase):
         self.assertFalse(card.exit_button.isHidden())
         card.close()
 
+    def test_startup_card_displays_the_application_logo(self) -> None:
+        card = StartupProgressCard()
+
+        logo = card.logo_label.pixmap()
+
+        self.assertIsNotNone(logo)
+        assert logo is not None
+        self.assertFalse(logo.isNull())
+        self.assertEqual("机器人动作编排器 Logo", card.logo_label.accessibleName())
+        card.close()
+
+    def test_empty_progress_detail_hides_internal_identifier_row(self) -> None:
+        card = StartupProgressCard()
+        card.show()
+        QApplication.processEvents()
+        card.set_progress(40, "正在初始化机械臂...", "robot-system")
+        self.assertFalse(card.detail_label.isHidden())
+        expanded_height = card.height()
+
+        card.set_progress(54, "正在连接机械臂...", "")
+
+        self.assertEqual("", card.detail_label.text())
+        self.assertTrue(card.detail_label.isHidden())
+        self.assertLess(card.height(), expanded_height)
+        card.mark_failed("设备连接失败")
+        self.assertFalse(card.detail_label.isHidden())
+        self.assertGreater(card.height(), expanded_height)
+        card.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QShowEvent
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QIcon, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from ..theme import ThemeMode, application_icon_for_mode
 
 
 class StartupProgressCard(QWidget):
@@ -33,8 +35,9 @@ class StartupProgressCard(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(560, 300)
+        self.setFixedWidth(560)
         self._build_ui()
+        self.adjustSize()
 
     def _build_ui(self) -> None:
         outer_layout = QVBoxLayout(self)
@@ -50,16 +53,39 @@ class StartupProgressCard(QWidget):
         outer_layout.addWidget(card)
 
         layout = QVBoxLayout(card)
+        self._content_layout = layout
         layout.setContentsMargins(36, 32, 36, 28)
         layout.setSpacing(12)
 
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(0, 0, 0, 0)
+        brand_row.setSpacing(18)
+        self.logo_label = QLabel()
+        self.logo_label.setObjectName("startupLogo")
+        self.logo_label.setFixedSize(68, 68)
+        self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.logo_label.setAccessibleName("机器人动作编排器 Logo")
+        self.logo_label.setPixmap(self._startup_icon().pixmap(QSize(50, 50)))
+        brand_row.addWidget(self.logo_label, alignment=Qt.AlignmentFlag.AlignTop)
+
+        brand_text = QVBoxLayout()
+        brand_text.setContentsMargins(0, 2, 0, 0)
+        brand_text.setSpacing(6)
         title = QLabel("机器人动作编排器")
         title.setObjectName("startupTitle")
         subtitle = QLabel("正在准备设备、语音与运行服务")
         subtitle.setObjectName("startupSubtitle")
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
-        layout.addSpacing(20)
+        brand_text.addWidget(title)
+        brand_text.addWidget(subtitle)
+        brand_text.addStretch(1)
+        brand_row.addLayout(brand_text, stretch=1)
+        layout.addLayout(brand_row)
+
+        accent = QFrame()
+        accent.setObjectName("startupBrandAccent")
+        accent.setFixedSize(44, 3)
+        layout.addWidget(accent, alignment=Qt.AlignmentFlag.AlignLeft)
+        layout.addSpacing(8)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setObjectName("startupProgressBar")
@@ -99,7 +125,16 @@ class StartupProgressCard(QWidget):
             QFrame#startupCard {
                 background: palette(base);
                 border: 1px solid palette(mid);
-                border-radius: 16px;
+                border-radius: 20px;
+            }
+            QLabel#startupLogo {
+                background: transparent;
+                border: none;
+            }
+            QFrame#startupBrandAccent {
+                background: palette(highlight);
+                border: none;
+                border-radius: 1px;
             }
             QLabel#startupTitle {
                 color: palette(text);
@@ -146,13 +181,39 @@ class StartupProgressCard(QWidget):
             """
         )
 
+    def _startup_icon(self) -> QIcon:
+        palette = self.palette()
+        mode = (
+            ThemeMode.DARK
+            if palette.window().color().lightnessF() < 0.5
+            else ThemeMode.LIGHT
+        )
+        return application_icon_for_mode(mode)
+
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
+        self._center_on_screen()
+
+    def _center_on_screen(self) -> None:
         screen = self.screen() or QApplication.primaryScreen()
         if screen is None:
             return
         available = screen.availableGeometry()
         self.move(available.center() - self.rect().center())
+
+    def _fit_to_content(self) -> None:
+        layout = self.layout()
+        if layout is not None:
+            self.setMinimumHeight(0)
+            self.detail_label.updateGeometry()
+            self.exit_button.updateGeometry()
+            self._content_layout.invalidate()
+            self._content_layout.activate()
+            layout.invalidate()
+            layout.activate()
+        self.resize(self.width(), self.sizeHint().height())
+        if self.isVisible():
+            self._center_on_screen()
 
     def set_progress(
         self,
@@ -164,11 +225,15 @@ class StartupProgressCard(QWidget):
         self.progress_bar.setValue(self._progress)
         self.percent_label.setText(f"{self._progress}%")
         self.status_label.setText(status)
-        if detail:
-            self.detail_label.setText(detail)
+        visible_detail = detail.strip()
+        self.detail_label.setText(visible_detail)
+        self.detail_label.setVisible(bool(visible_detail))
+        self._fit_to_content()
 
     def mark_failed(self, message: str) -> None:
         self.status_label.setText("初始化失败")
         self.detail_label.setText(message)
+        self.detail_label.show()
         self.detail_label.setStyleSheet("color: #fca5a5;")
         self.exit_button.show()
+        self._fit_to_content()

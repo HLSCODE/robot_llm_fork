@@ -214,7 +214,7 @@ class MainWindow(QMainWindow):
         self.startup_progress_changed.emit(
             24,
             "正在准备语音与设备运行时...",
-            "启动任务将在后台执行，主界面完成前保持隐藏",
+            "",
         )
 
         try:
@@ -232,7 +232,7 @@ class MainWindow(QMainWindow):
             self.startup_progress_changed.emit(
                 36,
                 "语音输入未启用，开始初始化设备...",
-                "VOICE_INPUT_ENABLED=false",
+                "",
             )
             self.initialize_startup_hardware()
             return
@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
         self.startup_progress_changed.emit(
             32,
             "正在加载 ASR / KWS 模型...",
-            f"最多优先等待 {timeout_s:g} 秒，超时后语音继续后台加载",
+            "",
         )
 
     def _on_speech_runtime_startup_finished(self, speech_ready: bool) -> None:
@@ -261,7 +261,7 @@ class MainWindow(QMainWindow):
         self.startup_progress_changed.emit(
             48,
             "语音监听已就绪" if speech_ready else "语音初始化不可用",
-            "继续初始化设备" if speech_ready else "语音失败不阻止设备控制界面启动",
+            "" if speech_ready else "语音失败不阻止设备控制界面启动",
         )
         self.initialize_startup_hardware(speech_ready)
 
@@ -318,7 +318,7 @@ class MainWindow(QMainWindow):
             PIPETTE: (88, "正在初始化移液枪..."),
         }
         percent, message = progress.get(device_id, (60, "正在初始化设备..."))
-        self.startup_progress_changed.emit(percent, message, device_id)
+        self.startup_progress_changed.emit(percent, message, "")
 
     def _on_hardware_startup_step_completed(
         self,
@@ -334,7 +334,7 @@ class MainWindow(QMainWindow):
         self.startup_progress_changed.emit(
             progress.get(result.device_id, 90),
             f"{self._startup_device_name(result.device_id)}{state}",
-            result.error or result.device_id,
+            result.error or "",
         )
 
     def _on_hardware_startup_completed(
@@ -357,7 +357,7 @@ class MainWindow(QMainWindow):
             message = f"初始化完成，{len(failures)} 个设备暂不可用"
         else:
             message = "所有必要组件初始化完成"
-        self.startup_progress_changed.emit(96, message, "正在启动附加服务...")
+        self.startup_progress_changed.emit(96, message, "")
         self.startup_finished.emit(True, message)
 
     def _on_hardware_startup_thread_finished(self) -> None:

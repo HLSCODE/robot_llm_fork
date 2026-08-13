@@ -166,7 +166,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
         startup_card.set_progress(
             8,
             "正在检查任务数据...",
-            "迁移旧版任务并加载动作库、技能库与统一执行运行时",
+            "",
         )
         migration = migrate_startup_workflows(settings)
         if migration.migrated_count:
@@ -182,7 +182,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
         startup_card.set_progress(
             16,
             "应用服务已就绪",
-            "正在创建主界面与后台初始化任务",
+            "",
         )
         auxiliary_host = build_auxiliary_service_host(
             args,
@@ -197,7 +197,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
         window.startup_progress_changed.connect(startup_card.set_progress)
 
         def reveal_main_window(message: str) -> None:
-            startup_card.set_progress(100, message, "正在打开控制界面...")
+            startup_card.set_progress(100, message, "")
 
             def reveal() -> None:
                 window.show()
@@ -217,7 +217,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             startup_card.set_progress(
                 97,
                 "正在启动附加服务...",
-                "WebSocket 等可选服务与 GUI 共用应用运行时",
+                "",
             )
             thread = QThread(app)
             thread.setObjectName("GuiAuxiliaryServiceStartupThread")
