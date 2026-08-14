@@ -1,11 +1,12 @@
-# --- ģ����������ļ� ---
+# --- 模型权重与大文件 ---
 *.pt
 *.pth
 *.onnx
 *.weights
 *.h5
 *.pb
-# ��������ݼ��ļ��У�����Ҳ�ų�
+
+# 默认忽略运行时数据，仅保留版本化的回归测试基线
 data/
 !data/
 data/*
@@ -15,7 +16,7 @@ data/*
 temp_models/
 models/
 
-# --- Python �����뻷�� ---
+# --- Python 缓存、测试产物与覆盖率 ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -24,11 +25,14 @@ __pycache__/
 .Python
 .mypy_cache/
 .pytest_cache/
+.pytest-application-data-*/
 .ruff_cache/
 .coverage
 coverage.xml
 performance-report.json
 htmlcov/
+
+# --- 本地配置与虚拟环境 ---
 config/config.toml
 env/
 venv/
@@ -37,16 +41,16 @@ venv/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# --- ������ IDE �����ļ� ---
+# --- 编辑器与 IDE 配置 ---
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# --- ϵͳ��ʱ�ļ� ---
+# --- 操作系统临时文件 ---
 .DS_Store
 Thumbs.db
 
-# --- ��־�ļ� ---
+# --- 日志文件 ---
 *.log
 logs/
