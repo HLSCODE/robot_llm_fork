@@ -36,6 +36,7 @@ from ...voice_interaction import (
     VoiceSessionState,
     VoiceSpeechRuntime,
     WakeFeedback,
+    build_voice_speech_runtime,
 )
 from ...domain.models import SequenceItem
 from ..controllers.audio import VoiceAudioPlayer
@@ -179,8 +180,6 @@ class VoiceSpeechRuntimeWorker(QObject):
         self._runner.stop()
 
     async def _run_async(self) -> None:
-        from ..voice_interaction import build_voice_speech_runtime
-
         self._runtime = build_voice_speech_runtime(
             self._controller,
             self._voice_config,
