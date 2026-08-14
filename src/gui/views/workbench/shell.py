@@ -7,13 +7,16 @@ from dataclasses import dataclass
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
+    QEnterEvent,
     QHideEvent,
     QKeySequence,
     QMouseEvent,
+    QPaintEvent,
     QPainter,
     QPen,
     QResizeEvent,
     QShortcut,
+    QShowEvent,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,7 +24,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
-    QSizePolicy,
+    QScrollBar,
     QSplitter,
     QSplitterHandle,
     QStackedWidget,
@@ -30,9 +33,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...bridges.notifications import GuiNotification, GuiNotificationLevel
 from ...view_models.models import DeviceViewState
 from ...icons import IconName, themed_icon
-from ...toolbars import IconToolButton, icon_foreground
+from ...toolbars import IconToolButton, PaneHeader, icon_foreground
+from ..log_widget import LogFilter
 from ...workbench_layout import (
     WORKBENCH_LAYOUT_SCHEMA_VERSION,
     WorkbenchLayoutState,
@@ -45,7 +50,15 @@ ACTIVITY_BUTTON_SIZE = 44
 ACTIVITY_ICON_SIZE = 20
 STATUS_BUTTON_SIZE = 28
 STATUS_ICON_SIZE = 16
-SPLITTER_HIT_WIDTH = 7
+STATUS_PROBLEM_CONTENT_SPACING = 1
+STATUS_PROBLEM_HORIZONTAL_PADDING = 3
+NOTIFICATION_TOAST_TIMEOUT_MS = 5000
+NOTIFICATION_TOAST_MAXIMUM_WIDTH = 380
+NOTIFICATION_TOAST_MARGIN = 12
+NOTIFICATION_TOAST_SUMMARY_LIMIT = 180
+SPLITTER_HIT_WIDTH = 8
+WORKBENCH_CARD_MARGIN = 8
+WORKBENCH_CARD_TOP_MARGIN = 6
 SIDE_BAR_DEFAULT_WIDTH = 280
 SIDE_BAR_MINIMUM_WIDTH = 220
 SIDE_BAR_MAXIMUM_WIDTH = 440
@@ -64,24 +77,54 @@ class WorkbenchPage:
 
 
 class _ThinLineSplitterHandle(QSplitterHandle):
-    """Keep a generous resize target while painting only a one-pixel line."""
+    """Provide an invisible resize target in the gap between content cards."""
 
-    def paintEvent(self, event: object) -> None:  # noqa: N802
+    def __init__(
+        self,
+        orientation: Qt.Orientation,
+        parent: QSplitter,
+    ) -> None:
+        super().__init__(orientation, parent)
+        self._is_dragging = False
+
+    @property
+    def indicator_visible(self) -> bool:
+        return self.underMouse() or self._is_dragging
+
+    def enterEvent(self, event: QEnterEvent) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self.update()
+
+    def leaveEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        self.update()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() is Qt.MouseButton.LeftButton:
+            self._is_dragging = True
+            self.update()
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        super().mouseReleaseEvent(event)
+        if event.button() is Qt.MouseButton.LeftButton:
+            self._is_dragging = False
+            self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
         del event
+        if not self.indicator_visible:
+            return
+        color = self.palette().highlight().color()
+        color.setAlpha(220)
         painter = QPainter(self)
-        color = (
-            self.palette().highlight().color()
-            if self.underMouse()
-            else self.palette().mid().color()
-        )
-        color.setAlpha(150 if self.underMouse() else 72)
         painter.setPen(QPen(color, 1.0))
         if self.orientation() is Qt.Orientation.Horizontal:
             x = self.rect().center().x()
-            painter.drawLine(x, self.rect().top(), x, self.rect().bottom())
+            painter.drawLine(x, self.rect().top() + 6, x, self.rect().bottom() - 6)
         else:
             y = self.rect().center().y()
-            painter.drawLine(self.rect().left(), y, self.rect().right(), y)
+            painter.drawLine(self.rect().left() + 6, y, self.rect().right() - 6, y)
 
 
 class _ThinLineSplitter(QSplitter):
@@ -91,6 +134,7 @@ class _ThinLineSplitter(QSplitter):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(orientation, parent)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self.setHandleWidth(SPLITTER_HIT_WIDTH)
         self.setChildrenCollapsible(False)
 
@@ -157,6 +201,7 @@ class _ActivityBar(QFrame):
 
 class WorkbenchStatusBar(QFrame):
     panel_requested = Signal(str)
+    log_filter_requested = Signal(object)
 
     def __init__(
         self,
@@ -168,70 +213,122 @@ class WorkbenchStatusBar(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 6, 0)
         layout.setSpacing(4)
-        self.message_label = QLabel()
-        self.message_label.setObjectName("workbenchStatusMessage")
-        self.message_label.setAccessibleName("状态消息")
-        self.message_label.setMinimumWidth(0)
-        self.message_label.setSizePolicy(
-            QSizePolicy.Policy.Ignored,
-            QSizePolicy.Policy.Preferred,
-        )
-        layout.addWidget(self.message_label, stretch=1)
         self.buttons: dict[str, QToolButton] = {}
-        for page in pages:
-            button = QToolButton()
-            button.setObjectName("statusPanelButton")
-            button.setText("")
-            button.setToolTip(f"显示或隐藏{page.title}")
-            button.setAccessibleName(f"显示或隐藏{page.title}")
-            button.setAccessibleDescription(f"切换状态栏{page.title}详情浮层")
-            button.setCheckable(True)
-            button.setFixedSize(STATUS_BUTTON_SIZE, STATUS_BUTTON_SIZE)
-            button.setIconSize(QSize(STATUS_ICON_SIZE, STATUS_ICON_SIZE))
+        self.log_problem_buttons: dict[LogFilter, QToolButton] = {}
+        self._log_problem_icons: dict[LogFilter, IconName] = {}
+        self._active_log_filter = LogFilter.ALL
+        left_pages = tuple(page for page in pages if page.key in {"devices", "poses"})
+        right_pages = tuple(page for page in pages if page.key not in {"devices", "poses"})
+        for page in left_pages:
+            self._add_panel_button(layout, page)
+        layout.addStretch(1)
+        for page in right_pages:
+            if page.key == "logs":
+                self._add_log_problem_button(
+                    layout,
+                    LogFilter.ERRORS,
+                    IconName.PROBLEM_ERROR,
+                    "错误",
+                )
+                self._add_log_problem_button(
+                    layout,
+                    LogFilter.WARNINGS,
+                    IconName.PROBLEM_WARNING,
+                    "警告",
+                )
+            self._add_panel_button(layout, page)
+        self._pages = {page.key: page for page in pages}
+        self.render_log_counts(0, 0)
+        self.setFixedHeight(32)
+
+    @property
+    def active_log_filter(self) -> LogFilter:
+        return self._active_log_filter
+
+    def _add_panel_button(self, layout: QHBoxLayout, page: WorkbenchPage) -> None:
+        button = QToolButton()
+        button.setObjectName("statusPanelButton")
+        button.setText("")
+        button.setToolTip(f"显示或隐藏{page.title}")
+        button.setAccessibleName(f"显示或隐藏{page.title}")
+        button.setAccessibleDescription(f"切换状态栏{page.title}详情浮层")
+        button.setCheckable(True)
+        button.setFixedSize(STATUS_BUTTON_SIZE, STATUS_BUTTON_SIZE)
+        button.setIconSize(QSize(STATUS_ICON_SIZE, STATUS_ICON_SIZE))
+        if page.key == "logs":
+            button.clicked.connect(
+                lambda _checked=False: self.log_filter_requested.emit(LogFilter.ALL)
+            )
+        else:
             button.clicked.connect(
                 lambda _checked=False, key=page.key: self.panel_requested.emit(key)
             )
-            layout.addWidget(button)
-            self.buttons[page.key] = button
-        self._pages = {page.key: page for page in pages}
-        self._refresh_icons()
-        self._message_text = ""
-        self._message_timer = QTimer(self)
-        self._message_timer.setSingleShot(True)
-        self._message_timer.timeout.connect(self._clear_message)
-        self.setFixedHeight(32)
+        layout.addWidget(button)
+        self.buttons[page.key] = button
 
-    def show_message(self, message: str, timeout_ms: int = 5000) -> None:
-        self._message_text = " ".join(message.split())
-        self.message_label.setToolTip(message)
-        self._render_message()
-        self._message_timer.start(timeout_ms)
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
-        super().resizeEvent(event)
-        self._render_message()
-
-    def _render_message(self) -> None:
-        if not self._message_text:
-            self.message_label.clear()
-            return
-        available_width = max(0, self.message_label.width() - 4)
-        self.message_label.setText(
-            self.message_label.fontMetrics().elidedText(
-                self._message_text,
-                Qt.TextElideMode.ElideRight,
-                available_width,
+    def _add_log_problem_button(
+        self,
+        layout: QHBoxLayout,
+        log_filter: LogFilter,
+        icon: IconName,
+        label: str,
+    ) -> None:
+        button = QToolButton()
+        button.setObjectName("statusProblemButton")
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        button.setCheckable(True)
+        button.setAutoRaise(True)
+        button.setFixedHeight(STATUS_BUTTON_SIZE)
+        button.setIconSize(QSize(STATUS_ICON_SIZE, STATUS_ICON_SIZE))
+        button.setProperty("problemLabel", label)
+        button.clicked.connect(
+            lambda _checked=False, target=log_filter: self.log_filter_requested.emit(
+                target
             )
         )
-
-    def _clear_message(self) -> None:
-        self._message_text = ""
-        self.message_label.clear()
-        self.message_label.setToolTip("")
+        layout.addWidget(button)
+        self.log_problem_buttons[log_filter] = button
+        self._log_problem_icons[log_filter] = icon
 
     def render_active_panel(self, page_key: str | None) -> None:
         for key, button in self.buttons.items():
-            button.setChecked(key == page_key)
+            button.setChecked(
+                key == page_key
+                and (key != "logs" or self._active_log_filter is LogFilter.ALL)
+            )
+        for log_filter, button in self.log_problem_buttons.items():
+            button.setChecked(
+                page_key == "logs" and self._active_log_filter is log_filter
+            )
+
+    def render_log_filter(self, log_filter: LogFilter) -> None:
+        self._active_log_filter = log_filter
+
+    def render_log_counts(self, error_count: int, warning_count: int) -> None:
+        counts = {
+            LogFilter.ERRORS: max(0, error_count),
+            LogFilter.WARNINGS: max(0, warning_count),
+        }
+        roles = {
+            LogFilter.ERRORS: "statusDanger",
+            LogFilter.WARNINGS: "statusWarning",
+        }
+        for log_filter, count in counts.items():
+            button = self.log_problem_buttons.get(log_filter)
+            if button is None:
+                continue
+            label = str(button.property("problemLabel"))
+            button.setText(str(count))
+            button.setToolTip(f"{label}：{count} 条（筛选运行日志）")
+            button.setAccessibleName(f"{label}日志 {count} 条")
+            button.setProperty(
+                "themeRole",
+                roles[log_filter] if count else "statusMuted",
+            )
+            style = button.style()
+            style.unpolish(button)
+            style.polish(button)
+        self._refresh_icons()
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         super().changeEvent(event)
@@ -253,6 +350,29 @@ class WorkbenchStatusBar(QFrame):
                     color=icon_foreground(button),
                 )
             )
+        for log_filter, button in self.log_problem_buttons.items():
+            icon = self._log_problem_icons[log_filter]
+            button.setIcon(
+                themed_icon(
+                    button,
+                    icon,
+                    size=STATUS_ICON_SIZE,
+                    color=icon_foreground(button),
+                )
+            )
+            button.ensurePolished()
+            self._fit_log_problem_button(button)
+
+    @staticmethod
+    def _fit_log_problem_button(button: QToolButton) -> None:
+        text_width = button.fontMetrics().horizontalAdvance(button.text())
+        content_width = (
+            STATUS_ICON_SIZE
+            + STATUS_PROBLEM_CONTENT_SPACING
+            + text_width
+            + (2 * STATUS_PROBLEM_HORIZONTAL_PADDING)
+        )
+        button.setFixedWidth(max(STATUS_BUTTON_SIZE, content_width))
 
     def render_device_state(self, state: DeviceViewState) -> None:
         ready_count = sum(
@@ -274,6 +394,128 @@ class WorkbenchStatusBar(QFrame):
         style.unpolish(device_button)
         style.polish(device_button)
         self._refresh_icons()
+
+
+class _NotificationToast(QFrame):
+    """Present the latest non-modal warning or error without consuming layout."""
+
+    dismissed = Signal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("workbenchNotificationToast")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setMaximumWidth(NOTIFICATION_TOAST_MAXIMUM_WIDTH)
+        self._notification: GuiNotification | None = None
+
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 72))
+        self.setGraphicsEffect(shadow)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 8, 10)
+        layout.setSpacing(10)
+        self.icon_label = QLabel()
+        self.icon_label.setObjectName("notificationToastIcon")
+        self.icon_label.setFixedSize(20, 20)
+        layout.addWidget(self.icon_label, alignment=Qt.AlignmentFlag.AlignTop)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(3)
+        self.title_label = QLabel()
+        self.title_label.setObjectName("notificationToastTitle")
+        self.message_label = QLabel()
+        self.message_label.setObjectName("notificationToastMessage")
+        self.message_label.setWordWrap(True)
+        self.message_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        text_layout.addWidget(self.title_label)
+        text_layout.addWidget(self.message_label)
+        layout.addLayout(text_layout, stretch=1)
+
+        self.close_button = IconToolButton(
+            IconName.CLOSE,
+            "关闭通知",
+            callback=self.dismiss,
+            parent=self,
+            hit_size=24,
+            icon_size=12,
+        )
+        layout.addWidget(self.close_button, alignment=Qt.AlignmentFlag.AlignTop)
+
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self.dismiss)
+        self.hide()
+
+    def show_notification(
+        self,
+        notification: GuiNotification,
+        *,
+        timeout_ms: int = NOTIFICATION_TOAST_TIMEOUT_MS,
+    ) -> None:
+        if timeout_ms <= 0:
+            raise ValueError("notification toast timeout must be positive")
+        self._notification = notification
+        role = (
+            "statusWarning"
+            if notification.level is GuiNotificationLevel.WARNING
+            else "statusDanger"
+        )
+        self.setProperty("themeRole", role)
+        self.icon_label.setProperty("themeRole", role)
+        style = self.style()
+        style.unpolish(self)
+        style.polish(self)
+        self.title_label.setText(notification.title)
+        self.message_label.setText(self._summarize(notification.message))
+        self.message_label.setToolTip(notification.message)
+        self._refresh_icon()
+        self.adjustSize()
+        self.show()
+        self.raise_()
+        self._hide_timer.start(timeout_ms)
+
+    def dismiss(self) -> None:
+        self._hide_timer.stop()
+        self.hide()
+        self.dismissed.emit()
+
+    def changeEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().changeEvent(event)
+        if event.type() in {
+            QEvent.Type.PaletteChange,
+            QEvent.Type.ApplicationPaletteChange,
+            QEvent.Type.DynamicPropertyChange,
+        }:
+            self._refresh_icon()
+
+    def _refresh_icon(self) -> None:
+        if self._notification is None:
+            return
+        icon_name = (
+            IconName.PROBLEM_WARNING
+            if self._notification.level is GuiNotificationLevel.WARNING
+            else IconName.PROBLEM_ERROR
+        )
+        icon = themed_icon(
+            self.icon_label,
+            icon_name,
+            size=18,
+            color=icon_foreground(self.icon_label),
+        )
+        self.icon_label.setPixmap(icon.pixmap(QSize(18, 18)))
+
+    @staticmethod
+    def _summarize(message: str) -> str:
+        summary = " ".join(message.split())
+        if len(summary) <= NOTIFICATION_TOAST_SUMMARY_LIMIT:
+            return summary
+        return f"{summary[: NOTIFICATION_TOAST_SUMMARY_LIMIT - 1].rstrip()}…"
 
 
 class _FloatingDetailPanel(QFrame):
@@ -375,8 +617,21 @@ class WorkbenchView(QWidget):
         self.activity_bar.page_requested.connect(self.toggle_side_page)
         body_layout.addWidget(self.activity_bar)
 
+        self.content_area = QFrame()
+        self.content_area.setObjectName("workbenchContentArea")
+        self.content_area.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        content_layout = QHBoxLayout(self.content_area)
+        content_layout.setContentsMargins(
+            WORKBENCH_CARD_MARGIN,
+            WORKBENCH_CARD_TOP_MARGIN,
+            WORKBENCH_CARD_MARGIN,
+            WORKBENCH_CARD_MARGIN,
+        )
+        content_layout.setSpacing(0)
+
         self.side_stack = QStackedWidget()
         self.side_stack.setObjectName("workbenchSideBar")
+        self.side_stack.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.side_stack.setMinimumWidth(SIDE_BAR_MINIMUM_WIDTH)
         self.side_stack.setMaximumWidth(SIDE_BAR_MAXIMUM_WIDTH)
         for page in side_pages:
@@ -384,20 +639,30 @@ class WorkbenchView(QWidget):
 
         self.side_splitter = _ThinLineSplitter(Qt.Orientation.Horizontal)
         self.side_splitter.setObjectName("workbenchSideSplitter")
+        editor.setProperty("workbenchCard", True)
+        editor.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.side_splitter.addWidget(self.side_stack)
         self.side_splitter.addWidget(editor)
         self.side_splitter.setStretchFactor(0, 0)
         self.side_splitter.setStretchFactor(1, 1)
         self.side_splitter.setSizes((SIDE_BAR_DEFAULT_WIDTH, 640))
         self.side_splitter.splitterMoved.connect(self._remember_side_width)
-        body_layout.addWidget(self.side_splitter, stretch=1)
+        content_layout.addWidget(self.side_splitter)
+        body_layout.addWidget(self.content_area, stretch=1)
+        self._scrollbar_cards = (self.side_stack, editor)
+        for card in self._scrollbar_cards:
+            card.installEventFilter(self)
+            self._set_card_hover_state(card, visible=False)
         root.addWidget(body, stretch=1)
 
         self.status_bar = WorkbenchStatusBar(bottom_pages)
         self.status_bar.panel_requested.connect(self.toggle_bottom_page)
+        self.status_bar.log_filter_requested.connect(self.toggle_log_filter)
         root.addWidget(self.status_bar)
         self.detail_panel = _FloatingDetailPanel(bottom_pages, self)
         self.detail_panel.close_requested.connect(self.close_bottom_page)
+        self.notification_toast = _NotificationToast(self)
+        self.notification_toast.dismissed.connect(self._position_notification_toast)
         self.bottom_stack = self.detail_panel.stack
         self._close_panel_shortcut = QShortcut(
             QKeySequence(Qt.Key.Key_Escape),
@@ -433,6 +698,11 @@ class WorkbenchView(QWidget):
     def toggle_last_side_page(self) -> None:
         self.toggle_side_page(self._selected_side_page)
 
+    def show_notification(self, notification: GuiNotification) -> None:
+        """Show the latest non-modal problem in one reusable corner toast."""
+        self.notification_toast.show_notification(notification)
+        self._position_notification_toast()
+
     def toggle_bottom_page(self, page_key: str) -> None:
         self._require_page(page_key, self._bottom_pages, "bottom")
         if self._active_bottom_page == page_key:
@@ -440,12 +710,24 @@ class WorkbenchView(QWidget):
             return
         self._show_bottom_page(page_key)
 
+    def toggle_log_filter(self, log_filter: LogFilter) -> None:
+        self._require_page("logs", self._bottom_pages, "bottom")
+        if (
+            self._active_bottom_page == "logs"
+            and self.status_bar.active_log_filter is log_filter
+        ):
+            self.close_bottom_page()
+            return
+        self.status_bar.render_log_filter(log_filter)
+        self._show_bottom_page("logs")
+
     def close_bottom_page(self) -> None:
         self._set_outside_click_filter_enabled(False)
         self._close_panel_shortcut.setEnabled(False)
         if self._active_bottom_page is None:
             return
         self.detail_panel.hide()
+        self._position_notification_toast()
         self._active_bottom_page = None
         self.status_bar.render_active_panel(None)
         self._schedule_layout_save()
@@ -499,6 +781,7 @@ class WorkbenchView(QWidget):
         self._position_detail_panel()
         self.detail_panel.show()
         self.detail_panel.raise_()
+        self._position_notification_toast()
         self._set_outside_click_filter_enabled(True)
         self._close_panel_shortcut.setEnabled(True)
         self._selected_bottom_page = page_key
@@ -554,12 +837,23 @@ class WorkbenchView(QWidget):
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)
         self._position_detail_panel()
+        self._position_notification_toast()
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802
+        super().showEvent(event)
+        self._position_detail_panel()
+        self._position_notification_toast()
 
     def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
         self._set_outside_click_filter_enabled(False)
         super().hideEvent(event)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched in self._scrollbar_cards:
+            if event.type() is QEvent.Type.Enter:
+                self._set_card_hover_state(watched, visible=True)
+            elif event.type() is QEvent.Type.Leave:
+                self._set_card_hover_state(watched, visible=False)
         if (
             self._active_bottom_page is not None
             and event.type() is QEvent.Type.MouseButtonPress
@@ -572,6 +866,19 @@ class WorkbenchView(QWidget):
             self.close_bottom_page()
         return super().eventFilter(watched, event)
 
+    @staticmethod
+    def _set_card_hover_state(card: QObject, *, visible: bool) -> None:
+        for scroll_bar in card.findChildren(QScrollBar):
+            if scroll_bar.property("cardHover") is visible:
+                continue
+            scroll_bar.setProperty("cardHover", visible)
+            style = scroll_bar.style()
+            style.unpolish(scroll_bar)
+            style.polish(scroll_bar)
+            scroll_bar.update()
+        for header in card.findChildren(PaneHeader):
+            header.set_actions_revealed(visible)
+
     def _is_workbench_outside_detail_click(
         self,
         target: QWidget | None,
@@ -582,6 +889,7 @@ class WorkbenchView(QWidget):
             return False
         return not (
             self._is_within(target, self.detail_panel)
+            or self._is_within(target, self.notification_toast)
             or self._is_within(target, self.status_bar)
         )
 
@@ -618,6 +926,27 @@ class WorkbenchView(QWidget):
             self.height() - self.status_bar.height() - DETAIL_PANEL_MARGIN - height,
         )
         self.detail_panel.setGeometry(x, y, width, height)
+
+    def _position_notification_toast(self) -> None:
+        toast = self.notification_toast
+        if toast.isHidden():
+            return
+        available_width = max(1, self.width() - (2 * NOTIFICATION_TOAST_MARGIN))
+        width = min(NOTIFICATION_TOAST_MAXIMUM_WIDTH, available_width)
+        toast.setFixedWidth(width)
+        toast.adjustSize()
+        x = max(NOTIFICATION_TOAST_MARGIN, self.width() - width - NOTIFICATION_TOAST_MARGIN)
+        lower_anchor = (
+            self.detail_panel.y()
+            if self.detail_panel.isVisible()
+            else self.height() - self.status_bar.height()
+        )
+        y = max(
+            NOTIFICATION_TOAST_MARGIN,
+            lower_anchor - toast.height() - NOTIFICATION_TOAST_MARGIN,
+        )
+        toast.move(x, y)
+        toast.raise_()
 
     def _schedule_layout_save(self) -> None:
         if self._layout_store is not None:

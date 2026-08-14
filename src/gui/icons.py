@@ -43,6 +43,8 @@ class IconName(str, Enum):
     POSES = "poses"
     CONTROLS = "controls"
     LOGS = "logs"
+    PROBLEM_ERROR = "problem-error"
+    PROBLEM_WARNING = "problem-warning"
     OPEN = "open"
     SAVE = "save"
     INSERT = "insert"

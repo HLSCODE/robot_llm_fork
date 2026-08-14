@@ -5,10 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PySide6.QtCore import QEvent, QSize, Qt
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtGui import QColor, QPaintEvent, QPalette
 from PySide6.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionComboBox,
+    QStylePainter,
     QToolButton,
     QWidget,
 )
@@ -18,6 +23,36 @@ from .icons import IconName, themed_icon
 
 TOOL_BUTTON_HIT_SIZE = 32
 TOOL_BUTTON_ICON_SIZE = 18
+PANE_HEADER_VERTICAL_MARGIN = 4
+PANE_HEADER_MINIMUM_HEIGHT = TOOL_BUTTON_HIT_SIZE + (2 * PANE_HEADER_VERTICAL_MARGIN)
+
+
+class ElidingComboBox(QComboBox):
+    """Keep full item text while eliding only the closed-field presentation."""
+
+    def visible_text(self) -> str:
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        edit_rect = self.style().subControlRect(
+            QStyle.ComplexControl.CC_ComboBox,
+            option,
+            QStyle.SubControl.SC_ComboBoxEditField,
+            self,
+        )
+        return self.fontMetrics().elidedText(
+            option.currentText,
+            Qt.TextElideMode.ElideRight,
+            max(0, edit_rect.width()),
+        )
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        del event
+        option = QStyleOptionComboBox()
+        self.initStyleOption(option)
+        painter = QStylePainter(self)
+        painter.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, option)
+        option.currentText = self.visible_text()
+        painter.drawControl(QStyle.ControlElement.CE_ComboBoxLabel, option)
 
 
 def icon_foreground(widget: QWidget, role: str | None = None) -> QColor:
@@ -40,6 +75,10 @@ def icon_foreground(widget: QWidget, role: str | None = None) -> QColor:
         return QColor("#15803d" if is_light_surface else "#4ade80")
     if resolved_role == "statusDanger":
         return QColor("#dc2626" if is_light_surface else "#f87171")
+    if resolved_role == "statusWarning":
+        return QColor("#b45309" if is_light_surface else "#fbbf24")
+    if resolved_role == "statusMuted":
+        return widget.palette().color(QPalette.ColorRole.PlaceholderText)
     return widget.palette().color(QPalette.ColorRole.WindowText)
 
 
@@ -109,8 +148,14 @@ class PaneHeader(QWidget):
     def __init__(self, title: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("paneHeader")
+        self.setMinimumHeight(PANE_HEADER_MINIMUM_HEIGHT)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 4, 4)
+        layout.setContentsMargins(
+            8,
+            PANE_HEADER_VERTICAL_MARGIN,
+            4,
+            PANE_HEADER_VERTICAL_MARGIN,
+        )
         layout.setSpacing(2)
         self.title_label = QLabel(title)
         self.title_label.setObjectName("paneHeaderTitle")
@@ -118,6 +163,36 @@ class PaneHeader(QWidget):
         layout.addWidget(self.title_label)
         layout.addStretch(1)
         self._layout = layout
+        self._actions_revealed = True
+        self._action_buttons: list[IconToolButton] = []
+
+    def replace_title_with(self, widget: QWidget) -> None:
+        """Use a compact navigation control in place of the static pane title."""
+        self.title_label.clear()
+        self.title_label.hide()
+        for index in range(self._layout.count()):
+            item = self._layout.itemAt(index)
+            if item is not None and item.spacerItem() is not None:
+                self._layout.takeAt(index)
+                break
+        widget.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            widget.sizePolicy().verticalPolicy(),
+        )
+        self._layout.insertWidget(0, widget)
+
+    def set_actions_revealed(self, revealed: bool) -> None:
+        """Reveal commands and release their layout space while hidden."""
+        self._actions_revealed = revealed
+        for button in self._action_buttons:
+            button.setVisible(revealed)
+            button.setAttribute(
+                Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+                not revealed,
+            )
+            button.setFocusPolicy(
+                Qt.FocusPolicy.StrongFocus if revealed else Qt.FocusPolicy.NoFocus
+            )
 
     def add_action(
         self,
@@ -131,5 +206,7 @@ class PaneHeader(QWidget):
             callback=callback,
             parent=self,
         )
+        self._action_buttons.append(button)
         self._layout.addWidget(button)
+        self.set_actions_revealed(self._actions_revealed)
         return button

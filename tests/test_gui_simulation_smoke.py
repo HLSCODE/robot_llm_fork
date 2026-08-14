@@ -23,6 +23,7 @@ from src.gui.theme import ThemeController, ThemeMode
 from src.gui.shortcuts import DEFAULT_SHORTCUTS
 from src.gui.views import StartupProgressCard
 from src.gui.views.ai_assistant import AIAssistantWidget
+from src.gui.views.log_widget import LogFilter
 from src.gui.views.workflow_canvas.items import InsertionItem
 
 
@@ -325,18 +326,50 @@ class GuiSimulationSmokeTests(unittest.TestCase):
 
         self.assertIsNone(workbench.active_side_page)
 
-    def test_status_bar_collapses_multiline_notifications_to_one_line(self) -> None:
-        status_bar = self.window.workbench_view.status_bar
+    def test_non_modal_problem_uses_one_corner_toast_instead_of_status_text(self) -> None:
+        toast = self.window.workbench_view.notification_toast
         details = "第一行错误\n必要设备未就绪: robot-system " + "诊断详情 " * 100
 
-        status_bar.show_message(details)
+        self.window._notifications.error(details, modal=False)
         QApplication.processEvents()
 
-        rendered = status_bar.message_label.text()
-        self.assertNotIn("\n", rendered)
-        self.assertTrue(rendered.endswith("…"))
-        self.assertEqual(details, status_bar.message_label.toolTip())
-        self.assertEqual(32, status_bar.height())
+        self.assertTrue(toast.isVisible())
+        self.assertNotIn("\n", toast.message_label.text())
+        self.assertTrue(toast.message_label.text().endswith("…"))
+        self.assertEqual(details.strip(), toast.message_label.toolTip())
+        self.assertFalse(hasattr(self.window.workbench_view.status_bar, "message_label"))
+
+    def test_typed_notifications_update_problem_counts_and_shared_log_filter(self) -> None:
+        status_bar = self.window.workbench_view.status_bar
+        initial_errors = self.window.log_widget.error_count
+        initial_warnings = self.window.log_widget.warning_count
+
+        self.window._notifications.warning("smoke warning", modal=False)
+        self.window._notifications.error("smoke error", modal=False)
+        QApplication.processEvents()
+
+        self.assertEqual(initial_errors + 1, self.window.log_widget.error_count)
+        self.assertEqual(initial_warnings + 1, self.window.log_widget.warning_count)
+        self.assertEqual(
+            str(initial_errors + 1),
+            status_bar.log_problem_buttons[LogFilter.ERRORS].text(),
+        )
+        self.assertEqual(
+            str(initial_warnings + 1),
+            status_bar.log_problem_buttons[LogFilter.WARNINGS].text(),
+        )
+
+        status_bar.log_problem_buttons[LogFilter.ERRORS].click()
+        QApplication.processEvents()
+        self.assertEqual(LogFilter.ERRORS, self.window.log_widget.active_filter)
+        self.assertIn("smoke error", self.window.log_widget.toPlainText())
+        self.assertNotIn("smoke warning", self.window.log_widget.toPlainText())
+
+        status_bar.log_problem_buttons[LogFilter.WARNINGS].click()
+        QApplication.processEvents()
+        self.assertEqual(LogFilter.WARNINGS, self.window.log_widget.active_filter)
+        self.assertIn("smoke warning", self.window.log_widget.toPlainText())
+        self.assertNotIn("smoke error", self.window.log_widget.toPlainText())
 
     def test_buttons_drive_pause_resume_and_cancel_through_shared_runtime(self) -> None:
         item = SequenceItem.from_definition(
@@ -651,22 +684,35 @@ class StartupProgressCardTests(unittest.TestCase):
         self.assertEqual("机器人动作编排器 Logo", card.logo_label.accessibleName())
         card.close()
 
-    def test_empty_progress_detail_hides_internal_identifier_row(self) -> None:
+    def test_progress_updates_keep_normal_card_height_stable(self) -> None:
         card = StartupProgressCard()
         card.show()
         QApplication.processEvents()
+        normal_height = card.height()
+
         card.set_progress(40, "正在初始化机械臂...", "robot-system")
-        self.assertFalse(card.detail_label.isHidden())
-        expanded_height = card.height()
+        QApplication.processEvents()
+        self.assertEqual(normal_height, card.height())
 
         card.set_progress(54, "正在连接机械臂...", "")
+        QApplication.processEvents()
 
         self.assertEqual("", card.detail_label.text())
-        self.assertTrue(card.detail_label.isHidden())
-        self.assertLess(card.height(), expanded_height)
-        card.mark_failed("设备连接失败")
         self.assertFalse(card.detail_label.isHidden())
-        self.assertGreater(card.height(), expanded_height)
+        self.assertEqual(normal_height, card.height())
+
+        card.set_progress(
+            66,
+            "正在连接移动底盘...",
+            "设备初始化切换时复用稳定的详情区域",
+        )
+        QApplication.processEvents()
+        self.assertEqual(normal_height, card.height())
+
+        card.mark_failed("设备连接失败")
+        QApplication.processEvents()
+        self.assertFalse(card.detail_label.isHidden())
+        self.assertGreater(card.height(), normal_height)
         card.close()
 
 

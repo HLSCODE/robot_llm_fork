@@ -737,35 +737,35 @@ class WorkflowNodeItem(QGraphicsObject):
         control = control_flow_colors(ControlFlowKind.LOOP)
         painter.setBrush(control.header)
         loop_running = _entry_is_running(loop)
-        loop_border = (
-            STATUS_COLORS[SequenceItemStatus.RUNNING]
-            if loop_running
-            else accent if self.isSelected() else control.accent
-        )
-        loop_border_width = (
-            1.5 + self._execution_pulse_phase * 1.5
-            if loop_running
-            else 1.5
-        )
+        if loop_running:
+            loop_border = STATUS_COLORS[SequenceItemStatus.RUNNING]
+            loop_border_width = 1.5 + self._execution_pulse_phase * 1.5
+        elif self.isSelected():
+            loop_border = accent
+            loop_border_width = 2.0
+        else:
+            loop_border = QColor(control.accent)
+            loop_border.setAlpha(180 if self.isUnderMouse() else 96)
+            loop_border_width = 1.5 if self.isUnderMouse() else 1.0
         painter.setPen(QPen(loop_border, loop_border_width))
         painter.drawRoundedRect(header_rect, NODE_RADIUS, NODE_RADIUS)
+
+        badge_rect = QRectF(card_left + 14.0, 12.0, 24.0, 24.0)
+        badge_fill = QColor(control.accent)
+        badge_fill.setAlpha(48 if control.header.lightnessF() < 0.5 else 28)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(control.accent)
-        painter.drawRoundedRect(
-            QRectF(header_rect.left(), header_rect.top(), 5.0, header_rect.height()),
-            2.5,
-            2.5,
-        )
+        painter.setBrush(badge_fill)
+        painter.drawRoundedRect(badge_rect, 6.0, 6.0)
         _draw_svg_icon(
             painter,
             IconName.LOOP,
-            QRectF(card_left + 16.0, 11.0, 18.0, 18.0),
+            QRectF(card_left + 17.0, 15.0, 18.0, 18.0),
             control.accent,
         )
         painter.setPen(control.header_text)
         painter.setFont(canvas_font(emphasis=True))
         painter.drawText(
-            QRectF(card_left + 44.0, 7.0, NODE_WIDTH - 60.0, 26.0),
+            QRectF(card_left + 48.0, 7.0, NODE_WIDTH - 64.0, 26.0),
             Qt.AlignmentFlag.AlignVCenter,
             "循环",
         )
@@ -777,7 +777,7 @@ class WorkflowNodeItem(QGraphicsObject):
             else ""
         )
         painter.drawText(
-            QRectF(card_left + 44.0, 31.0, NODE_WIDTH - 60.0, 22.0),
+            QRectF(card_left + 48.0, 31.0, NODE_WIDTH - 64.0, 22.0),
             Qt.AlignmentFlag.AlignVCenter,
             f"{loop.repeat_count} 次 · {len(loop.items)} 个节点{progress}",
         )
@@ -795,6 +795,21 @@ class WorkflowNodeItem(QGraphicsObject):
             "循环体",
         )
         visible_children = loop.items[:MAX_VISIBLE_LOOP_CHILDREN]
+        if visible_children:
+            children_bottom = (
+                body_top
+                + len(visible_children) * LOOP_CHILD_HEIGHT
+                + max(0, len(visible_children) - 1) * LOOP_CHILD_GAP
+            )
+        else:
+            children_bottom = body_top + 44.0
+        footer_top = children_bottom + LOOP_SECTION_GAP
+        self._paint_loop_spine(
+            painter,
+            header_rect.bottom(),
+            footer_top,
+            canvas_colors().edge,
+        )
         if self._editing_enabled:
             self._paint_insert_marker(
                 painter,
@@ -838,13 +853,7 @@ class WorkflowNodeItem(QGraphicsObject):
             )
             if is_dragged_child:
                 painter.restore()
-
         if visible_children:
-            children_bottom = (
-                body_top
-                + len(visible_children) * LOOP_CHILD_HEIGHT
-                + max(0, len(visible_children) - 1) * LOOP_CHILD_GAP
-            )
             if self._editing_enabled and len(loop.items) <= MAX_VISIBLE_LOOP_CHILDREN:
                 self._paint_insert_marker(
                     painter,
@@ -855,14 +864,12 @@ class WorkflowNodeItem(QGraphicsObject):
                     hover_phase=self._loop_insert_hover_phase(len(loop.items)),
                 )
         else:
-            children_bottom = body_top + 44.0
             painter.setPen(secondary_text)
             painter.drawText(
                 QRectF(card_left, body_top, NODE_WIDTH, 44.0),
                 Qt.AlignmentFlag.AlignCenter,
                 "循环体为空",
             )
-        footer_top = children_bottom + LOOP_SECTION_GAP
         footer_left = (LOOP_NODE_WIDTH - LOOP_FOOTER_WIDTH) / 2.0
         footer_rect = QRectF(
             footer_left,
@@ -887,6 +894,19 @@ class WorkflowNodeItem(QGraphicsObject):
                 f"另有 {len(loop.items) - MAX_VISIBLE_LOOP_CHILDREN} 个动作",
             )
         self._paint_loop_paths(painter, header_rect, footer_rect, control.path)
+
+    @staticmethod
+    def _paint_loop_spine(
+        painter: QPainter,
+        start_y: float,
+        end_y: float,
+        color: QColor,
+    ) -> None:
+        """Draw the neutral execution path behind loop children and insert markers."""
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(color, 1.5))
+        center_x = LOOP_NODE_WIDTH / 2.0
+        painter.drawLine(QPointF(center_x, start_y), QPointF(center_x, end_y))
 
     def _paint_parallel(
         self,
@@ -1180,6 +1200,9 @@ class WorkflowNodeItem(QGraphicsObject):
         right_x = LOOP_NODE_WIDTH - 24.0
         header_center_y = header_rect.center().y()
         footer_center_y = footer_rect.center().y()
+        path_color = QColor(loop_color)
+        is_dark = canvas_colors().canvas.lightnessF() < 0.5
+        path_color.setAlpha(205 if is_dark else 175)
         painter.setBrush(Qt.BrushStyle.NoBrush)
 
         forward_path = QPainterPath()
@@ -1192,18 +1215,8 @@ class WorkflowNodeItem(QGraphicsObject):
             footer_rect.right(),
             footer_center_y,
         )
-        painter.setPen(QPen(loop_color, 2.0))
+        painter.setPen(QPen(path_color, 1.5))
         painter.drawPath(forward_path)
-        painter.drawText(
-            QRectF(
-                header_rect.right() + 8.0,
-                header_center_y + 18.0,
-                right_x - header_rect.right() - 12.0,
-                24.0,
-            ),
-            Qt.AlignmentFlag.AlignRight,
-            "达到次数",
-        )
 
         return_path = QPainterPath()
         return_path.moveTo(footer_rect.left(), footer_center_y)
@@ -1215,19 +1228,49 @@ class WorkflowNodeItem(QGraphicsObject):
             header_rect.left(),
             header_center_y,
         )
-        return_pen = QPen(loop_color, 2.0, Qt.PenStyle.DashLine)
+        return_pen = QPen(path_color, 1.5, Qt.PenStyle.DashLine)
         painter.setPen(return_pen)
         painter.drawPath(return_path)
-        painter.setPen(loop_color)
+
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(path_color)
+        for point in (
+            QPointF(header_rect.left(), header_center_y),
+            QPointF(header_rect.right(), header_center_y),
+            QPointF(footer_rect.left(), footer_center_y),
+            QPointF(footer_rect.right(), footer_center_y),
+        ):
+            painter.drawEllipse(point, 2.5, 2.5)
+
+        left_label_rect = QRectF(
+            4.0,
+            header_center_y + 15.0,
+            header_rect.left() - 14.0,
+            24.0,
+        )
+        right_label_rect = QRectF(
+            header_rect.right() + 6.0,
+            header_center_y + 15.0,
+            right_x - header_rect.right() - 8.0,
+            24.0,
+        )
+        label_surface = QColor(canvas_colors().canvas)
+        label_surface.setAlpha(235)
+        painter.setBrush(label_surface)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(left_label_rect, 5.0, 5.0)
+        painter.drawRoundedRect(right_label_rect, 5.0, 5.0)
+        painter.setFont(canvas_font(secondary=True))
+        painter.setPen(path_color)
         painter.drawText(
-            QRectF(
-                4.0,
-                header_center_y + 18.0,
-                header_rect.left() - 16.0,
-                24.0,
-            ),
-            Qt.AlignmentFlag.AlignRight,
+            left_label_rect,
+            Qt.AlignmentFlag.AlignCenter,
             "下一次",
+        )
+        painter.drawText(
+            right_label_rect,
+            Qt.AlignmentFlag.AlignCenter,
+            "达到次数",
         )
 
     def _item_uuid_at(self, position: QPointF) -> str:

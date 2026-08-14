@@ -35,10 +35,12 @@ from src.gui.views.dialogs import (
     SchemaActionForm,
 )
 from src.gui.bridges.notifications import (
+    GuiNotification,
     GuiNotificationCenter,
     GuiNotificationLevel,
 )
 from src.gui.view_models import DeviceViewModel, ExecutionViewModel
+from src.gui.views.log_widget import LogFilter, LogWidget
 from src.gui.controllers.startup import (
     GuiAuxiliaryServiceStartupWorker,
     GuiAuxiliaryStartupResultReceiver,
@@ -376,15 +378,15 @@ class GuiNotificationCenterTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
 
-    def test_notifications_have_one_history_log_status_and_modal_path(self) -> None:
+    def test_notifications_separate_modal_and_non_modal_presentation_paths(self) -> None:
         parent = SchemaActionForm(ActionType.WAIT)
-        logs: list[str] = []
-        statuses: list[str] = []
+        logs: list[GuiNotification] = []
+        toasts: list[GuiNotification] = []
         presenter = _FakeNotificationPresenter()
         notifications = GuiNotificationCenter(
             parent,
             log_sink=logs.append,
-            status_sink=statuses.append,
+            toast_sink=toasts.append,
             presenter=presenter,
             history_limit=2,
         )
@@ -401,13 +403,47 @@ class GuiNotificationCenterTests(unittest.TestCase):
         self.assertEqual(GuiNotificationLevel.ERROR, state.latest.level)
         self.assertEqual(
             ["ready", "device unavailable", "execution failed"],
-            logs,
+            [notification.message for notification in logs],
         )
-        self.assertEqual(logs, statuses)
         self.assertEqual([warning], presenter.shown)
+        self.assertEqual([logs[-1]], toasts)
         presenter.confirmed = True
         self.assertTrue(notifications.confirm("continue?"))
         parent.deleteLater()
+
+    def test_log_widget_counts_filters_and_clears_typed_notifications(self) -> None:
+        log_widget = LogWidget()
+        counts: list[tuple[int, int]] = []
+        log_widget.counts_changed.connect(
+            lambda errors, warnings: counts.append((errors, warnings))
+        )
+        notifications = (
+            GuiNotification(GuiNotificationLevel.INFO, "提示", "ready"),
+            GuiNotification(GuiNotificationLevel.WARNING, "警告", "low pressure"),
+            GuiNotification(GuiNotificationLevel.ERROR, "错误", "motion failed"),
+            GuiNotification(GuiNotificationLevel.CRITICAL, "严重", "emergency"),
+        )
+        for notification in notifications:
+            log_widget.append_notification(notification)
+
+        self.assertEqual(2, log_widget.error_count)
+        self.assertEqual(1, log_widget.warning_count)
+        self.assertEqual((2, 1), counts[-1])
+        self.assertIn("ready", log_widget.toPlainText())
+
+        log_widget.set_filter(LogFilter.ERRORS)
+        self.assertIn("motion failed", log_widget.toPlainText())
+        self.assertIn("emergency", log_widget.toPlainText())
+        self.assertNotIn("low pressure", log_widget.toPlainText())
+
+        log_widget.set_filter(LogFilter.WARNINGS)
+        self.assertEqual(1, len(log_widget.toPlainText().splitlines()))
+        self.assertIn("low pressure", log_widget.toPlainText())
+
+        log_widget.clear()
+        self.assertEqual("", log_widget.toPlainText())
+        self.assertEqual((0, 0), counts[-1])
+        log_widget.deleteLater()
 
 
     def test_worker_notification_is_presented_on_gui_thread(self) -> None:
@@ -416,7 +452,7 @@ class GuiNotificationCenterTests(unittest.TestCase):
         notifications = GuiNotificationCenter(
             parent,
             log_sink=lambda _message: sink_threads.append(QThread.currentThread()),
-            status_sink=lambda _message: None,
+            toast_sink=lambda _notification: None,
             presenter=_FakeNotificationPresenter(),
         )
         gui_thread = QThread.currentThread()

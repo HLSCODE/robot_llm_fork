@@ -102,7 +102,7 @@ def control_flow_colors(
     is_dark = active.color(QPalette.ColorRole.Window).lightnessF() < 0.5
     if kind is ControlFlowKind.LOOP:
         return ControlFlowColors(
-            header=QColor("#3b3018" if is_dark else "#fff4cc"),
+            header=QColor("#332b19" if is_dark else "#fffbeb"),
             header_text=QColor("#fde68a" if is_dark else "#713f12"),
             accent=QColor("#fbbf24" if is_dark else "#d97706"),
             path=QColor("#eab308" if is_dark else "#b45309"),

@@ -9,6 +9,8 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDragMoveEvent,
     QHelpEvent,
+    QImage,
+    QPainter,
     QPalette,
     QWheelEvent,
 )
@@ -19,6 +21,7 @@ from PySide6.QtWidgets import (
     QGraphicsProxyWidget,
     QGraphicsScene,
     QGraphicsView,
+    QStyleOptionGraphicsItem,
 )
 
 from src.application import WorkflowCompiler
@@ -34,6 +37,7 @@ from src.domain.models import (
 )
 from src.domain.workflow import WorkflowDocument
 from src.gui.drag_preview_style import DRAG_CARD_OPACITY, DRAG_CARD_RELATIVE_SCALE
+from src.gui.theme import LIGHT_COLORS, build_palette
 from src.gui.views import WorkflowCanvasWidget
 from src.gui.tooltips import install_tooltip_service
 from src.gui.views.workflow_canvas.items import (
@@ -59,6 +63,7 @@ from src.gui.views.workflow_canvas.tokens import (
     PARALLEL_CHILD_GAP,
     PARALLEL_HEADER_HEIGHT,
     PARALLEL_SECTION_GAP,
+    canvas_colors,
     contrasting_text,
     control_flow_colors,
 )
@@ -113,6 +118,76 @@ class WorkflowCanvasTests(unittest.TestCase):
             self.canvas.view.optimizationFlags()
             & self.canvas.view.OptimizationFlag.DontSavePainterState
         )
+
+    def test_light_loop_header_uses_structural_surface_without_action_stripe(
+        self,
+    ) -> None:
+        original_palette = self.application.palette()
+        try:
+            self.application.setPalette(build_palette(LIGHT_COLORS))
+            loop = LoopBlock(
+                uuid="loop-style",
+                items=[_item("inside")],
+                repeat_count=2,
+            )
+            node = WorkflowNodeItem("loop-style", loop)
+            image = QImage(
+                round(node.node_width),
+                round(LOOP_HEADER_HEIGHT),
+                QImage.Format.Format_ARGB32_Premultiplied,
+            )
+            image.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(image)
+            node.paint(painter, QStyleOptionGraphicsItem())
+            painter.end()
+
+            card_left = (LOOP_NODE_WIDTH - NODE_WIDTH) / 2.0
+            sampled = image.pixelColor(
+                round(card_left + 3.0),
+                round(LOOP_HEADER_HEIGHT / 2.0),
+            )
+            colors = control_flow_colors(ControlFlowKind.LOOP)
+            surface_distance = _color_distance(sampled, colors.header)
+            accent_distance = _color_distance(sampled, colors.accent)
+            self.assertLess(surface_distance, accent_distance)
+        finally:
+            self.application.setPalette(original_palette)
+
+    def test_loop_children_are_connected_by_theme_edge(self) -> None:
+        original_palette = self.application.palette()
+        try:
+            for palette in (
+                build_palette(LIGHT_COLORS),
+                _palette("#0f172a", "#111827", "#f1f5f9"),
+            ):
+                self.application.setPalette(palette)
+                loop = LoopBlock(
+                    uuid="loop-spine",
+                    items=[_item("first"), _item("second")],
+                    repeat_count=2,
+                )
+                node = WorkflowNodeItem("loop-spine", loop)
+                image = QImage(
+                    round(node.node_width),
+                    round(node.node_height),
+                    QImage.Format.Format_ARGB32_Premultiplied,
+                )
+                image.fill(Qt.GlobalColor.transparent)
+                painter = QPainter(image)
+                node.paint(painter, QStyleOptionGraphicsItem())
+                painter.end()
+
+                connector_y = round(
+                    LOOP_HEADER_HEIGHT
+                    + LOOP_SECTION_GAP
+                    + LOOP_CHILD_HEIGHT
+                    + 1.0
+                )
+                sampled = image.pixelColor(round(LOOP_NODE_WIDTH / 2.0), connector_y)
+                self.assertLess(_color_distance(sampled, canvas_colors().edge), 4.0)
+                self.assertGreater(sampled.alphaF(), 0.7)
+        finally:
+            self.application.setPalette(original_palette)
 
     def test_start_and_end_nodes_remain_visible_when_hovered(self) -> None:
         self.canvas.render_entries(())
@@ -1703,6 +1778,14 @@ def _item(item_uuid: str) -> SequenceItem:
     return SequenceItem(
         uuid=item_uuid,
         definition=_action(item_uuid),
+    )
+
+
+def _color_distance(first: QColor, second: QColor) -> int:
+    return (
+        abs(first.red() - second.red())
+        + abs(first.green() - second.green())
+        + abs(first.blue() - second.blue())
     )
 
 

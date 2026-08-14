@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QPoint, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from .drag_preview_style import (
     DRAG_CARD_MAX_SCALE,
@@ -53,7 +53,9 @@ def create_drag_card_preview(
     pixmap.setDevicePixelRatio(device_pixel_ratio)
     pixmap.fill(Qt.GlobalColor.transparent)
 
-    palette = widget.palette()
+    # Drag thumbnails belong to the application chrome, not to a list widget's
+    # potentially stale/local palette.  This also matches in-canvas previews.
+    palette = QApplication.palette()
     surface = palette.base().color()
     text = palette.text().color()
     secondary_text = palette.placeholderText().color()

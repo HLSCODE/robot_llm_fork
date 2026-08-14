@@ -4,6 +4,7 @@ from PySide6.QtGui import QColor, QIcon
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.gui.drag_preview import create_drag_card_preview
+from src.gui.theme import DARK_COLORS, LIGHT_COLORS, build_palette
 from src.gui.drag_preview_style import (
     DRAG_CARD_MAX_SCALE,
     DRAG_CARD_MIN_SCALE,
@@ -54,3 +55,30 @@ def test_in_canvas_drag_preview_uses_shared_relative_scale_and_bounds() -> None:
     large_scale = bounded_drag_preview_scale(500.0, 500.0)
     assert 500.0 * large_scale <= DRAG_PREVIEW_MAX_WIDTH
     assert 500.0 * large_scale <= DRAG_PREVIEW_MAX_HEIGHT
+
+
+def test_drag_preview_uses_current_application_theme_not_stale_widget_palette() -> None:
+    application = QApplication.instance() or QApplication([])
+    original_palette = application.palette()
+    widget = QWidget()
+    try:
+        application.setPalette(build_palette(LIGHT_COLORS))
+        widget.setPalette(build_palette(DARK_COLORS))
+        preview = create_drag_card_preview(
+            widget,
+            title="ready_to_place",
+            subtitle="机械臂移动",
+            icon=QIcon(),
+            accent=QColor(LIGHT_COLORS.accent),
+            canvas_scale=1.0,
+        )
+
+        image = preview.pixmap.toImage()
+        surface_pixel = image.pixelColor(image.width() - 12, image.height() // 2)
+        assert widget.palette().base().color() == QColor(DARK_COLORS.surface)
+        assert surface_pixel.lightnessF() > 0.8
+        assert 0 < surface_pixel.alpha() < 255
+    finally:
+        application.setPalette(original_palette)
+        widget.close()
+        application.processEvents()

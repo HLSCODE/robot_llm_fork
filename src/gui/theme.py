@@ -222,7 +222,7 @@ QWidget {{ color: {colors.text}; }}
 QMainWindow {{ background: transparent; }}
 QDialog {{ background: {colors.window}; }}
 QFrame#applicationWindowSurface {{
-    background: {colors.window}; border: none;
+    background: {colors.surface}; border: none;
 }}
 QFrame#applicationWindowSurface[windowCorners="rounded"] {{
     border-radius: 10px;
@@ -325,6 +325,21 @@ QComboBox::drop-down {{
 }}
 QComboBox::drop-down:hover {{ background: {colors.selection}; }}
 QComboBox::down-arrow {{ image: url({combo_arrow}); width: 12px; height: 8px; }}
+QComboBox#paneHeaderSelector {{
+    background: transparent; border: none; color: {colors.text};
+    font-weight: 600; padding: 5px 4px;
+}}
+QComboBox#paneHeaderSelector:hover,
+QComboBox#paneHeaderSelector:focus,
+QComboBox#paneHeaderSelector:on {{
+    background: transparent; border: none; color: {colors.text};
+}}
+QComboBox#paneHeaderSelector::drop-down {{
+    subcontrol-origin: border; subcontrol-position: top left;
+    width: 24px; background: transparent; border: none;
+    border-top-left-radius: 6px; border-bottom-left-radius: 6px;
+}}
+QComboBox#paneHeaderSelector::drop-down:hover {{ background: transparent; }}
 QComboBoxPrivateContainer, QWidget#comboBoxPopup {{
     background: {colors.surface}; border: 1px solid {colors.border};
     border-radius: 8px; padding: 4px;
@@ -355,12 +370,38 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 QScrollBar:horizontal {{ height: 8px; background: transparent; }}
 QScrollBar::handle:horizontal {{ background: {colors.border_strong}; border-radius: 4px; min-width: 20px; }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+QScrollBar[cardHover="false"]::handle:vertical,
+QScrollBar[cardHover="false"]::handle:horizontal {{ background: transparent; }}
+QScrollBar[cardHover="true"]::handle:vertical,
+QScrollBar[cardHover="true"]::handle:horizontal {{ background: {colors.border_strong}; }}
+QScrollBar[cardHover="true"]::handle:vertical:hover,
+QScrollBar[cardHover="true"]::handle:horizontal:hover {{ background: {colors.accent}; }}
 QSplitter::handle {{ background: {colors.border}; }}
 QSplitter::handle:hover {{ background: {colors.accent}; }}
-QSplitter#workbenchSideSplitter::handle, QSplitter#workbenchBottomSplitter::handle {{ background: transparent; }}
-QFrame#workbenchActivityBar {{ background: {colors.surface_subtle}; border: none; }}
-QStackedWidget#workbenchSideBar, QStackedWidget#workbenchBottomPanel {{ background: {colors.surface}; }}
-QWidget#paneHeader, QWidget#workflowCommandBar {{ background: {colors.surface}; border: none; }}
+QFrame#workbenchContentArea {{
+    background: {colors.surface}; border: none;
+}}
+QSplitter#workbenchSideSplitter {{ background: transparent; border: none; }}
+QSplitter#workbenchSideSplitter::handle, QSplitter#workbenchBottomSplitter::handle {{
+    background: transparent; border: none;
+}}
+QFrame#workbenchActivityBar {{ background: {colors.surface}; border: none; }}
+QStackedWidget#workbenchSideBar, QWidget[workbenchCard="true"] {{
+    background: {colors.window}; border: none; border-radius: 10px;
+}}
+QStackedWidget#workbenchSideBar QListWidget {{ background: transparent; }}
+QStackedWidget#workbenchBottomPanel {{ background: {colors.surface}; }}
+QWidget#paneHeader, QWidget#workflowCommandBar {{ background: transparent; border: none; }}
+QPushButton#workflowBreadcrumb {{
+    background: transparent; border: none; color: {colors.text_muted};
+    padding: 4px 8px;
+}}
+QPushButton#workflowBreadcrumb:hover {{
+    background: {colors.selection}; color: {colors.text};
+}}
+QPushButton#workflowBreadcrumb:pressed {{
+    background: {colors.border}; color: {colors.text};
+}}
 QLabel#paneHeaderTitle {{ color: {colors.text}; font-weight: 700; padding-left: 2px; }}
 QToolButton#paneToolButton {{
     background: transparent; border: none; border-radius: 5px;
@@ -398,6 +439,23 @@ QToolButton#statusPanelButton {{
     background: transparent; border: none; border-radius: 5px; color: {colors.text_muted}; padding: 3px;
 }}
 QToolButton#statusPanelButton:hover, QToolButton#statusPanelButton:checked {{ background: {colors.selection}; }}
+QToolButton#statusProblemButton {{
+    background: transparent; border: none; border-radius: 5px;
+    color: {colors.text_muted}; padding: 2px 3px; spacing: 1px;
+}}
+QToolButton#statusProblemButton:hover,
+QToolButton#statusProblemButton:checked {{ background: {colors.selection}; }}
+QToolButton#statusProblemButton[themeRole="statusDanger"] {{ color: {colors.danger}; }}
+QToolButton#statusProblemButton[themeRole="statusWarning"] {{ color: {colors.warning}; }}
+QToolButton#statusProblemButton[themeRole="statusMuted"] {{ color: {colors.text_muted}; }}
+QFrame#workbenchNotificationToast {{
+    background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 10px;
+}}
+QFrame#workbenchNotificationToast[themeRole="statusWarning"] {{ border-left: 3px solid {colors.warning}; }}
+QFrame#workbenchNotificationToast[themeRole="statusDanger"] {{ border-left: 3px solid {colors.danger}; }}
+QLabel#notificationToastIcon {{ background: transparent; border: none; }}
+QLabel#notificationToastTitle {{ background: transparent; color: {colors.text}; font-weight: 700; }}
+QLabel#notificationToastMessage {{ background: transparent; color: {colors.text_muted}; }}
 QMenuBar {{ background: {colors.surface}; color: {colors.text}; border: none; padding: 2px 4px; spacing: 2px; }}
 QMenuBar::item {{ background: transparent; padding: 6px 10px; margin: 1px; border-radius: 5px; }}
 QMenuBar::item:selected, QMenuBar::item:pressed {{ background: {colors.selection}; color: {colors.text}; }}

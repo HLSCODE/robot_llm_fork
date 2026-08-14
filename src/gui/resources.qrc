@@ -35,6 +35,8 @@
     <file alias="poses.svg">assets/icons/poses.svg</file>
     <file alias="controls.svg">assets/icons/controls.svg</file>
     <file alias="logs.svg">assets/icons/logs.svg</file>
+    <file alias="problem-error.svg">assets/icons/problem-error.svg</file>
+    <file alias="problem-warning.svg">assets/icons/problem-warning.svg</file>
     <file alias="open.svg">assets/icons/open.svg</file>
     <file alias="save.svg">assets/icons/save.svg</file>
     <file alias="insert.svg">assets/icons/insert.svg</file>

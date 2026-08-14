@@ -75,8 +75,8 @@ class GuiNotificationCenter(QObject):
         self,
         parent: QWidget,
         *,
-        log_sink: Callable[[str], None],
-        status_sink: Callable[[str], None],
+        log_sink: Callable[[GuiNotification], None],
+        toast_sink: Callable[[GuiNotification], None],
         presenter: NotificationDialogPresenter | None = None,
         history_limit: int = 200,
     ) -> None:
@@ -85,7 +85,7 @@ class GuiNotificationCenter(QObject):
             raise ValueError("notification history limit must be positive")
         self._parent = parent
         self._log_sink = log_sink
-        self._status_sink = status_sink
+        self._toast_sink = toast_sink
         self._presenter = presenter or AppDialogPresenter()
         self._history: deque[GuiNotification] = deque(maxlen=history_limit)
         self.notification_requested.connect(self._record_and_present)
@@ -147,10 +147,12 @@ class GuiNotificationCenter(QObject):
     @Slot(object)
     def _record_and_present(self, notification: GuiNotification) -> None:
         self._history.append(notification)
-        self._log_sink(notification.message)
-        self._status_sink(notification.message)
+        self._log_sink(notification)
         if notification.modal:
             self._presenter.show(self._parent, notification)
+            return
+        if notification.level is not GuiNotificationLevel.INFO:
+            self._toast_sink(notification)
 
     def confirm(self, message: str, *, title: str = "确认") -> bool:
         normalized = message.strip()

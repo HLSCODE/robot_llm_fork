@@ -107,7 +107,7 @@ class StartupProgressCard(QWidget):
 
         self.detail_label = QLabel("请稍候，初始化期间界面会保持响应")
         self.detail_label.setObjectName("startupDetail")
-        self.detail_label.setWordWrap(True)
+        self.detail_label.setWordWrap(False)
         layout.addWidget(self.detail_label)
 
         self.exit_button = QPushButton("退出")
@@ -180,6 +180,10 @@ class StartupProgressCard(QWidget):
             }
             """
         )
+        self.detail_label.ensurePolished()
+        self._detail_unbounded_max_height = self.detail_label.maximumHeight()
+        self._normal_detail_height = self.detail_label.fontMetrics().lineSpacing() + 4
+        self.detail_label.setFixedHeight(self._normal_detail_height)
 
     def _startup_icon(self) -> QIcon:
         palette = self.palette()
@@ -227,13 +231,15 @@ class StartupProgressCard(QWidget):
         self.status_label.setText(status)
         visible_detail = detail.strip()
         self.detail_label.setText(visible_detail)
-        self.detail_label.setVisible(bool(visible_detail))
-        self._fit_to_content()
+        self.detail_label.setToolTip(visible_detail)
 
     def mark_failed(self, message: str) -> None:
         self.status_label.setText("初始化失败")
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setMinimumHeight(self._normal_detail_height)
+        self.detail_label.setMaximumHeight(self._detail_unbounded_max_height)
         self.detail_label.setText(message)
-        self.detail_label.show()
+        self.detail_label.setToolTip(message)
         self.detail_label.setStyleSheet("color: #fca5a5;")
         self.exit_button.show()
         self._fit_to_content()

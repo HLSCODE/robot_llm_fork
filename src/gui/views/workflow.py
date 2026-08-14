@@ -5,7 +5,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QComboBox,
+    QApplication,
     QListWidget,
     QMenu,
     QStackedWidget,
@@ -20,7 +20,7 @@ from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
 from ..icons import IconName, themed_icon
 from ..drag_preview import create_drag_card_preview
-from ..toolbars import PaneHeader
+from ..toolbars import ElidingComboBox, PaneHeader
 
 
 ACTION_LIBRARY_CATEGORIES: tuple[tuple[ActionType, str], ...] = (
@@ -53,7 +53,7 @@ class TaskLibraryListWidget(QListWidget):
             QEvent.Type.ApplicationPaletteChange,
         }:
             return
-        color = self.palette().highlight().color()
+        color = QApplication.palette().highlight().color()
         for index in range(self.count()):
             self.item(index).setIcon(
                 themed_icon(self, IconName.WORKFLOW, size=20, color=color)
@@ -72,12 +72,13 @@ class TaskLibraryListWidget(QListWidget):
         mime.setData("application/x-task-name", task_name.encode("utf-8"))
         drag = QDrag(self)
         drag.setMimeData(mime)
+        accent = QApplication.palette().highlight().color()
         preview = create_drag_card_preview(
             self,
             title=current_item.text(),
             subtitle="已保存任务 · 拖入画布",
-            icon=current_item.icon(),
-            accent=self.palette().highlight().color(),
+            icon=themed_icon(self, IconName.WORKFLOW, size=20, color=accent),
+            accent=accent,
             canvas_scale=self._canvas_scale_provider(),
         )
         drag.setPixmap(preview.pixmap)
@@ -98,34 +99,35 @@ class ActionLibraryView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        header = PaneHeader("基础动作")
-        self.create_button = header.add_action(
+        self.category_selector = ElidingComboBox()
+        self.category_selector.setObjectName("paneHeaderSelector")
+        self.category_selector.setAccessibleName("基础动作分类")
+        self.category_selector.setToolTip("选择基础动作分类")
+        self.category_selector.setMinimumContentsLength(8)
+
+        self.header = PaneHeader("")
+        self.header.replace_title_with(self.category_selector)
+        self.create_button = self.header.add_action(
             IconName.ADD,
             "新建动作",
             self.create_requested.emit,
         )
-        self.edit_button = header.add_action(
+        self.edit_button = self.header.add_action(
             IconName.EDIT,
             "修改选中动作",
             self.edit_requested.emit,
         )
-        self.delete_button = header.add_action(
+        self.delete_button = self.header.add_action(
             IconName.DELETE,
             "删除选中动作",
             self.delete_requested.emit,
         )
-        self.camera_test_button = header.add_action(
+        self.camera_test_button = self.header.add_action(
             IconName.CAMERA,
             "测试相机",
             self.camera_test_requested.emit,
         )
-        layout.addWidget(header)
-
-        self.category_selector = QComboBox()
-        self.category_selector.setAccessibleName("基础动作分类")
-        self.category_selector.setToolTip("选择基础动作分类")
-        self.category_selector.setMinimumContentsLength(8)
-        layout.addWidget(self.category_selector)
+        layout.addWidget(self.header)
 
         self.action_stack = QStackedWidget()
         self.action_lists = {

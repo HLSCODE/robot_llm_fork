@@ -82,7 +82,7 @@ class ActionListWidget(QListWidget):
             self,
             title=action.name,
             subtitle=ACTION_TYPE_LABELS.get(action.type, action.type.value),
-            icon=current_item.icon(),
+            icon=self._get_icon_for_action(action),
             accent=ACTION_COLORS.get(action.type, QColor("#64748b")),
             canvas_scale=self._canvas_scale_provider(),
         )

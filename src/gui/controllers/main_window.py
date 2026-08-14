@@ -45,7 +45,7 @@ from ...devices.runtime.ids import (
     PIPETTE,
     ROBOT_SYSTEM,
 )
-from ..views.log_widget import LogWidget
+from ..views.log_widget import LogFilter, LogWidget
 from ..views.ai_assistant import AIAssistantWidget
 from ..views.action_list import ActionListWidget
 from ..bridges.composition import CompositionBridge
@@ -131,8 +131,8 @@ class MainWindow(RoundedMainWindow):
         )
         self._notifications = GuiNotificationCenter(
             self,
-            log_sink=self.log_widget.append_log,
-            status_sink=self.workbench_view.status_bar.show_message,
+            log_sink=self.log_widget.append_notification,
+            toast_sink=self.workbench_view.show_notification,
         )
         if self.workbench_view.layout_recovery_reason is not None:
             self._notifications.warning(
@@ -429,6 +429,12 @@ class MainWindow(RoundedMainWindow):
         self.pose_timer.timeout.connect(self.refresh_arm_poses)
 
     def _connect_view_signals(self) -> None:
+        self.log_widget.counts_changed.connect(
+            self.workbench_view.status_bar.render_log_counts
+        )
+        self.workbench_view.status_bar.log_filter_requested.connect(
+            self.log_widget.set_filter
+        )
         library = self.action_library_view
         library.create_requested.connect(self.create_action)
         library.edit_requested.connect(self.edit_action)
@@ -527,6 +533,10 @@ class MainWindow(RoundedMainWindow):
                 *,
                 page_key: str = key,
             ) -> None:
+                if page_key == "logs":
+                    self.log_widget.set_filter(LogFilter.ALL)
+                    self.workbench_view.toggle_log_filter(LogFilter.ALL)
+                    return
                 self.workbench_view.toggle_bottom_page(page_key)
 
             command_id = f"view.{key}"

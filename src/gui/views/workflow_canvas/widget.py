@@ -116,6 +116,7 @@ class WorkflowCanvasWidget(QWidget):
         toolbar = QHBoxLayout()
         toolbar.setSpacing(TOOLBAR_SPACING)
         self.root_scope_button = QPushButton("当前任务")
+        self.root_scope_button.setObjectName("workflowBreadcrumb")
         self.root_scope_button.setAccessibleName("返回工作流根作用域")
         self.root_scope_button.clicked.connect(self.leave_scope)
         self.root_scope_button.setVisible(False)
