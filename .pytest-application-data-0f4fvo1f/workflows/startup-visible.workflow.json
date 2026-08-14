@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/workflow.schema.json",
+  "schema": "robot_llm.workflow",
+  "schema_version": 4,
+  "workflow_id": "startup-visible",
+  "name": "startup-visible",
+  "revision": 1,
+  "root": {
+    "kind": "sequence",
+    "children": [
+      {
+        "kind": "action",
+        "node_id": "9cffa789-910a-4317-a573-4f757ad3e675",
+        "item_uuid": "9cffa789-910a-4317-a573-4f757ad3e675",
+        "definition": {
+          "id": "startup-task-action",
+          "name": "启动任务动作",
+          "type": "WAIT",
+          "parameters": {
+            "wait_seconds": 1.0
+          }
+        }
+      }
+    ]
+  },
+  "presentation": {
+    "positions": {}
+  }
+}

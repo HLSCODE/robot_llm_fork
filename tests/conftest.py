@@ -33,6 +33,7 @@ def isolate_default_application_data(
                 workflows_directory=root / "workflows",
                 workflow_drafts_directory=root / "drafts",
                 skills_directory=root / "skills",
+                trajectories_directory=root / "trajectories",
             )
 
         monkeypatch.setattr(

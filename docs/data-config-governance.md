@@ -34,6 +34,9 @@ data/
 ├── skills/
 │   └── <domain>/
 │       └── <id>.skill.json
+├── trajectories/
+│   ├── left/
+│   └── right/
 └── schemas/
     ├── action-library.schema.json
     ├── skill.schema.json
@@ -54,10 +57,14 @@ actions_library_directory = ""
 workflows_directory = ""
 workflow_drafts_directory = ""
 skill_library_directory = ""
+trajectories_directory = ""
 ```
 
-四个覆盖项留空时从 `ROBOT_DATA_DIR` 推导。显式相对路径以项目根目录为基准；生产部署可以使用
+五个覆盖项留空时从 `ROBOT_DATA_DIR` 推导。显式相对路径以项目根目录为基准；生产部署可以使用
 绝对路径将用户数据放在独立持久卷。
+
+轨迹录制由应用服务在 `trajectories/<arm>/` 下分配递增文件名并自动保存。GUI 不得把轨迹
+写入 `src/`，也不在每次录制前要求用户选择文件系统路径；文件选择器仅用于选择已有轨迹。
 
 ## 3. 文档格式
 
@@ -151,10 +158,15 @@ data/
 ├── drafts/
 │   └── <workflow-id>.draft.workflow.json
 ├── skills/
-    ├── manipulation/
-    │   └── <name>.skill.json
-    └── <domain>/
-        └── <name>.skill.json
+│   ├── manipulation/
+│   │   └── <name>.skill.json
+│   └── <domain>/
+│       └── <name>.skill.json
+├── trajectories/
+│   ├── left/
+│   │   └── trajectory_<sequence>.txt
+│   └── right/
+│       └── trajectory_<sequence>.txt
 └── schemas/
     ├── action-library.schema.json
     ├── skill.schema.json
@@ -182,6 +194,7 @@ ACTIONS_LIBRARY_DIRECTORY=
 WORKFLOWS_DIRECTORY=
 WORKFLOW_DRAFTS_DIRECTORY=
 SKILL_LIBRARY_DIRECTORY=
+TRAJECTORIES_DIRECTORY=
 ```
 
 切换已按 dry-run、备份、转换、重新加载、数量/ID/参数/语义比对和原子发布完成。旧路径

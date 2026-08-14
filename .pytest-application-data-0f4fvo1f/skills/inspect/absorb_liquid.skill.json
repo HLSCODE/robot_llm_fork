@@ -1,0 +1,64 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "absorb_liquid",
+    "name": "吸取液体",
+    "category": "检测",
+    "description": "使用吸液枪吸取指定容量的液体",
+    "icon": "💉",
+    "parameters": [
+      {
+        "name": "volume",
+        "param_label": "容量",
+        "type": "int",
+        "description": "吸取容量(ul)",
+        "default": 500,
+        "required": false,
+        "unit": "ul"
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "qu1",
+        "action_type": "CHANGE_GUN",
+        "parameters": {
+          "Gun_Position": 1,
+          "Operation": "取"
+        },
+        "parameter_bindings": {},
+        "description": "取吸液枪",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "2",
+        "action_name": "xiye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吸",
+          "容量": 500,
+          "吸液速度": 1200
+        },
+        "parameter_bindings": {
+          "volume": "容量"
+        },
+        "description": "吸取液体",
+        "estimated_time": 2.0
+      }
+    ],
+    "examples": [
+      "吸取500微升液体",
+      "吸液500ul",
+      "帮我抽一些液体"
+    ],
+    "tags": [
+      "吸液",
+      "液体",
+      "吸取",
+      "absorb"
+    ]
+  }
+}

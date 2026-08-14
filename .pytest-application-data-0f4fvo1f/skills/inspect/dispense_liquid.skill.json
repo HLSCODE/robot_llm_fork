@@ -1,0 +1,39 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "dispense_liquid",
+    "name": "释放液体",
+    "category": "检测",
+    "description": "使用吸液枪释放已吸取的液体",
+    "icon": "💉",
+    "parameters": [],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "tuye",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "吸液枪",
+          "操作": "吐",
+          "容量": 500
+        },
+        "parameter_bindings": {},
+        "description": "释放液体",
+        "estimated_time": 2.0
+      }
+    ],
+    "examples": [
+      "释放液体",
+      "吐液",
+      "排出液体"
+    ],
+    "tags": [
+      "吐液",
+      "液体",
+      "释放",
+      "dispense"
+    ]
+  }
+}

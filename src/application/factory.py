@@ -5,6 +5,7 @@ from functools import partial
 from ..configuration.data_paths import ApplicationDataPaths
 from ..configuration.settings import ApplicationSettings, DataCollectionSettings
 from ..persistence.storage import JsonCompositionRepository
+from ..persistence.trajectory_storage import TrajectoryStorage
 from ..devices import (
     ArmTelemetryReader,
     DepthCameraSource,
@@ -131,6 +132,7 @@ def create_application_services(
     trajectory_teaching = TrajectoryTeachingService(
         device_runtime,
         resources,
+        TrajectoryStorage(data_paths.trajectories_directory),
     )
     safety = SafetyService(
         execution,

@@ -40,11 +40,13 @@ retention_days = 14
 [data]
 # 项目运行数据根目录。
 robot_data_dir = "data"
-# 以下目录为空时，分别使用 robot_data_dir 下的默认 actions、workflows、drafts、skills 目录。
+# 以下目录为空时，分别使用 robot_data_dir 下的默认 actions、workflows、drafts、skills、trajectories 目录。
 actions_library_directory = ""
 workflows_directory = ""
 workflow_drafts_directory = ""
 skill_library_directory = ""
+# 轨迹录制默认自动保存到该目录；留空使用 robot_data_dir/trajectories。
+trajectories_directory = ""
 
 [data_collection]
 # 采集帧率及 OpenCV 摄像头索引。

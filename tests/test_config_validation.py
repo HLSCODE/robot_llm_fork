@@ -329,6 +329,7 @@ class ConfigurationValidationTests(unittest.TestCase):
                     root,
                     ACTIONS_LIBRARY_DIRECTORY="same",
                     SKILL_LIBRARY_DIRECTORY="same",
+                    TRAJECTORIES_DIRECTORY="same",
                 ),
                 _options(websocket_enabled=False),
             )
@@ -404,6 +405,10 @@ class ConfigurationValidationTests(unittest.TestCase):
         self.assertEqual(root.resolve(), paths.root)
         self.assertEqual(root.resolve() / "actions", paths.actions_directory)
         self.assertEqual(root.resolve() / "skills", paths.skills_directory)
+        self.assertEqual(
+            root.resolve() / "trajectories",
+            paths.trajectories_directory,
+        )
         self.assertEqual(
             Path.cwd().resolve() / "custom" / "workflows",
             paths.workflows_directory,

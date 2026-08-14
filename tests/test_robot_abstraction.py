@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -755,11 +754,10 @@ class RobotApplicationServiceTests(unittest.TestCase):
         with self.assertRaises(ResourceBusyError):
             services.execution.start_entries([item], origin="test")
 
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "trajectory.txt"
-            result = services.trajectory_teaching.stop_and_save(str(path))
-            self.assertEqual(path, result.path)
-            self.assertTrue(path.is_file())
+        result = services.trajectory_teaching.stop_and_save()
+        self.assertEqual("trajectory_001.txt", result.path.name)
+        self.assertEqual("right", result.path.parent.name)
+        self.assertTrue(result.path.is_file())
 
         final = services.execution.start_entries([item], origin="test").wait(1)
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)

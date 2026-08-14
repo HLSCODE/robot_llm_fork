@@ -154,6 +154,7 @@ class BuiltinCatalogTests(unittest.TestCase):
             workflows_directory=root / "workflows",
             workflow_drafts_directory=root / "drafts",
             skills_directory=root / "skills",
+            trajectories_directory=root / "trajectories",
         )
         SkillRegistry().reset()
 
@@ -165,6 +166,7 @@ class BuiltinCatalogTests(unittest.TestCase):
         installer = BuiltinDataInstaller(self.paths)
 
         first = installer.install_missing()
+        self.assertTrue(self.paths.trajectories_directory.is_dir())
         original = (self.paths.actions_directory / "library.json").read_bytes()
         second = installer.install_missing()
         report = validate_catalogs(

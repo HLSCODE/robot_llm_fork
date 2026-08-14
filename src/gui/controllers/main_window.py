@@ -673,16 +673,6 @@ class MainWindow(RoundedMainWindow):
             self._notifications.warning(f"{robot_name.upper()} 未连接")
             return None
 
-        default_path = self._next_trajectory_file(robot_name)
-        filename, _ = QFileDialog.getSaveFileName(
-            self,
-            f"保存 {robot_name.upper()} 轨迹",
-            str(default_path),
-            "轨迹文件 (*.txt);;所有文件 (*)"
-        )
-        if not filename:
-            return None
-
         teaching_started = False
         try:
             self._notifications.info(f"{robot_name.upper()} 开始拖动示教")
@@ -695,10 +685,7 @@ class MainWindow(RoundedMainWindow):
                 modal=True,
             )
 
-            Path(filename).parent.mkdir(parents=True, exist_ok=True)
-            save_result = self._services.trajectory_teaching.stop_and_save(
-                filename
-            )
+            save_result = self._services.trajectory_teaching.stop_and_save()
             teaching_started = False
             self._notifications.info(
                 f"{robot_name.upper()} 轨迹已保存: "
@@ -738,13 +725,22 @@ class MainWindow(RoundedMainWindow):
         if not filename:
             return
 
+        try:
+            trajectory_path = self._services.trajectory_teaching.import_trajectory(
+                robot_name,
+                filename,
+            )
+        except (OSError, ValueError) as exc:
+            self._notifications.warning(f"轨迹文件导入失败: {exc}")
+            return
+
         action = ActionDefinition(
             id=str(uuid4()),
-            name=f"{robot_name.upper()} {Path(filename).stem}",
+            name=f"{robot_name.upper()} {trajectory_path.stem}",
             type=ActionType.TRAJECTORY,
             parameters={
                 "robot": robot_name,
-                "file_path": filename,
+                "file_path": str(trajectory_path),
             },
         )
         self._start_sequence_execution([SequenceItem.from_definition(action)], display_list=None, label="轨迹")
@@ -756,20 +752,7 @@ class MainWindow(RoundedMainWindow):
         self._notifications.warning(message, title="轨迹")
 
     def _trajectory_dir(self, robot_name: str) -> Path:
-        return Path(__file__).resolve().parents[1] / "actions" / "Path" / robot_name
-
-    def _next_trajectory_file(self, robot_name: str) -> Path:
-        trajectory_dir = self._trajectory_dir(robot_name)
-        trajectory_dir.mkdir(parents=True, exist_ok=True)
-
-        existing_numbers = []
-        for path in trajectory_dir.glob("trajectory_*.txt"):
-            number_text = path.stem.rsplit("_", 1)[-1]
-            if number_text.isdigit():
-                existing_numbers.append(int(number_text))
-
-        next_number = max(existing_numbers, default=0) + 1
-        return trajectory_dir / f"trajectory_{next_number:03d}.txt"
+        return self._services.trajectory_teaching.trajectory_directory(robot_name)
 
     def _set_trajectory_buttons_enabled(self, enabled: bool) -> None:
         self._render_device_state()
@@ -1039,14 +1022,6 @@ class MainWindow(RoundedMainWindow):
             robot_name = "robot2"
             file_path = self.record_trajectory(robot_name)
         else:
-            file_path, _ = QFileDialog.getOpenFileName(
-                self,
-                "选择轨迹文件",
-                str(self._trajectory_dir("robot1")),
-                "轨迹文件 (*.txt);;所有文件 (*)"
-            )
-            if not file_path:
-                return
             robot_options = ["R1", "R2"]
             robot_selected, robot_ok = choose_item(
                 self,
@@ -1057,6 +1032,24 @@ class MainWindow(RoundedMainWindow):
             if not robot_ok:
                 return
             robot_name = "robot2" if robot_selected == "R2" else "robot1"
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择轨迹文件",
+                str(self._trajectory_dir(robot_name)),
+                "轨迹文件 (*.txt);;所有文件 (*)"
+            )
+            if not file_path:
+                return
+            try:
+                file_path = str(
+                    self._services.trajectory_teaching.import_trajectory(
+                        robot_name,
+                        file_path,
+                    )
+                )
+            except (OSError, ValueError) as exc:
+                self._notifications.warning(f"轨迹文件导入失败: {exc}")
+                return
 
         if not file_path:
             return

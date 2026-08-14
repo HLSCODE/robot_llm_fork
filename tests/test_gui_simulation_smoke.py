@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from pathlib import Path
 from threading import Event
 from time import monotonic, sleep
 import unittest
@@ -505,6 +506,27 @@ class GuiSimulationSmokeTests(unittest.TestCase):
                 for notification in self.window._notifications.snapshot().history
             ],
         )
+
+    def test_trajectory_recording_uses_configured_storage_without_save_dialog(
+        self,
+    ) -> None:
+        with (
+            patch.object(self.window._notifications, "info"),
+            patch(
+                "src.gui.controllers.main_window.QFileDialog.getSaveFileName"
+            ) as save_dialog,
+        ):
+            result = self.window.record_trajectory("robot1")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        saved_path = Path(result)
+        self.assertEqual(
+            self.services.trajectory_teaching.trajectory_directory("robot1"),
+            saved_path.parent,
+        )
+        self.assertTrue(saved_path.is_file())
+        save_dialog.assert_not_called()
 
 
 class GuiSpeechStartupSmokeTests(unittest.TestCase):

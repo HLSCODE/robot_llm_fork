@@ -18,6 +18,7 @@ class ApplicationDataPaths:
     workflows_directory: Path
     workflow_drafts_directory: Path
     skills_directory: Path
+    trajectories_directory: Path
 
     @classmethod
     def from_settings(cls, settings: DataSettings) -> ApplicationDataPaths:
@@ -42,6 +43,10 @@ class ApplicationDataPaths:
             skills_directory=_resolve_override(
                 settings.skill_library_directory,
                 default=root / "skills",
+            ),
+            trajectories_directory=_resolve_override(
+                settings.trajectories_directory,
+                default=root / "trajectories",
             ),
         )
 

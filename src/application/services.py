@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from threading import RLock
 from typing import TYPE_CHECKING, Any, TypeVar
 from uuid import uuid4
@@ -37,6 +38,7 @@ from ..execution import (
 from ..domain.execution_plan import ExecutionPlan
 from ..domain.models import SequenceEntry
 from ..llm import LLMRegistry
+from ..persistence.trajectory_storage import TrajectoryStorage
 from .camera_access import CameraAccessService
 from ..vision.service import VisionService
 from .command_runtime import CommandRuntime
@@ -384,9 +386,11 @@ class TrajectoryTeachingService:
         self,
         runtime: DeviceRuntime,
         resources: ResourceArbiter,
+        storage: TrajectoryStorage,
     ) -> None:
         self._runtime = runtime
         self._resources = resources
+        self._storage = storage
         self._lease: ResourceLease | None = None
         self._arm: ArmId | None = None
         self._lock = RLock()
@@ -420,9 +424,16 @@ class TrajectoryTeachingService:
             self._lease = lease
             self._arm = arm_id
 
-    def stop_and_save(self, path: str) -> TrajectorySaveResult:
+    def trajectory_directory(self, arm: str | ArmId) -> Path:
+        return self._storage.directory_for(_arm_id(arm).value)
+
+    def import_trajectory(self, arm: str | ArmId, source: str | Path) -> Path:
+        return self._storage.import_file(_arm_id(arm).value, Path(source))
+
+    def stop_and_save(self) -> TrajectorySaveResult:
         with self._lock:
             arm, lease = self._required_session_unlocked()
+            path = self._storage.next_recording_path(arm.value)
             trajectory = _device_operation(
                 ROBOT_SYSTEM,
                 "trajectory.resolve",

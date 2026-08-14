@@ -1,0 +1,60 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "inspect_sensor",
+    "name": "传感器检测",
+    "category": "检测",
+    "description": "执行传感器检测，判断是否通过阈值",
+    "icon": "🔍",
+    "parameters": [
+      {
+        "name": "sensor_id",
+        "param_label": "传感器ID",
+        "type": "str",
+        "description": "传感器编号",
+        "default": "2",
+        "required": false,
+        "unit": ""
+      },
+      {
+        "name": "threshold",
+        "param_label": "阈值",
+        "type": "float",
+        "description": "检测阈值",
+        "default": 0.0,
+        "required": false,
+        "unit": ""
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "检测",
+        "action_type": "INSPECT",
+        "parameters": {
+          "Sensor_ID": "2",
+          "Threshold": 0.0,
+          "Timeout": 5.0
+        },
+        "parameter_bindings": {
+          "sensor_id": "Sensor_ID",
+          "threshold": "Threshold"
+        },
+        "description": "执行传感器检测",
+        "estimated_time": 5.0
+      }
+    ],
+    "examples": [
+      "检测一下",
+      "执行传感器检测",
+      "检测传感器"
+    ],
+    "tags": [
+      "检测",
+      "传感器",
+      "inspect"
+    ]
+  }
+}

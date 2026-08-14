@@ -1,0 +1,38 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "place_tool_1",
+    "name": "放回枪头1",
+    "category": "工具",
+    "description": "将快换手上的枪头放回枪位1",
+    "icon": "🔧",
+    "parameters": [],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "fang1",
+        "action_type": "CHANGE_GUN",
+        "parameters": {
+          "Gun_Position": 1,
+          "Operation": "放"
+        },
+        "parameter_bindings": {},
+        "description": "将工具放回枪位1",
+        "estimated_time": 3.0
+      }
+    ],
+    "examples": [
+      "放回枪头1",
+      "把枪头放回去",
+      "退枪"
+    ],
+    "tags": [
+      "枪头",
+      "放回",
+      "退枪",
+      "gun"
+    ]
+  }
+}

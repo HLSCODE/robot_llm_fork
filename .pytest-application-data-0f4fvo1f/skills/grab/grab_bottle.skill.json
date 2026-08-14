@@ -1,0 +1,99 @@
+{
+  "$schema": "../../schemas/skill.schema.json",
+  "schema": "robot_llm.skill",
+  "schema_version": 2,
+  "skill": {
+    "id": "grab_bottle",
+    "name": "抓取瓶子",
+    "category": "抓取",
+    "description": "从瓶子上方下降，夹爪抓取瓶子",
+    "icon": "🫙",
+    "parameters": [],
+    "steps": [
+      {
+        "step_id": "1",
+        "action_name": "pingzishang",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "左",
+          "模式": "move_l",
+          "点位": [
+            0.068791,
+            -0.011241,
+            -0.423676,
+            -3.107,
+            0.0,
+            1.603
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到瓶子上方",
+        "estimated_time": 3.0
+      },
+      {
+        "step_id": "2",
+        "action_name": "pingzijia",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "左",
+          "模式": "move_l",
+          "点位": [
+            0.068791,
+            -0.011249,
+            -0.488797,
+            -3.107,
+            0.0,
+            1.602
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "下降到瓶子位置",
+        "estimated_time": 2.0
+      },
+      {
+        "step_id": "3",
+        "action_name": "jiazhua guan",
+        "action_type": "MANIPULATE",
+        "parameters": {
+          "执行器": "夹爪",
+          "编号": 1,
+          "操作": "关"
+        },
+        "parameter_bindings": {},
+        "description": "关闭夹爪抓取瓶子",
+        "estimated_time": 1.0
+      },
+      {
+        "step_id": "4",
+        "action_name": "pingzishang",
+        "action_type": "MOVE",
+        "parameters": {
+          "臂": "左",
+          "模式": "move_l",
+          "点位": [
+            0.068791,
+            -0.011241,
+            -0.423676,
+            -3.107,
+            0.0,
+            1.603
+          ]
+        },
+        "parameter_bindings": {},
+        "description": "移动到瓶子上方",
+        "estimated_time": 3.0
+      }
+    ],
+    "examples": [
+      "帮我抓一个瓶子",
+      "抓取瓶子",
+      "夹爪抓取"
+    ],
+    "tags": [
+      "抓取",
+      "瓶子",
+      "夹爪",
+      "grab"
+    ]
+  }
+}

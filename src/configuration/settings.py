@@ -75,6 +75,7 @@ class DataSettings:
     workflows_directory: str = ""
     workflow_drafts_directory: str = ""
     skill_library_directory: str = ""
+    trajectories_directory: str = ""
 
 
 @dataclass(frozen=True, slots=True)
