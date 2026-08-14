@@ -127,8 +127,17 @@ def _card_brush(surface: QColor, accent: QColor, emphasized: bool) -> QBrush:
     """Keep selected and hovered cards calm without a thick focus outline."""
     if not emphasized:
         return QBrush(surface)
-    highlighted = QColor(accent)
-    highlighted.setAlpha(24)
+    # Pre-composite the subtle accent over the card surface. Returning a
+    # translucent accent directly lets container-owned connector lines bleed
+    # through selected nested cards.
+    accent_weight = 24.0 / 255.0
+    surface_weight = 1.0 - accent_weight
+    highlighted = QColor.fromRgbF(
+        surface.redF() * surface_weight + accent.redF() * accent_weight,
+        surface.greenF() * surface_weight + accent.greenF() * accent_weight,
+        surface.blueF() * surface_weight + accent.blueF() * accent_weight,
+        1.0,
+    )
     return QBrush(highlighted)
 
 
@@ -841,6 +850,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 and self._dragged_item_uuid == child.uuid
             )
             if is_dragged_child:
+                self._paint_drag_source_backdrop(painter, child_rect)
                 painter.save()
                 painter.setOpacity(DRAG_SOURCE_OPACITY)
             self._paint_compact_entry_card(
@@ -1120,6 +1130,15 @@ class WorkflowNodeItem(QGraphicsObject):
             Qt.AlignmentFlag.AlignVCenter,
             count,
         )
+
+    @staticmethod
+    def _paint_drag_source_backdrop(painter: QPainter, rect: QRectF) -> None:
+        """Occlude container paths before painting a faded nested drag source."""
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(canvas_colors().canvas)
+        painter.drawRoundedRect(rect, NODE_RADIUS, NODE_RADIUS)
+        painter.restore()
 
     def _paint_parallel_paths(
         self,

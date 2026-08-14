@@ -189,6 +189,33 @@ class WorkflowCanvasTests(unittest.TestCase):
         finally:
             self.application.setPalette(original_palette)
 
+    def test_selected_loop_child_card_occludes_the_loop_spine(self) -> None:
+        loop = LoopBlock(
+            uuid="selected-loop-child",
+            items=[_item("selected-child")],
+            repeat_count=2,
+        )
+        node = WorkflowNodeItem(loop.uuid, loop)
+        node.set_active_child_uuid("selected-child")
+        image = QImage(
+            round(node.node_width),
+            round(node.node_height),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        node.paint(painter, QStyleOptionGraphicsItem())
+        painter.end()
+
+        child_y = round(LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + 8.0)
+        center_x = round(LOOP_NODE_WIDTH / 2.0)
+        center_pixel = image.pixelColor(center_x, child_y)
+        adjacent_pixel = image.pixelColor(center_x + 20, child_y)
+
+        self.assertGreater(center_pixel.alphaF(), 0.99)
+        self.assertGreater(adjacent_pixel.alphaF(), 0.99)
+        self.assertLess(_color_distance(center_pixel, adjacent_pixel), 4.0)
+
     def test_start_and_end_nodes_remain_visible_when_hovered(self) -> None:
         self.canvas.render_entries(())
         self.canvas.view.fit_workflow()
@@ -585,6 +612,25 @@ class WorkflowCanvasTests(unittest.TestCase):
         )
         self.assertEqual(DRAG_CARD_OPACITY, preview.opacity())
         self.assertEqual(1.0, node.opacity())
+
+        image = QImage(
+            round(node.boundingRect().width()),
+            round(node.boundingRect().height()),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        try:
+            node.paint(painter, QStyleOptionGraphicsItem())
+        finally:
+            painter.end()
+        child_y = round(LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP + 8.0)
+        center_x = round(node.node_width / 2.0)
+        center_pixel = image.pixelColor(center_x, child_y)
+        adjacent_pixel = image.pixelColor(center_x + 20, child_y)
+        self.assertGreater(center_pixel.alphaF(), 0.99)
+        self.assertLess(_color_distance(center_pixel, adjacent_pixel), 4.0)
+
         QTest.mouseRelease(
             self.canvas.view.viewport(),
             Qt.MouseButton.LeftButton,
