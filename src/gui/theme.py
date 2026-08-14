@@ -537,7 +537,60 @@ QFrame#applicationMenuSeparator {{
     background: {colors.border}; border: none; margin: 4px 6px;
 }}
 QToolButton::menu-indicator {{ width: 9px; height: 9px; subcontrol-position: bottom right; }}
-QWidget#aiStatusCard {{ background: {colors.surface_subtle}; border: none; border-radius: 8px; }}
+QWidget#aiAssistantPanel {{ background: transparent; }}
+QWidget#aiStatusCard {{
+    background: {colors.surface_subtle}; border: none; border-radius: 8px;
+}}
+QLabel#aiRuntimeStatus {{
+    background: transparent; color: {colors.text}; font-weight: 600;
+}}
+QLabel#aiModelStatus {{ background: transparent; }}
+QLabel#aiModeBadge {{
+    background: {colors.selection}; color: {colors.text_muted};
+    border: none; border-radius: 6px; padding: 3px 7px;
+}}
+QGroupBox#aiVoiceCard, QFrame#aiSkillsCard, QFrame#aiPlanCard {{
+    background: {colors.surface_subtle}; border: none; border-radius: 9px;
+}}
+QGroupBox#aiVoiceCard {{
+    color: {colors.text}; font-weight: 600; margin-top: 8px; padding-top: 6px;
+}}
+QGroupBox#aiVoiceCard::title {{
+    subcontrol-origin: margin; left: 8px; padding: 0 3px;
+}}
+QTextEdit#aiChatHistory {{
+    background: {colors.surface}; color: {colors.text};
+    border: none; border-radius: 10px; padding: 8px;
+}}
+QToolButton#aiSectionToggle {{
+    background: transparent; color: {colors.text}; border: none;
+    border-radius: 6px; padding: 6px; text-align: left; font-weight: 600;
+}}
+QToolButton#aiSectionToggle:hover,
+QToolButton#aiSectionToggle:checked {{ background: {colors.selection}; }}
+QListWidget#aiSkillList {{
+    background: transparent; color: {colors.text}; border: none;
+    outline: none; padding: 2px;
+}}
+QListWidget#aiSkillList::item {{
+    border: none; border-radius: 5px; padding: 5px 8px;
+}}
+QListWidget#aiSkillList::item:hover,
+QListWidget#aiSkillList::item:selected {{
+    background: {colors.selection}; color: {colors.text};
+}}
+QLabel#aiPlanSummary {{
+    background: transparent; color: {colors.text}; font-weight: 600;
+}}
+QFrame#aiComposerCard {{
+    background: {colors.surface}; border: 1px solid {colors.border};
+    border-radius: 10px;
+}}
+QLineEdit#aiMessageInput {{
+    background: transparent; border: none; padding: 4px 2px;
+}}
+QLineEdit#aiMessageInput:focus {{ border: none; }}
+QPushButton#aiSendButton {{ min-width: 64px; }}
 QWidget#startupProgressWindow {{ background: transparent; }}
 QFrame#startupCard {{ background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 16px; }}
 QLabel#startupTitle {{ color: {colors.text}; font-size: 25px; font-weight: 700; }}

@@ -11,7 +11,7 @@ from unittest.mock import patch
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSizePolicy
 
 from src.application import create_application_services
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
@@ -128,6 +128,39 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         assistant = self.window.ai_assistant_view
         self.assertIs(assistant._ai_controller._llm_registry, self.services.llm)
         self.assertIs(assistant._voice_controller.llm_registry, self.services.llm)
+        self.assertEqual(
+            QSizePolicy.Policy.Expanding,
+            assistant.chat_history.sizePolicy().verticalPolicy(),
+        )
+        self.assertGreater(assistant.chat_history.maximumHeight(), 1_000_000)
+        self.assertTrue(assistant.simulation_checkbox.isHidden())
+        self.assertEqual("模拟", assistant.mode_badge.text())
+        self.assertTrue(assistant.skill_list.isHidden())
+        self.assertIn(
+            str(assistant.skill_list.count()),
+            assistant.skill_toggle_button.text(),
+        )
+        assistant.skill_toggle_button.click()
+        QApplication.processEvents()
+        self.assertFalse(assistant.skill_list.isHidden())
+        self.assertTrue(assistant.plan_card.isHidden())
+
+        assistant._handle_interaction_event(
+            {
+                "type": "command_preview",
+                "text": "已生成测试方案",
+                "data": {
+                    "preview_id": "preview-layout-test",
+                    "version": 1,
+                    "sequence": [{"type": "WAIT"}],
+                },
+            },
+            source="dialog",
+        )
+        self.assertFalse(assistant.plan_card.isHidden())
+        self.assertEqual("待执行方案 · 1 个步骤", assistant.plan_summary_label.text())
+        assistant._reset_ui()
+        self.assertTrue(assistant.plan_card.isHidden())
         self.assertIsNotNone(self.window.workflow_view.sequence_list)
         self.assertIsNotNone(self.window.device_status_view)
         self.assertIsNotNone(self.window.device_control_view)

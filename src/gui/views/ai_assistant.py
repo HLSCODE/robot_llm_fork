@@ -10,17 +10,21 @@ from threading import Lock
 from time import monotonic
 from typing import Any
 
-from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QColor, QPalette, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -291,6 +295,7 @@ class AIAssistantWidget(QWidget):
 
     def _init_ui(self) -> None:
         """初始化UI"""
+        self.setObjectName("aiAssistantPanel")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
@@ -302,64 +307,101 @@ class AIAssistantWidget(QWidget):
         status_layout.setContentsMargins(8, 2, 8, 2)
 
         self.status_label = QLabel("状态: 就绪")
+        self.status_label.setObjectName("aiRuntimeStatus")
         status_layout.addWidget(self.status_label)
 
         self.model_label = QLabel("模型: —")
+        self.model_label.setObjectName("aiModelStatus")
+        self.model_label.setMinimumWidth(0)
+        self.model_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         set_theme_role(self.model_label, "muted")
-        status_layout.addWidget(self.model_label)
+        status_layout.addWidget(self.model_label, stretch=1)
 
-        status_layout.addStretch()
-
+        # Retain the checkbox as the public read-only state contract used by
+        # existing controllers/tests; the visible representation is a badge.
         self.simulation_checkbox = QCheckBox("模拟模式")
         self.simulation_checkbox.setChecked(self._services.simulation)
         self.simulation_checkbox.setEnabled(False)
-        status_layout.addWidget(self.simulation_checkbox)
+        self.simulation_checkbox.setVisible(False)
+
+        self.mode_badge = QLabel("模拟" if self._services.simulation else "真实")
+        self.mode_badge.setObjectName("aiModeBadge")
+        self.mode_badge.setToolTip(
+            "当前使用模拟设备，不会操作真实硬件"
+            if self._services.simulation
+            else "当前连接真实设备"
+        )
+        status_layout.addWidget(self.mode_badge)
 
         layout.addWidget(status_widget)
 
         # ── Voice session status ──
-        self.voice_group = QGroupBox("语音 Session")
-        voice_layout = QHBoxLayout(self.voice_group)
+        self.voice_group = QGroupBox("语音控制")
+        self.voice_group.setObjectName("aiVoiceCard")
+        self.voice_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
+        voice_layout = QVBoxLayout(self.voice_group)
         voice_layout.setContentsMargins(8, 6, 8, 6)
         voice_layout.setSpacing(6)
+
+        voice_status_layout = QHBoxLayout()
+        voice_status_layout.setContentsMargins(0, 0, 0, 0)
+        voice_status_layout.setSpacing(8)
+
+        self.voice_state_label = QLabel("Session: 未唤醒")
+        set_theme_role(self.voice_state_label, "muted")
+        voice_status_layout.addWidget(self.voice_state_label)
+
+        self.voice_asr_label = QLabel("监听: 未启动")
+        set_theme_role(self.voice_asr_label, "muted")
+        voice_status_layout.addWidget(self.voice_asr_label)
+
+        self.voice_intent_label = QLabel("意图: —")
+        self.voice_intent_label.setMinimumWidth(0)
+        set_theme_role(self.voice_intent_label, "muted")
+        voice_status_layout.addWidget(self.voice_intent_label, stretch=1)
+        voice_layout.addLayout(voice_status_layout)
+
+        voice_action_layout = QHBoxLayout()
+        voice_action_layout.setContentsMargins(0, 0, 0, 0)
+        voice_action_layout.setSpacing(6)
 
         self.voice_wake_button = QPushButton("唤醒")
         self.voice_wake_button.setMinimumHeight(30)
         set_theme_role(self.voice_wake_button, "success")
         self.voice_wake_button.clicked.connect(self._on_voice_wake_clicked)
-        voice_layout.addWidget(self.voice_wake_button)
+        voice_action_layout.addWidget(self.voice_wake_button)
         self.voice_wake_button.setVisible(False)
 
         self.voice_sleep_button = QPushButton("结束语音会话")
         self.voice_sleep_button.setMinimumHeight(30)
         self.voice_sleep_button.clicked.connect(self._on_voice_sleep_clicked)
-        voice_layout.addWidget(self.voice_sleep_button)
+        voice_action_layout.addWidget(self.voice_sleep_button)
 
         self.voice_listen_button = QPushButton("启动监听")
         self.voice_listen_button.setMinimumHeight(30)
         set_theme_role(self.voice_listen_button, "primary")
         self.voice_listen_button.clicked.connect(self._on_voice_listen_clicked)
-        voice_layout.addWidget(self.voice_listen_button)
-
-        self.voice_state_label = QLabel("Session: 未唤醒")
-        set_theme_role(self.voice_state_label, "muted")
-        voice_layout.addWidget(self.voice_state_label)
-
-        self.voice_asr_label = QLabel("监听: 未启动")
-        set_theme_role(self.voice_asr_label, "muted")
-        voice_layout.addWidget(self.voice_asr_label)
-
-        self.voice_intent_label = QLabel("意图: —")
-        set_theme_role(self.voice_intent_label, "muted")
-        voice_layout.addWidget(self.voice_intent_label, stretch=1)
+        voice_action_layout.addWidget(self.voice_listen_button)
+        voice_layout.addLayout(voice_action_layout)
 
         self.voice_group.setVisible(self._voice_input_enabled)
         layout.addWidget(self.voice_group)
 
         # ── Chat history ──
         self.chat_history = QTextEdit()
+        self.chat_history.setObjectName("aiChatHistory")
         self.chat_history.setReadOnly(True)
-        self.chat_history.setMaximumHeight(220)
+        self.chat_history.setMinimumHeight(160)
+        self.chat_history.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         self.chat_history.setPlaceholderText(
             "你好！我是 AI 动作助手。\n\n"
             "可以直接聊天、询问视觉信息，或输入要执行的动作，例如：\n"
@@ -367,67 +409,113 @@ class AIAssistantWidget(QWidget):
             "• 吸取 500 微升液体\n"
             "• 回到安全位置"
         )
-        layout.addWidget(self.chat_history)
+        layout.addWidget(self.chat_history, stretch=1)
 
         # ── Skills ──
-        skills_group = QGroupBox("⚙ 可用技能")
-        skills_layout = QVBoxLayout(skills_group)
-        skills_layout.setContentsMargins(4, 4, 4, 4)
+        self.skills_panel = QFrame()
+        self.skills_panel.setObjectName("aiSkillsCard")
+        self.skills_panel.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
+        skills_layout = QVBoxLayout(self.skills_panel)
+        skills_layout.setContentsMargins(6, 4, 6, 6)
+        skills_layout.setSpacing(2)
+
+        self.skill_toggle_button = QToolButton()
+        self.skill_toggle_button.setObjectName("aiSectionToggle")
+        self.skill_toggle_button.setText("可用技能")
+        self.skill_toggle_button.setCheckable(True)
+        self.skill_toggle_button.setChecked(False)
+        self.skill_toggle_button.setArrowType(Qt.ArrowType.RightArrow)
+        self.skill_toggle_button.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.skill_toggle_button.setAccessibleName("展开或收起可用技能")
+        self.skill_toggle_button.toggled.connect(self._toggle_skill_list)
+        skills_layout.addWidget(self.skill_toggle_button)
 
         self.skill_list = QListWidget()
-        self.skill_list.setMaximumHeight(90)
+        self.skill_list.setObjectName("aiSkillList")
+        self.skill_list.setMaximumHeight(120)
+        self.skill_list.setVisible(False)
         skills_layout.addWidget(self.skill_list)
         self._refresh_skill_list()
 
-        layout.addWidget(skills_group)
+        layout.addWidget(self.skills_panel)
 
-        # ── Input row ──
-        input_layout = QHBoxLayout()
-        input_layout.setSpacing(6)
+        # ── Contextual action plan ──
+        self.plan_card = QFrame()
+        self.plan_card.setObjectName("aiPlanCard")
+        self.plan_card.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Maximum,
+        )
+        plan_layout = QVBoxLayout(self.plan_card)
+        plan_layout.setContentsMargins(10, 8, 10, 8)
+        plan_layout.setSpacing(6)
 
-        self.input_field = QLineEdit()
-        self.input_field.setPlaceholderText("输入消息、问题或机器人指令，按 Enter 发送...")
-        self.input_field.setMinimumHeight(34)
-        self.input_field.returnPressed.connect(self._on_send_clicked)
-        input_layout.addWidget(self.input_field, stretch=1)
+        self.plan_summary_label = QLabel("已生成动作方案")
+        self.plan_summary_label.setObjectName("aiPlanSummary")
+        plan_layout.addWidget(self.plan_summary_label)
 
-        self.send_button = QPushButton("➤ 发送")
-        self.send_button.setMinimumWidth(80)
-        self.send_button.setMinimumHeight(34)
-        set_theme_role(self.send_button, "primary")
-        self.send_button.clicked.connect(self._on_send_clicked)
-        input_layout.addWidget(self.send_button)
-
-        layout.addLayout(input_layout)
-
-        # ── Action buttons ──
         action_layout = QHBoxLayout()
+        action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(6)
 
-        self.execute_button = QPushButton("✅ 执行")
+        self.preview_button = QPushButton("查看详情")
+        self.preview_button.setEnabled(False)
+        self.preview_button.setMinimumHeight(32)
+        self.preview_button.clicked.connect(self._on_preview_clicked)
+        action_layout.addWidget(self.preview_button)
+
+        self.execute_button = QPushButton("执行")
         self.execute_button.setEnabled(False)
-        self.execute_button.setMinimumHeight(34)
+        self.execute_button.setMinimumHeight(32)
         set_theme_role(self.execute_button, "success")
         self.execute_button.clicked.connect(self._on_execute_clicked)
         action_layout.addWidget(self.execute_button)
 
-        self.preview_button = QPushButton("🔍 预览详情")
-        self.preview_button.setEnabled(False)
-        self.preview_button.setMinimumHeight(34)
-        self.preview_button.clicked.connect(self._on_preview_clicked)
-        action_layout.addWidget(self.preview_button)
-
         self.cancel_button = QPushButton("取消")
         self.cancel_button.setEnabled(False)
-        self.cancel_button.setMinimumHeight(34)
+        self.cancel_button.setMinimumHeight(32)
         set_theme_role(self.cancel_button, "danger")
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
         action_layout.addWidget(self.cancel_button)
+        plan_layout.addLayout(action_layout)
+        self.plan_card.setVisible(False)
+        layout.addWidget(self.plan_card)
 
-        layout.addLayout(action_layout)
+        # ── Input row ──
+        self.composer_card = QFrame()
+        self.composer_card.setObjectName("aiComposerCard")
+        input_layout = QHBoxLayout(self.composer_card)
+        input_layout.setContentsMargins(8, 6, 6, 6)
+        input_layout.setSpacing(6)
+
+        self.input_field = QLineEdit()
+        self.input_field.setObjectName("aiMessageInput")
+        self.input_field.setPlaceholderText("输入消息、问题或机器人指令，按 Enter 发送...")
+        self.input_field.setMinimumHeight(36)
+        self.input_field.returnPressed.connect(self._on_send_clicked)
+        input_layout.addWidget(self.input_field, stretch=1)
+
+        self.send_button = QPushButton("发送")
+        self.send_button.setObjectName("aiSendButton")
+        self.send_button.setMinimumWidth(72)
+        self.send_button.setMinimumHeight(36)
+        set_theme_role(self.send_button, "primary")
+        self.send_button.clicked.connect(self._on_send_clicked)
+        input_layout.addWidget(self.send_button)
+
+        layout.addWidget(self.composer_card)
 
         # Welcome
-        self._add_bot_message("你好！我是 AI 动作助手。\n\n你可以直接输入消息、问题或机器人指令，不需要先唤醒。\n\n示例：\n• 帮我抓一个瓶子\n• 你现在看到了什么\n• 吸取 500 微升液体")
+        self._add_bot_message(
+            "你好，我是 AI 动作助手。\n"
+            "可以直接聊天、询问视觉信息或安排机器人动作。\n\n"
+            "试试：帮我抓一个瓶子｜你现在看到了什么｜吸取 500 微升液体"
+        )
 
     def _connect_signals(self) -> None:
         """连接信号"""
@@ -458,11 +546,31 @@ class AIAssistantWidget(QWidget):
         self.skill_list.clear()
         skills = self._ai_controller.get_skill_list()
         for skill in skills:
-            icon = skill.get("icon", "🤖")
-            name = skill.get("name", "")
-            category = skill.get("category", "")
-            item_text = f"{icon} {name} ({category})"
-            self.skill_list.addItem(item_text)
+            name = str(skill.get("name") or "未命名技能")
+            category = str(skill.get("category") or "未分类")
+            item = QListWidgetItem(name)
+            item.setToolTip(f"{name}\n分类：{category}")
+            self.skill_list.addItem(item)
+        self.skill_toggle_button.setText(f"可用技能 · {len(skills)}")
+
+    @Slot(bool)
+    def _toggle_skill_list(self, expanded: bool) -> None:
+        self.skill_list.setVisible(expanded)
+        self.skill_toggle_button.setArrowType(
+            Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
+        )
+
+    def _refresh_plan_card(self) -> None:
+        if self._current_preview is not None:
+            step_count = len(self._current_preview.get("sequence") or [])
+            self.plan_summary_label.setText(f"待执行方案 · {step_count} 个步骤")
+        elif self.cancel_button.isEnabled():
+            self.plan_summary_label.setText("正在处理或执行动作")
+        else:
+            self.plan_summary_label.setText("已生成动作方案")
+        self.plan_card.setVisible(
+            self._current_preview is not None or self.cancel_button.isEnabled()
+        )
 
     def _add_user_message(self, text: str) -> None:
         """添加用户消息到对话历史"""
@@ -471,7 +579,7 @@ class AIAssistantWidget(QWidget):
         self.chat_history.setTextColor(
             self.palette().color(QPalette.ColorRole.Highlight)
         )
-        cursor.insertText(f"\n👤 {text}\n\n")
+        cursor.insertText(f"\n你 · {text}\n\n")
         self.chat_history.setTextColor(
             self.palette().color(QPalette.ColorRole.Text)
         )
@@ -484,7 +592,7 @@ class AIAssistantWidget(QWidget):
         self.chat_history.setTextColor(
             self.palette().color(QPalette.ColorRole.Text)
         )
-        cursor.insertText(f"\n🤖 {text}\n")
+        cursor.insertText(f"\nAI · {text}\n")
         self.chat_history.setTextColor(
             self.palette().color(QPalette.ColorRole.Text)
         )
@@ -506,15 +614,19 @@ class AIAssistantWidget(QWidget):
     def _update_status_display(self) -> None:
         """更新状态显示"""
         if not self._ai_controller.is_api_key_set():
-            self.model_label.setText("模型: 未配置 🔴")
+            self.model_label.setText("模型未配置")
+            self.model_label.setToolTip("未配置可用的 LLM 模型")
             set_theme_role(self.model_label, "danger")
         elif self._ai_controller.is_llm_available():
             provider = self._ai_controller.get_model_provider()
             model_name = self._ai_controller.get_llm_model_name()
-            self.model_label.setText(f"模型: {provider} {model_name} 🟢")
+            model_description = f"{provider} · {model_name}"
+            self.model_label.setText(model_description)
+            self.model_label.setToolTip(f"当前模型：{model_description}")
             set_theme_role(self.model_label, "success")
         else:
-            self.model_label.setText("模型: 连接失败 🔴")
+            self.model_label.setText("模型连接失败")
+            self.model_label.setToolTip("LLM 模型当前不可用")
             set_theme_role(self.model_label, "danger")
 
     def _set_input_enabled(self, enabled: bool) -> None:
@@ -591,7 +703,7 @@ class AIAssistantWidget(QWidget):
             self.palette().color(QPalette.ColorRole.Text)
         )
         if not self._voice_streaming_reply:
-            cursor.insertText("\n🤖 ")
+            cursor.insertText("\nAI · ")
             self._voice_streaming_reply = True
         cursor.insertText(text)
         self.chat_history.setTextColor(
@@ -754,6 +866,7 @@ class AIAssistantWidget(QWidget):
         self._current_preview = None
         self.preview_button.setEnabled(False)
         self.execute_button.setEnabled(False)
+        self._refresh_plan_card()
 
     @Slot(dict)
     def _handle_dialog_event(self, event: dict[str, Any]) -> None:
@@ -878,6 +991,7 @@ class AIAssistantWidget(QWidget):
             self.preview_button.setEnabled(self._current_preview is not None)
             self.execute_button.setEnabled(self._current_preview is not None)
             self.cancel_button.setEnabled(True)
+            self._refresh_plan_card()
         elif event_type == "done":
             text = event.get("text", "")
             if text and not self._voice_streaming_reply:
@@ -985,6 +1099,7 @@ class AIAssistantWidget(QWidget):
         )
         if accepted:
             self._current_preview = None
+        self._refresh_plan_card()
 
     def _on_preview_clicked(self) -> None:
         """预览详情按钮点击"""
@@ -1028,12 +1143,14 @@ class AIAssistantWidget(QWidget):
         self.execute_button.setEnabled(has_preview)
         self.preview_button.setEnabled(has_preview)
         self.cancel_button.setEnabled(has_preview)
+        self._refresh_plan_card()
 
     @Slot()
     def _on_execution_started(self) -> None:
         """执行开始"""
         self._add_system_message("开始执行动作序列...")
         self.cancel_button.setEnabled(True)
+        self._refresh_plan_card()
 
     def _on_sequence_execution_started(
         self,
@@ -1071,6 +1188,7 @@ class AIAssistantWidget(QWidget):
         self.preview_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
         self._current_preview = None
+        self._refresh_plan_card()
 
     @property
     def ai_controller(self) -> AIController:
