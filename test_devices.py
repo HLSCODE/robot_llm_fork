@@ -1,7 +1,8 @@
 """
 加粉装置硬件联调脚本
 ===================
-基于 device_control_sdk 控制同一条 RS-485 总线上的三个设备：
+基于当前设备层的 transport 与 powder_dispenser 驱动控制同一条
+RS-485 总线上的三个设备：
   1. 加粉夹爪   (Electric Gripper)
   2. 针升降电机 (Stepper Motor, M系列)
   3. 针旋转电机 (Stepper Motor, M系列)
@@ -16,7 +17,23 @@ from __future__ import annotations
 
 import argparse
 import time
-from dataclasses import dataclass
+from collections.abc import Callable
+
+from src.devices.tools.powder_dispenser.electric_gripper import ElectricGripper
+from src.devices.tools.powder_dispenser.stepper_motor import (
+    MSeriesRegister,
+    MotorStatus,
+    StepperBus,
+    register_to_int16,
+    register_to_speed,
+    registers_to_int32,
+)
+from src.devices.transports import (
+    DeviceControlSDKError,
+    ModbusRTUProtocol,
+    ModbusRTUStrategy,
+    SerialTransport,
+)
 
 # ============================================================
 # 配置 —— 按实际硬件修改这里
@@ -36,35 +53,6 @@ ROTATION_ADDRESS = 6  # 针旋转
 STEPS = 5000
 SPEED_RPM = 60
 ACCEL_MS = 200        # 加速度 ms，必须 > 0 电机才会动
-
-# ============================================================
-# SDK 引用
-# ============================================================
-
-from src.device_control_sdk import (
-    SerialTransport,
-    StepperBus,
-    ElectricGripper,
-)
-from src.device_control_sdk.devices.stepper_motor import (
-    MSeriesRegister,
-    MotorStatus,
-)
-from src.device_control_sdk.devices.stepper_motor.registers import (
-    register_to_speed,
-    register_to_int16,
-    registers_to_int32,
-)
-from src.device_control_sdk.devices.electric_gripper.registers import (
-    GripperRegister,
-    InitializationStatus,
-    MotionStatus,
-    EmergencyStopStatus,
-    ExcitationState,
-    SaveStatus,
-)
-from src.device_control_sdk.core.exceptions import TransportError
-
 
 # ============================================================
 # 辅助函数
@@ -93,8 +81,6 @@ def make_bus(port: str) -> tuple[SerialTransport, StepperBus]:
 
 def gripper_dump(transport: SerialTransport, address: int) -> None:
     """读取夹爪的关键寄存器并打印诊断信息。"""
-    from src.device_control_sdk.devices.electric_gripper.client import ElectricGripper
-
     g = ElectricGripper(transport, address=address)
     print(f"  夹爪 {address} 状态诊断:")
 
@@ -230,7 +216,7 @@ def run_interactive(port: str) -> None:
 
     _last_cmd_time = 0.0
 
-    def _cmd_gap():
+    def _cmd_gap() -> None:
         nonlocal _last_cmd_time
         now = time.monotonic()
         gap = now - _last_cmd_time
@@ -238,25 +224,25 @@ def run_interactive(port: str) -> None:
             time.sleep(0.5 - gap)
         _last_cmd_time = time.monotonic()
 
-    def _gripper_move(percent: int):
+    def _gripper_move(percent: int) -> None:
         percent = max(0, min(100, percent))
         gripper.move_to(percent)
         print(f"  夹爪: 移动到 {percent}%")
 
-    def _gripper_dump():
+    def _gripper_dump() -> None:
         gripper_dump(transport, GRIPPER_ADDRESS)
 
-    def _full_dump():
+    def _full_dump() -> None:
         motor_dump(bus, ROTATION_ADDRESS, "旋转")
         motor_dump(bus, LIFT_ADDRESS, "升降")
         _gripper_dump()
 
-    def _rot_motor(label: str, steps: int):
+    def _rot_motor(label: str, steps: int) -> None:
         _cmd_gap()
         motor_move_to(bus, ROTATION_ADDRESS, steps)
         print(f"  旋转: {label} {steps} 步")
 
-    def _lift_motor(label: str, steps: int):
+    def _lift_motor(label: str, steps: int) -> None:
         _cmd_gap()
         motor_move_to(bus, LIFT_ADDRESS, steps)
         print(f"  升降: {label} {steps} 步")
@@ -264,11 +250,24 @@ def run_interactive(port: str) -> None:
     def _confirm(msg: str) -> bool:
         return input(f"  {msg} (y/n): ").strip().lower() == "y"
 
+    def _stop_rotation() -> None:
+        motor_stop(bus, ROTATION_ADDRESS)
+        _cmd_gap()
+
+    def _stop_lift() -> None:
+        motor_stop(bus, LIFT_ADDRESS)
+        _cmd_gap()
+
+    def _enable_all() -> None:
+        motor_enable(bus, ROTATION_ADDRESS)
+        motor_enable(bus, LIFT_ADDRESS)
+
+    def _disable_all() -> None:
+        motor_disable(bus, ROTATION_ADDRESS)
+        motor_disable(bus, LIFT_ADDRESS)
+
     def _scan_gripper(_bus: StepperBus) -> None:
         """扫描夹爪地址 (读 0x0204 寄存器)。"""
-        from src.device_control_sdk.protocols.modbus_rtu import ModbusRTUProtocol
-        from src.device_control_sdk.core.strategies import ModbusRTUStrategy
-
         proto = ModbusRTUProtocol()
         print("  扫描夹爪 (地址 1-32, 读 0x0204)...")
         found = []
@@ -279,14 +278,14 @@ def run_interactive(port: str) -> None:
                 proto.parse_read_registers(response, addr, 1)
                 found.append(addr)
                 print(f"    ✓ 地址 {addr}")
-            except:
+            except DeviceControlSDKError:
                 pass
         if found:
             print(f"  找到夹爪地址: {found}")
         else:
             print("  未找到夹爪。请检查: 1) 是否上电 2) 是否接在485总线上 3) 地址是否在1-32范围内")
 
-    commands = {
+    commands: dict[str, Callable[..., object]] = {
         # ---- 夹爪 (此型号不支持 0x0109 寄存器，用 move_to 替代 grip/release) ----
         "grip":         lambda *a: (gripper.move_to(100), print("  夹爪: 夹取 (完全闭合)")),
         "release":      lambda *a: (gripper.move_to(0), print("  夹爪: 释放 (完全张开)")),
@@ -303,7 +302,7 @@ def run_interactive(port: str) -> None:
         "rot_ccw":      lambda *a: _rot_motor("反转", -int(a[0]) if a else -STEPS),
         "rot_pos":      lambda: print(f"  旋转位置: {rot_motor.read_actual_position()} steps"),
         "rot_status":   lambda: print(f"  旋转状态: {rot_motor.read_status().name}"),
-        "rot_stop":     lambda: (motor_stop(bus, ROTATION_ADDRESS), _cmd_gap()),
+        "rot_stop":     _stop_rotation,
         "rot_home":     lambda: (rot_motor.set_actual_position_zero(), print("  旋转: 当前位置设为零")),
         # ---- 升降电机 ----
         "lift_enable":  lambda: motor_enable(bus, LIFT_ADDRESS),
@@ -313,21 +312,13 @@ def run_interactive(port: str) -> None:
         "lift_down":    lambda *a: _lift_motor("下降", -int(a[0]) if a else -STEPS),
         "lift_pos":     lambda: print(f"  升降位置: {lift_motor.read_actual_position()} steps"),
         "lift_status":  lambda: print(f"  升降状态: {lift_motor.read_status().name}"),
-        "lift_stop":    lambda: (motor_stop(bus, LIFT_ADDRESS), _cmd_gap()),
+        "lift_stop":    _stop_lift,
         "lift_home":    lambda: (lift_motor.set_actual_position_zero(), print("  升降: 当前位置设为零")),
         # ---- 通用 ----
         "dump":
             lambda: _full_dump(),
-        "enable":
-            lambda: (
-                motor_enable(bus, ROTATION_ADDRESS),
-                motor_enable(bus, LIFT_ADDRESS),
-            ),
-        "disable":
-            lambda: (
-                motor_disable(bus, ROTATION_ADDRESS),
-                motor_disable(bus, LIFT_ADDRESS),
-            ),
+        "enable": _enable_all,
+        "disable": _disable_all,
         "help": lambda: _print_help(),
         "exit": lambda: (_ := "exit"),
     }
@@ -407,7 +398,6 @@ def run_interactive(port: str) -> None:
 def run_sequence(port: str) -> None:
     """自动化测试序列。"""
     transport, bus = make_bus(port)
-    gripper = ElectricGripper(transport, address=GRIPPER_ADDRESS)
 
     try:
         # 第一步：诊断
@@ -451,14 +441,12 @@ def run_sequence(port: str) -> None:
 
 def scan_bus(port: str) -> None:
     """扫描总线上的设备。"""
-    from src.device_control_sdk.protocols.modbus_rtu import ModbusRTUProtocol
-
     baudrates = [115200]
     addresses = list(range(1, 33))
     proto = ModbusRTUProtocol()
 
     print(f"扫描 {port} @ {baudrates[0]} baud ...")
-    print(f"地址范围: 1-32")
+    print("地址范围: 1-32")
 
     # 先扫电机 (reg 0x00)，再专门扫夹爪 (reg 0x0204 当前位置)
     stepper_found = []
@@ -470,11 +458,10 @@ def scan_bus(port: str) -> None:
         # 电机: 读 0x00
         request = proto.build_read_registers(addr, 0x00, 1)
         try:
-            from src.device_control_sdk.core.strategies import ModbusRTUStrategy
             response = transport.transact_with_strategy(ModbusRTUStrategy(request, proto.expected_read_response_size(1)))
             proto.parse_read_registers(response, addr, 1)
             stepper_found.append(addr)
-        except:
+        except DeviceControlSDKError:
             pass
 
     for addr in addresses:
@@ -484,7 +471,7 @@ def scan_bus(port: str) -> None:
             response = transport.transact_with_strategy(ModbusRTUStrategy(request, proto.expected_read_response_size(1)))
             proto.parse_read_registers(response, addr, 1)
             gripper_found.append(addr)
-        except:
+        except DeviceControlSDKError:
             pass
 
     transport.close()
