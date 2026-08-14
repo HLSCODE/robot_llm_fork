@@ -219,7 +219,14 @@ def build_stylesheet(colors: ThemeColors) -> str:
     spin_arrow_down = combo_arrow
     return f"""
 QWidget {{ color: {colors.text}; }}
-QMainWindow, QDialog {{ background: {colors.window}; }}
+QMainWindow {{ background: transparent; }}
+QDialog {{ background: {colors.window}; }}
+QFrame#applicationWindowSurface {{
+    background: {colors.window}; border: none;
+}}
+QFrame#applicationWindowSurface[windowCorners="rounded"] {{
+    border-radius: 10px;
+}}
 QDialog#appDialogWindow {{ background: transparent; }}
 QFrame#appDialogSurface {{
     background: {colors.surface}; color: {colors.text};
@@ -383,6 +390,9 @@ QToolButton#activityButton:checked {{ background: {colors.selection}; color: {co
 QFrame#workbenchStatusBar {{
     background: {colors.surface}; border: none; color: {colors.text_muted};
 }}
+QFrame#workbenchStatusBar[windowCorners="rounded"] {{
+    border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;
+}}
 QFrame#workbenchStatusBar QLabel {{ color: {colors.text_muted}; }}
 QToolButton#statusPanelButton {{
     background: transparent; border: none; border-radius: 5px; color: {colors.text_muted}; padding: 3px;
@@ -407,6 +417,9 @@ QFrame#applicationMenuBar {{
 QFrame#applicationTitleBar {{
     background: {colors.surface}; border: none;
 }}
+QFrame#applicationTitleBar[windowCorners="rounded"] {{
+    border-top-left-radius: 10px; border-top-right-radius: 10px;
+}}
 QLabel#applicationTitleIcon,
 QLabel#applicationTitle {{
     background: transparent; border: none; color: {colors.text};
@@ -420,6 +433,9 @@ QToolButton#windowControlButton:pressed {{ background: {colors.border}; }}
 QToolButton#windowControlButton[windowControl="close"]:hover,
 QToolButton#windowControlButton[windowControl="close"]:pressed {{
     background: {colors.danger_strong};
+}}
+QToolButton#windowControlButton[windowControl="close"][windowCorners="rounded"] {{
+    border-top-right-radius: 10px;
 }}
 QToolButton#applicationMenuButton {{
     background: transparent; color: {colors.text}; border: none;

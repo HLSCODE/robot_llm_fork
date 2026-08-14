@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QSplitter,
     QSplitterHandle,
     QStackedWidget,
@@ -164,13 +165,17 @@ class WorkbenchStatusBar(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("workbenchStatusBar")
-        self.setFixedHeight(32)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 0, 6, 0)
         layout.setSpacing(4)
         self.message_label = QLabel()
         self.message_label.setObjectName("workbenchStatusMessage")
         self.message_label.setAccessibleName("状态消息")
+        self.message_label.setMinimumWidth(0)
+        self.message_label.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
         layout.addWidget(self.message_label, stretch=1)
         self.buttons: dict[str, QToolButton] = {}
         for page in pages:
@@ -190,13 +195,39 @@ class WorkbenchStatusBar(QFrame):
             self.buttons[page.key] = button
         self._pages = {page.key: page for page in pages}
         self._refresh_icons()
+        self._message_text = ""
         self._message_timer = QTimer(self)
         self._message_timer.setSingleShot(True)
-        self._message_timer.timeout.connect(self.message_label.clear)
+        self._message_timer.timeout.connect(self._clear_message)
+        self.setFixedHeight(32)
 
     def show_message(self, message: str, timeout_ms: int = 5000) -> None:
-        self.message_label.setText(message)
+        self._message_text = " ".join(message.split())
+        self.message_label.setToolTip(message)
+        self._render_message()
         self._message_timer.start(timeout_ms)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._render_message()
+
+    def _render_message(self) -> None:
+        if not self._message_text:
+            self.message_label.clear()
+            return
+        available_width = max(0, self.message_label.width() - 4)
+        self.message_label.setText(
+            self.message_label.fontMetrics().elidedText(
+                self._message_text,
+                Qt.TextElideMode.ElideRight,
+                available_width,
+            )
+        )
+
+    def _clear_message(self) -> None:
+        self._message_text = ""
+        self.message_label.clear()
+        self.message_label.setToolTip("")
 
     def render_active_panel(self, page_key: str | None) -> None:
         for key, button in self.buttons.items():

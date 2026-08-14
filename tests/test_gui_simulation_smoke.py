@@ -164,19 +164,55 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertEqual("最小化", title_bar.minimize_button.accessibleName())
         self.assertEqual("最大化", title_bar.maximize_button.accessibleName())
         self.assertEqual("关闭", title_bar.close_button.accessibleName())
-        self.assertFalse(self.window.mask().isEmpty())
+        self.assertTrue(self.window.mask().isEmpty())
+        self.assertEqual("rounded", title_bar.property("windowCorners"))
+        self.assertEqual(
+            "rounded",
+            self.window.workbench_view.status_bar.property("windowCorners"),
+        )
+        restored_image = self.window.grab().toImage()
+        self.assertEqual(0, restored_image.pixelColor(0, 0).alpha())
+        self.assertEqual(
+            0,
+            restored_image.pixelColor(
+                restored_image.width() - 1,
+                restored_image.height() - 1,
+            ).alpha(),
+        )
+        self.assertGreater(
+            restored_image.pixelColor(restored_image.width() // 2, 0).alpha(),
+            0,
+        )
+        self.assertEqual(
+            255,
+            restored_image.pixelColor(
+                restored_image.width() // 2,
+                title_bar.height() + 8,
+            ).alpha(),
+        )
 
         title_bar.maximize_button.click()
         QApplication.processEvents()
         self.assertTrue(self.window.isMaximized())
         self.assertEqual("还原", title_bar.maximize_button.accessibleName())
         self.assertTrue(self.window.mask().isEmpty())
+        self.assertEqual("square", title_bar.property("windowCorners"))
+        maximized_image = self.window.grab().toImage()
+        self.assertGreater(maximized_image.pixelColor(0, 0).alpha(), 0)
+        self.assertGreater(
+            maximized_image.pixelColor(
+                maximized_image.width() - 1,
+                maximized_image.height() - 1,
+            ).alpha(),
+            0,
+        )
 
         title_bar.maximize_button.click()
         QApplication.processEvents()
         self.assertFalse(self.window.isMaximized())
         self.assertEqual("最大化", title_bar.maximize_button.accessibleName())
-        self.assertFalse(self.window.mask().isEmpty())
+        self.assertTrue(self.window.mask().isEmpty())
+        self.assertEqual("rounded", title_bar.property("windowCorners"))
 
     def test_canvas_plus_click_opens_picker_and_inserts_selected_action(self) -> None:
         action = ActionDefinition(
@@ -288,6 +324,19 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         QApplication.processEvents()
 
         self.assertIsNone(workbench.active_side_page)
+
+    def test_status_bar_collapses_multiline_notifications_to_one_line(self) -> None:
+        status_bar = self.window.workbench_view.status_bar
+        details = "第一行错误\n必要设备未就绪: robot-system " + "诊断详情 " * 100
+
+        status_bar.show_message(details)
+        QApplication.processEvents()
+
+        rendered = status_bar.message_label.text()
+        self.assertNotIn("\n", rendered)
+        self.assertTrue(rendered.endswith("…"))
+        self.assertEqual(details, status_bar.message_label.toolTip())
+        self.assertEqual(32, status_bar.height())
 
     def test_buttons_drive_pause_resume_and_cancel_through_shared_runtime(self) -> None:
         item = SequenceItem.from_definition(

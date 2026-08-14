@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QMouseEvent, QPainterPath, QRegion
+from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QMouseEvent, QResizeEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -27,13 +27,25 @@ RESIZE_BORDER_WIDTH = 6
 WINDOW_CORNER_RADIUS = 10
 
 
-def _rounded_window_region(rect: QRect, radius: int = WINDOW_CORNER_RADIUS) -> QRegion:
-    """Build the platform-neutral mask used by a restored frameless window."""
-    if rect.isEmpty() or radius <= 0:
-        return QRegion(rect)
-    path = QPainterPath()
-    path.addRoundedRect(QRectF(rect), radius, radius)
-    return QRegion(path.toFillPolygon().toPolygon())
+class RoundedMainWindow(QMainWindow):
+    """Own one opaque styled surface behind a translucent top-level window."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.window_surface = QFrame(self)
+        self.window_surface.setObjectName("applicationWindowSurface")
+        self.window_surface.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            True,
+        )
+        self.window_surface.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.window_surface.setGeometry(self.rect())
+        self.window_surface.lower()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.window_surface.setGeometry(self.rect())
+        self.window_surface.lower()
 
 
 def _resize_edges(
@@ -292,11 +304,28 @@ class ApplicationTitleBar(QFrame):
         self.maximize_button.setAccessibleName(description)
 
     def refresh_window_shape(self) -> None:
-        """Use rounded corners only when the window is in its restored state."""
-        if self._window.isMaximized() or self._window.isFullScreen():
-            self._window.clearMask()
+        """Switch the styled surface between restored and edge-to-edge modes."""
+        rounded = not (self._window.isMaximized() or self._window.isFullScreen())
+        corner_mode = "rounded" if rounded else "square"
+        self._window.clearMask()
+        self._set_corner_mode(self, corner_mode)
+        self._set_corner_mode(self.close_button, corner_mode)
+        window_surface = self._window.findChild(QFrame, "applicationWindowSurface")
+        if window_surface is not None:
+            self._set_corner_mode(window_surface, corner_mode)
+        status_bar = self._window.findChild(QFrame, "workbenchStatusBar")
+        if status_bar is not None:
+            self._set_corner_mode(status_bar, corner_mode)
+
+    @staticmethod
+    def _set_corner_mode(widget: QWidget, corner_mode: str) -> None:
+        if widget.property("windowCorners") == corner_mode:
             return
-        self._window.setMask(_rounded_window_region(self._window.rect()))
+        widget.setProperty("windowCorners", corner_mode)
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
 
     def toggle_maximized(self) -> None:
         if self._window.isMaximized():

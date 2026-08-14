@@ -14,7 +14,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QListWidget,
     QListWidgetItem,
-    QMainWindow,
     QMenu,
 )
 
@@ -72,7 +71,7 @@ from ..theme import ThemeController, ThemeMode
 from ..icons import IconName, themed_icon
 from ..shortcuts import ShortcutRegistry
 from ..workbench_layout import WorkbenchLayoutStore
-from ..window_chrome import ApplicationTitleBar
+from ..window_chrome import ApplicationTitleBar, RoundedMainWindow
 
 
 _WORKFLOW_FILE_SUFFIX = ".workflow.json"
@@ -83,7 +82,7 @@ def _display_task_name(task_name: str) -> str:
     return task_name.removesuffix(_WORKFLOW_FILE_SUFFIX)
 
 
-class MainWindow(QMainWindow):
+class MainWindow(RoundedMainWindow):
     startup_progress_changed = Signal(int, str, str)
     startup_finished = Signal(bool, str)
 
@@ -376,6 +375,7 @@ class MainWindow(QMainWindow):
     def init_ui(self) -> None:
         self.setWindowTitle("机器人动作编排器")
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMinimumSize(540, 800)
         self.resize(900, 960)
 

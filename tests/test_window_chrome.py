@@ -9,7 +9,6 @@ from PySide6.QtWidgets import QApplication, QMainWindow
 from src.gui.window_chrome import (
     FramelessResizeController,
     _resize_edges,
-    _rounded_window_region,
 )
 
 
@@ -41,13 +40,6 @@ class FramelessResizeGeometryTests(unittest.TestCase):
             Qt.Edge(0),
             _resize_edges(QRect(100, 100, 800, 600), QPoint(500, 400)),
         )
-
-    def test_rounded_region_removes_only_the_outer_corner_pixels(self) -> None:
-        region = _rounded_window_region(QRect(0, 0, 200, 120), radius=10)
-
-        self.assertFalse(region.contains(QPoint(0, 0)))
-        self.assertTrue(region.contains(QPoint(10, 10)))
-        self.assertTrue(region.contains(QPoint(100, 60)))
 
     def test_cursor_override_is_owned_and_cleared_without_child_reference(self) -> None:
         window = QMainWindow()
