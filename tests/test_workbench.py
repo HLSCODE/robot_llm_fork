@@ -261,16 +261,24 @@ class WorkbenchViewTests(unittest.TestCase):
 
         self.assertEqual("0", error_button.text())
         self.assertEqual("0", warning_button.text())
+        self.assertEqual("", error_button.property("text"))
+        self.assertEqual("", warning_button.property("text"))
         self.assertEqual("statusMuted", error_button.property("themeRole"))
         self.assertEqual("statusMuted", warning_button.property("themeRole"))
-        self.assertFalse(error_button.icon().isNull())
-        self.assertFalse(warning_button.icon().isNull())
+        self.assertFalse(error_button.icon_label.pixmap().isNull())
+        self.assertFalse(warning_button.icon_label.pixmap().isNull())
+        self.assertEqual(
+            Qt.ToolButtonStyle.ToolButtonIconOnly,
+            error_button.toolButtonStyle(),
+        )
         single_digit_width = error_button.width()
         expected_single_digit_width = max(
             STATUS_BUTTON_SIZE,
             STATUS_ICON_SIZE
             + STATUS_PROBLEM_CONTENT_SPACING
-            + error_button.fontMetrics().horizontalAdvance(error_button.text())
+            + error_button.count_label.fontMetrics().horizontalAdvance(
+                error_button.text()
+            )
             + (2 * STATUS_PROBLEM_HORIZONTAL_PADDING),
         )
         self.assertEqual(expected_single_digit_width, single_digit_width)
@@ -285,10 +293,17 @@ class WorkbenchViewTests(unittest.TestCase):
         expected_warning_width = (
             STATUS_ICON_SIZE
             + STATUS_PROBLEM_CONTENT_SPACING
-            + warning_button.fontMetrics().horizontalAdvance(warning_button.text())
+            + warning_button.count_label.fontMetrics().horizontalAdvance(
+                warning_button.text()
+            )
             + (2 * STATUS_PROBLEM_HORIZONTAL_PADDING)
         )
         self.assertEqual(expected_warning_width, warning_button.width())
+        QApplication.processEvents()
+        self.assertLess(
+            error_button.icon_label.geometry().right(),
+            error_button.count_label.geometry().left(),
+        )
 
         status_bar.render_log_counts(2, 3)
         self.assertLessEqual(error_button.width(), single_digit_width)

@@ -441,13 +441,22 @@ QToolButton#statusPanelButton {{
 QToolButton#statusPanelButton:hover, QToolButton#statusPanelButton:checked {{ background: {colors.selection}; }}
 QToolButton#statusProblemButton {{
     background: transparent; border: none; border-radius: 5px;
-    color: {colors.text_muted}; padding: 2px 3px; spacing: 1px;
+    color: {colors.text_muted}; padding: 0;
 }}
 QToolButton#statusProblemButton:hover,
 QToolButton#statusProblemButton:checked {{ background: {colors.selection}; }}
 QToolButton#statusProblemButton[themeRole="statusDanger"] {{ color: {colors.danger}; }}
 QToolButton#statusProblemButton[themeRole="statusWarning"] {{ color: {colors.warning}; }}
 QToolButton#statusProblemButton[themeRole="statusMuted"] {{ color: {colors.text_muted}; }}
+QLabel#statusProblemIcon, QLabel#statusProblemCount {{
+    background: transparent; border: none; margin: 0; padding: 0;
+}}
+QLabel#statusProblemCount {{
+    color: {colors.text_muted}; font-size: 13px; font-weight: 500;
+}}
+QLabel#statusProblemCount[themeRole="statusDanger"] {{ color: {colors.danger}; }}
+QLabel#statusProblemCount[themeRole="statusWarning"] {{ color: {colors.warning}; }}
+QLabel#statusProblemCount[themeRole="statusMuted"] {{ color: {colors.text_muted}; }}
 QFrame#workbenchNotificationToast {{
     background: {colors.surface}; border: 1px solid {colors.border}; border-radius: 10px;
 }}

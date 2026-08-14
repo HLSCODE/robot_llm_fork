@@ -9,6 +9,7 @@ from PySide6.QtGui import (
     QColor,
     QEnterEvent,
     QHideEvent,
+    QIcon,
     QKeySequence,
     QMouseEvent,
     QPaintEvent,
@@ -50,7 +51,7 @@ ACTIVITY_BUTTON_SIZE = 44
 ACTIVITY_ICON_SIZE = 20
 STATUS_BUTTON_SIZE = 28
 STATUS_ICON_SIZE = 16
-STATUS_PROBLEM_CONTENT_SPACING = 1
+STATUS_PROBLEM_CONTENT_SPACING = 4
 STATUS_PROBLEM_HORIZONTAL_PADDING = 3
 NOTIFICATION_TOAST_TIMEOUT_MS = 5000
 NOTIFICATION_TOAST_MAXIMUM_WIDTH = 380
@@ -199,6 +200,76 @@ class _ActivityBar(QFrame):
             )
 
 
+class _StatusProblemButton(QToolButton):
+    """Compact problem counter with platform-independent content geometry."""
+
+    def __init__(self, label: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._count_text = "0"
+        self.setObjectName("statusProblemButton")
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.setCheckable(True)
+        self.setAutoRaise(True)
+        self.setFixedHeight(STATUS_BUTTON_SIZE)
+        self.setProperty("problemLabel", label)
+
+        content_layout = QHBoxLayout(self)
+        content_layout.setContentsMargins(
+            STATUS_PROBLEM_HORIZONTAL_PADDING,
+            0,
+            STATUS_PROBLEM_HORIZONTAL_PADDING,
+            0,
+        )
+        content_layout.setSpacing(STATUS_PROBLEM_CONTENT_SPACING)
+
+        self.icon_label = QLabel(self)
+        self.icon_label.setObjectName("statusProblemIcon")
+        self.icon_label.setFixedSize(STATUS_ICON_SIZE, STATUS_ICON_SIZE)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        content_layout.addWidget(self.icon_label)
+
+        self.count_label = QLabel("0", self)
+        self.count_label.setObjectName("statusProblemCount")
+        self.count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.count_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        content_layout.addWidget(self.count_label)
+
+        self.set_count(0)
+
+    def set_count(self, count: int) -> None:
+        text = str(max(0, count))
+        self._count_text = text
+        # Keep QAbstractButton's native text empty. Some Windows styles paint it
+        # even in IconOnly mode, underneath the explicit content layout.
+        super().setText("")
+        self.count_label.setText(text)
+        self._fit_to_content()
+
+    def text(self) -> str:
+        """Return the visible counter text without enabling native painting."""
+        return self._count_text
+
+    def set_status_icon(self, icon: QIcon) -> None:
+        self.icon_label.setPixmap(icon.pixmap(STATUS_ICON_SIZE, STATUS_ICON_SIZE))
+        self._fit_to_content()
+
+    def refresh_content_geometry(self) -> None:
+        self._fit_to_content()
+
+    def _fit_to_content(self) -> None:
+        text_width = self.count_label.fontMetrics().horizontalAdvance(
+            self.count_label.text()
+        )
+        content_width = (
+            STATUS_ICON_SIZE
+            + STATUS_PROBLEM_CONTENT_SPACING
+            + text_width
+            + (2 * STATUS_PROBLEM_HORIZONTAL_PADDING)
+        )
+        self.setFixedWidth(max(STATUS_BUTTON_SIZE, content_width))
+
+
 class WorkbenchStatusBar(QFrame):
     panel_requested = Signal(str)
     log_filter_requested = Signal(object)
@@ -214,7 +285,7 @@ class WorkbenchStatusBar(QFrame):
         layout.setContentsMargins(8, 0, 6, 0)
         layout.setSpacing(4)
         self.buttons: dict[str, QToolButton] = {}
-        self.log_problem_buttons: dict[LogFilter, QToolButton] = {}
+        self.log_problem_buttons: dict[LogFilter, _StatusProblemButton] = {}
         self._log_problem_icons: dict[LogFilter, IconName] = {}
         self._active_log_filter = LogFilter.ALL
         left_pages = tuple(page for page in pages if page.key in {"devices", "poses"})
@@ -273,14 +344,7 @@ class WorkbenchStatusBar(QFrame):
         icon: IconName,
         label: str,
     ) -> None:
-        button = QToolButton()
-        button.setObjectName("statusProblemButton")
-        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        button.setCheckable(True)
-        button.setAutoRaise(True)
-        button.setFixedHeight(STATUS_BUTTON_SIZE)
-        button.setIconSize(QSize(STATUS_ICON_SIZE, STATUS_ICON_SIZE))
-        button.setProperty("problemLabel", label)
+        button = _StatusProblemButton(label)
         button.clicked.connect(
             lambda _checked=False, target=log_filter: self.log_filter_requested.emit(
                 target
@@ -318,16 +382,16 @@ class WorkbenchStatusBar(QFrame):
             if button is None:
                 continue
             label = str(button.property("problemLabel"))
-            button.setText(str(count))
+            button.set_count(count)
             button.setToolTip(f"{label}：{count} 条（筛选运行日志）")
             button.setAccessibleName(f"{label}日志 {count} 条")
-            button.setProperty(
-                "themeRole",
-                roles[log_filter] if count else "statusMuted",
-            )
-            style = button.style()
-            style.unpolish(button)
-            style.polish(button)
+            role = roles[log_filter] if count else "statusMuted"
+            button.setProperty("themeRole", role)
+            button.count_label.setProperty("themeRole", role)
+            for widget in (button, button.count_label):
+                style = widget.style()
+                style.unpolish(widget)
+                style.polish(widget)
         self._refresh_icons()
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
@@ -337,6 +401,9 @@ class WorkbenchStatusBar(QFrame):
             QEvent.Type.ApplicationPaletteChange,
             QEvent.Type.DynamicPropertyChange,
             QEvent.Type.EnabledChange,
+            QEvent.Type.FontChange,
+            QEvent.Type.ApplicationFontChange,
+            QEvent.Type.StyleChange,
         }:
             self._refresh_icons()
 
@@ -352,7 +419,7 @@ class WorkbenchStatusBar(QFrame):
             )
         for log_filter, button in self.log_problem_buttons.items():
             icon = self._log_problem_icons[log_filter]
-            button.setIcon(
+            button.set_status_icon(
                 themed_icon(
                     button,
                     icon,
@@ -361,18 +428,7 @@ class WorkbenchStatusBar(QFrame):
                 )
             )
             button.ensurePolished()
-            self._fit_log_problem_button(button)
-
-    @staticmethod
-    def _fit_log_problem_button(button: QToolButton) -> None:
-        text_width = button.fontMetrics().horizontalAdvance(button.text())
-        content_width = (
-            STATUS_ICON_SIZE
-            + STATUS_PROBLEM_CONTENT_SPACING
-            + text_width
-            + (2 * STATUS_PROBLEM_HORIZONTAL_PADDING)
-        )
-        button.setFixedWidth(max(STATUS_BUTTON_SIZE, content_width))
+            button.refresh_content_geometry()
 
     def render_device_state(self, state: DeviceViewState) -> None:
         ready_count = sum(
