@@ -129,6 +129,23 @@ class ConfigurationLoadingTests(unittest.TestCase):
                     env_file=root / "missing.env",
                 )
 
+    def test_legacy_minicpm_ask_configuration_is_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 2
+                [llm]
+                minicpm_ask_enabled = true
+                """,
+            )
+            with self.assertRaisesRegex(ConfigLoadError, "未知"):
+                load_application_settings(
+                    config_path,
+                    env_file=root / "missing.env",
+                )
+
     def test_secrets_are_rejected_in_toml(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

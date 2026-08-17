@@ -132,7 +132,6 @@ class SecretSettings:
     openai_api_key: str = ""
     deepseek_api_key: str = ""
     dashscope_api_key: str = ""
-    minicpm_ask_api_key: str = ""
     websocket_auth_token: str = ""
 
 
@@ -169,9 +168,6 @@ class LLMSettings:
     minicpm_gateway_path_prefix: str = ""
     minicpm_realtime_path: str = "/v1/realtime"
     minicpm_model: str = "minicpm-o"
-    minicpm_ask_enabled: bool = True
-    minicpm_ask_base_url: str = ""
-    minicpm_ask_model: str = "gpt-4o-mini"
 
 
 @dataclass(frozen=True, slots=True)

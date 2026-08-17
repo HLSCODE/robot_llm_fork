@@ -60,20 +60,12 @@ class MiniCPMChatConfig:
         ws_scheme: str = "wss",
         gateway_path_prefix: str = "",
         realtime_path: str = "/v1/realtime",
-        ask_enabled: bool = True,
-        ask_api_key: str = "",
-        ask_base_url: str = "",
-        ask_model: str = "gpt-4o-mini",
     ) -> None:
         self.gateway_host = gateway_host
         self.gateway_port = gateway_port
         self.ws_scheme = self._normalize_ws_scheme(ws_scheme)
         self.gateway_path_prefix = gateway_path_prefix.rstrip("/")
         self.realtime_path = realtime_path
-        self.ask_enabled = ask_enabled
-        self.ask_api_key = ask_api_key
-        self.ask_base_url = ask_base_url
-        self.ask_model = ask_model
 
     @property
     def _port_suffix(self) -> str:
@@ -322,8 +314,7 @@ class InteractionWebSocketHandler:
         查询 MiniCPM 网关配置与聊天状态
         请求: {"action": "minicpm_status"}
         响应: {"event": "minicpm_status", "configured": bool,
-               "gateway": "https://host:port",
-               "ask_enabled": bool}
+               "gateway": "https://host:port"}
         """
         if self._server._minicpm_cfg is None:
             await websocket.send(
@@ -344,7 +335,6 @@ class InteractionWebSocketHandler:
                     "configured": True,
                     "gateway": f"{cfg.ws_scheme}://{cfg.gateway_host}{cfg._port_suffix}{cfg.gateway_path_prefix}",
                     "realtime_path": cfg.realtime_path,
-                    "ask_enabled": cfg.ask_enabled,
                     "chat_action": "chat_connect / chat / chat_disconnect",
                 }
             )
@@ -769,16 +759,6 @@ class InteractionWebSocketHandler:
                 ws_scheme=settings.llm.minicpm_ws_scheme,
                 gateway_path_prefix=settings.llm.minicpm_gateway_path_prefix,
                 realtime_path=settings.llm.minicpm_realtime_path,
-                ask_enabled=settings.llm.minicpm_ask_enabled,
-                ask_api_key=(
-                    settings.secrets.minicpm_ask_api_key
-                    or settings.secrets.openai_api_key
-                ),
-                ask_base_url=(
-                    settings.llm.minicpm_ask_base_url
-                    or settings.llm.openai_base_url
-                ),
-                ask_model=settings.llm.minicpm_ask_model,
             )
             logger.info(
                 "MiniCPM 配置已加载: %s://%s%s%s",

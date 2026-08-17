@@ -89,7 +89,6 @@ websocket_allowed_origins = []
 OPENAI_API_KEY=""
 DEEPSEEK_API_KEY=""
 DASHSCOPE_API_KEY=""
-MINICPM_ASK_API_KEY=""
 WEBSOCKET_AUTH_TOKEN=""
 ```
 

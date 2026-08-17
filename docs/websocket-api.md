@@ -183,16 +183,13 @@ minicpm_gateway_host = "10.10.17.13"
 minicpm_gateway_port = 8006
 minicpm_ws_scheme = "wss"
 minicpm_realtime_path = "/v1/realtime"
-minicpm_ask_enabled = true
-minicpm_ask_base_url = ""
-minicpm_ask_model = "qwen-turbo"
 
 [vision]
 realsense_device_sn = "153122077516"
 realsense_device_names = ""
 ```
 
-`OPENAI_API_KEY`、`MINICPM_ASK_API_KEY` 和 `WEBSOCKET_AUTH_TOKEN` 写入 `.env`。
+`OPENAI_API_KEY` 和 `WEBSOCKET_AUTH_TOKEN` 写入 `.env`。
 
 配置项说明：
 
@@ -231,7 +228,6 @@ realsense_device_names = ""
 | `MINICPM_WS_SCHEME` | MiniCPM WebSocket 协议 | `wss` 或 `ws`，默认 `wss` |
 | `MINICPM_REALTIME_PATH` | Realtime Chat 路径 | 最终连接为 `{MINICPM_WS_SCHEME}://HOST:PORT{PATH_PREFIX}{REALTIME_PATH}?mode=chat` |
 | `MINICPM_ASK_ENABLED` | 是否启用指令分类 | 仅影响是否触发 `minicpm_instruction` / AI 规划，不影响 MiniCPM 聊天回复 |
-| `MINICPM_ASK_API_KEY` | 指令分类模型的 API Key | 留空时回退到 `OPENAI_API_KEY`；若两者都为空，则跳过分类，不自动规划 |
 | `MINICPM_ASK_BASE_URL` | 指令分类模型 Base URL | 留空时回退到 `OPENAI_BASE_URL` |
 | `MINICPM_ASK_MODEL` | 指令分类模型名 | 如 `qwen-turbo` |
 
@@ -2784,7 +2780,6 @@ function toImageSrc(frame) {
   "event": "minicpm_status",
   "configured": true,
   "gateway": "https://10.10.17.13:8006",
-  "ask_enabled": true,
   "chat_action": "chat_connect / chat / chat_disconnect"
 }
 ```
@@ -2795,7 +2790,6 @@ function toImageSrc(frame) {
 |---|---|---|
 | `configured` | `boolean` | 是否已完成配置 |
 | `gateway` | `string` | 目标网关地址 |
-| `ask_enabled` | `boolean` | 是否启用指令分类 |
 | `chat_action` | `string` | 推荐的聊天流程 |
 
 ### 13.2 建立聊天会话 `chat_connect`
@@ -3097,8 +3091,6 @@ function handleChatData(data) {
 
 补充说明：
 
-- 该事件依赖 `MINICPM_ASK_ENABLED=true` 且存在可用的 Ask 分类 API Key
-- 若 `MINICPM_ASK_API_KEY` 和 `OPENAI_API_KEY` 都未配置，则不会自动触发该事件
 - 普通聊天回复仍会通过 `chat_data` 返回，与是否触发指令规划无关
 - `minicpm_instruction` 不是聊天正文，它只是“该输入被判定为机器人指令”的附加通知事件
 - 前端不要把 `minicpm_instruction.instruction` 当成机器人回复文本渲染到聊天气泡中

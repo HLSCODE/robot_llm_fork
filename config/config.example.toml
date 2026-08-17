@@ -163,10 +163,6 @@ minicpm_gateway_path_prefix = ""
 minicpm_realtime_path = "/v1/realtime"
 # MiniCPM 对外显示的模型名。
 minicpm_model = "minicpm-o"
-# 是否启用 MiniCPM ASK 指令分类通道；Key 使用 MINICPM_ASK_API_KEY。
-minicpm_ask_enabled = true
-minicpm_ask_base_url = ""
-minicpm_ask_model = "qwen-turbo"
 
 # 每个 TaskProfile 的推理路由和语音输出策略。
 # output_mode 可选：
