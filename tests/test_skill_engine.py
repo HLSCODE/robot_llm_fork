@@ -69,7 +69,10 @@ def _skill_with_action_types(*action_types: object) -> Skill:
             ActionType.WAIT: {},
             ActionType.CHANGE_GUN: {},
             ActionType.VISION_CAPTURE: {},
-            ActionType.VISION_RELOCALIZE: {"station_name": "station-a"},
+            ActionType.VISION_RELOCALIZE: {
+                "action_mode": "teach",
+                "station_name": "station-a",
+            },
             ActionType.TRAJECTORY: {"file_path": "trajectory.json"},
         }.get(action_type, {})
 

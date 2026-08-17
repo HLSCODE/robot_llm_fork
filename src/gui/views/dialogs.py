@@ -674,7 +674,7 @@ class SchemaActionForm(QWidget):
             self._variant_combo.setCurrentIndex(max(0, selected_index))
             variant_form = QFormLayout()
             variant_form.addRow(
-                f"{variant_key}:",
+                f"{self._type_schema.get('variant_label', variant_key)}:",
                 self._variant_combo,
             )
             layout.addLayout(variant_form)
@@ -750,7 +750,7 @@ class SchemaActionForm(QWidget):
             self._validation_target(widget).setFocus()
 
     def _change_variant(self) -> None:
-        self._values = self.parameters()
+        self._values.update(self.parameters())
         self._render_fields()
         self.adjustSize()
         self.updateGeometry()
@@ -765,7 +765,7 @@ class SchemaActionForm(QWidget):
         fields = self._selected_fields()
         variant_key = self._type_schema.get("variant_key")
         for field_name, field_schema in fields.items():
-            if field_name == variant_key:
+            if field_name == variant_key or field_schema.get("hidden", False):
                 continue
             widget = self._create_widget(field_schema, self._values.get(field_name))
             label = field_schema.get("label", field_name)
@@ -796,6 +796,18 @@ class SchemaActionForm(QWidget):
         ):
             arm_widget.currentTextChanged.connect(compensation_widget.set_arm)
             compensation_widget.set_arm(arm_widget.currentText())
+        relocalization_arm = self._field_widgets.get("arm")
+        station_widget = self._field_widgets.get("station_id")
+        if isinstance(relocalization_arm, QComboBox) and isinstance(
+            station_widget,
+            QComboBox,
+        ):
+            relocalization_arm.currentIndexChanged.connect(
+                lambda _index: self._populate_station_choices(
+                    station_widget,
+                    None,
+                )
+            )
 
     def _selected_fields(self) -> dict[str, ActionFieldSchema]:
         variants = self._type_schema.get("variants")
@@ -818,12 +830,15 @@ class SchemaActionForm(QWidget):
         field_type = schema["type"]
         if field_type == "select":
             widget = QComboBox()
-            for option in schema.get("options", []):
-                option_value = option.get("value") if isinstance(option, dict) else option
-                option_label = option.get("label") if isinstance(option, dict) else str(option)
-                widget.addItem(str(option_label), option_value)
-            index = widget.findData(value)
-            widget.setCurrentIndex(max(0, index))
+            if schema.get("options_source") == "vision_stations":
+                self._populate_station_choices(widget, value)
+            else:
+                for option in schema.get("options", []):
+                    option_value = option.get("value") if isinstance(option, dict) else option
+                    option_label = option.get("label") if isinstance(option, dict) else str(option)
+                    widget.addItem(str(option_label), option_value)
+                index = widget.findData(value)
+                widget.setCurrentIndex(max(0, index))
         elif field_type == "boolean":
             widget = QCheckBox()
             widget.setChecked(bool(value))
@@ -864,6 +879,37 @@ class SchemaActionForm(QWidget):
                 widget.setPlaceholderText(schema.get("placeholder", ""))
         widget.setEnabled(not schema.get("readonly", False))
         return widget
+
+    def _populate_station_choices(
+        self,
+        widget: QComboBox,
+        selected_station_id: object,
+    ) -> None:
+        arm_widget = self._field_widgets.get("arm")
+        arm = "left"
+        if isinstance(arm_widget, QComboBox):
+            arm_data = arm_widget.currentData()
+            if isinstance(arm_data, str) and arm_data:
+                arm = arm_data
+        choices = (
+            self._station_choices_reader(arm)
+            if self._station_choices_reader is not None
+            else []
+        )
+        selected = str(selected_station_id or "").strip()
+        widget.blockSignals(True)
+        try:
+            widget.clear()
+            widget.addItem("请选择示教工位", "")
+            for station_id, label in choices:
+                widget.addItem(label, station_id)
+            selected_index = widget.findData(selected)
+            if selected and selected_index < 0:
+                widget.addItem(f"{selected}（当前配置）", selected)
+                selected_index = widget.count() - 1
+            widget.setCurrentIndex(max(0, selected_index))
+        finally:
+            widget.blockSignals(False)
 
     @staticmethod
     def _widget_value(widget: FieldWidget, schema: ActionFieldSchema) -> Any:
@@ -919,7 +965,7 @@ class SchemaActionForm(QWidget):
         if isinstance(target, QLineEdit):
             return bool(target.text().strip())
         if isinstance(target, QComboBox):
-            return target.currentIndex() >= 0 and bool(target.currentText().strip())
+            return target.currentIndex() >= 0 and target.currentData() not in {None, ""}
         if isinstance(target, QCheckBox):
             return target.isChecked()
         return True

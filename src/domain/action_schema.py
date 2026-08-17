@@ -14,6 +14,7 @@ from .models import ActionType
 class ActionFieldSchema(TypedDict, total=False):
     type: str
     options: list[Any]
+    options_source: str
     default: Any
     min: float
     max: float
@@ -21,6 +22,7 @@ class ActionFieldSchema(TypedDict, total=False):
     label: str
     required: bool
     readonly: bool
+    hidden: bool
     placeholder: str
 
 
@@ -35,6 +37,7 @@ class ActionTypeSchema(TypedDict, total=False):
     fields: dict[str, ActionFieldSchema]
     variants: dict[str, ActionVariantSchema]
     variant_key: str
+    variant_label: str
     note: str
 
 
@@ -78,12 +81,14 @@ def _field(
     label: str,
     *,
     options: list[Any] | None = None,
+    options_source: str = "",
     default: Any = _MISSING,
     minimum: float | None = None,
     maximum: float | None = None,
     unit: str = "",
     required: bool = False,
     readonly: bool = False,
+    hidden: bool = False,
     placeholder: str = "",
 ) -> ActionFieldSchema:
     schema: ActionFieldSchema = {
@@ -92,6 +97,8 @@ def _field(
     }
     if options is not None:
         schema["options"] = options
+    if options_source:
+        schema["options_source"] = options_source
     if default is not _MISSING:
         schema["default"] = default
     if minimum is not None:
@@ -104,6 +111,8 @@ def _field(
         schema["required"] = True
     if readonly:
         schema["readonly"] = True
+    if hidden:
+        schema["hidden"] = True
     if placeholder:
         schema["placeholder"] = placeholder
     return schema
@@ -772,19 +781,25 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
     },
     ActionType.VISION_CAPTURE.value: {
         "label": "视觉类",
-        "description": "视觉识别 + 自动抓取（参数已固定）",
+        "description": "视觉识别 + 自动抓取",
         "fields": {
             "目标机械臂": _field(
-                "text",
+                "select",
                 "目标机械臂",
+                options=[
+                    {"value": "robot1", "label": "左臂 (Robot1)"},
+                    {"value": "robot2", "label": "右臂 (Robot2)"},
+                ],
                 default="robot1",
-                readonly=True,
             ),
             "工作流": _field(
-                "text",
+                "select",
                 "工作流",
+                options=[
+                    {"value": "bottle", "label": "瓶子抓取 (bottle)"},
+                    {"value": "vertical", "label": "竖直抓取 (vertical)"},
+                ],
                 default="bottle",
-                readonly=True,
             ),
             "置信度": _field(
                 "number",
@@ -792,13 +807,11 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                 default=0.7,
                 minimum=0,
                 maximum=1,
-                readonly=True,
             ),
             "调试图片": _field(
                 "boolean",
                 "调试图片",
                 default=True,
-                readonly=True,
             ),
             "移动速度": _field(
                 "number",
@@ -807,7 +820,6 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                 minimum=1,
                 maximum=100,
                 unit="mm/s",
-                readonly=True,
             ),
             "夹爪长度": _field(
                 "number",
@@ -815,58 +827,109 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                 default=150.0,
                 minimum=0,
                 unit="mm",
-                readonly=True,
             ),
         },
-        "note": "视觉抓取参数已固定，前端仅需填写动作名称即可",
     },
     ActionType.VISION_RELOCALIZE.value: {
         "label": "视觉重定位",
         "description": "移动到拍照位，识别 Tag，并更新本次任务的工位定位状态",
-        "fields": {
-            "action_mode": _field(
-                "select",
-                "动作模式",
-                options=["run", "teach"],
-                default="run",
+        "variant_key": "action_mode",
+        "variant_label": "动作模式",
+        "variants": {
+            "run": _variant(
+                "运行时重定位",
+                {
+                    "action_mode": _field(
+                        "select",
+                        "动作模式",
+                        options=[{"value": "run", "label": "运行时重定位"}],
+                        default="run",
+                    ),
+                    "arm": _field(
+                        "select",
+                        "机械臂",
+                        options=[
+                            {"value": "left", "label": "左臂"},
+                            {"value": "right", "label": "右臂"},
+                        ],
+                        default="left",
+                    ),
+                    "station_id": _field(
+                        "select",
+                        "示教工位",
+                        options_source="vision_stations",
+                        required=True,
+                    ),
+                    "station_name": _field(
+                        "text",
+                        "工位名称",
+                        hidden=True,
+                    ),
+                    "move_mode": _field(
+                        "select",
+                        "移动模式",
+                        options=[
+                            {"value": "move_j", "label": "关节运动 (move_j)"},
+                            {"value": "move_l", "label": "直线运动 (move_l)"},
+                        ],
+                        default="move_j",
+                    ),
+                },
             ),
-            "arm": _field(
-                "select",
-                "机械臂",
-                options=["left", "right"],
-                default="left",
-            ),
-            "station_id": _field("text", "工位 ID"),
-            "station_name": _field(
-                "text",
-                "工位名称",
-                required=True,
-            ),
-            "photo_pose": _field("text", "示教拍照位姿"),
-            "camera_name": _field("text", "示教相机名称"),
-            "marker_width": _field(
-                "number",
-                "示教 marker 宽度",
-                default=0.158,
-                minimum=0.000001,
-            ),
-            "marker_height": _field(
-                "number",
-                "示教 marker 高度",
-                default=0.158,
-                minimum=0.000001,
-            ),
-            "move_mode": _field(
-                "select",
-                "移动模式",
-                options=["move_j", "move_l"],
-                default="move_j",
+            "teach": _variant(
+                "采集/更新示教基准",
+                {
+                    "action_mode": _field(
+                        "select",
+                        "动作模式",
+                        options=[{"value": "teach", "label": "采集/更新示教基准"}],
+                        default="teach",
+                    ),
+                    "arm": _field(
+                        "select",
+                        "机械臂",
+                        options=[
+                            {"value": "left", "label": "左臂"},
+                            {"value": "right", "label": "右臂"},
+                        ],
+                        default="left",
+                    ),
+                    "station_name": _field(
+                        "text",
+                        "工位名称",
+                        required=True,
+                    ),
+                    "station_id": _field(
+                        "text",
+                        "工位 ID",
+                        hidden=True,
+                    ),
+                    "photo_pose": _field("text", "拍照位姿"),
+                    "camera_name": _field("text", "相机名称"),
+                    "marker_width": _field(
+                        "number",
+                        "Marker 宽度",
+                        default=0.158,
+                        minimum=0.000001,
+                    ),
+                    "marker_height": _field(
+                        "number",
+                        "Marker 高度",
+                        default=0.158,
+                        minimum=0.000001,
+                    ),
+                    "move_mode": _field(
+                        "select",
+                        "移动模式",
+                        options=[
+                            {"value": "move_j", "label": "关节运动 (move_j)"},
+                            {"value": "move_l", "label": "直线运动 (move_l)"},
+                        ],
+                        default="move_j",
+                    ),
+                },
             ),
         },
-        "note": (
-            "工位名称是唯一用户输入；photo_pose、camera_name、marker "
-            "宽高只在 action_mode=teach 时填写"
-        ),
     },
     ActionType.TRAJECTORY.value: {
         "label": "轨迹类",
@@ -1041,8 +1104,10 @@ def _validate_field_value(
             )
 
     if field_type == "select":
-        options = [_option_value(option) for option in schema["options"]]
-        if not any(_same_option(value, option) for option in options):
+        options = schema.get("options")
+        if options is not None and not any(
+            _same_option(value, _option_value(option)) for option in options
+        ):
             return ActionParameterIssue(
                 code=ActionParameterIssueCode.INVALID_OPTION,
                 field=field_name,

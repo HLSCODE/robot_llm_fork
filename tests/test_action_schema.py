@@ -157,6 +157,44 @@ class ActionSchemaTests(unittest.TestCase):
             {issue.code for issue in invalid.issues},
         )
 
+    def test_visual_relocalization_validates_mode_specific_fields(self):
+        run = validate_action_parameters(
+            ActionType.VISION_RELOCALIZE,
+            {
+                "action_mode": "run",
+                "arm": "left",
+                "station_id": "station-left",
+                "move_mode": "move_j",
+            },
+        )
+        teach = validate_action_parameters(
+            ActionType.VISION_RELOCALIZE,
+            {
+                "action_mode": "teach",
+                "arm": "right",
+                "station_name": "右臂示教工位",
+            },
+        )
+        missing_run_station = validate_action_parameters(
+            ActionType.VISION_RELOCALIZE,
+            {"action_mode": "run", "arm": "left"},
+        )
+        legacy_run_metadata = validate_action_parameters(
+            ActionType.VISION_RELOCALIZE,
+            {
+                "action_mode": "run",
+                "arm": "left",
+                "station_id": "station-left",
+                "station_name": "左臂示教工位",
+            },
+        )
+
+        self.assertTrue(run.is_valid, run.message)
+        self.assertTrue(teach.is_valid, teach.message)
+        self.assertTrue(legacy_run_metadata.is_valid, legacy_run_metadata.message)
+        self.assertEqual("teach", teach.parameters["action_mode"])
+        self.assertIn("station_id", missing_run_station.message)
+
 
 class _RecordingWebSocket:
     def __init__(self) -> None:

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from PySide6.QtCore import QThread, QTimer, Qt
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QLabel,
     QPushButton,
@@ -159,8 +160,13 @@ class SchemaActionFormTests(unittest.TestCase):
                     {variant_key: variant_name},
                 )
                 self.assertEqual(set(variants), set(form.variant_names))
+                visible_fields = {
+                    field_name
+                    for field_name, field_schema in variant_schema["fields"].items()
+                    if field_name != variant_key and not field_schema.get("hidden", False)
+                }
                 self.assertEqual(
-                    set(variant_schema["fields"]) - {variant_key},
+                    visible_fields,
                     set(form.field_names),
                 )
                 self.assertEqual(
@@ -168,6 +174,90 @@ class SchemaActionFormTests(unittest.TestCase):
                     form.parameters()[variant_key],
                 )
                 form.deleteLater()
+
+    def test_visual_capture_restores_editable_labeled_parameters(self) -> None:
+        form = SchemaActionForm(ActionType.VISION_CAPTURE)
+        robot = form._field_widgets["目标机械臂"]
+        workflow = form._field_widgets["工作流"]
+        debug_images = form._field_widgets["调试图片"]
+        assert isinstance(robot, QComboBox)
+        assert isinstance(workflow, QComboBox)
+        assert isinstance(debug_images, QCheckBox)
+
+        self.assertTrue(robot.isEnabled())
+        self.assertEqual("左臂 (Robot1)", robot.currentText())
+        robot.setCurrentIndex(robot.findData("robot2"))
+        workflow.setCurrentIndex(workflow.findData("vertical"))
+        debug_images.setChecked(False)
+
+        parameters = form.parameters()
+        self.assertEqual("robot2", parameters["目标机械臂"])
+        self.assertEqual("vertical", parameters["工作流"])
+        self.assertFalse(parameters["调试图片"])
+        form.deleteLater()
+
+    def test_visual_relocalization_switches_localized_mode_fields(self) -> None:
+        requested_arms: list[str | None] = []
+
+        def station_choices(arm: str | None) -> list[tuple[str, str]]:
+            requested_arms.append(arm)
+            if arm == "right":
+                return [("station-right", "右臂工位")]
+            return [("station-left", "左臂工位")]
+
+        form = SchemaActionForm(
+            ActionType.VISION_RELOCALIZE,
+            {
+                "action_mode": "run",
+                "arm": "left",
+                "station_id": "station-left",
+            },
+            station_choices_reader=station_choices,
+        )
+        mode = form._variant_combo
+        arm = form._field_widgets["arm"]
+        station = form._field_widgets["station_id"]
+        move_mode = form._field_widgets["move_mode"]
+        assert mode is not None
+        assert isinstance(arm, QComboBox)
+        assert isinstance(station, QComboBox)
+        assert isinstance(move_mode, QComboBox)
+
+        self.assertEqual("运行时重定位", mode.currentText())
+        self.assertEqual("左臂", arm.currentText())
+        self.assertEqual("左臂工位", station.currentText())
+        self.assertEqual("关节运动 (move_j)", move_mode.currentText())
+        self.assertEqual(
+            {"arm", "station_id", "move_mode"},
+            set(form.field_names),
+        )
+
+        arm.setCurrentIndex(arm.findData("right"))
+        self.assertEqual("right", requested_arms[-1])
+        self.assertEqual("右臂工位", station.itemText(1))
+        station.setCurrentIndex(station.findData("station-right"))
+
+        mode.setCurrentIndex(mode.findData("teach"))
+        QApplication.processEvents()
+        self.assertEqual(
+            {
+                "arm",
+                "station_name",
+                "photo_pose",
+                "camera_name",
+                "marker_width",
+                "marker_height",
+                "move_mode",
+            },
+            set(form.field_names),
+        )
+        self.assertEqual("teach", form.parameters()["action_mode"])
+        self.assertNotIn("station_id", form.field_names)
+
+        mode.setCurrentIndex(mode.findData("run"))
+        QApplication.processEvents()
+        self.assertEqual("station-right", form.parameters()["station_id"])
+        form.deleteLater()
 
     def test_move_compensation_uses_guided_editor_and_reads_udp_snapshot(self) -> None:
         calls: list[dict[str, float]] = []
