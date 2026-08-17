@@ -188,8 +188,8 @@ class MainWindow(RoundedMainWindow):
             ai_assistant.speech_runtime_startup_finished.connect(
                 self._on_speech_runtime_startup_finished
             )
-            ai_assistant.welcome_task_execution_requested.connect(
-                self.execute_wake_welcome_task
+            ai_assistant.welcome_workflow_execution_requested.connect(
+                self.execute_wake_welcome_workflow
             )
             ai_assistant.sequence_visualization_requested.connect(
                 self.add_ai_sequence
@@ -1508,27 +1508,27 @@ class MainWindow(RoundedMainWindow):
             label="动作编排序列",
         )
 
-    def execute_wake_welcome_task(self, task_name: str) -> None:
-        """Execute a configured wake lifecycle task without replacing the editor document."""
+    def execute_wake_welcome_workflow(self, workflow_name: str) -> None:
+        """Execute the configured wake workflow without replacing the editor document."""
         if self._execution_view_model.snapshot().active:
             self._notifications.warning(
-                f"跳过唤醒欢迎任务，当前已有序列在执行: {task_name}",
+                f"跳过唤醒欢迎工作流，当前已有序列在执行: {workflow_name}",
                 modal=False,
             )
             return
 
         try:
-            entries = self._services.composition.load_task(task_name)
+            entries = self._services.composition.load_task(workflow_name)
         except FileNotFoundError:
             entries = ()
         if not entries:
             self._notifications.warning(
-                f"跳过唤醒欢迎任务，任务不存在或为空: {task_name}",
+                f"跳过唤醒欢迎工作流，工作流不存在或为空: {workflow_name}",
                 modal=False,
             )
             return
 
-        self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎任务")
+        self._start_sequence_execution(entries, display_list=None, label="唤醒欢迎工作流")
 
     def _start_sequence_execution(
         self,

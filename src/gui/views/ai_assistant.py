@@ -216,7 +216,7 @@ class AIAssistantWidget(QWidget):
     提供自然语言交互和动作序列预览功能
     """
     speech_runtime_startup_finished = Signal(bool)
-    welcome_task_execution_requested = Signal(str)
+    welcome_workflow_execution_requested = Signal(str)
     sequence_visualization_requested = Signal(object, bool, int)
     step_started = Signal(int, object)
     step_completed = Signal(int, object)
@@ -943,11 +943,16 @@ class AIAssistantWidget(QWidget):
                 self._set_input_enabled(True)
                 self.status_label.setText("状态: 未识别到有效语音")
         elif event_type == "wake_welcome_requested":
-            task_name = str((event.get("data") or {}).get("task_name") or "").strip()
-            if not task_name:
-                logger.debug("跳过唤醒欢迎动作: task=%s", task_name or "<empty>")
+            workflow_name = str(
+                (event.get("data") or {}).get("workflow_name") or ""
+            ).strip()
+            if not workflow_name:
+                logger.debug(
+                    "跳过唤醒欢迎动作: workflow=%s",
+                    workflow_name or "<empty>",
+                )
             else:
-                self.welcome_task_execution_requested.emit(task_name)
+                self.welcome_workflow_execution_requested.emit(workflow_name)
         elif event_type == "ignored":
             self._add_system_message(event.get("text") or "已忽略")
             if self._speech_runtime_active and is_voice_source:

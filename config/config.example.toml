@@ -506,9 +506,9 @@ voice_wake_cooldown_s = 1.5
 # 是否播放/生成唤醒反馈及默认反馈文本。
 voice_wake_feedback_enabled = true
 voice_wake_feedback_text = "你好"
-# 是否在唤醒后执行欢迎任务；任务名为空时不执行。
+# 是否在唤醒后执行欢迎工作流；工作流名称为空时不执行。
 voice_wake_welcome_enabled = false
-voice_wake_welcome_task = ""
+voice_wake_welcome_workflow = ""
 # 静音 RMS 阈值；通常应低于 speech_start_rms_threshold。
 voice_silence_rms_threshold = 0.01
 # 是否抑制 ASR/唤醒模型直接向控制台输出，以及是否显示 ASR 耗时。

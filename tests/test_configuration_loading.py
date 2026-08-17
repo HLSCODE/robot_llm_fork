@@ -86,6 +86,49 @@ class ConfigurationLoadingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ConfigLoadError, "未知"):
                     load_application_settings(config_path, env_file=root / "missing.env")
 
+    def test_wake_welcome_uses_workflow_field_without_legacy_alias(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 2
+                [voice]
+                voice_wake_welcome_enabled = true
+                voice_wake_welcome_workflow = "welcome.workflow.json"
+                """,
+            )
+            settings = load_application_settings(
+                config_path,
+                env_file=root / "missing.env",
+            )
+
+        self.assertTrue(settings.voice.voice_wake_welcome_enabled)
+        self.assertEqual(
+            "welcome.workflow.json",
+            settings.voice.voice_wake_welcome_workflow,
+        )
+        self.assertEqual(
+            "welcome.workflow.json",
+            settings.voice.as_runtime_mapping()["wake_welcome_workflow"],
+        )
+
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            legacy_config_path = self._write(
+                root,
+                """
+                schema_version = 2
+                [voice]
+                voice_wake_welcome_task = "welcome.task"
+                """,
+            )
+            with self.assertRaisesRegex(ConfigLoadError, "未知"):
+                load_application_settings(
+                    legacy_config_path,
+                    env_file=root / "missing.env",
+                )
+
     def test_secrets_are_rejected_in_toml(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

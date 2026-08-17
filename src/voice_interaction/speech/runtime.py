@@ -39,7 +39,7 @@ class VoiceSpeechRuntimeConfig:
     follow_up_listening_timeout_s: float = 25.0
     wake_cooldown_s: float = 1.5
     wake_welcome_enabled: bool = False
-    wake_welcome_task: str = ""
+    wake_welcome_workflow: str = ""
     show_asr_timing: bool = False
 
     @property
@@ -112,11 +112,16 @@ class VoiceSpeechRuntime:
                         async for feedback_event in self.controller.stream_wake_feedback():
                             feedback_event.data["wake_word"] = wake_result
                             yield feedback_event
-                        if self.config.wake_welcome_enabled and self.config.wake_welcome_task:
+                        if (
+                            self.config.wake_welcome_enabled
+                            and self.config.wake_welcome_workflow
+                        ):
                             yield VoiceEvent(
                                 type="wake_welcome_requested",
                                 text="请求执行唤醒欢迎动作",
-                                data={"task_name": self.config.wake_welcome_task},
+                                data={
+                                    "workflow_name": self.config.wake_welcome_workflow
+                                },
                             )
                         self._reset_detectors(endpoint, buffer, vad_accumulator)
                         wake_cooldown_until = now + self.config.wake_cooldown_s
@@ -334,7 +339,9 @@ def _runtime_config_from_dict(config: dict[str, Any]) -> VoiceSpeechRuntimeConfi
         ),
         wake_cooldown_s=float(config.get("wake_cooldown_s") or 1.5),
         wake_welcome_enabled=bool(config.get("wake_welcome_enabled", False)),
-        wake_welcome_task=str(config.get("wake_welcome_task") or "").strip(),
+        wake_welcome_workflow=str(
+            config.get("wake_welcome_workflow") or ""
+        ).strip(),
         show_asr_timing=bool(config.get("show_asr_timing", False)),
     )
 

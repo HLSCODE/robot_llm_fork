@@ -216,7 +216,7 @@ Canvas + Breadcrumb      JSON repository       ExecutionPlan
 
 AI Assistant 不获取 MainWindow 对象。它通过以下窄信号协作：
 
-- `welcome_task_execution_requested`；
+- `welcome_workflow_execution_requested`；
 - `sequence_visualization_requested`；
 - step、loop 和 execution terminal 展示事件。
 

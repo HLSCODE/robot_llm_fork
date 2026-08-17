@@ -652,7 +652,7 @@ class VoiceSettings:
     voice_wake_feedback_enabled: bool = True
     voice_wake_feedback_text: str = "明德博士在，请说。"
     voice_wake_welcome_enabled: bool = False
-    voice_wake_welcome_task: str = ""
+    voice_wake_welcome_workflow: str = ""
     voice_silence_rms_threshold: float = 0.01
     voice_suppress_model_output: bool = True
     voice_show_asr_timing: bool = False
@@ -704,7 +704,7 @@ class VoiceSettings:
             "wake_feedback_enabled": self.voice_wake_feedback_enabled,
             "wake_feedback_text": self.voice_wake_feedback_text,
             "wake_welcome_enabled": self.voice_wake_welcome_enabled,
-            "wake_welcome_task": self.voice_wake_welcome_task,
+            "wake_welcome_workflow": self.voice_wake_welcome_workflow,
             "silence_rms_threshold": self.voice_silence_rms_threshold,
             "suppress_model_output": self.voice_suppress_model_output,
             "show_asr_timing": self.voice_show_asr_timing,
