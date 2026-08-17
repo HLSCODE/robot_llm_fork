@@ -6,6 +6,7 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QFrame
 
 from src.domain.models import ActionType
+from src.gui.about import AboutDialog
 from src.gui.app_dialogs import (
     AppDialog,
     AppMessageDialog,
@@ -54,6 +55,32 @@ class AppDialogTests(unittest.TestCase):
         )
         config.close()
         picker.close()
+
+    def test_about_dialog_exposes_product_and_runtime_details(self) -> None:
+        dialog = AboutDialog()
+
+        self.assertEqual("关于 机器人工作流控制台", dialog.windowTitle())
+        self.assertEqual("机器人工作流控制台", dialog.name_label.text())
+        self.assertTrue(dialog.version_label.text().startswith("版本 "))
+        self.assertIn("机器人动作编排", dialog.description_label.text())
+        self.assertEqual(
+            {
+                "产品标识",
+                "支持平台",
+                "Python",
+                "Qt / PySide",
+                "当前系统",
+                "系统架构",
+            },
+            set(dialog.runtime_value_labels),
+        )
+        self.assertEqual(
+            "Windows x64 / Linux x86_64",
+            dialog.runtime_value_labels["支持平台"].text(),
+        )
+        for label in dialog.runtime_value_labels.values():
+            self.assertTrue(label.text())
+        dialog.close()
 
     def test_temporary_choice_dialog_also_uses_shared_shell(self) -> None:
         observed: dict[str, object] = {}

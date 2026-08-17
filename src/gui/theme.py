@@ -237,6 +237,24 @@ QWidget#appDialogContent {{ background: transparent; border: none; }}
 QLabel#appDialogApplicationIcon,
 QLabel#appDialogTitle {{ background: transparent; border: none; color: {colors.text}; }}
 QLabel#appDialogTitle {{ font-weight: 650; }}
+QLabel#aboutApplicationIcon {{ background: transparent; border: none; }}
+QLabel#aboutApplicationName {{
+    background: transparent; border: none; color: {colors.text};
+    font-size: 18px; font-weight: 700;
+}}
+QLabel#aboutApplicationVersion,
+QLabel#aboutApplicationDescription {{
+    background: transparent; border: none; color: {colors.text_muted};
+}}
+QFrame#aboutRuntimeDetails {{
+    background: {colors.surface_subtle}; border: none; border-radius: 8px;
+}}
+QLabel#aboutRuntimeKey {{
+    background: transparent; border: none; color: {colors.text_muted};
+}}
+QLabel#aboutRuntimeValue {{
+    background: transparent; border: none; color: {colors.text};
+}}
 QToolButton#appDialogCloseButton {{
     background: transparent; border: none; border-radius: 6px; padding: 0;
 }}
@@ -487,11 +505,9 @@ QFrame#applicationTitleBar {{
 QFrame#applicationTitleBar[windowCorners="rounded"] {{
     border-top-left-radius: 10px; border-top-right-radius: 10px;
 }}
-QLabel#applicationTitleIcon,
-QLabel#applicationTitle {{
+QLabel#applicationTitleIcon {{
     background: transparent; border: none; color: {colors.text};
 }}
-QLabel#applicationTitle {{ font-weight: 600; padding: 0 6px 0 2px; }}
 QToolButton#windowControlButton {{
     background: transparent; border: none; border-radius: 0; padding: 0;
 }}

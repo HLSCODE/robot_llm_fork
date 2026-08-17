@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
 
 from ..bridges.execution import ExecutionBridge
 from ..app_dialogs import ask_integer, ask_text, choose_item
+from ..about import show_about_dialog
+from ..branding import APPLICATION_NAME
 from ...application import (
     ApplicationServices,
     CompositionChangeType,
@@ -373,7 +375,7 @@ class MainWindow(RoundedMainWindow):
         }.get(device_id, device_id)
 
     def init_ui(self) -> None:
-        self.setWindowTitle("机器人动作编排器")
+        self.setWindowTitle(APPLICATION_NAME)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setMinimumSize(540, 800)
@@ -588,13 +590,6 @@ class MainWindow(RoundedMainWindow):
             "恢复默认布局",
             self.workbench_view.reset_layout,
         )
-        self._add_menu_action(
-            view_menu,
-            "view.shortcuts",
-            "快捷键设置…",
-            lambda: self._shortcut_registry.open_editor(self),
-        )
-
         execution_menu = menubar.addMenu("执行")
         for command_id, label, callback in (
             ("execution.start", "开始执行", self.start_execution),
@@ -613,6 +608,21 @@ class MainWindow(RoundedMainWindow):
             self.refresh_arm_poses,
         )
         device_menu.addAction(panel_actions["controls"])
+
+        help_menu = menubar.addMenu("帮助")
+        self._add_menu_action(
+            help_menu,
+            "view.shortcuts",
+            "快捷键设置…",
+            lambda: self._shortcut_registry.open_editor(self),
+        )
+        help_menu.addSeparator()
+        self._add_menu_action(
+            help_menu,
+            "help.about",
+            f"关于 {APPLICATION_NAME}",
+            lambda: show_about_dialog(self),
+        )
 
     def _add_menu_action(
         self,

@@ -56,6 +56,7 @@ DEFAULT_SHORTCUTS: tuple[ShortcutDefinition, ...] = (
     ShortcutDefinition("execution.quick_stop", "快速停止", "Ctrl+Alt+X"),
     ShortcutDefinition("execution.emergency", "设备急停", "Ctrl+Alt+Shift+X"),
     ShortcutDefinition("device.refresh_pose", "刷新机械臂位姿", "F5"),
+    ShortcutDefinition("help.about", "关于软件", "F1"),
 )
 
 

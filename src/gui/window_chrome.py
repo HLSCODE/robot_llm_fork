@@ -241,11 +241,8 @@ class ApplicationTitleBar(QFrame):
         self.icon_label.setObjectName("applicationTitleIcon")
         self.icon_label.setFixedSize(24, 24)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.icon_label.setAccessibleName("机器人动作编排器 Logo")
+        self.icon_label.setAccessibleName("应用程序 Logo")
         layout.addWidget(self.icon_label)
-        self.title_label = QLabel(window.windowTitle(), self)
-        self.title_label.setObjectName("applicationTitle")
-        layout.addWidget(self.title_label)
 
         self.menu_bar = ApplicationMenuBar(window)
         self.menu_bar.setSizePolicy(
@@ -278,7 +275,7 @@ class ApplicationTitleBar(QFrame):
         layout.addWidget(self.maximize_button)
         layout.addWidget(self.close_button)
 
-        self._drag_targets = {self.icon_label, self.title_label}
+        self._drag_targets = {self.icon_label}
         window.installEventFilter(self)
         for target in self._drag_targets:
             target.installEventFilter(self)

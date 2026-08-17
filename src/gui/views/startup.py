@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..theme import ThemeMode, application_icon_for_mode
+from ..branding import APPLICATION_NAME
 
 
 class StartupProgressCard(QWidget):
@@ -28,7 +29,7 @@ class StartupProgressCard(QWidget):
         super().__init__()
         self._progress = 0
         self.setObjectName("startupProgressWindow")
-        self.setWindowTitle("机器人动作编排器 - 正在启动")
+        self.setWindowTitle(f"{APPLICATION_NAME} - 正在启动")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -64,18 +65,18 @@ class StartupProgressCard(QWidget):
         self.logo_label.setObjectName("startupLogo")
         self.logo_label.setFixedSize(68, 68)
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logo_label.setAccessibleName("机器人动作编排器 Logo")
+        self.logo_label.setAccessibleName(f"{APPLICATION_NAME} Logo")
         self.logo_label.setPixmap(self._startup_icon().pixmap(QSize(50, 50)))
         brand_row.addWidget(self.logo_label, alignment=Qt.AlignmentFlag.AlignTop)
 
         brand_text = QVBoxLayout()
         brand_text.setContentsMargins(0, 2, 0, 0)
         brand_text.setSpacing(6)
-        title = QLabel("机器人动作编排器")
-        title.setObjectName("startupTitle")
+        self.title_label = QLabel(APPLICATION_NAME)
+        self.title_label.setObjectName("startupTitle")
         subtitle = QLabel("正在准备设备、语音与运行服务")
         subtitle.setObjectName("startupSubtitle")
-        brand_text.addWidget(title)
+        brand_text.addWidget(self.title_label)
         brand_text.addWidget(subtitle)
         brand_text.addStretch(1)
         brand_row.addLayout(brand_text, stretch=1)

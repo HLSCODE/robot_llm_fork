@@ -19,6 +19,7 @@ from src.configuration.settings import ApplicationSettings
 from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
+from src.gui.branding import APPLICATION_NAME
 from src.gui.controllers.startup import GuiStartupLifecycle
 from src.gui.theme import ThemeController, ThemeMode
 from src.gui.shortcuts import DEFAULT_SHORTCUTS
@@ -195,6 +196,8 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             self.window.windowFlags() & Qt.WindowType.FramelessWindowHint
         )
         self.assertIs(title_bar.menu_bar, self.window.application_menu_bar)
+        self.assertEqual(APPLICATION_NAME, self.window.windowTitle())
+        self.assertFalse(hasattr(title_bar, "title_label"))
         self.assertFalse(title_bar.icon_label.pixmap().isNull())
         self.assertEqual("最小化", title_bar.minimize_button.accessibleName())
         self.assertEqual("最大化", title_bar.maximize_button.accessibleName())
@@ -342,6 +345,24 @@ class GuiSimulationSmokeTests(unittest.TestCase):
 
         self.assertEqual(expected_command_ids, set(self.window._menu_actions))
         self.assertIn("view.shortcuts", self.window._menu_actions)
+        self.assertIn("help.about", self.window._menu_actions)
+        menus = {
+            menu.title(): menu
+            for menu in self.window.application_menu_bar._buttons
+        }
+        self.assertIn("帮助", menus)
+        self.assertNotIn(
+            "快捷键设置…",
+            [action.text() for action in menus["视图"].actions()],
+        )
+        self.assertEqual(
+            ["快捷键设置…", "关于 机器人工作流控制台"],
+            [
+                action.text()
+                for action in menus["帮助"].actions()
+                if not action.isSeparator()
+            ],
+        )
         for command_id, action in self.window._menu_actions.items():
             with self.subTest(command=command_id):
                 self.assertFalse(action.shortcut().isEmpty())
@@ -736,7 +757,8 @@ class StartupProgressCardTests(unittest.TestCase):
         self.assertIsNotNone(logo)
         assert logo is not None
         self.assertFalse(logo.isNull())
-        self.assertEqual("机器人动作编排器 Logo", card.logo_label.accessibleName())
+        self.assertEqual(f"{APPLICATION_NAME} Logo", card.logo_label.accessibleName())
+        self.assertEqual(APPLICATION_NAME, card.title_label.text())
         card.close()
 
     def test_progress_updates_keep_normal_card_height_stable(self) -> None:
