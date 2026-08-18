@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QShowEvent
 from PySide6.QtWidgets import (
@@ -18,6 +20,13 @@ from PySide6.QtWidgets import (
 
 from ..theme import ThemeMode, application_icon_for_mode
 from ..branding import APPLICATION_NAME
+from ..application_lifecycle import (
+    GuiPresentationStatus,
+    gui_presentation_status,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class StartupProgressCard(QWidget):
@@ -194,6 +203,15 @@ class StartupProgressCard(QWidget):
             else ThemeMode.LIGHT
         )
         return application_icon_for_mode(mode)
+
+    def show_if_available(self) -> GuiPresentationStatus:
+        """Present the card only while the GUI still owns a usable screen."""
+        presentation = gui_presentation_status(self)
+        if not presentation.allowed:
+            logger.error("启动进度卡片未显示: %s", presentation.reason)
+            return presentation
+        super().show()
+        return presentation
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)

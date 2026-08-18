@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
+from .application_lifecycle import gui_presentation_status
+
 
 TOOLTIP_SERVICE_OBJECT_NAME = "unifiedToolTipService"
 TOOLTIP_BUBBLE_OBJECT_NAME = "unifiedToolTipBubble"
@@ -143,6 +145,9 @@ class ToolTipService(QObject):
         owner: QWidget | None = None,
     ) -> None:
         if self._is_closed:
+            return
+        if not gui_presentation_status(owner).allowed:
+            self.hide()
             return
         normalized_text = text.strip()
         if not normalized_text:

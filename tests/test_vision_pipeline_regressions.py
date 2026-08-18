@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from src.configuration.settings import VisionSettings
+from src.configuration.settings import CameraProfile, CameraRole, VisionSettings
 from src.devices import DepthCameraFrame, DepthCameraSource, RobotSystem
 from src.vision.pipelines.capture import execute_vision_capture
 from src.vision.pipelines.grasp import VisionCaptureAction
@@ -65,7 +65,32 @@ class VisionPipelineRegressionTests(unittest.TestCase):
         action = VisionCaptureAction(
             robot_system=cast(RobotSystem, object()),
             camera=cast(DepthCameraSource, camera),
-            settings=VisionSettings(vision_camera_name="fixture-camera"),
+            settings=VisionSettings(
+                cameras=(
+                    CameraProfile(
+                        name="fixture-camera",
+                        provider="realsense",
+                        device_id="fixture-serial",
+                        roles=(
+                            CameraRole.VISION_CAPTURE.value,
+                            CameraRole.ROBOT_GRASP.value,
+                        ),
+                        capture_rotation_matrix=(
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0,
+                        ),
+                        capture_translation_vector=(0.0, 0.0, 0.0),
+                        capture_gripper_offset=(0.0, 0.0, 0.0),
+                    ),
+                )
+            ),
         )
 
         color, depth, intrinsics = action._fetch_frames()
@@ -77,6 +102,43 @@ class VisionPipelineRegressionTests(unittest.TestCase):
             {"fx": 400.0, "fy": 410.0, "ppx": 8.0, "ppy": 6.0},
             intrinsics,
         )
+
+    def test_capture_action_selects_camera_for_target_arm(self) -> None:
+        camera = _DepthCamera(_depth_frame())
+        settings = VisionSettings(
+            cameras=(
+                CameraProfile(
+                    name="left-camera",
+                    provider="realsense",
+                    device_id="left-serial",
+                    roles=(CameraRole.ROBOT_GRASP.value,),
+                    arms=("left",),
+                    capture_rotation_matrix=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+                    capture_translation_vector=(0.0, 0.0, 0.0),
+                    capture_gripper_offset=(0.0, 0.0, 0.0),
+                ),
+                CameraProfile(
+                    name="right-camera",
+                    provider="realsense",
+                    device_id="right-serial",
+                    roles=(CameraRole.ROBOT_GRASP.value,),
+                    arms=("right",),
+                    capture_rotation_matrix=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+                    capture_translation_vector=(0.0, 0.0, 0.0),
+                    capture_gripper_offset=(0.0, 0.0, 0.0),
+                ),
+            )
+        )
+        action = VisionCaptureAction(
+            robot_system=cast(RobotSystem, object()),
+            camera=cast(DepthCameraSource, camera),
+            settings=settings,
+            target_robot="robot2",
+        )
+
+        action._fetch_frames()
+
+        self.assertEqual("right-camera", camera.requested_camera_name)
 
     def test_capture_parses_false_string_without_enabling_debug_images(self) -> None:
         received: dict[str, object] = {}

@@ -9,7 +9,6 @@ from uuid import uuid4
 from PySide6.QtCore import QObject, QSize, Qt, QThread, QTimer, Signal, Slot
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -34,6 +33,7 @@ from ...domain.action_schema import (
     get_action_schema,
     validate_action_parameters,
 )
+from ...domain.arm_names import normalize_arm_name
 from ...domain.models import ActionDefinition, ActionType
 from ..app_dialogs import (
     AppDialog,
@@ -41,6 +41,7 @@ from ..app_dialogs import (
     create_dialog_button_box,
     show_warning,
 )
+from ..application_lifecycle import register_gui_background_thread
 from ..icons import IconName
 from ..theme import set_theme_role
 from ..toolbars import IconToolButton
@@ -135,7 +136,19 @@ class ActionPreviewDialog(AppDialog):
 
 LocalizationReader = Callable[..., dict[str, Any] | None]
 StationChoicesReader = Callable[[str | None], list[tuple[str, str]]]
+CameraChoicesReader = Callable[[str | None], list[tuple[str, str]]]
 PoseReader = Callable[[str], Sequence[float] | None]
+
+
+_DYNAMIC_SELECT_PLACEHOLDERS = {
+    "vision_stations": "请选择示教工位",
+    "cameras": "跟随所选机械臂默认相机",
+}
+
+
+def _arm_display_name(arm: str) -> str:
+    normalized = normalize_arm_name(arm)
+    return {"left": "左臂", "right": "右臂"}.get(normalized, arm)
 
 
 class FormFieldLabel(QWidget):
@@ -188,7 +201,8 @@ class PoseReadWorker(QObject):
             pose = self._reader(self._arm)
             if pose is None:
                 raise RuntimeError(
-                    f"{self._arm}臂当前位姿不可用，请确认设备已连接并完成初始化"
+                    f"{_arm_display_name(self._arm)}当前位姿不可用，"
+                    "请确认设备已连接并完成初始化"
                 )
             values = _validated_pose_values(pose)
         except Exception as exc:
@@ -209,11 +223,13 @@ class PoseEditor(QWidget):
         arm: str = "左",
         pose_reader: PoseReader | None = None,
         placeholder: str = "",
+        field_label: str = "位姿",
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("poseEditor")
         self._arm = arm
+        self._field_label = field_label
         self._pose_reader = pose_reader
         self._read_thread: QThread | None = None
         self._read_worker: PoseReadWorker | None = None
@@ -224,7 +240,9 @@ class PoseEditor(QWidget):
         self.input = QLineEdit(self)
         self.input.setObjectName("poseInput")
         self.input.setPlaceholderText(placeholder)
-        if current is not None:
+        if isinstance(current, str):
+            self.input.setText(current)
+        elif current is not None:
             self.input.setText(json.dumps(current, ensure_ascii=False))
         layout.addWidget(self.input, 1)
 
@@ -254,12 +272,13 @@ class PoseEditor(QWidget):
         if self.input.text().strip():
             should_replace = ask_confirmation(
                 self,
-                "替换点位",
-                f"是否使用{arm}臂当前位姿替换已有点位？",
+                f"替换{self._field_label}",
+                f"是否使用{_arm_display_name(arm)}当前位姿"
+                f"替换已有{self._field_label}？",
             )
             if not should_replace:
                 return
-        thread = QThread(QApplication.instance())
+        thread = QThread()
         thread.setObjectName(f"PoseReadThread-{arm}")
         worker = PoseReadWorker(self._pose_reader, arm)
         worker.moveToThread(thread)
@@ -272,8 +291,24 @@ class PoseEditor(QWidget):
         thread.finished.connect(thread.deleteLater)
         self._read_thread = thread
         self._read_worker = worker
+        if not register_gui_background_thread(
+            thread,
+            f"读取{_arm_display_name(arm)}当前位姿线程",
+        ):
+            self._read_thread = None
+            self._read_worker = None
+            worker.deleteLater()
+            thread.deleteLater()
+            show_warning(
+                self,
+                "读取机械臂位姿",
+                "GUI 正在关闭或图形会话不可用，无法开始读取当前位姿",
+            )
+            return
         self.read_button.setEnabled(False)
-        self.read_button.setToolTip(f"正在读取{arm}臂当前位姿…")
+        self.read_button.setToolTip(
+            f"正在读取{_arm_display_name(arm)}当前位姿…"
+        )
         self.read_button.setAccessibleName(self.read_button.toolTip())
         thread.start()
 
@@ -297,7 +332,7 @@ class PoseEditor(QWidget):
         self._update_button_description()
 
     def _update_button_description(self) -> None:
-        description = f"读取{self._arm}臂当前位姿"
+        description = f"读取{_arm_display_name(self._arm)}当前位姿"
         self.read_button.setToolTip(description)
         self.read_button.setAccessibleName(description)
 
@@ -628,6 +663,7 @@ class SchemaActionForm(QWidget):
         pose_reader: PoseReader | None = None,
         localization_reader: LocalizationReader | None = None,
         station_choices_reader: StationChoicesReader | None = None,
+        camera_choices_reader: CameraChoicesReader | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -639,6 +675,7 @@ class SchemaActionForm(QWidget):
         self._pose_reader = pose_reader
         self._localization_reader = localization_reader
         self._station_choices_reader = station_choices_reader
+        self._camera_choices_reader = camera_choices_reader
         self._locked_variant = initial_variant
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
@@ -781,33 +818,60 @@ class SchemaActionForm(QWidget):
             self._field_widgets[field_name] = widget
             self._field_schemas[field_name] = field_schema
             self._connect_validation_reset(widget)
+        self._bind_current_pose_sources()
+        self._bind_dynamic_select_sources()
+
         arm_widget = self._field_widgets.get("臂")
-        pose_widget = self._field_widgets.get("点位")
         compensation_widget = self._field_widgets.get("补偿")
-        if isinstance(arm_widget, QComboBox) and isinstance(
-            pose_widget,
-            PoseEditor,
-        ):
-            arm_widget.currentTextChanged.connect(pose_widget.set_arm)
-            pose_widget.set_arm(arm_widget.currentText())
         if isinstance(arm_widget, QComboBox) and isinstance(
             compensation_widget,
             CompensationEditor,
         ):
             arm_widget.currentTextChanged.connect(compensation_widget.set_arm)
             compensation_widget.set_arm(arm_widget.currentText())
-        relocalization_arm = self._field_widgets.get("arm")
-        station_widget = self._field_widgets.get("station_id")
-        if isinstance(relocalization_arm, QComboBox) and isinstance(
-            station_widget,
-            QComboBox,
-        ):
-            relocalization_arm.currentIndexChanged.connect(
-                lambda _index: self._populate_station_choices(
-                    station_widget,
-                    None,
+
+    def _bind_current_pose_sources(self) -> None:
+        for field_name, widget in self._field_widgets.items():
+            if not isinstance(widget, PoseEditor):
+                continue
+            schema = self._field_schemas[field_name]
+            if "current_pose" not in schema:
+                continue
+            widget.set_arm(self._current_pose_arm(schema))
+            source_field = schema["current_pose"].get("arm_field")
+            source_widget = self._field_widgets.get(source_field or "")
+            if isinstance(source_widget, QComboBox):
+                source_widget.currentIndexChanged.connect(
+                    lambda _index, editor=widget, field_schema=schema: editor.set_arm(
+                        self._current_pose_arm(field_schema)
+                    )
+                )
+
+    def _bind_dynamic_select_sources(self) -> None:
+        for field_name, schema in self._field_schemas.items():
+            source_field = schema.get("options_source_field")
+            target = self._field_widgets[field_name]
+            source = self._field_widgets.get(source_field or "")
+            if not isinstance(target, QComboBox) or not isinstance(source, QComboBox):
+                continue
+            source.currentIndexChanged.connect(
+                lambda _index, combo=target, field_schema=schema: (
+                    self._populate_dynamic_choices(combo, field_schema, None)
                 )
             )
+
+    def _current_pose_arm(self, schema: ActionFieldSchema) -> str:
+        source = schema.get("current_pose", {})
+        source_field = source.get("arm_field")
+        source_widget = self._field_widgets.get(source_field or "")
+        if isinstance(source_widget, QComboBox):
+            selected = source_widget.currentData()
+            if selected not in {None, ""}:
+                return str(selected)
+        configured = self._values.get(source_field or "")
+        if configured not in {None, ""}:
+            return str(configured)
+        return str(source.get("arm", "left"))
 
     def _selected_fields(self) -> dict[str, ActionFieldSchema]:
         variants = self._type_schema.get("variants")
@@ -830,8 +894,8 @@ class SchemaActionForm(QWidget):
         field_type = schema["type"]
         if field_type == "select":
             widget = QComboBox()
-            if schema.get("options_source") == "vision_stations":
-                self._populate_station_choices(widget, value)
+            if schema.get("options_source"):
+                self._populate_dynamic_choices(widget, schema, value)
             else:
                 for option in schema.get("options", []):
                     option_value = option.get("value") if isinstance(option, dict) else option
@@ -860,14 +924,13 @@ class SchemaActionForm(QWidget):
                 localization_reader=self._localization_reader,
                 station_choices_reader=self._station_choices_reader,
             )
-        elif field_type == "pose":
-            arm_widget = self._field_widgets.get("臂")
-            arm = arm_widget.currentText() if isinstance(arm_widget, QComboBox) else "左"
+        elif field_type == "pose" or "current_pose" in schema:
             widget = PoseEditor(
                 value,
-                arm=arm,
+                arm=self._current_pose_arm(schema),
                 pose_reader=self._pose_reader,
                 placeholder=schema.get("placeholder", ""),
+                field_label=schema.get("label", "位姿"),
             )
         else:
             widget = QLineEdit()
@@ -880,36 +943,80 @@ class SchemaActionForm(QWidget):
         widget.setEnabled(not schema.get("readonly", False))
         return widget
 
-    def _populate_station_choices(
+    def _populate_dynamic_choices(
         self,
         widget: QComboBox,
-        selected_station_id: object,
+        schema: ActionFieldSchema,
+        selected_value: object,
     ) -> None:
-        arm_widget = self._field_widgets.get("arm")
-        arm = "left"
-        if isinstance(arm_widget, QComboBox):
-            arm_data = arm_widget.currentData()
-            if isinstance(arm_data, str) and arm_data:
-                arm = arm_data
-        choices = (
-            self._station_choices_reader(arm)
-            if self._station_choices_reader is not None
-            else []
-        )
-        selected = str(selected_station_id or "").strip()
+        placeholder, choices = self._dynamic_select_choices(schema)
+        selected = str(selected_value or "").strip()
         widget.blockSignals(True)
         try:
             widget.clear()
-            widget.addItem("请选择示教工位", "")
-            for station_id, label in choices:
-                widget.addItem(label, station_id)
+            widget.addItem(placeholder, "")
+            for option_value, label in choices:
+                widget.addItem(label, option_value)
             selected_index = widget.findData(selected)
-            if selected and selected_index < 0:
+            preserve_unknown = (
+                schema.get("options_source") != "cameras"
+                or self._camera_choices_reader is None
+            )
+            if selected and selected_index < 0 and preserve_unknown:
                 widget.addItem(f"{selected}（当前配置）", selected)
                 selected_index = widget.count() - 1
             widget.setCurrentIndex(max(0, selected_index))
         finally:
             widget.blockSignals(False)
+
+    def _dynamic_select_choices(
+        self,
+        schema: ActionFieldSchema,
+    ) -> tuple[str, list[tuple[str, str]]]:
+        source = schema.get("options_source", "")
+        readers: dict[
+            str,
+            Callable[[ActionFieldSchema], list[tuple[str, str]]],
+        ] = {
+            "vision_stations": self._read_station_choices,
+            "cameras": self._read_camera_choices,
+        }
+        try:
+            reader = readers[source]
+            placeholder = _DYNAMIC_SELECT_PLACEHOLDERS[source]
+        except KeyError as exc:
+            raise ValueError(f"unknown action select options source: {source}") from exc
+        return placeholder, reader(schema)
+
+    def _read_station_choices(
+        self,
+        schema: ActionFieldSchema,
+    ) -> list[tuple[str, str]]:
+        source_field = schema.get("options_source_field", "")
+        arm_widget = self._field_widgets.get(source_field)
+        arm = "left"
+        if isinstance(arm_widget, QComboBox):
+            arm_data = arm_widget.currentData()
+            if isinstance(arm_data, str) and arm_data:
+                arm = arm_data
+        if self._station_choices_reader is None:
+            return []
+        return self._station_choices_reader(arm)
+
+    def _read_camera_choices(
+        self,
+        schema: ActionFieldSchema,
+    ) -> list[tuple[str, str]]:
+        if self._camera_choices_reader is None:
+            return []
+        source_field = schema.get("options_source_field", "")
+        arm_widget = self._field_widgets.get(source_field)
+        arm: str | None = None
+        if isinstance(arm_widget, QComboBox):
+            arm_data = arm_widget.currentData()
+            if isinstance(arm_data, str) and arm_data:
+                arm = arm_data
+        return self._camera_choices_reader(arm)
 
     @staticmethod
     def _widget_value(widget: FieldWidget, schema: ActionFieldSchema) -> Any:
@@ -918,17 +1025,29 @@ class SchemaActionForm(QWidget):
         if isinstance(widget, PoseEditor):
             text = widget.text().strip()
             if not text:
-                return []
+                if schema["type"] == "pose":
+                    return [] if schema.get("required") else None
+                return "" if schema.get("required") else None
             try:
                 value = json.loads(text)
             except json.JSONDecodeError as exc:
-                raise ValueError("点位必须是合法 JSON 数组") from exc
+                raise ValueError(
+                    f"{schema.get('label', '位姿')}必须是合法 JSON 数组"
+                ) from exc
             try:
-                return _validated_pose_values(value)
+                pose = _validated_pose_values(value)
             except (TypeError, ValueError) as exc:
-                raise ValueError("点位必须包含 6 个有效数值") from exc
+                raise ValueError(
+                    f"{schema.get('label', '位姿')}必须包含 6 个有效数值"
+                ) from exc
+            if schema["type"] == "pose":
+                return pose
+            return json.dumps(pose, ensure_ascii=False)
         if isinstance(widget, QComboBox):
-            return widget.currentData()
+            value = widget.currentData()
+            if value in {None, ""} and not schema.get("required") and "default" not in schema:
+                return None
+            return value
         if isinstance(widget, QCheckBox):
             return widget.isChecked()
         if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
@@ -1004,6 +1123,7 @@ class ActionConfigDialog(AppDialog):
         pose_reader: PoseReader | None = None,
         localization_reader: LocalizationReader | None = None,
         station_choices_reader: StationChoicesReader | None = None,
+        camera_choices_reader: CameraChoicesReader | None = None,
     ) -> None:
         super().__init__(parent)
         self.action_type = action_type
@@ -1035,6 +1155,7 @@ class ActionConfigDialog(AppDialog):
             pose_reader=pose_reader,
             localization_reader=localization_reader,
             station_choices_reader=station_choices_reader,
+            camera_choices_reader=camera_choices_reader,
         )
         layout.addWidget(self.action_form)
         self.action_form.content_size_changed.connect(

@@ -17,11 +17,15 @@ class TcpMobileBaseClient:
         port: int,
         bind_port: int | None = None,
         *,
+        timeout_seconds: float = 5.0,
         receive_size: int = 4096,
     ) -> None:
+        if timeout_seconds <= 0:
+            raise ValueError("mobile-base TCP timeout must be positive")
         self._host = host
         self._port = port
         self._bind_port = bind_port
+        self._timeout_seconds = timeout_seconds
         self._receive_size = receive_size
         self._socket: socket.socket | None = None
         self._receive_buffer = ""
@@ -35,6 +39,7 @@ class TcpMobileBaseClient:
             return
         connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         connection.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        connection.settimeout(self._timeout_seconds)
         try:
             if self._bind_port is not None:
                 connection.bind(("", self._bind_port))

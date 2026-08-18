@@ -8,8 +8,8 @@ from src.application.balance import (
     ManagedBalanceCameraCapture,
     register_balance_reader,
 )
-from src.configuration.settings import VisionSettings
-from src.devices import BalanceReader, DeviceRuntime
+from src.configuration.settings import CameraProfile, CameraRole, VisionSettings
+from src.devices import BalanceReader, DeviceOperationError, DeviceRuntime
 from src.devices.runtime.ids import BALANCE
 from src.devices.sensors.balance import VisionBalanceReader
 from src.llm import LLMChatResult
@@ -91,6 +91,15 @@ class BalanceReaderTests(unittest.TestCase):
         self.assertEqual("balance-reading", access.purpose)
         self.assertTrue(access.released)
 
+    def test_managed_capture_requires_an_explicit_camera_identity(self) -> None:
+        access = _CameraAccess(_Camera([]))
+
+        with self.assertRaisesRegex(ValueError, "camera name must not be empty"):
+            ManagedBalanceCameraCapture(
+                access,  # type: ignore[arg-type]
+                camera_name=" ",
+            )
+
     def test_llm_recognizer_uses_balance_profile_and_jpeg_content(self) -> None:
         llm = _LLMRegistry()
         recognizer = LLMBalanceDisplayRecognizer(llm)  # type: ignore[arg-type]
@@ -114,6 +123,31 @@ class BalanceReaderTests(unittest.TestCase):
         reader = runtime.require(BALANCE, BalanceReader)
 
         self.assertEqual(0.0, reader.read_weight().weight_g)
+
+    def test_hardware_balance_reader_requires_a_balance_camera_role(self) -> None:
+        runtime = DeviceRuntime()
+        settings = VisionSettings(
+            cameras=(
+                CameraProfile(
+                    name="overview",
+                    provider="realsense",
+                    device_id="serial-overview",
+                    roles=(CameraRole.VISION_CAPTURE.value,),
+                ),
+            )
+        )
+        register_balance_reader(
+            runtime,
+            camera_access=_CameraAccess(_Camera([])),  # type: ignore[arg-type]
+            llm=_LLMRegistry(),  # type: ignore[arg-type]
+            settings=settings,
+            simulation=False,
+        )
+
+        with self.assertRaises(DeviceOperationError) as raised:
+            runtime.require(BALANCE, BalanceReader)
+
+        self.assertIn("role 'balance'", raised.exception.diagnostic_message)
 
 
 if __name__ == "__main__":

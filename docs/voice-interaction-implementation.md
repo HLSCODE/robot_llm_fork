@@ -375,7 +375,9 @@ def camera_capture_session():
 
 camera_provider = CamerasModuleProvider(
     session_factory=camera_capture_session,
-    camera_name=application_services.settings.vision.vision_camera_name or None,
+    camera_name=application_services.settings.vision.camera_name_for_role(
+        CameraRole.VISION_CAPTURE
+    ) or None,
 )
 ```
 
@@ -383,8 +385,8 @@ camera_provider = CamerasModuleProvider(
 取得独占 `CameraSession`。provider 在抓帧成功、失败或超时后都会退出上下文并
 释放租约，不直接创建、初始化或关闭底层相机。它调用 `get_latest_jpegs()` 转成
 `LLMContentPart(type="image")`。如果
-`VISION_CAMERA_NAME` 为空，则使用所有在线相机；如果配置了名称或序列号，
-则只使用对应相机。
+未给任何相机配置 `vision_capture` role 时使用所有在线相机；配置后只使用该
+role 的第一个相机。相机身份来自 `[[vision.cameras]]`。
 
 当相机未连接、未启动或没有最新帧时，不应把设备状态列表直接反馈给用户。适配器抛出 `CameraCaptureError`，其中 `user_message` 是适合语音播报的自然提示，`technical_detail` 只用于日志和调试数据。需要根据技术细节进一步润色时，路由层可使用 `VOICE_FEEDBACK_PROFILE` 生成一句更拟人化的反馈。
 
@@ -550,8 +552,6 @@ GUI 行为：
 
 ```env
 LLM_DEFAULT_PROVIDER=minicpm
-CAMERA_PROVIDER=realsense
-VISION_CAMERA_NAME=monitor1
 VOICE_SESSION_TIMEOUT_S=30
 VOICE_SPEECH_STARTUP_WAIT_TIMEOUT_S=30
 VOICE_TTS_ENABLED=false
@@ -567,8 +567,9 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 含义：
 
 - `LLM_DEFAULT_PROVIDER`：未登记的自定义 profile 的兜底 provider；固定 task 使用 `[model_routing.<task>]`，单次调用仍可显式覆盖推理 provider。
-- `CAMERA_PROVIDER`：视觉问答使用的相机来源，复用 `src/devices/cameras/` 支持的 `realsense` / `opencv`。
-- `VISION_CAMERA_NAME`：视觉问答默认使用的相机名称或序列号；为空时使用所有在线相机。
+- 视觉问答相机不再使用独立环境变量；在 `config/config.toml` 的
+  `[[vision.cameras]]` 中配置 `provider`/`device_id`，并为默认相机声明
+  `roles = ["vision_capture"]`。相机逻辑名、用途和标定共用同一 profile。
 - `VOICE_SESSION_TIMEOUT_S`：唤醒后无交互多久自动休眠。
 - `VOICE_TTS_ENABLED`：是否请求语音回复；实际采用原生语音还是“文字 + TTS”由 task 的 `output_mode` 决定，`classifier/planner` 等文本 task 不受影响。
 - `VOICE_INPUT_ENABLED`：是否启用真实语音输入；true 时同时启用唤醒词和 ASR，false 时二者都不加载。
@@ -587,8 +588,14 @@ speech_provider = "minicpm"
 speech_fallback_providers = []
 
 [vision]
-camera_provider = "realsense"
-vision_camera_name = "monitor1"
+
+[[vision.cameras]]
+name = "monitor1"
+label = "语音视觉相机"
+provider = "realsense"
+device_id = "153122077516"
+roles = ["vision_capture"]
+arms = []
 
 [voice]
 voice_session_timeout_s = 30.0

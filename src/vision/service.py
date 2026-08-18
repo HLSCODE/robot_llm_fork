@@ -6,7 +6,7 @@ from types import MappingProxyType
 from typing import Protocol
 
 from ..domain.execution_context import ExecutionContext
-from ..configuration.settings import VisionSettings
+from ..configuration.settings import CameraRole, VisionSettings
 from ..persistence.vision_station_storage import VisionStationStorage
 from ..devices import (
     CameraSource,
@@ -95,6 +95,15 @@ class VisionService:
     def list_station_choices(self, arm: str | None = None) -> list[tuple[str, str]]:
         """Return configured relocalization stations for one arm."""
         return self._station_storage.list_station_choices(arm)
+
+    def list_camera_choices(
+        self,
+        role: CameraRole | None = None,
+        *,
+        arm: str | None = None,
+    ) -> list[tuple[str, str]]:
+        """Return configured logical cameras without touching hardware."""
+        return list(self._settings.camera_choices(role, arm=arm))
 
     def capture(
         self,

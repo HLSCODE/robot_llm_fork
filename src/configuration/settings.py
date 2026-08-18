@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field, fields
+from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypedDict, TypeVar, cast
@@ -43,6 +44,12 @@ class PWMNeckConfig(TypedDict):
     baudrate: int
     horizontal: PWMServoConfig
     vertical: PWMServoConfig
+
+
+class CaptureCalibrationConfig(TypedDict):
+    rotation_matrix: list[list[float]]
+    translation_vector: list[float]
+    gripper_offset: list[float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +264,7 @@ class RobotSettings:
     move_controller_host: str = "192.168.1.216"
     move_controller_port: int = 12345
     move_controller_client_bind_port: int | None = None
+    move_controller_timeout_seconds: float = 5.0
     move_velocity: int = 10
     move_radius: int = 0
     move_connect: int = 0
@@ -272,11 +280,16 @@ class RobotSettings:
     tianji_acceleration_percent: int = 50
     tianji_linear_acceleration_m_s2: float = 0.5
 
+    def __post_init__(self) -> None:
+        if self.move_controller_timeout_seconds <= 0:
+            raise ValueError("move_controller_timeout_seconds must be positive")
+
     def move_controller_config(self) -> dict[str, object]:
         return {
             "host": self.move_controller_host,
             "port": self.move_controller_port,
             "client_bind_port": self.move_controller_client_bind_port,
+            "timeout_seconds": self.move_controller_timeout_seconds,
         }
 
 
@@ -454,11 +467,143 @@ class DeviceSettings:
         }
 
 
+class CameraRole(str, Enum):
+    """Stable use-case roles assigned to configured camera profiles."""
+
+    VISION_CAPTURE = "vision_capture"
+    ROBOT_GRASP = "robot_grasp"
+    BALANCE = "balance"
+    RELOCALIZATION = "relocalization"
+
+
+@dataclass(frozen=True, slots=True)
+class CameraProfile:
+    """One logical camera and its optional capture/relocalization calibration."""
+
+    name: str
+    provider: str
+    device_id: str
+    label: str = ""
+    roles: tuple[str, ...] = ()
+    arms: tuple[str, ...] = ()
+    capture_rotation_matrix: tuple[float, ...] = ()
+    capture_translation_vector: tuple[float, ...] = ()
+    capture_gripper_offset: tuple[float, ...] = ()
+    camera_matrix: tuple[float, ...] = ()
+    camera_matrix_resolution: tuple[float, ...] = ()
+    distortion_coefficients: tuple[float, ...] = ()
+    end_effector_to_camera: tuple[tuple[float, ...], ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("camera profile name must not be empty")
+        if not self.provider.strip():
+            raise ValueError(f"camera profile '{self.name}' provider must not be empty")
+        if not self.device_id.strip():
+            raise ValueError(f"camera profile '{self.name}' device_id must not be empty")
+
+        known_roles = {role.value for role in CameraRole}
+        unknown_roles = set(self.roles) - known_roles
+        if unknown_roles:
+            rendered = ", ".join(sorted(unknown_roles))
+            raise ValueError(f"camera profile '{self.name}' has unknown roles: {rendered}")
+
+        if (
+            self.provider.strip().lower() == "opencv"
+            and CameraRole.ROBOT_GRASP.value in self.roles
+        ):
+            raise ValueError(
+                f"camera profile '{self.name}' uses OpenCV, which does not "
+                "provide the depth frames required by the robot_grasp role"
+            )
+
+        normalized_arms = {arm.strip().lower() for arm in self.arms}
+        unknown_arms = normalized_arms - {"left", "right"}
+        if unknown_arms:
+            rendered = ", ".join(sorted(unknown_arms))
+            raise ValueError(f"camera profile '{self.name}' has unknown arms: {rendered}")
+        if len(self.camera_matrix) not in {0, 9}:
+            raise ValueError(
+                f"camera profile '{self.name}' camera_matrix must contain 9 values"
+            )
+        if len(self.capture_rotation_matrix) not in {0, 9}:
+            raise ValueError(
+                f"camera profile '{self.name}' capture_rotation_matrix "
+                "must contain 9 values"
+            )
+        if len(self.capture_translation_vector) not in {0, 3}:
+            raise ValueError(
+                f"camera profile '{self.name}' capture_translation_vector "
+                "must contain 3 values"
+            )
+        if len(self.capture_gripper_offset) not in {0, 3}:
+            raise ValueError(
+                f"camera profile '{self.name}' capture_gripper_offset "
+                "must contain 3 values"
+            )
+        if len(self.camera_matrix_resolution) not in {0, 2}:
+            raise ValueError(
+                f"camera profile '{self.name}' camera_matrix_resolution "
+                "must contain width and height"
+            )
+        if self.end_effector_to_camera and (
+            len(self.end_effector_to_camera) != 4
+            or any(len(row) != 4 for row in self.end_effector_to_camera)
+        ):
+            raise ValueError(
+                f"camera profile '{self.name}' end_effector_to_camera "
+                "must be a 4x4 matrix"
+            )
+        if CameraRole.ROBOT_GRASP.value in self.roles:
+            missing_capture_fields = [
+                field_name
+                for field_name, value in (
+                    ("capture_rotation_matrix", self.capture_rotation_matrix),
+                    ("capture_translation_vector", self.capture_translation_vector),
+                    ("capture_gripper_offset", self.capture_gripper_offset),
+                )
+                if not value
+            ]
+            if missing_capture_fields:
+                rendered = ", ".join(missing_capture_fields)
+                raise ValueError(
+                    f"camera profile '{self.name}' robot_grasp role requires: "
+                    f"{rendered}"
+                )
+        if CameraRole.RELOCALIZATION.value in self.roles:
+            missing_relocalization_fields = [
+                field_name
+                for field_name, value in (
+                    ("camera_matrix", self.camera_matrix),
+                    ("end_effector_to_camera", self.end_effector_to_camera),
+                )
+                if not value
+            ]
+            if missing_relocalization_fields:
+                rendered = ", ".join(missing_relocalization_fields)
+                raise ValueError(
+                    f"camera profile '{self.name}' relocalization role requires: "
+                    f"{rendered}"
+                )
+
+    @property
+    def display_label(self) -> str:
+        return self.label.strip() or self.name.strip()
+
+    def supports(self, role: CameraRole, arm: str | None = None) -> bool:
+        if role.value not in self.roles:
+            return False
+        normalized_arm = _normalize_camera_arm(arm)
+        if normalized_arm is None or not self.arms:
+            return True
+        return normalized_arm in {
+            configured_arm.strip().lower() for configured_arm in self.arms
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class VisionSettings:
-    camera_provider: str = "realsense"
-    realsense_device_sn: str = ""
-    realsense_device_names: str = ""
+    cameras: tuple[CameraProfile, ...] = ()
     realsense_color_width: int = 640
     realsense_color_height: int = 480
     realsense_depth_width: int = 640
@@ -467,8 +612,6 @@ class VisionSettings:
     realsense_jpeg_quality: int = 85
     realsense_align_depth_to_color: bool = True
     camera_encode_fps: int = 5
-    webcam_device_indexes: str = "0"
-    webcam_device_names: str = ""
     webcam_width: int = 640
     webcam_height: int = 480
     webcam_fps: int = 30
@@ -483,50 +626,21 @@ class VisionSettings:
     vision_debug_save_dir: str = "pictures"
     vision_debug_retention_days: int = 7
     vision_debug_max_runs: int = 100
-    balance_camera_name: str = ""
     balance_camera_wait_timeout_seconds: float = 2.0
-    vision_rotation_matrix: tuple[float, ...] = (
-        0.00215684,
-        0.97503835,
-        0.22202606,
-        -0.99995231,
-        -0.0000119,
-        0.00976617,
-        0.00952503,
-        -0.22203654,
-        0.97499182,
-    )
-    vision_translation_vector: tuple[float, ...] = (
-        -0.10273135,
-        0.03312807,
-        -0.07214614,
-    )
-    vision_gripper_offset: tuple[float, ...] = (3.146, 0.0, 3.128)
     vision_default_confidence: float = 0.7
     vision_default_velocity: int = 15
     vision_default_gripper_length: float = 150.0
     vision_default_workflow: str = "bottle"
-    vision_camera_name: str = ""
     vision_prep_offset_x: float = -0.07
     vision_grasp_z: float = -0.24
     vision_bottle_target_offset_x: float = -0.025
     vision_bottle_target_offset_y: float = 0.015
     vision_gmm_components: int = 1
     vision_relocalization_stations_file: str = "data/vision_stations/profiles.json"
-    vision_relocalization_left_camera_name: str = ""
-    vision_relocalization_right_camera_name: str = ""
-    vision_relocalization_left_camera_matrix: tuple[float, ...] = ()
-    vision_relocalization_right_camera_matrix: tuple[float, ...] = ()
-    vision_relocalization_left_camera_matrix_resolution: tuple[float, ...] = ()
-    vision_relocalization_right_camera_matrix_resolution: tuple[float, ...] = ()
-    vision_relocalization_left_dist_coeffs: tuple[float, ...] = ()
-    vision_relocalization_right_dist_coeffs: tuple[float, ...] = ()
     vision_relocalization_default_marker_width: float = 0.158
     vision_relocalization_default_marker_height: float = 0.158
     vision_relocalization_pose_rotation_type: str = "rpy"
     vision_relocalization_pose_angle_unit: str = "rad"
-    vision_relocalization_left_t_e_c: tuple[tuple[float, ...], ...] = ()
-    vision_relocalization_right_t_e_c: tuple[tuple[float, ...], ...] = ()
     vision_relocalization_mode: str = "planar"
     vision_relocalization_planar_constraint: str = "none"
     vision_relocalization_save_debug_images: bool = True
@@ -560,56 +674,199 @@ class VisionSettings:
     )
     max_attempts: int = 5
 
-    def calibration_config(self) -> dict[str, list[float] | list[list[float]]]:
+    def __post_init__(self) -> None:
+        names: set[str] = set()
+        devices: set[tuple[str, str]] = set()
+        providers: set[str] = set()
+        for profile in self.cameras:
+            normalized_name = profile.name.strip().casefold()
+            if normalized_name in names:
+                raise ValueError(f"duplicate camera profile name: {profile.name}")
+            names.add(normalized_name)
+
+            provider = profile.provider.strip().lower()
+            providers.add(provider)
+            device = (provider, profile.device_id.strip().casefold())
+            if device in devices:
+                raise ValueError(
+                    "duplicate camera device_id for provider "
+                    f"'{provider}': {profile.device_id}"
+                )
+            devices.add(device)
+        if len(providers) > 1:
+            rendered = ", ".join(sorted(providers))
+            raise ValueError(
+                "the current camera runtime requires one provider per deployment; "
+                f"configured providers: {rendered}"
+            )
+
+    def camera_provider_name(self) -> str:
+        """Return the provider shared by all configured camera profiles."""
+        if not self.cameras:
+            raise ValueError("camera catalog must contain at least one profile")
+        return self.cameras[0].provider.strip().lower()
+
+    def camera_profiles_for_provider(
+        self,
+        provider: str,
+    ) -> tuple[CameraProfile, ...]:
+        normalized = provider.strip().lower()
+        return tuple(
+            profile
+            for profile in self.cameras
+            if profile.provider.strip().lower() == normalized
+        )
+
+    def camera_profile(self, name: str) -> CameraProfile | None:
+        normalized = name.strip().casefold()
+        if not normalized:
+            return None
+        for profile in self.cameras:
+            if profile.name.strip().casefold() == normalized:
+                return profile
+        return None
+
+    def camera_for_role(
+        self,
+        role: CameraRole,
+        *,
+        arm: str | None = None,
+    ) -> CameraProfile | None:
+        candidates = tuple(
+            profile for profile in self.cameras if role.value in profile.roles
+        )
+        if not candidates:
+            return None
+        normalized_arm = _normalize_camera_arm(arm)
+        if normalized_arm is not None:
+            for profile in candidates:
+                if normalized_arm in {
+                    configured_arm.strip().lower()
+                    for configured_arm in profile.arms
+                }:
+                    return profile
+            for profile in candidates:
+                if not profile.arms:
+                    return profile
+            return None
+        return candidates[0]
+
+    def require_camera_for_role(
+        self,
+        role: CameraRole,
+        *,
+        arm: str | None = None,
+        camera_name: str = "",
+    ) -> CameraProfile:
+        """Resolve a role assignment without crossing an arm boundary."""
+        if camera_name.strip():
+            camera = self.camera_profile(camera_name)
+            if camera is None:
+                raise ValueError(f"unknown camera profile: {camera_name}")
+            if not camera.supports(role, arm):
+                target = f" for arm '{_normalize_camera_arm(arm)}'" if arm else ""
+                raise ValueError(
+                    f"camera profile '{camera.name}' is not assigned to "
+                    f"role '{role.value}'{target}"
+                )
+            return camera
+
+        camera = self.camera_for_role(role, arm=arm)
+        if camera is None:
+            target = f" for arm '{_normalize_camera_arm(arm)}'" if arm else ""
+            raise ValueError(
+                f"no camera profile is assigned to role '{role.value}'{target}"
+            )
+        return camera
+
+    def camera_name_for_role(
+        self,
+        role: CameraRole,
+        *,
+        arm: str | None = None,
+    ) -> str:
+        profile = self.camera_for_role(role, arm=arm)
+        return profile.name if profile is not None else ""
+
+    def camera_choices(
+        self,
+        role: CameraRole | None = None,
+        *,
+        arm: str | None = None,
+    ) -> tuple[tuple[str, str], ...]:
+        """Return stable ``(name, label)`` choices for presentation layers."""
+        profiles = (
+            self.cameras
+            if role is None
+            else tuple(
+                profile for profile in self.cameras if profile.supports(role, arm)
+            )
+        )
+        return tuple(
+            (profile.name, profile.display_label)
+            for profile in profiles
+        )
+
+    def capture_calibration_config(
+        self,
+        *,
+        arm: str | None = None,
+        camera_name: str = "",
+    ) -> CaptureCalibrationConfig:
+        camera = self.require_camera_for_role(
+            CameraRole.ROBOT_GRASP,
+            arm=arm,
+            camera_name=camera_name,
+        )
         return {
-            "rotation_matrix": _matrix3(self.vision_rotation_matrix),
-            "translation_vector": list(self.vision_translation_vector),
-            "gripper_offset": list(self.vision_gripper_offset),
+            "rotation_matrix": _matrix3(camera.capture_rotation_matrix),
+            "translation_vector": list(camera.capture_translation_vector),
+            "gripper_offset": list(camera.capture_gripper_offset),
         }
 
-    def relocalization_config(self, arm: str | None = None) -> dict[str, object]:
-        arm_text = str(arm or "").strip().lower()
-        is_right = arm_text in {"right", "r", "robot2", "r2", "2", "右", "右臂"}
-        camera_name = (
-            self.vision_relocalization_right_camera_name
-            if is_right
-            else self.vision_relocalization_left_camera_name
+    def relocalization_config(
+        self,
+        arm: str | None = None,
+        *,
+        camera_name: str = "",
+    ) -> dict[str, object]:
+        camera = self.require_camera_for_role(
+            CameraRole.RELOCALIZATION,
+            arm=arm,
+            camera_name=camera_name,
         )
-        camera_values = (
-            self.vision_relocalization_right_camera_matrix
-            if is_right
-            else self.vision_relocalization_left_camera_matrix
-        )
-        camera_resolution = (
-            self.vision_relocalization_right_camera_matrix_resolution
-            if is_right
-            else self.vision_relocalization_left_camera_matrix_resolution
-        )
-        dist_coeffs = (
-            self.vision_relocalization_right_dist_coeffs
-            if is_right
-            else self.vision_relocalization_left_dist_coeffs
-        )
-        transform = (
-            self.vision_relocalization_right_t_e_c
-            if is_right
-            else self.vision_relocalization_left_t_e_c
-        )
+        missing_calibration = [
+            field_name
+            for field_name, value in (
+                ("camera_matrix", camera.camera_matrix),
+                ("end_effector_to_camera", camera.end_effector_to_camera),
+            )
+            if not value
+        ]
+        if missing_calibration:
+            rendered = ", ".join(missing_calibration)
+            raise ValueError(
+                f"camera profile '{camera.name}' relocalization role requires: "
+                f"{rendered}"
+            )
+        camera_resolution = camera.camera_matrix_resolution
         return {
             "stations_file": self.vision_relocalization_stations_file,
-            "camera_name": camera_name,
-            "camera_matrix": _matrix3(camera_values),
+            "camera_name": camera.name,
+            "camera_matrix": _matrix3(camera.camera_matrix),
             "camera_matrix_resolution": (
                 list(camera_resolution) if len(camera_resolution) == 2 else None
             ),
-            "dist_coeffs": list(dist_coeffs or (0, 0, 0, 0, 0)),
+            "dist_coeffs": list(
+                camera.distortion_coefficients or (0, 0, 0, 0, 0)
+            ),
             "marker": {
                 "width": self.vision_relocalization_default_marker_width,
                 "height": self.vision_relocalization_default_marker_height,
             },
             "pose_rotation_type": self.vision_relocalization_pose_rotation_type,
             "pose_angle_unit": self.vision_relocalization_pose_angle_unit,
-            "T_E_C": [list(row) for row in transform],
+            "T_E_C": [list(row) for row in camera.end_effector_to_camera],
             "mode": self.vision_relocalization_mode,
             "planar_constraint": self.vision_relocalization_planar_constraint,
             "save_debug_images": self.vision_relocalization_save_debug_images,
@@ -844,6 +1101,17 @@ def _freeze(value: object) -> object:
     if isinstance(value, dict):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
     return value
+
+
+def _normalize_camera_arm(arm: str | None) -> str | None:
+    normalized = str(arm or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"left", "l", "robot1", "r1", "1", "左", "左臂"}:
+        return "left"
+    if normalized in {"right", "r", "robot2", "r2", "2", "右", "右臂"}:
+        return "right"
+    raise ValueError(f"unknown camera arm: {arm}")
 
 
 def _matrix3(values: tuple[float, ...]) -> list[list[float]]:

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 
 from ..controllers.ai import AIController
 from ...application import ApplicationServices
+from ...configuration.settings import CameraRole
 from ..bridges.execution import ExecutionBridge
 from .dialogs import ActionPreviewDialog
 from ...voice_interaction import (
@@ -246,7 +247,12 @@ class AIAssistantWidget(QWidget):
             source="gui-ai",
             camera_provider=CamerasModuleProvider(
                 session_factory=self._camera_capture_session,
-                camera_name=settings.vision.vision_camera_name or None,
+                camera_name=(
+                    settings.vision.camera_name_for_role(
+                        CameraRole.VISION_CAPTURE
+                    )
+                    or None
+                ),
             ),
             timeout_s=settings.voice.voice_session_timeout_s,
             turn_timeout_s=settings.runtime.interaction_turn_timeout_s,

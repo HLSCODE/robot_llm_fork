@@ -46,7 +46,7 @@ class _QtThreadHandle(Protocol):
 
     def quit(self) -> None: ...
 
-    def wait(self, milliseconds: int) -> bool: ...
+    def wait(self, milliseconds: int = ...) -> bool: ...
 
 
 class _GuiShutdownHandle(Protocol):
@@ -133,9 +133,14 @@ def resolve_startup_options(
 def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     """Run the GUI and optional network services in one process."""
     from PySide6.QtCore import QThread, QTimer, Qt
-    from PySide6.QtWidgets import QApplication
 
     from ..application import create_application_services
+    from ..gui.application_lifecycle import (
+        GUI_STARTUP_FAILURE_EXIT_CODE,
+        GuiStartupError,
+        create_gui_application,
+        install_gui_application_lifecycle,
+    )
     from ..gui.controllers.main_window import MainWindow
     from ..gui.theme import ThemeController, ThemeMode
     from ..gui.workbench_layout import QSettingsWorkbenchLayoutStore
@@ -145,7 +150,12 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     )
     from ..gui.views import StartupProgressCard
 
-    app = QApplication([sys.argv[0]])
+    try:
+        app = create_gui_application([sys.argv[0]])
+    except GuiStartupError as exc:
+        logger.error("GUI 启动环境不可用: %s", exc)
+        return GUI_STARTUP_FAILURE_EXIT_CODE
+    gui_lifecycle = install_gui_application_lifecycle(app)
     app.setStyle("Fusion")
     theme_controller = ThemeController(
         app,
@@ -153,7 +163,11 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     )
     startup_card = StartupProgressCard()
     startup_card.exit_requested.connect(app.quit)
-    startup_card.show()
+    presentation = startup_card.show_if_available()
+    if not presentation.allowed:
+        logger.error("GUI 启动环境不可用: %s", presentation.reason)
+        app.quit()
+        return GUI_STARTUP_FAILURE_EXIT_CODE
     app.processEvents()
 
     services = None
@@ -162,6 +176,7 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
     auxiliary_startup_worker = None
     auxiliary_startup_receiver = None
     window = None
+    reveal_timer: QTimer | None = None
     try:
         startup_card.set_progress(
             8,
@@ -189,23 +204,50 @@ def run_gui(args: argparse.Namespace, settings: ApplicationSettings) -> int:
             settings,
             services,
         )
+        app.processEvents()
+        presentation = gui_lifecycle.presentation_status()
+        if not presentation.allowed:
+            logger.error("GUI 启动环境在服务初始化期间失效: %s", presentation.reason)
+            startup_card.close()
+            app.quit()
+            return GUI_STARTUP_FAILURE_EXIT_CODE
         window = MainWindow(
             services,
             theme_controller,
             layout_store=QSettingsWorkbenchLayoutStore(),
         )
+        app.aboutToQuit.connect(
+            window.prepare_shutdown,
+            Qt.ConnectionType.DirectConnection,
+        )
         window.startup_progress_changed.connect(startup_card.set_progress)
 
         def reveal_main_window(message: str) -> None:
+            nonlocal reveal_timer
             startup_card.set_progress(100, message, "")
 
             def reveal() -> None:
+                nonlocal reveal_timer
+                reveal_timer = None
+                presentation = gui_lifecycle.presentation_status(window)
+                if not presentation.allowed:
+                    logger.info(
+                        "已取消迟到的主窗口显示请求: %s",
+                        presentation.reason,
+                    )
+                    return
                 window.show()
                 window.raise_()
                 window.activateWindow()
                 startup_card.close()
 
-            QTimer.singleShot(180, reveal)
+            if reveal_timer is not None:
+                reveal_timer.stop()
+                reveal_timer.deleteLater()
+            reveal_timer = QTimer(window)
+            reveal_timer.setSingleShot(True)
+            reveal_timer.timeout.connect(reveal)
+            reveal_timer.start(180)
 
         def start_auxiliary_services(success: bool, message: str) -> None:
             nonlocal auxiliary_startup_thread
@@ -314,6 +356,13 @@ def _shutdown_gui_runtime(
         except Exception:
             logger.exception("GUI 后台资源关闭失败")
 
+    try:
+        from ..gui.application_lifecycle import join_gui_background_threads
+
+        join_gui_background_threads()
+    except Exception:
+        logger.exception("GUI 短生命周期后台线程关闭失败")
+
     if auxiliary_host is not None and services is not None:
         _shutdown_application(auxiliary_host, services)
 
@@ -330,7 +379,11 @@ def _stop_auxiliary_startup_thread(thread: _QtThreadHandle | None) -> None:
         return
     thread.quit()
     if not thread.wait(10_000):
-        logger.warning("附加服务启动线程未在 10 秒内退出")
+        logger.warning(
+            "附加服务启动线程未在 10 秒内退出；继续等待资源释放，"
+            "避免在线程运行时销毁 Qt 对象"
+        )
+        thread.wait()
 
 
 def _start_auxiliary_services(host: AuxiliaryServiceHost) -> None:

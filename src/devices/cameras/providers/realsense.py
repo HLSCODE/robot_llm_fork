@@ -13,26 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 def create_realsense_camera(settings: VisionSettings) -> RealSenseManager:
-    serials = [
-        value.strip()
-        for value in settings.realsense_device_sn.split(",")
-        if value.strip()
-    ]
-    if not serials:
+    profiles = settings.camera_profiles_for_provider("realsense")
+    if not profiles:
         raise DeviceInitializationError(
-            "RealSense provider requires REALSENSE_DEVICE_SN"
+            "RealSense provider requires at least one [[vision.cameras]] profile"
         )
-    names = [
-        value.strip()
-        for value in settings.realsense_device_names.split(",")
-        if value.strip()
-    ]
     cameras = [
         {
-            "serial": serial,
-            "name": names[position] if position < len(names) else serial,
+            "serial": profile.device_id,
+            "name": profile.name,
         }
-        for position, serial in enumerate(serials)
+        for profile in profiles
     ]
     automatic_fps = 30 if len(cameras) <= 2 else 15
     fps = settings.realsense_fps or automatic_fps
@@ -49,6 +40,11 @@ def create_realsense_camera(settings: VisionSettings) -> RealSenseManager:
         encode_fps=settings.camera_encode_fps,
     )
     result = manager.start()
+    if int(result["started"]) <= 0:
+        manager.stop()
+        raise DeviceInitializationError(
+            "RealSense camera provider could not start any configured camera"
+        )
     logger.info(
         "RealSense camera provider started: %d online, %d failed",
         result["started"],

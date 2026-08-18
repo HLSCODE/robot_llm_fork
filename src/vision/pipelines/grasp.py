@@ -30,7 +30,7 @@ from numpy.typing import NDArray
 from sklearn.mixture import GaussianMixture
 from ultralytics import SAM, YOLO
 
-from ...configuration.settings import VisionSettings
+from ...configuration.settings import CameraRole, VisionSettings
 from ...devices import (
     ArmId,
     CartesianPose,
@@ -277,12 +277,21 @@ class VisionCaptureAction:
         self.target_robot = target_robot
         self.workflow = workflow
 
-        self.gripper_offset = list(gripper_offset or settings.vision_gripper_offset)
+        calibration = settings.capture_calibration_config(arm=self.arm.value)
+        self.gripper_offset = list(
+            gripper_offset
+            if gripper_offset is not None
+            else calibration["gripper_offset"]
+        )
         self.rotation_matrix = normalize_rotation_matrix(
-            rotation_matrix or settings.vision_rotation_matrix
+            rotation_matrix
+            if rotation_matrix is not None
+            else calibration["rotation_matrix"]
         )
         self.translation_vector = list(
-            translation_vector or settings.vision_translation_vector
+            translation_vector
+            if translation_vector is not None
+            else calibration["translation_vector"]
         )
         self.gripper_length = (
             gripper_length if gripper_length is not None else settings.vision_default_gripper_length
@@ -476,7 +485,13 @@ class VisionCaptureAction:
         NDArray[np.generic],
         dict[str, float],
     ]:
-        camera_name = self.settings.vision_camera_name or None
+        camera_name = (
+            self.settings.camera_name_for_role(
+                CameraRole.ROBOT_GRASP,
+                arm=self.arm.value,
+            )
+            or None
+        )
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:
             frame = self.camera.get_latest_depth_frame(camera_name)

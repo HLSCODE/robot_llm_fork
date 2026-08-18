@@ -224,9 +224,12 @@ AI Assistant 不获取 MainWindow 对象。它通过以下窄信号协作：
 
 1. `closeEvent` 请求执行取消、相机线程中断和交互 worker 停止，关闭窗口时不等待。
 2. Qt 事件循环退出后，launcher 调用 `shutdown_after_event_loop()`；相机和交互线程
-   使用显式超时等待，然后附加服务、定位服务和 DeviceRuntime 按宿主顺序关闭。
+   先经过有界退出宽限期，超时会记录明确错误，随后必须安全 join，确认线程退出后，
+   附加服务、定位服务和 DeviceRuntime 才按宿主顺序关闭。
 
-线程未在期限内退出会记录明确错误，不会被静默吞掉。
+RealMan、天机、OpenCV 和 RealSense 的部分原生 SDK 调用没有可用的取消接口，不能用
+`QThread.terminate()` 或在线程仍运行时销毁 Qt/设备对象。若要对这些调用提供严格的硬
+超时，需要供应商 SDK 提供原生取消能力，或将驱动隔离到可终止的独立进程。
 
 ## 6. 当前遗留项
 

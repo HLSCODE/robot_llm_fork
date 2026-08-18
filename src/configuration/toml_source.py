@@ -11,7 +11,7 @@ from .settings import ApplicationSettings
 from .value_parsing import coerce_value
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _RESERVED_ROOT_KEYS = frozenset({"schema_version"})
 _FORBIDDEN_TOML_GROUPS = frozenset({"secrets"})
 

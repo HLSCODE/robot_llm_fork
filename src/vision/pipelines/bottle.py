@@ -8,7 +8,7 @@ import numpy as np
 from numpy.typing import NDArray
 from ultralytics import SAM, YOLO
 
-from ...configuration.settings import VisionSettings
+from ...configuration.settings import CameraRole, VisionSettings
 from ...devices import (
     ArmId,
     CartesianPose,
@@ -82,9 +82,17 @@ def capture_and_move(
     height: int = 480,
 ) -> bool:
     """Capture a bottle, grasp it and place it through project capabilities."""
-    gripper_offset = list(settings.vision_gripper_offset)
-    rotation_matrix = normalize_rotation_matrix(settings.vision_rotation_matrix)
-    translation_vector = list(settings.vision_translation_vector)
+    camera_name = settings.camera_name_for_role(
+        CameraRole.ROBOT_GRASP,
+        arm=arm.value,
+    )
+    calibration = settings.capture_calibration_config(
+        arm=arm.value,
+        camera_name=camera_name,
+    )
+    gripper_offset = calibration["gripper_offset"]
+    rotation_matrix = normalize_rotation_matrix(calibration["rotation_matrix"])
+    translation_vector = calibration["translation_vector"]
     motion_options = MotionOptions(
         velocity_percent=settings.vision_default_velocity,
     )
@@ -105,7 +113,7 @@ def capture_and_move(
 
         color_image, depth_image, color_intrinsics = _wait_for_frames(
             camera,
-            settings.vision_camera_name or None,
+            camera_name or None,
         )
         if save_debug_images:
             cv2.imwrite(f"{debug_directory}/original_image.jpg", color_image)
@@ -144,7 +152,7 @@ def capture_and_move(
 
         color_image, depth_image, color_intrinsics = _wait_for_frames(
             camera,
-            settings.vision_camera_name or None,
+            camera_name or None,
         )
         mask, _bounding_box, detected = detect_target(
             color_image,

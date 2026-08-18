@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,11 +12,15 @@ from typing import Protocol
 from PySide6.QtCore import QObject, Signal, Slot
 from PySide6.QtWidgets import QWidget
 
+from ..application_lifecycle import gui_presentation_status
 from ..app_dialogs import (
     MessageDialogKind,
     ask_confirmation,
     show_message,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class GuiNotificationLevel(str, Enum):
@@ -88,6 +93,7 @@ class GuiNotificationCenter(QObject):
         self._toast_sink = toast_sink
         self._presenter = presenter or AppDialogPresenter()
         self._history: deque[GuiNotification] = deque(maxlen=history_limit)
+        self._is_shutting_down = False
         self.notification_requested.connect(self._record_and_present)
 
     def snapshot(self) -> GuiNotificationState:
@@ -147,6 +153,16 @@ class GuiNotificationCenter(QObject):
     @Slot(object)
     def _record_and_present(self, notification: GuiNotification) -> None:
         self._history.append(notification)
+        presentation = gui_presentation_status(self._parent)
+        if self._is_shutting_down or not presentation.allowed:
+            logger.log(
+                self._log_level(notification.level),
+                "GUI 通知未展示 [%s] %s: %s",
+                presentation.reason or "通知中心正在关闭",
+                notification.title,
+                notification.message,
+            )
+            return
         self._log_sink(notification)
         if notification.modal:
             self._presenter.show(self._parent, notification)
@@ -158,4 +174,26 @@ class GuiNotificationCenter(QObject):
         normalized = message.strip()
         if not normalized:
             raise ValueError("confirmation message must not be empty")
+        presentation = gui_presentation_status(self._parent)
+        if self._is_shutting_down or not presentation.allowed:
+            logger.warning(
+                "确认对话框未展示 [%s] %s: %s",
+                presentation.reason or "通知中心正在关闭",
+                title,
+                normalized,
+            )
+            return False
         return self._presenter.confirm(self._parent, title, normalized)
+
+    def begin_shutdown(self) -> None:
+        """Prevent late worker results from touching hidden or destroyed widgets."""
+        self._is_shutting_down = True
+
+    @staticmethod
+    def _log_level(level: GuiNotificationLevel) -> int:
+        return {
+            GuiNotificationLevel.INFO: logging.INFO,
+            GuiNotificationLevel.WARNING: logging.WARNING,
+            GuiNotificationLevel.ERROR: logging.ERROR,
+            GuiNotificationLevel.CRITICAL: logging.CRITICAL,
+        }[level]

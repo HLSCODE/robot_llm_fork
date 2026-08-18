@@ -18,7 +18,10 @@ CAMERA_PROVIDERS: Mapping[str, CameraProviderDefinition] = MappingProxyType({
 
 
 def resolve_camera_provider(settings: VisionSettings) -> CameraProviderDefinition:
-    provider_name = settings.camera_provider.strip().lower()
+    try:
+        provider_name = settings.camera_provider_name()
+    except ValueError as exc:
+        raise DeviceInitializationError(str(exc)) from exc
     try:
         return CAMERA_PROVIDERS[provider_name]
     except KeyError as exc:

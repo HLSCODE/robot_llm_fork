@@ -185,8 +185,14 @@ minicpm_ws_scheme = "wss"
 minicpm_realtime_path = "/v1/realtime"
 
 [vision]
-realsense_device_sn = "153122077516"
-realsense_device_names = ""
+
+[[vision.cameras]]
+name = "monitor1"
+label = "主视觉相机"
+provider = "realsense"
+device_id = "153122077516"
+roles = ["vision_capture"]
+arms = []
 ```
 
 `OPENAI_API_KEY` 和 `WEBSOCKET_AUTH_TOKEN` 写入 `.env`。
@@ -221,8 +227,6 @@ realsense_device_names = ""
 | `OPENAI_API_KEY` | OpenAI-compatible API Key | `openai` / `deepseek` / `dashscope` 使用 |
 | `OPENAI_BASE_URL` | OpenAI-compatible Base URL | 留空时使用 provider 默认值 |
 | `OPENAI_MODEL` | OpenAI-compatible 模型名 | 如 `qwen-turbo` / `gpt-4o` |
-| `REALSENSE_DEVICE_SN` | RealSense 序列号 | 支持逗号分隔多台 |
-| `REALSENSE_DEVICE_NAMES` | RealSense 名称 | 与序列号一一对应 |
 | `MINICPM_GATEWAY_HOST` | MiniCPM 网关主机 | `LLM_DEFAULT_PROVIDER=minicpm`、task 默认 provider 为 `minicpm` 或请求指定 `provider=minicpm` 时使用 |
 | `MINICPM_GATEWAY_PORT` | MiniCPM 网关端口 | 同上 |
 | `MINICPM_WS_SCHEME` | MiniCPM WebSocket 协议 | `wss` 或 `ws`，默认 `wss` |

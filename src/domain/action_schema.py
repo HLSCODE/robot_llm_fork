@@ -11,10 +11,22 @@ from typing import Any, TypedDict
 from .models import ActionType
 
 
+class CurrentPoseSourceSchema(TypedDict, total=False):
+    """Describe which arm supplies a field's live 6D pose.
+
+    ``arm_field`` references a sibling select field. ``arm`` is the canonical
+    fixed arm, or the fallback when that sibling field has no value yet.
+    """
+
+    arm_field: str
+    arm: str
+
+
 class ActionFieldSchema(TypedDict, total=False):
     type: str
     options: list[Any]
     options_source: str
+    options_source_field: str
     default: Any
     min: float
     max: float
@@ -24,6 +36,7 @@ class ActionFieldSchema(TypedDict, total=False):
     readonly: bool
     hidden: bool
     placeholder: str
+    current_pose: CurrentPoseSourceSchema
 
 
 class ActionVariantSchema(TypedDict):
@@ -82,6 +95,7 @@ def _field(
     *,
     options: list[Any] | None = None,
     options_source: str = "",
+    options_source_field: str = "",
     default: Any = _MISSING,
     minimum: float | None = None,
     maximum: float | None = None,
@@ -90,6 +104,7 @@ def _field(
     readonly: bool = False,
     hidden: bool = False,
     placeholder: str = "",
+    current_pose: CurrentPoseSourceSchema | None = None,
 ) -> ActionFieldSchema:
     schema: ActionFieldSchema = {
         "type": field_type,
@@ -99,6 +114,8 @@ def _field(
         schema["options"] = options
     if options_source:
         schema["options_source"] = options_source
+    if options_source_field:
+        schema["options_source_field"] = options_source_field
     if default is not _MISSING:
         schema["default"] = default
     if minimum is not None:
@@ -115,6 +132,8 @@ def _field(
         schema["hidden"] = True
     if placeholder:
         schema["placeholder"] = placeholder
+    if current_pose is not None:
+        schema["current_pose"] = current_pose
     return schema
 
 
@@ -169,6 +188,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "点位",
                         required=True,
                         placeholder=("例如: [-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]"),
+                        current_pose={"arm_field": "臂", "arm": "left"},
                     ),
                     "补偿": _field(
                         "compensation",
@@ -482,6 +502,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "圆心位姿",
                         required=True,
                         placeholder=("例如: [-0.058,-0.412,-0.154,-2.934,0.428,-2.722]"),
+                        current_pose={"arm": "right"},
                     ),
                     "半径R": _field(
                         "number",
@@ -858,6 +879,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "select",
                         "示教工位",
                         options_source="vision_stations",
+                        options_source_field="arm",
                         required=True,
                     ),
                     "station_name": _field(
@@ -904,8 +926,20 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "工位 ID",
                         hidden=True,
                     ),
-                    "photo_pose": _field("text", "拍照位姿"),
-                    "camera_name": _field("text", "相机名称"),
+                    "photo_pose": _field(
+                        "text",
+                        "拍照位姿",
+                        placeholder=(
+                            "例如: [-0.048, -0.269, -0.101, 3.109, -0.094, -1.592]"
+                        ),
+                        current_pose={"arm_field": "arm", "arm": "left"},
+                    ),
+                    "camera_name": _field(
+                        "select",
+                        "相机名称",
+                        options_source="cameras",
+                        options_source_field="arm",
+                    ),
                     "marker_width": _field(
                         "number",
                         "Marker 宽度",

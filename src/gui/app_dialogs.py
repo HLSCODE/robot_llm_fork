@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from enum import Enum
 
 from PySide6.QtCore import QEvent, QPoint, Qt
@@ -21,8 +22,12 @@ from PySide6.QtWidgets import (
 )
 
 from .icons import IconName
+from .application_lifecycle import gui_presentation_status
 from .theme import set_theme_role
 from .toolbars import IconToolButton
+
+
+logger = logging.getLogger(__name__)
 
 
 class MessageDialogKind(str, Enum):
@@ -149,6 +154,28 @@ class AppDialog(QDialog):
             QEvent.Type.ApplicationPaletteChange,
         }:
             self.title_bar.refresh()
+
+    def exec(self) -> int:
+        presentation = gui_presentation_status(self.parentWidget())
+        if not presentation.allowed:
+            logger.warning(
+                "对话框未展示 [%s]: %s",
+                presentation.reason,
+                self.windowTitle() or type(self).__name__,
+            )
+            return int(QDialog.DialogCode.Rejected)
+        return super().exec()
+
+    def show(self) -> None:
+        presentation = gui_presentation_status(self.parentWidget())
+        if not presentation.allowed:
+            logger.warning(
+                "窗口未展示 [%s]: %s",
+                presentation.reason,
+                self.windowTitle() or type(self).__name__,
+            )
+            return
+        super().show()
 
     def _center_over_parent(self) -> None:
         parent = self.parentWidget()

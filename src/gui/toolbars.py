@@ -39,10 +39,15 @@ class ElidingComboBox(QComboBox):
             QStyle.SubControl.SC_ComboBoxEditField,
             self,
         )
-        return self.fontMetrics().elidedText(
+        metrics = self.fontMetrics()
+        available_width = max(
+            edit_rect.width(),
+            metrics.horizontalAdvance("…"),
+        )
+        return metrics.elidedText(
             option.currentText,
             Qt.TextElideMode.ElideRight,
-            max(0, edit_rect.width()),
+            available_width,
         )
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802

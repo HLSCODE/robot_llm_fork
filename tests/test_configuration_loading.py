@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from src.configuration.config_loader import ConfigLoadError, load_application_settings
+from src.configuration.settings import CameraRole
 
 
 class ConfigurationLoadingTests(unittest.TestCase):
@@ -34,7 +35,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 2
+                schema_version = 3
                 [gui]
                 theme = "light"
                 [server]
@@ -62,7 +63,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_dotenv_is_loaded_without_overriding_process_environment(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 2\n")
+            config_path = self._write(root, "schema_version = 3\n")
             env_path = root / ".env"
             env_path.write_text(
                 'OPENAI_API_KEY="file-secret"\nGUI_THEME="light"\n',
@@ -76,8 +77,8 @@ class ConfigurationLoadingTests(unittest.TestCase):
 
     def test_unknown_table_and_field_are_rejected(self) -> None:
         documents = (
-            "schema_version = 2\n[unknown]\nvalue = 1\n",
-            "schema_version = 2\n[gui]\ntheme = \"dark\"\ntypo = true\n",
+            "schema_version = 3\n[unknown]\nvalue = 1\n",
+            "schema_version = 3\n[gui]\ntheme = \"dark\"\ntypo = true\n",
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -86,13 +87,80 @@ class ConfigurationLoadingTests(unittest.TestCase):
                 with self.assertRaisesRegex(ConfigLoadError, "未知"):
                     load_application_settings(config_path, env_file=root / "missing.env")
 
+    def test_camera_catalog_loads_nested_typed_profiles(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 3
+                [vision]
+                vision_default_workflow = "bottle"
+
+                [[vision.cameras]]
+                name = "monitor1"
+                label = "左臂视觉相机"
+                provider = "realsense"
+                device_id = "serial-left"
+                roles = ["vision_capture", "robot_grasp", "relocalization"]
+                arms = ["left"]
+                capture_rotation_matrix = [1, 0, 0, 0, 1, 0, 0, 0, 1]
+                capture_translation_vector = [0.1, 0.2, 0.3]
+                capture_gripper_offset = [3.14, 0, 1.57]
+                camera_matrix = [1, 0, 2, 0, 3, 4, 0, 0, 1]
+                camera_matrix_resolution = [1920, 1080]
+                distortion_coefficients = [0.1, 0.2, 0, 0, 0.3]
+                end_effector_to_camera = [
+                    [1, 0, 0, 0],
+                    [0, 1, 0, 0],
+                    [0, 0, 1, 0],
+                    [0, 0, 0, 1],
+                ]
+                """,
+            )
+            settings = load_application_settings(
+                config_path,
+                env_file=root / "missing.env",
+            ).vision
+
+        self.assertEqual((("monitor1", "左臂视觉相机"),), settings.camera_choices())
+        self.assertEqual(
+            "monitor1",
+            settings.camera_name_for_role(CameraRole.RELOCALIZATION, arm="left"),
+        )
+        self.assertEqual("serial-left", settings.cameras[0].device_id)
+        self.assertEqual(
+            (0.1, 0.2, 0.3),
+            settings.cameras[0].capture_translation_vector,
+        )
+        self.assertEqual((1920.0, 1080.0), settings.cameras[0].camera_matrix_resolution)
+
+    def test_legacy_camera_identity_fields_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 3
+                [vision]
+                camera_provider = "realsense"
+                realsense_device_sn = "serial-left"
+                vision_relocalization_left_camera_name = "monitor1"
+                """,
+            )
+            with self.assertRaisesRegex(ConfigLoadError, "未知"):
+                load_application_settings(
+                    config_path,
+                    env_file=root / "missing.env",
+                )
+
     def test_wake_welcome_uses_workflow_field_without_legacy_alias(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             config_path = self._write(
                 root,
                 """
-                schema_version = 2
+                schema_version = 3
                 [voice]
                 voice_wake_welcome_enabled = true
                 voice_wake_welcome_workflow = "welcome.workflow.json"
@@ -118,7 +186,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             legacy_config_path = self._write(
                 root,
                 """
-                schema_version = 2
+                schema_version = 3
                 [voice]
                 voice_wake_welcome_task = "welcome.task"
                 """,
@@ -135,7 +203,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 2
+                schema_version = 3
                 [llm]
                 minicpm_ask_enabled = true
                 """,
@@ -151,7 +219,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             root = Path(temporary_directory)
             config_path = self._write(
                 root,
-                'schema_version = 2\n[secrets]\nopenai_api_key = "do-not-store"\n',
+                'schema_version = 3\n[secrets]\nopenai_api_key = "do-not-store"\n',
             )
             with self.assertRaisesRegex(ConfigLoadError, "敏感字段不得写入 TOML"):
                 load_application_settings(config_path, env_file=root / "missing.env")
@@ -160,7 +228,8 @@ class ConfigurationLoadingTests(unittest.TestCase):
         documents = (
             "[gui]\ntheme = \"dark\"\n",
             "schema_version = 1\n",
-            'schema_version = 2\n[server]\nwebsocket_port = "8765"\n',
+            "schema_version = 2\n",
+            'schema_version = 3\n[server]\nwebsocket_port = "8765"\n',
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -172,7 +241,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_invalid_environment_value_names_field_without_echoing_secret(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 2\n")
+            config_path = self._write(root, "schema_version = 3\n")
             with (
                 patch.dict(
                     os.environ,

@@ -7,12 +7,18 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
 import unittest
+from unittest.mock import patch
 
 from src.application import create_application_services
-from src.domain.execution_context import ExecutionContext
+from src.domain.execution_context import ExecutionContext, VisionRelocalizationState
 from src.persistence.json_documents import JsonDocumentSchemaError
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
-from src.configuration.settings import ApplicationSettings, VisionSettings
+from src.configuration.settings import (
+    ApplicationSettings,
+    CameraProfile,
+    CameraRole,
+    VisionSettings,
+)
 from src.persistence.vision_station_storage import VisionStationStorage
 from src.execution import ExecutionState
 from src.vision.artifacts import VisionArtifactStore
@@ -22,6 +28,7 @@ from src.vision.models import (
     vision_configuration,
 )
 from src.vision.service import VisionService
+from src.vision.relocalization.service import compensate_pose_with_context
 
 
 class VisionServiceTests(unittest.TestCase):
@@ -165,6 +172,136 @@ class VisionServiceTests(unittest.TestCase):
             service.list_station_choices("left"),
         )
         self.assertEqual([], service.list_station_choices("right"))
+
+    def test_camera_choices_are_exposed_without_initializing_hardware(self) -> None:
+        settings = replace(
+            self.settings,
+            cameras=(
+                CameraProfile(
+                    name="monitor1",
+                    label="左臂视觉相机",
+                    provider="realsense",
+                    device_id="serial-left",
+                    roles=(CameraRole.RELOCALIZATION.value,),
+                    arms=("left",),
+                    camera_matrix=(
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ),
+                    end_effector_to_camera=(
+                        (1.0, 0.0, 0.0, 0.0),
+                        (0.0, 1.0, 0.0, 0.0),
+                        (0.0, 0.0, 1.0, 0.0),
+                        (0.0, 0.0, 0.0, 1.0),
+                    ),
+                ),
+            ),
+        )
+        service = VisionService(settings, ExecutionContext())
+
+        self.assertEqual(
+            [("monitor1", "左臂视觉相机")],
+            service.list_camera_choices(CameraRole.RELOCALIZATION, arm="left"),
+        )
+        self.assertEqual(
+            [],
+            service.list_camera_choices(CameraRole.RELOCALIZATION, arm="right"),
+        )
+
+    def test_compensation_uses_camera_recorded_by_this_relocalization_run(self) -> None:
+        identity = (
+            (1.0, 0.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0, 0.0),
+            (0.0, 0.0, 1.0, 0.0),
+            (0.0, 0.0, 0.0, 1.0),
+        )
+        settings = replace(
+            self.settings,
+            cameras=(
+                CameraProfile(
+                    name="left-default-uncalibrated",
+                    provider="realsense",
+                    device_id="serial-default",
+                    roles=(CameraRole.RELOCALIZATION.value,),
+                    arms=("left",),
+                    camera_matrix=(
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ),
+                    end_effector_to_camera=identity,
+                ),
+                CameraProfile(
+                    name="left-calibrated",
+                    provider="realsense",
+                    device_id="serial-calibrated",
+                    roles=(CameraRole.RELOCALIZATION.value,),
+                    arms=("left",),
+                    camera_matrix=(
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ),
+                    end_effector_to_camera=identity,
+                ),
+            ),
+        )
+        storage = VisionStationStorage(
+            settings.vision_relocalization_stations_file,
+            configuration=vision_configuration(settings),
+        )
+        storage.upsert_profile(
+            {
+                "station_id": "station-left",
+                "station_name": "左臂工位",
+                "arm": "left",
+                "T_B0_M": [list(row) for row in identity],
+            }
+        )
+        context = ExecutionContext()
+        context.set_vision_state(
+            VisionRelocalizationState(
+                station_id="station-left",
+                arm="left",
+                marker_pose=[list(row) for row in identity],
+                camera_name="left-calibrated",
+            )
+        )
+
+        with patch(
+            "src.vision.relocalization.service.compensate_taught_pose",
+            return_value=[1.0, 2.0, 3.0, 0.0, 0.0, 0.0],
+        ) as compensate:
+            result = compensate_pose_with_context(
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                "station-left",
+                "left",
+                context,
+                settings,
+            )
+
+        self.assertEqual([1.0, 2.0, 3.0, 0.0, 0.0, 0.0], result)
+        compensation_config = compensate.call_args.args[3]
+        self.assertEqual("left-calibrated", compensation_config["camera_name"])
 
 
 class VisionStationStorageTests(unittest.TestCase):

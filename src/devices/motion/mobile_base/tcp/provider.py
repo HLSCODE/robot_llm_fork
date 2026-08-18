@@ -20,6 +20,7 @@ class TcpMobileBaseProvider:
                 host=settings.move_controller_host,
                 port=settings.move_controller_port,
                 bind_port=settings.move_controller_client_bind_port,
+                timeout_seconds=settings.move_controller_timeout_seconds,
             )
         )
         adapter.connect()

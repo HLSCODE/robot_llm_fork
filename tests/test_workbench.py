@@ -5,7 +5,7 @@ from typing import ClassVar
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QHelpEvent, QPalette
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.gui.view_models.models import DeviceViewState
@@ -362,6 +362,7 @@ class WorkbenchViewTests(unittest.TestCase):
 
     def test_notification_toast_auto_hides(self) -> None:
         toast = self.workbench.notification_toast
+        dismissed = QSignalSpy(toast.dismissed)
         toast.show_notification(
             GuiNotification(
                 GuiNotificationLevel.WARNING,
@@ -372,7 +373,7 @@ class WorkbenchViewTests(unittest.TestCase):
         )
         QApplication.processEvents()
         self.assertTrue(toast.isVisible())
-        QTest.qWait(40)
+        self.assertTrue(dismissed.wait(500))
         self.assertFalse(toast.isVisible())
 
     def test_notification_created_while_hidden_is_anchored_after_first_show(

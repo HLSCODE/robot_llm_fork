@@ -13,6 +13,20 @@ from src.configuration.data_paths import ApplicationDataPaths
 
 
 @pytest.fixture(autouse=True)
+def isolate_gui_lifecycle_state() -> Iterator[None]:
+    """Reactivate a shared test QApplication without weakening production shutdown."""
+    from PySide6.QtWidgets import QApplication
+
+    from src.gui.application_lifecycle import gui_application_lifecycle
+
+    application = QApplication.instance()
+    lifecycle = gui_application_lifecycle() if application is not None else None
+    if lifecycle is not None:
+        lifecycle.begin_window_session()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def isolate_default_application_data(
     monkeypatch: pytest.MonkeyPatch,
 ) -> Iterator[None]:

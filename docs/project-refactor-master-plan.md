@@ -535,8 +535,8 @@ src/
 - `GuiNotificationCenter` 已统一 MainWindow 的日志、状态栏、通知历史、模态错误和确认出口。
 - AI Assistant 只通过窄 Qt 信号请求欢迎任务、序列可视化和执行状态展示，
   不再持有或调用 MainWindow。
-- `closeEvent` 只发出执行取消、相机中断和交互停止请求；可阻塞的有界等待在
-  Qt 事件循环退出后执行，再由应用宿主统一关闭附加服务和设备。
+- `closeEvent` 只发出执行取消、相机中断和交互停止请求；Qt 事件循环退出后先按有界宽限期等待，
+  对仍处于厂商 SDK 阻塞调用中的线程执行安全 join，确认线程退出后再由应用宿主关闭附加服务和设备。
 - 动作库/任务库、唯一工作流画布、设备状态/位姿和手动控制已拆成稳定视图组件；
   `MainWindow` 只组合组件、连接意图信号并调用渲染接口，不保留旧控件属性别名。
 - 新一轮 GUI 评审确认：列表式编排区域仍需升级为受约束的工作流画布；原 GUI 草案中
@@ -578,7 +578,7 @@ src/
 | D-008 | P2 | DONE | `ActionConfigDialog` 按唯一 action schema 通用渲染字段、variant、默认值、范围、枚举、只读和校验 |
 | D-009 | P2 | DONE | 生命周期、手动控制、轨迹示教和位姿读取已进入 Application Service |
 | D-010 | P2 | DONE | 删除启动布尔组合和嵌套事件循环；显式 startup lifecycle 管理 speech wait、硬件初始化、ready/failed/closed，等待使用异步 signal + 单次超时 |
-| D-011 | P3 | DONE | `GuiNotificationCenter` 统一日志、状态栏、通知历史、模态错误和确认；AI 使用窄信号协作；关闭采用非阻塞请求 + 事件循环后有界等待 |
+| D-011 | P3 | DONE | `GuiNotificationCenter` 统一日志、状态栏、通知历史、模态错误和确认；AI 使用窄信号协作；关闭采用非阻塞请求 + 事件循环后有界宽限，厂商 SDK 调用仍未返回时安全 join，避免销毁运行中的 QThread |
 | D-012 | P3 | DONE | Windows/Linux offscreen GUI smoke 构造真实 MainWindow + simulation services，覆盖启动、暂停、恢复、取消、日志终态和资源清理 |
 | D-013 | P2 | DONE | 提取 `ActionLibraryView` 与 `WorkflowEditorView`，统一动作库、任务库、序列和任务组合器的构造、意图信号及执行控件渲染接口 |
 | D-014 | P2 | DONE | 提取 `DeviceStatusView` 与 `DeviceControlView`，统一设备状态、位姿、定位和手动控制视图；组件不持有设备或应用服务 |
@@ -912,7 +912,7 @@ src/
 | G-021 | P2 | DONE | Qt 通用组件和 AI Assistant 已迁入 `gui/views`，AI Controller 与音频播放生命周期进入 `gui/controllers`；生产代码、测试、Mypy、wheel 门禁和文档均直切新路径，`widgets` 与 `ai_integration` 顶级目录已删除，不保留转发模块 |
 | G-022 | P2 | DONE | 转圈注液与确定性闭环加粉已迁入 `execution/workflows`，handler 和专项测试直切新路径；动作参数、typed result、取消/暂停和安全回位语义保持不变，`actions` 与 `agents` 顶级目录已删除，不保留转发模块 |
 | G-023 | P2 | DONE | `devices/transports/devices` 已删除；ElectricGripper、StepperMotor 只有粉末装置调用方，因此直接迁入 `tools/powder_dispenser`；relay/tool-changer/pipette Adapter 分别与 Driver 共置；Transport 顶层不再导出语义设备，只保留通信、策略、协议、错误和测试 fake；源码与 wheel 边界禁止旧目录回归 |
-| G-024 | P2 | DONE | 相机已建立静态 Provider/Registry；RealSense 与 OpenCV 使用平行 Provider 并共享 `CameraSource`/camera capability，`CAMERA_PROVIDER` 只接受显式注册值，未知值在 DeviceRuntime 装配阶段失败；删除隐式 RealSense 回退、异常吞并和旧 `camera_factory.py`，不保留 `auto`/`webcam` 兼容值 |
+| G-024 | P2 | DONE | 相机已建立静态 Provider/Registry；RealSense 与 OpenCV 使用平行 Provider 并共享 `CameraSource`/camera capability；配置 schema v3 由 `[[vision.cameras]]` profile 显式声明 provider、设备身份、用途和标定，未知 provider 在 DeviceRuntime 装配阶段失败；删除隐式 RealSense 回退、异常吞并和旧 `camera_factory.py`，不保留 `auto`/`webcam` 兼容值 |
 | G-025 | P2 | DONE | 移动底盘已按当前 TCP 产品拆为 Provider/Adapter/Client 纵向切片，Client 独占 socket/JSON 帧，Adapter 实现 `MobileBase`，Provider 只负责装配；显示屏以静态 ProviderDefinition/Registry 取代字符串动态导入；删除旧底盘 Controller/Client 路径且未建立无第二实现的底盘 Registry |
 | G-026 | P2 | DONE | 视觉内部已形成 `pipelines/`、`relocalization/`、`artifacts.py`、`cli/` 四个明确边界，抓取算法和离线重定位 CLI 不再平铺/混入算法包；外部 Tag 定位新增 typed reading、Provider contract、UDP Provider 和 simulation Null Provider，socket/线程由 Provider 独占，Application Service 只负责新鲜度/有效性策略；配置、服务字段和执行参数统一使用 `external_localization`，与视觉工位重定位明确区分 |
 | G-027 | P3 | DONE | 删除混合职责的 `execution/action_handlers.py`，结果/上下文/Protocol 迁入 `handler_api.py`，分派迁入 `handler_registry.py`，无设备核心 handler 迁入 `handlers/core.py`；README 项目结构、动作模型路径和相机 Provider 说明已更新，旧 application/vision/execution 路径加入禁止回归清单，Mypy 同步覆盖新边界 |
@@ -1338,7 +1338,7 @@ M7 GUI 工作台信息架构与空间收敛
 | 2026-08-03 | M4 | G | 性能预算与回归监控 | G-015 TODO → DONE | 新增 strict schema v1 性能预算和无硬件 runner；批量执行请求解析、动作校验、资源租约、schema 深拷贝与 LLM golden suite，预热后取 5 次样本中位数；机器可读原子报告和超预算失败进入 Windows/Linux 统一质量入口 | 336 tests + 32 subtests，覆盖率 44.65%，14 golden cases；5/5 性能预算通过，完整质量门禁和 wheel smoke |
 | 2026-08-03 | M4 | A/D | GUI 启动状态机与 simulation smoke | A-009 DOING → DONE；D-010/D-012 TODO → DONE | 删除两个启动布尔和构造期嵌套 QEventLoop；新增显式 lifecycle，语音等待改为非阻塞 signal + timer；真实 MainWindow 在 offscreen simulation 中验证共享服务、fake 设备启动、开始/暂停/恢复/取消、终态日志、资源释放和关闭 | 342 tests + 32 subtests，覆盖率 52.35% 并将门禁提升至 50%；完整质量门禁、5/5 性能预算和 wheel smoke |
 | 2026-08-03 | M4 | D/G | GUI 应用状态与 schema 表单收敛 | D-005/D-006/D-007/D-008、ER-018 TODO → DONE | TaskComposerService 独占组合草稿；Device/Execution ViewModel 从运行时快照派生状态；删除 MainWindow 平行布尔和 ExecutionBridge 控制双入口；1300 余行逐动作表单分支替换为唯一 schema 通用渲染与校验；新增边界进入 Mypy | 348 tests + 32 subtests，覆盖率 55.09%；21 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
-| 2026-08-03 | M4 | D/G | GUI 通知、协作与关闭生命周期收敛 | D-011 TODO → DONE | 新增 typed GuiNotificationCenter；MainWindow 删除直接 QMessageBox 和散落日志出口；通知通过 QObject signal 回到 GUI 线程；AI Assistant 删除 MainWindow 反向引用并改用窄 Qt 信号；活动执行关闭时立即请求取消，相机/交互先非阻塞停止，事件循环退出后按有界预算等待 | 352 tests + 32 subtests，覆盖率 55.30%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
+| 2026-08-03 | M4 | D/G | GUI 通知、协作与关闭生命周期收敛 | D-011 TODO → DONE | 新增 typed GuiNotificationCenter；MainWindow 删除直接 QMessageBox 和散落日志出口；通知通过 QObject signal 回到 GUI 线程；AI Assistant 删除 MainWindow 反向引用并改用窄 Qt 信号；活动执行关闭时立即请求取消，相机/交互先非阻塞停止，事件循环退出后先按有界宽限等待，仍阻塞时安全 join 后再释放 Qt/服务所有者 | 352 tests + 32 subtests，覆盖率 55.30%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-03 | M4 | D/G | GUI 稳定视图域拆分 | D-013/D-014 TODO → DONE | 提取 ActionLibraryView、WorkflowEditorView、DeviceStatusView、DeviceControlView；MainWindow 删除约 800 行控件构造与旧属性，改为连接参数化意图信号和调用渲染接口，不保留兼容别名；新增组件进入 Mypy | 352 tests + 32 subtests，覆盖率 55.34%；22 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | F/G | 视觉服务与数据治理整批收口 | F-V-004/F-V-005/F-V-006/F-V-007 TODO → DONE | 新增 VisionService/typed result；模型、标定、工位 profile 严格版本化；调试产物按 run staging、manifest、原子发布和有界保留；simulation 注入确定性 fixture；删除旧重定位调试目录和 bool executor 双入口 | 359 tests + 32 subtests，覆盖率 55.99%；28 个 Mypy 文件、14 golden、5/5 性能预算和 wheel smoke 全部通过 |
 | 2026-08-04 | M4 | F | 遥操作审计与软件性能基线 | F-T-006/F-T-007 TODO → DONE | 新增 typed TeleoperationObservability，统一会话、指令、跳过、错误、watchdog 和安全释放审计；敏感控制载荷不进入事件；聚合耗时、间隔、抖动和吞吐并通过 `server_metrics` 暴露；审计 sink 故障与控制结果隔离；新增确定性无硬件性能预算 | 361 tests + 32 subtests，覆盖率 56.32%；30 个 Mypy 文件、14 golden、6/6 性能预算和 wheel smoke 全部通过 |

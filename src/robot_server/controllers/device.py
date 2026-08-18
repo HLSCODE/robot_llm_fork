@@ -8,6 +8,7 @@ import logging
 import threading
 from typing import Any
 
+from ...configuration.settings import CameraRole
 from ...devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from ...execution import ExecutionState
 from ..protocol import WebSocketRequest
@@ -173,7 +174,9 @@ class DeviceWebSocketHandler:
                 import time
 
                 camera_name = (
-                    self._server._services.settings.vision.vision_camera_name
+                    self._server._services.settings.vision.camera_name_for_role(
+                        CameraRole.VISION_CAPTURE
+                    )
                     or None
                 )
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -19,6 +20,10 @@ from PySide6.QtWidgets import (
 
 from ..bridges.execution import ExecutionBridge
 from ..app_dialogs import ask_integer, ask_text, choose_item
+from ..application_lifecycle import (
+    begin_gui_shutdown,
+    install_gui_application_lifecycle,
+)
 from ..about import show_about_dialog
 from ..branding import APPLICATION_NAME
 from ...application import (
@@ -29,6 +34,7 @@ from ...application import (
     WorkflowCompilationError,
 )
 from ...application.camera_access import CameraSession
+from ...configuration.settings import CameraRole
 from ...domain.models import (
     ActionDefinition,
     ActionType,
@@ -78,6 +84,8 @@ from ..window_chrome import ApplicationTitleBar, RoundedMainWindow
 
 _WORKFLOW_FILE_SUFFIX = ".workflow.json"
 
+logger = logging.getLogger(__name__)
+
 
 def _display_task_name(task_name: str) -> str:
     """Hide the persistence suffix without changing the stored task identity."""
@@ -94,6 +102,9 @@ class MainWindow(RoundedMainWindow):
         theme_controller: ThemeController,
         layout_store: WorkbenchLayoutStore | None = None,
     ) -> None:
+        application = QApplication.instance()
+        if application is not None:
+            install_gui_application_lifecycle(application)
         super().__init__()
         self._services = services
         self._theme_controller = theme_controller
@@ -126,6 +137,9 @@ class MainWindow(RoundedMainWindow):
         self._hardware_startup_thread: QThread | None = None
         self._hardware_startup_worker: GuiHardwareStartupWorker | None = None
         self._camera_test_thread: QThread | None = None
+        self._startup_begin_timer = QTimer(self)
+        self._startup_begin_timer.setSingleShot(True)
+        self._startup_begin_timer.timeout.connect(self.start_startup_initialization)
 
         self.init_ui()
         self._execution_display_list: WorkflowCanvasWidget | None = (
@@ -201,7 +215,7 @@ class MainWindow(RoundedMainWindow):
             ai_assistant.execution_completed.connect(
                 self.on_execution_completed
             )
-        QTimer.singleShot(0, self.start_startup_initialization)
+        self._startup_begin_timer.start(0)
 
     @property
     def startup_state(self) -> GuiStartupState:
@@ -312,6 +326,8 @@ class MainWindow(RoundedMainWindow):
         self.initialize_startup_hardware(False)
 
     def _on_hardware_startup_step_started(self, device_id: str) -> None:
+        if self.startup_state is GuiStartupState.CLOSED:
+            return
         progress = {
             ROBOT_SYSTEM: (54, "正在连接机械臂..."),
             MOBILE_BASE: (66, "正在连接移动底盘..."),
@@ -325,6 +341,8 @@ class MainWindow(RoundedMainWindow):
         self,
         result: HardwareStartupStepResult,
     ) -> None:
+        if self.startup_state is GuiStartupState.CLOSED:
+            return
         progress = {
             ROBOT_SYSTEM: 64,
             MOBILE_BASE: 74,
@@ -988,6 +1006,15 @@ class MainWindow(RoundedMainWindow):
                 names.add(a.name)
         return names
 
+    def _camera_choices(self, arm: str | None) -> list[tuple[str, str]]:
+        """Expose relocalization cameras valid for the selected arm."""
+        return list(
+            self.settings.vision.camera_choices(
+                CameraRole.RELOCALIZATION,
+                arm=arm,
+            )
+        )
+
     def create_action(self) -> None:
         category = self.action_library_view.current_category_type()
         resolved = self._resolve_action_type_for_current_category(category)
@@ -1006,6 +1033,7 @@ class MainWindow(RoundedMainWindow):
             pose_reader=self._read_current_arm_pose_for_form,
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
+            camera_choices_reader=self._camera_choices,
         )
         if dialog.exec():
             action = dialog.get_action_definition()
@@ -1133,6 +1161,7 @@ class MainWindow(RoundedMainWindow):
             pose_reader=self._read_current_arm_pose_for_form,
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
+            camera_choices_reader=self._camera_choices,
         )
         if not dialog.exec():
             return
@@ -1838,6 +1867,7 @@ class MainWindow(RoundedMainWindow):
             pose_reader=self._read_current_arm_pose_for_form,
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
+            camera_choices_reader=self._camera_choices,
         )
         if not dialog.exec():
             return
@@ -1926,7 +1956,9 @@ class MainWindow(RoundedMainWindow):
 
             def run(self) -> None:
                 camera_name = (
-                    self._services.settings.vision.vision_camera_name
+                    self._services.settings.vision.camera_name_for_role(
+                        CameraRole.VISION_CAPTURE
+                    )
                     or None
                 )
                 session: CameraSession[CameraSource] | None = None
@@ -2029,10 +2061,21 @@ class MainWindow(RoundedMainWindow):
         self._camera_test_thread.start()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self.prepare_shutdown()
+        event.accept()
+
+    def prepare_shutdown(self) -> None:
+        """Stop GUI producers before the event loop can accept late callbacks."""
+        if self.startup_state is GuiStartupState.CLOSED:
+            return
+        begin_gui_shutdown("主窗口正在关闭")
+        logger.info("应用正在关闭，后台资源将按顺序释放")
+        self._notifications.begin_shutdown()
+        self._notifications.info("应用正在关闭，后台资源将按顺序释放...")
+        self._startup_begin_timer.stop()
         execution_state = self._execution_view_model.snapshot()
         if execution_state.active:
             self._execution_view_model.cancel()
-        self._notifications.info("应用正在关闭，后台资源将按顺序释放...")
         if self.pose_timer is not None:
             self.pose_timer.stop()
         camera_thread = self._camera_test_thread
@@ -2044,26 +2087,27 @@ class MainWindow(RoundedMainWindow):
         self.workbench_view.persist_layout()
         self._composition_bridge.close()
         self._startup_lifecycle.close()
-        event.accept()
 
     def shutdown_after_event_loop(self) -> None:
-        """Finish bounded worker cleanup after the visible GUI has closed."""
+        """Join GUI workers before their Qt owners and services are destroyed."""
         hardware_thread = self._hardware_startup_thread
         if hardware_thread is not None and hardware_thread.isRunning():
             if self._hardware_startup_worker is not None:
                 self._hardware_startup_worker.request_stop()
             hardware_thread.quit()
             if not hardware_thread.wait(10_000):
-                self._notifications.warning(
-                    "设备初始化线程未在 10 秒内退出，设备关闭流程将等待资源释放",
-                    modal=False,
+                logger.warning(
+                    "设备初始化线程未在 10 秒内退出；继续等待资源释放，"
+                    "避免在线程运行时销毁 Qt 对象"
                 )
+                hardware_thread.wait()
         camera_thread = self._camera_test_thread
         if camera_thread is not None and camera_thread.isRunning():
             camera_thread.requestInterruption()
             if not camera_thread.wait(2000):
-                self._notifications.warning(
-                    "相机测试线程未在 2 秒内退出，将由设备关闭流程继续清理",
-                    modal=False,
+                logger.warning(
+                    "相机测试线程未在 2 秒内退出；继续等待资源释放，"
+                    "避免在线程运行时销毁 Qt 对象"
                 )
+                camera_thread.wait()
         self.ai_assistant_view.shutdown()

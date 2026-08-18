@@ -198,12 +198,19 @@ class SchemaActionFormTests(unittest.TestCase):
 
     def test_visual_relocalization_switches_localized_mode_fields(self) -> None:
         requested_arms: list[str | None] = []
+        requested_camera_arms: list[str | None] = []
 
         def station_choices(arm: str | None) -> list[tuple[str, str]]:
             requested_arms.append(arm)
             if arm == "right":
                 return [("station-right", "右臂工位")]
             return [("station-left", "左臂工位")]
+
+        def camera_choices(arm: str | None) -> list[tuple[str, str]]:
+            requested_camera_arms.append(arm)
+            if arm == "right":
+                return [("monitor2", "右侧深度相机 (monitor2)")]
+            return [("monitor1", "左侧深度相机 (monitor1)")]
 
         form = SchemaActionForm(
             ActionType.VISION_RELOCALIZE,
@@ -213,6 +220,7 @@ class SchemaActionFormTests(unittest.TestCase):
                 "station_id": "station-left",
             },
             station_choices_reader=station_choices,
+            camera_choices_reader=camera_choices,
         )
         mode = form._variant_combo
         arm = form._field_widgets["arm"]
@@ -239,6 +247,8 @@ class SchemaActionFormTests(unittest.TestCase):
 
         mode.setCurrentIndex(mode.findData("teach"))
         QApplication.processEvents()
+        arm = form._field_widgets["arm"]
+        assert isinstance(arm, QComboBox)
         self.assertEqual(
             {
                 "arm",
@@ -253,10 +263,46 @@ class SchemaActionFormTests(unittest.TestCase):
         )
         self.assertEqual("teach", form.parameters()["action_mode"])
         self.assertNotIn("station_id", form.field_names)
+        camera = form._field_widgets["camera_name"]
+        assert isinstance(camera, QComboBox)
+        self.assertEqual("跟随所选机械臂默认相机", camera.itemText(0))
+        self.assertEqual("", camera.itemData(0))
+        self.assertEqual("right", requested_camera_arms[-1])
+        self.assertEqual(2, camera.count())
+        self.assertEqual("右侧深度相机 (monitor2)", camera.itemText(1))
+        camera.setCurrentIndex(camera.findData("monitor2"))
+        self.assertEqual("monitor2", form.parameters()["camera_name"])
+
+        arm.setCurrentIndex(arm.findData("left"))
+        self.assertEqual("left", requested_camera_arms[-1])
+        self.assertEqual(-1, camera.findData("monitor2"))
+        self.assertGreaterEqual(camera.findData("monitor1"), 0)
+        arm.setCurrentIndex(arm.findData("right"))
 
         mode.setCurrentIndex(mode.findData("run"))
         QApplication.processEvents()
         self.assertEqual("station-right", form.parameters()["station_id"])
+        form.deleteLater()
+
+    def test_visual_relocalization_drops_camera_outside_current_arm_choices(self) -> None:
+        form = SchemaActionForm(
+            ActionType.VISION_RELOCALIZE,
+            {
+                "action_mode": "teach",
+                "arm": "left",
+                "station_name": "左臂工位",
+                "camera_name": "right-camera",
+            },
+            camera_choices_reader=lambda arm: (
+                [("left-camera", "左臂相机")] if arm == "left" else []
+            ),
+        )
+
+        camera = form._field_widgets["camera_name"]
+        assert isinstance(camera, QComboBox)
+        self.assertEqual(-1, camera.findData("right-camera"))
+        self.assertEqual("", camera.currentData())
+        self.assertNotIn("camera_name", form.parameters())
         form.deleteLater()
 
     def test_move_compensation_uses_guided_editor_and_reads_udp_snapshot(self) -> None:
@@ -376,6 +422,75 @@ class SchemaActionFormTests(unittest.TestCase):
             [0.1, -0.2, 0.3, 1.0, -1.1, 1.2],
             form.parameters()["点位"],
         )
+        form.deleteLater()
+
+    def test_live_pose_buttons_follow_schema_arm_sources(self) -> None:
+        requested_arms: list[str] = []
+
+        def read_pose(arm: str) -> list[float]:
+            requested_arms.append(arm)
+            return [0.11, -0.22, 0.33, 1.1, -1.2, 1.3]
+
+        circle_form = SchemaActionForm(
+            ActionType.MANIPULATE,
+            {"执行器": "右臂转圈注液"},
+            pose_reader=read_pose,
+        )
+        circle_editor = circle_form._field_widgets["位姿"]
+        assert isinstance(circle_editor, PoseEditor)
+        circle_editor.read_button.click()
+        self.assertTrue(
+            _process_events_until(lambda: circle_editor.read_button.isEnabled())
+        )
+        self.assertEqual(["right"], requested_arms)
+        self.assertEqual(
+            "[0.11, -0.22, 0.33, 1.1, -1.2, 1.3]",
+            circle_form.parameters()["位姿"],
+        )
+        circle_form.deleteLater()
+
+        teach_form = SchemaActionForm(
+            ActionType.VISION_RELOCALIZE,
+            {
+                "action_mode": "teach",
+                "arm": "right",
+                "station_name": "右臂工位",
+            },
+            pose_reader=read_pose,
+        )
+        photo_editor = teach_form._field_widgets["photo_pose"]
+        assert isinstance(photo_editor, PoseEditor)
+        photo_editor.read_button.click()
+        self.assertTrue(
+            _process_events_until(lambda: photo_editor.read_button.isEnabled())
+        )
+        self.assertEqual(["right", "right"], requested_arms)
+
+        photo_editor.input.clear()
+        arm = teach_form._field_widgets["arm"]
+        assert isinstance(arm, QComboBox)
+        arm.setCurrentIndex(arm.findData("left"))
+        photo_editor.read_button.click()
+        self.assertTrue(
+            _process_events_until(lambda: photo_editor.read_button.isEnabled())
+        )
+        self.assertEqual(["right", "right", "left"], requested_arms)
+        teach_form.deleteLater()
+
+    def test_optional_live_pose_is_omitted_when_left_empty(self) -> None:
+        form = SchemaActionForm(
+            ActionType.VISION_RELOCALIZE,
+            {
+                "action_mode": "teach",
+                "arm": "left",
+                "station_name": "左臂工位",
+            },
+        )
+
+        parameters = form.parameters()
+
+        self.assertNotIn("photo_pose", parameters)
+        self.assertNotIn("camera_name", parameters)
         form.deleteLater()
 
     def test_required_fields_use_red_indicators_and_error_borders(self) -> None:

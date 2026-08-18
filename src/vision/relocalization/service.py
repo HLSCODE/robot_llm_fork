@@ -113,8 +113,9 @@ def _config_for_marker(
     settings: VisionSettings,
     arm: str,
     marker: Mapping[str, float] | None,
+    camera_name: str = "",
 ) -> dict[str, object]:
-    cfg = settings.relocalization_config(arm)
+    cfg = settings.relocalization_config(arm, camera_name=camera_name)
     if marker is not None:
         cfg["marker"] = marker
     return cfg
@@ -189,8 +190,7 @@ def _debug_paths(
     suffix: str,
     debug_directory: str | Path,
 ) -> tuple[Path | None, Path | None]:
-    cfg = settings.relocalization_config(arm)
-    if not cfg.get("save_debug_images", True):
+    if not settings.vision_relocalization_save_debug_images:
         return None, None
     debug_dir = _project_path(debug_directory)
     stamp = time.strftime("%Y%m%d_%H%M%S")
@@ -211,7 +211,7 @@ def capture_marker_pose(
     log_fn: LogFn | None = None,
 ) -> dict[str, object]:
     log = log_fn or _default_log
-    cfg = _config_for_marker(settings, arm, marker)
+    cfg = _config_for_marker(settings, arm, marker, camera_name)
     image_path, vis_path = _debug_paths(
         settings,
         station_id,
@@ -462,7 +462,10 @@ def compensate_pose_with_context(
             f"({profile.get('station_name', station_id)} / {arm_display_name(arm_key)})"
         )
 
-    cfg = settings.relocalization_config(arm_key)
+    cfg = settings.relocalization_config(
+        arm_key,
+        camera_name=state.camera_name,
+    )
     target_pose = parse_pose(taught_pose)
     return compensate_taught_pose(
         target_pose,

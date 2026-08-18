@@ -28,6 +28,53 @@ class ActionSchemaTests(unittest.TestCase):
 
         self.assertEqual("等待类", second[ActionType.WAIT.value]["label"])
 
+    def test_live_pose_capture_metadata_covers_only_pose_inputs(self):
+        schemas = get_action_schema()
+        actual: dict[tuple[str, str, str], dict[str, str]] = {}
+        for action_type, action_schema in schemas.items():
+            variants = action_schema.get("variants")
+            if variants is None:
+                field_groups = {"": action_schema.get("fields", {})}
+            else:
+                field_groups = {
+                    variant_name: variant["fields"]
+                    for variant_name, variant in variants.items()
+                }
+            for variant_name, fields in field_groups.items():
+                for field_name, field_schema in fields.items():
+                    source = field_schema.get("current_pose")
+                    if source is not None:
+                        actual[(action_type, variant_name, field_name)] = source
+
+        self.assertEqual(
+            {
+                (ActionType.MOVE.value, "机械臂", "点位"): {
+                    "arm_field": "臂",
+                    "arm": "left",
+                },
+                (ActionType.MANIPULATE.value, "右臂转圈注液", "位姿"): {
+                    "arm": "right",
+                },
+                (
+                    ActionType.VISION_RELOCALIZE.value,
+                    "teach",
+                    "photo_pose",
+                ): {
+                    "arm_field": "arm",
+                    "arm": "left",
+                },
+            },
+            actual,
+        )
+
+    def test_visual_camera_uses_the_shared_dynamic_catalog(self):
+        teach_fields = get_action_schema()[ActionType.VISION_RELOCALIZE.value][
+            "variants"
+        ]["teach"]["fields"]
+
+        self.assertEqual("select", teach_fields["camera_name"]["type"])
+        self.assertEqual("cameras", teach_fields["camera_name"]["options_source"])
+
     def test_variant_can_be_inferred_and_defaults_are_applied(self):
         result = validate_action_parameters(
             ActionType.MOVE,

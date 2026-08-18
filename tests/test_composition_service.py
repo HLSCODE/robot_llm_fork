@@ -44,10 +44,13 @@ class CompositionServiceTests(unittest.TestCase):
             origin="test",
         )
 
-        created.parameters["补偿"]["value"] = 99
+        created.parameters["补偿"]["udp"]["teach_offset"]["x"] = 99
         stored = self.service.get_action("action-1")
 
-        self.assertEqual(1, stored.parameters["补偿"]["value"])
+        self.assertEqual(
+            1,
+            stored.parameters["补偿"]["udp"]["teach_offset"]["x"],
+        )
         self.service.append_action_ids(
             ("action-1",),
             origin="test",
@@ -325,7 +328,16 @@ def _action(
             "臂": "左",
             "模式": "move_j",
             "点位": [0, 0, 0, 0, 0, 0],
-            "补偿": {"value": nested_value},
+            "补偿": {
+                "mode": "udp",
+                "udp": {
+                    "teach_offset": {
+                        "x": nested_value,
+                        "y": 0,
+                        "angle": 0,
+                    }
+                },
+            },
         },
     )
 

@@ -141,13 +141,19 @@ powder_dispense_small_step_threshold_mg = 3.0
 `CameraAccessService` 独占获取受管相机画面，再通过唯一 `LLMRegistry` 的
 `balance_reading` 视觉任务识别数值；不再自行创建 OpenCV 摄像头或直连独立 HTTP API。
 
-相机与 LLM 使用项目现有统一配置，电子秤只增加以下选择和等待配置：
+相机与 LLM 使用项目现有统一配置。为对应相机增加 `balance` role，并设置等待超时：
 
 ```toml
-# 名称可匹配受管相机返回的 serial 或 name；留空取首个有效画面
 [vision]
-balance_camera_name = ""
 balance_camera_wait_timeout_seconds = 2.0
+
+[[vision.cameras]]
+name = "balance-monitor"
+label = "电子秤相机"
+provider = "realsense"
+device_id = "153122077516"
+roles = ["balance"]
+arms = []
 
 # balance_reading 默认使用 dashscope 视觉模型
 [llm]
@@ -156,9 +162,9 @@ dashscope_model = "qwen-vl-max"
 
 `DASHSCOPE_API_KEY` 必须写入 `.env`，不能写入 TOML。
 
-摄像头索引、尺寸和 Provider 继续由 `[vision]` 中的 `camera_provider`、
-`webcam_*` 或 `realsense_*` 字段配置。所有值只在启动边界解析；设备 Provider
-本身不读取环境变量。
+摄像头身份和 Provider 由 `[[vision.cameras]]` 统一配置，采集尺寸继续使用
+`[vision]` 中的 `webcam_*` 或 `realsense_*` 参数。所有值只在启动边界解析；
+设备 Provider 本身不读取环境变量。
 
 ## 安全保护
 
@@ -183,7 +189,7 @@ dashscope_model = "qwen-vl-max"
 
 ```text
 1. 使用 test_devices.py 确认升降、旋转、夹爪方向和地址正确。
-2. 在 GUI 相机测试中确认 `BALANCE_CAMERA_NAME` 对应画面稳定，并用定向测试验证读数 Provider。
+2. 在 `[[vision.cameras]]` 中为电子秤相机声明 `roles = ["balance"]`，再通过 GUI 相机测试确认画面稳定，并用定向测试验证读数 Provider。
 3. 将智能加粉目标设为 10mg，观察每轮日志和实际加粉效果。
 4. 根据粉末流速调整 POWDER_DISPENSE_*_STEP。
 5. 再测试 100mg。

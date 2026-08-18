@@ -71,7 +71,7 @@ Copy-Item .env.example .env
 按实际环境修改 `config/config.toml`。最常用配置项：
 
 ```toml
-schema_version = 2
+schema_version = 3
 
 [runtime]
 simulation_mode = false
@@ -265,12 +265,14 @@ LLM provider 的连接参数位于 `[llm]`；各固定任务实际使用哪个�
 
 ## 相机与视觉
 
-相机配置由 `CAMERA_PROVIDER` 决定：
+相机统一在 `config/config.toml` 的 `[[vision.cameras]]` 目录中声明：
 
-- `realsense`：使用 Intel RealSense
-- `opencv`：使用本地 USB / 内置摄像头
+- `provider = "realsense"`：使用 Intel RealSense，`device_id` 填序列号；
+- `provider = "opencv"`：使用本地 USB / 内置摄像头，`device_id` 填设备索引；
+- `roles` 用于声明通用图像 `vision_capture`、机器人抓取 `robot_grasp`、`balance`、`relocalization` 等用途；
+- `arms` 用于把相机限制到 `left` 或 `right` 机械臂。
 
-Provider 必须显式配置；未知值会在应用装配阶段报错，不进行自动回退。
+每个相机 profile 同时保存稳定逻辑名、显示名、设备身份和可选标定；旧的逗号分隔设备字段不再读取。完整字段见 `docs/configuration.md`。
 
 视觉抓取流程中会用到：
 
@@ -341,8 +343,8 @@ uv run robot-llm --simulation
 
 ### 相机没有画面
 
-检查 `[vision]` 中的 `camera_provider`、`realsense_device_sn` 或
-`webcam_device_indexes`，并先调用 `camera_status` / `test_camera` 排查。
+检查 `[vision]` 下的 `[[vision.cameras]]` 相机目录中 `provider`、`device_id`
+和逻辑名称，并先调用 `camera_status` / `test_camera` 排查。
 
 ## 参考文档
 

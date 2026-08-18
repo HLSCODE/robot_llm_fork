@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import MagicMock, patch
 
-from src.configuration.settings import VisionSettings
+from src.configuration.settings import CameraProfile, VisionSettings
 from src.devices.cameras.registry import (
     CAMERA_PROVIDERS,
     resolve_camera_provider,
 )
+from src.devices.cameras.providers.opencv import create_opencv_camera
+from src.devices.cameras.providers.realsense import create_realsense_camera
 from src.devices.displays.registry import (
     EXPRESSION_DISPLAY_PROVIDERS,
     resolve_expression_display_provider,
@@ -26,7 +29,60 @@ class CameraProviderTests(unittest.TestCase):
             DeviceInitializationError,
             "unsupported camera provider: unknown",
         ):
-            resolve_camera_provider(VisionSettings(camera_provider="unknown"))
+            resolve_camera_provider(
+                VisionSettings(
+                    cameras=(
+                        CameraProfile(
+                            name="fixture",
+                            provider="unknown",
+                            device_id="fixture-device",
+                        ),
+                    )
+                )
+            )
+
+    def test_empty_camera_catalog_does_not_imply_realsense(self) -> None:
+        with self.assertRaisesRegex(
+            DeviceInitializationError,
+            "camera catalog must contain at least one profile",
+        ):
+            resolve_camera_provider(VisionSettings())
+
+    def test_opencv_provider_rejects_when_no_camera_starts(self) -> None:
+        manager = MagicMock()
+        manager.start.return_value = {"started": 0, "failed": 1}
+        settings = VisionSettings(
+            cameras=(CameraProfile("fixture", "opencv", "0"),)
+        )
+
+        with (
+            patch(
+                "src.devices.cameras.providers.opencv.OpenCVCameraManager",
+                return_value=manager,
+            ),
+            self.assertRaisesRegex(DeviceInitializationError, "could not start any"),
+        ):
+            create_opencv_camera(settings)
+
+        manager.stop.assert_called_once_with()
+
+    def test_realsense_provider_rejects_when_no_camera_starts(self) -> None:
+        manager = MagicMock()
+        manager.start.return_value = {"started": 0, "failed": 1}
+        settings = VisionSettings(
+            cameras=(CameraProfile("fixture", "realsense", "serial"),)
+        )
+
+        with (
+            patch(
+                "src.devices.cameras.providers.realsense.RealSenseManager",
+                return_value=manager,
+            ),
+            self.assertRaisesRegex(DeviceInitializationError, "could not start any"),
+        ):
+            create_realsense_camera(settings)
+
+        manager.stop.assert_called_once_with()
 
 
 class DisplayProviderTests(unittest.TestCase):
