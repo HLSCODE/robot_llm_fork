@@ -623,7 +623,8 @@ class VisionSettings:
     vision_schema_version: int = 1
     vision_model_version: str = "default-model-v1"
     vision_calibration_version: str = "default-calibration-v1"
-    vision_debug_save_dir: str = "pictures"
+    # Relative paths are resolved from the project root by VisionArtifactStore.
+    vision_debug_save_dir: str = "data/vision/debug"
     vision_debug_retention_days: int = 7
     vision_debug_max_runs: int = 100
     balance_camera_wait_timeout_seconds: float = 2.0

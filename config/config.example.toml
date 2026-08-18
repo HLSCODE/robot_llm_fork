@@ -395,8 +395,9 @@ sam_model_path = "models/sam2.1_l.pt"
 vision_schema_version = 1
 vision_model_version = "default-model-v1"
 vision_calibration_version = "default-calibration-v1"
-# 调试图片保存目录、保留天数和最多保留运行批次。
-vision_debug_save_dir = "pictures"
+# 调试图片保存根目录（默认收敛到 data/vision/debug）、保留天数和最多保留运行批次。
+# 相对路径以项目根目录为基准；每次运行会按视觉操作和运行 ID 自动分目录。
+vision_debug_save_dir = "data/vision/debug"
 vision_debug_retention_days = 7
 vision_debug_max_runs = 100
 # 电子秤相机由 camera profile 的 "balance" role 指定；等待超时单位秒。

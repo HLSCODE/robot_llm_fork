@@ -127,6 +127,10 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 当前统一相机运行时一次装配一个 provider，因此同一部署的所有 profile 必须使用相同
 `provider`。界面列举相机只读取配置快照，不会为了打开下拉列表而连接硬件。
 OpenCV provider 目前只提供彩色帧，不能声明需要深度帧的 `robot_grasp` role；配置加载时会明确拒绝这种组合。
+
+视觉调试图片与运行清单默认保存到 `data/vision/debug`。可通过
+`vision_debug_save_dir` 覆盖该位置；相对路径以项目根目录为基准，运行产物会按视觉操作和
+运行 ID 分目录，并由 `vision_debug_retention_days`、`vision_debug_max_runs` 自动清理。
 真实设备模式不会为空目录隐式选择 RealSense；至少需要一个明确的相机 profile。
 
 `.env` 仅保存敏感信息或临时部署覆盖：

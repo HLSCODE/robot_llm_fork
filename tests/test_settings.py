@@ -22,6 +22,9 @@ from src.configuration.settings import (
 
 
 class ApplicationSettingsTests(unittest.TestCase):
+    def test_visual_debug_artifacts_default_to_the_data_directory(self) -> None:
+        self.assertEqual("data/vision/debug", VisionSettings().vision_debug_save_dir)
+
     def test_environment_values_are_split_into_domain_snapshots(self) -> None:
         settings = ApplicationSettings.from_config(
             SimpleNamespace(
