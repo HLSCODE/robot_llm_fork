@@ -477,7 +477,7 @@ end_effector_to_camera = []
 
 [[vision.cameras]]
 name = "monitor3"
-label = "视觉相机 3"
+label = "头部视觉相机"
 provider = "realsense"
 device_id = "250222072950"
 roles = []
@@ -485,7 +485,7 @@ arms = []
 
 [[vision.cameras]]
 name = "monitor4"
-label = "视觉相机 4"
+label = "胸部视觉相机"
 provider = "realsense"
 device_id = "327122072448"
 roles = []

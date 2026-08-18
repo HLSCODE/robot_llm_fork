@@ -157,6 +157,14 @@ class VisionRelocalizationActionHandler:
             )
         except (ActionCancelledError, ActionTimeoutError):
             raise
+        except ValueError as exc:
+            message = f"视觉重定位配置无效: {exc}"
+            return context.failure(
+                ActionResultCode.OPERATION_REJECTED,
+                message,
+                operation=self._OPERATION,
+                device_id=CAMERA,
+            )
         except Exception as exc:
             message = f"视觉重定位失败: {exc}"
             return context.failure(

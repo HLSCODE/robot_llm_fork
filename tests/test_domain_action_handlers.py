@@ -387,6 +387,34 @@ class VisionActionHandlerTests(unittest.TestCase):
             self.logs,
         )
 
+    def test_relocalization_configuration_error_is_rejected(self):
+        def executor(
+            _robot,
+            _camera,
+            _parameters,
+            _execution_context,
+            _settings,
+            _station_storage,
+            _debug_directory,
+            _log,
+        ) -> VisionPipelineResult:
+            raise ValueError(
+                "no camera profile is assigned to role 'relocalization' for arm 'right'"
+            )
+
+        vision = VisionService(
+            self.vision_settings,
+            ExecutionContext(),
+            relocalization_pipeline=executor,
+        )
+        handler = VisionRelocalizationActionHandler(self.runtime, vision)
+
+        result = handler({"station_id": "A", "arm": "right"}, self.context)
+
+        self.assertEqual(ActionResultCode.OPERATION_REJECTED, result.code)
+        self.assertIn("视觉重定位配置无效", result.message)
+        self.assertIn("relocalization", result.message)
+
     def test_vision_executor_does_not_swallow_cancellation(self):
         control = ExecutionControl()
         context, _logs = _action_context(control)
