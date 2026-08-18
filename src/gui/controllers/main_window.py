@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QIcon
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QCursor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -75,7 +75,7 @@ from ..views.workflow import (
 )
 from ..views.workflow_canvas import WorkflowCanvasWidget
 from ..views.workbench import WorkbenchPage, WorkbenchView
-from ..theme import ThemeController, ThemeMode
+from ..theme import ThemeController, ThemeMode, ThemeTransitionOverlay
 from ..icons import IconName, themed_icon
 from ..shortcuts import ShortcutRegistry
 from ..workbench_layout import WorkbenchLayoutStore
@@ -442,6 +442,7 @@ class MainWindow(RoundedMainWindow):
         )
         self.setCentralWidget(self.workbench_view)
         self.create_menu()
+        self._theme_transition = ThemeTransitionOverlay(self)
         self._connect_view_signals()
 
         self.pose_timer = QTimer(self)
@@ -581,7 +582,12 @@ class MainWindow(RoundedMainWindow):
                 *,
                 selected: ThemeMode = mode,
             ) -> None:
-                self._theme_controller.set_mode(selected)
+                origin = self.mapFromGlobal(QCursor.pos())
+                self._theme_transition.apply_mode(
+                    self._theme_controller,
+                    selected,
+                    origin,
+                )
 
             action = self._add_menu_action(
                 theme_menu,

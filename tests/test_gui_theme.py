@@ -5,13 +5,16 @@ from typing import ClassVar
 
 from PySide6.QtCore import QFile, QPoint
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QComboBox, QStyle
+from PySide6.QtWidgets import QApplication, QComboBox, QStyle, QWidget
+
+from src.gui.icons import IconName, _render_themed_icon, themed_icon
 
 from src.gui.theme import (
     DARK_COLORS,
     LIGHT_COLORS,
     ThemeController,
     ThemeMode,
+    ThemeTransitionOverlay,
     apply_consistent_base_style,
 )
 from src.gui.tooltips import TOOLTIP_SERVICE_OBJECT_NAME, ToolTipService
@@ -201,6 +204,38 @@ class GuiThemeTests(unittest.TestCase):
             else ThemeMode.LIGHT
         )
         self.assertIs(expected, controller.effective_mode)
+
+    def test_themed_icon_reuses_rendered_variant(self) -> None:
+        _render_themed_icon.cache_clear()
+        widget = QWidget()
+
+        first = themed_icon(widget, IconName.SAVE, size=18, color=QColor("#2563eb"))
+        after_first = _render_themed_icon.cache_info()
+        second = themed_icon(widget, IconName.SAVE, size=18, color=QColor("#2563eb"))
+        after_second = _render_themed_icon.cache_info()
+
+        self.assertFalse(first.isNull())
+        self.assertEqual(first.cacheKey(), second.cacheKey())
+        self.assertEqual(after_first.misses, after_second.misses)
+        self.assertEqual(after_first.hits + 1, after_second.hits)
+
+    def test_visible_window_uses_theme_reveal_overlay(self) -> None:
+        controller = ThemeController(self.application, ThemeMode.LIGHT)
+        window = QWidget()
+        window.resize(320, 180)
+        window.show()
+        self.application.processEvents()
+        overlay = ThemeTransitionOverlay(window)
+
+        overlay.apply_mode(controller, ThemeMode.DARK, QPoint(24, 24))
+
+        self.assertIs(ThemeMode.DARK, controller.mode)
+        self.assertTrue(overlay.isVisible())
+        self.assertTrue(overlay.is_active)
+        overlay.finish()
+        self.assertFalse(overlay.isVisible())
+        self.assertFalse(overlay.is_active)
+        window.close()
 
 
 if __name__ == "__main__":

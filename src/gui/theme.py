@@ -4,9 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor, QIcon, QPalette
+from PySide6.QtCore import (
+    QEasingCurve,
+    QEvent,
+    QObject,
+    QPoint,
+    QPointF,
+    QRectF,
+    Qt,
+    QVariantAnimation,
+    Signal,
+)
+from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPaintEvent, QPalette, QPixmap
 from PySide6.QtWidgets import QApplication, QWidget
 
 from . import resources_rc as _resources_rc  # noqa: F401
@@ -153,6 +164,120 @@ class ThemeController(QObject):
     def _on_system_color_scheme_changed(self, _scheme: Qt.ColorScheme) -> None:
         if self._mode is ThemeMode.SYSTEM:
             self.apply()
+
+
+THEME_TRANSITION_DURATION_MS = 260
+
+
+class ThemeTransitionOverlay(QWidget):
+    """Reveal a newly applied theme beneath an old-window snapshot."""
+
+    def __init__(self, window: QWidget) -> None:
+        super().__init__(window)
+        self._window = window
+        self._snapshot = QPixmap()
+        self._origin = QPointF()
+        self._radius = 0.0
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(THEME_TRANSITION_DURATION_MS)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._animation.valueChanged.connect(self._set_radius)
+        self._animation.finished.connect(self.finish)
+        self.setObjectName("themeTransitionOverlay")
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        window.installEventFilter(self)
+        self.hide()
+
+    @property
+    def is_active(self) -> bool:
+        return self._animation.state() is QVariantAnimation.State.Running
+
+    def apply_mode(
+        self,
+        controller: ThemeController,
+        mode: ThemeMode,
+        origin: QPoint | None = None,
+    ) -> None:
+        """Apply ``mode`` and animate when the host can present a snapshot."""
+        if mode is controller.mode:
+            return
+        if not self._window.isVisible() or self._window.isMinimized():
+            controller.set_mode(mode)
+            return
+
+        self.finish()
+        snapshot = self._window.grab()
+        if snapshot.isNull():
+            controller.set_mode(mode)
+            return
+
+        requested_origin = origin or self._window.rect().center()
+        local_origin = QPoint(
+            min(max(requested_origin.x(), 0), self._window.width()),
+            min(max(requested_origin.y(), 0), self._window.height()),
+        )
+        self._origin = QPointF(local_origin)
+        self._snapshot = snapshot
+        self.setGeometry(self._window.rect())
+        self._window.setUpdatesEnabled(False)
+        try:
+            controller.set_mode(mode)
+        finally:
+            self._window.setUpdatesEnabled(True)
+
+        self._radius = 0.0
+        self.show()
+        self.raise_()
+        self._animation.setStartValue(0.0)
+        self._animation.setEndValue(self._maximum_radius(local_origin))
+        self._animation.start()
+
+    def finish(self) -> None:
+        """Stop and release the potentially large window snapshot."""
+        if self._animation.state() is QVariantAnimation.State.Running:
+            self._animation.stop()
+        self.hide()
+        self._snapshot = QPixmap()
+        self._window.update()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched is self._window and event.type() in {
+            QEvent.Type.Resize,
+            QEvent.Type.Hide,
+            QEvent.Type.Close,
+        }:
+            self.finish()
+        return False
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
+        if self._snapshot.isNull():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        old_theme_region = QPainterPath()
+        old_theme_region.setFillRule(Qt.FillRule.OddEvenFill)
+        old_theme_region.addRect(QRectF(self.rect()))
+        old_theme_region.addEllipse(self._origin, self._radius, self._radius)
+        painter.setClipPath(old_theme_region)
+        painter.drawPixmap(self.rect(), self._snapshot)
+        painter.end()
+
+    def _set_radius(self, value: object) -> None:
+        if not isinstance(value, (int, float)):
+            return
+        self._radius = float(value)
+        self.update()
+
+    def _maximum_radius(self, origin: QPoint) -> float:
+        return max(
+            math.hypot(origin.x() - corner.x(), origin.y() - corner.y())
+            for corner in (
+                self.rect().topLeft(),
+                self.rect().topRight(),
+                self.rect().bottomLeft(),
+                self.rect().bottomRight(),
+            )
+        )
 
 
 def colors_for_mode(mode: ThemeMode) -> ThemeColors:

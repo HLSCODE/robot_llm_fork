@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from functools import lru_cache
 
 from PySide6.QtCore import QByteArray, QFile, QIODevice, QRectF
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
@@ -130,10 +131,16 @@ def themed_icon(
     size: int = 20,
     color: QColor | None = None,
 ) -> QIcon:
-    """Render a monochrome SVG for common 1x/2x/3x display scales."""
-    source = _read_svg(name)
+    """Return a cached monochrome SVG icon for common display scales."""
     foreground = color or widget.palette().buttonText().color()
-    colored_source = source.replace(b"#000000", foreground.name().encode("ascii"))
+    return QIcon(_render_themed_icon(name, size, foreground.name()))
+
+
+@lru_cache(maxsize=512)
+def _render_themed_icon(name: IconName, size: int, color_name: str) -> QIcon:
+    """Render one immutable icon variant shared by all matching widgets."""
+    source = _read_svg(name)
+    colored_source = source.replace(b"#000000", color_name.encode("ascii"))
     renderer = QSvgRenderer(QByteArray(colored_source))
     if not renderer.isValid():
         raise ValueError(f"invalid GUI SVG resource: {name.value}")
@@ -151,6 +158,7 @@ def themed_icon(
     return icon
 
 
+@lru_cache(maxsize=None)
 def _read_svg(name: IconName) -> bytes:
     resource = QFile(f":/icons/{name.value}.svg")
     if not resource.open(QIODevice.OpenModeFlag.ReadOnly):
