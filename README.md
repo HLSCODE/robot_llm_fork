@@ -200,35 +200,34 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 
 ```text
 .
-├── config/
-│   └── config.example.toml    # 非敏感配置模板
-├── .env.example               # 密钥与部署覆盖模板
-├── pyproject.toml             # Python 版本与依赖声明
-├── uv.lock                    # 锁定的完整依赖图
-├── docs/
-│   └── websocket-api.md       # WebSocket 接口手册
-├── data/                      # 本机用户数据，默认不提交
-│   ├── actions_library.json   # versioned 动作库
-│   ├── tasks/                 # versioned 任务
-│   └── skills/                # versioned 技能库
-└── src/
-    ├── application/           # 应用用例、组合根与跨设备编排
-    ├── bootstrap/             # 进程入口、GUI 和附加服务生命周期
-    ├── configuration/         # TOML/环境解析、不可变 settings 与启动校验
-    ├── domain/                # 动作模型、执行上下文等稳定领域定义
-    ├── persistence/           # JSON 文档与工位配置持久化
-    ├── execution/             # 统一执行运行时、handler API/Registry
-    ├── gui/                   # PySide6 views/view-models/controllers/bridges
-    ├── robot_server/          # WebSocket protocol/controllers/security/metrics
-    ├── skill_system/          # 技能模型、注册表与匹配引擎
-    ├── llm/                   # 大模型能力层与 provider 策略
-    ├── devices/               # 设备能力、Runtime、Provider/Adapter/Driver/Transport
-    ├── localization/          # 外部定位输入 Provider（当前为 UDP）
-    ├── vision/                # 视觉 Service、pipelines、relocalization、artifacts、CLI
-    ├── data_collection/       # 示教数据采集、schema、写入与校验
-    ├── geometry/              # 坐标和位姿补偿纯计算
-    └── observability/         # 日志与运行上下文
+├── config/                    # TOML 模板与本机配置
+├── data/                      # 动作、工作流、技能、轨迹和运行产物（默认不提交）
+├── docs/                      # 架构、配置、接口和专项维护文档
+├── scripts/                   # 校验、构建、迁移等维护脚本
+├── src/                       # 业务源码
+├── tests/                     # 单元、契约、GUI 模拟与回归测试
+├── pyproject.toml             # 依赖、入口命令和质量工具配置
+└── uv.lock                    # 可重复安装的完整依赖锁定
 ```
+
+源码采用“入口/表现层 → 应用层 → 领域与执行运行时 → 设备与持久化适配层”的结构。
+完整的目录树、模块职责、关键文件、运行链路和扩展方式见
+[代码结构与模块说明](docs/codebase-architecture.md)。
+
+当前用户数据默认结构：
+
+```text
+data/
+├── actions/library.json
+├── workflows/<name>.workflow.json
+├── drafts/<workflow-id>.draft.workflow.json
+├── skills/<domain>/<id>.skill.json
+├── trajectories/<left|right>/
+└── vision/debug/<operation>/<run-id>/
+```
+
+可通过 `[data]` 配置项将各目录迁移到独立持久卷；正式任务文件只使用
+`*.workflow.json`，旧 `.task` 文件需使用迁移工具转换。
 
 ## 动作类型
 
@@ -245,7 +244,8 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 | `VISION_CAPTURE` | 视觉采集 |
 | `TRAJECTORY` | 轨迹执行 |
 
-动作库保存在 `data/actions_library.json`，任务序列保存在 `data/tasks/*.task`。
+动作库保存在 `data/actions/library.json`，正式任务保存在
+`data/workflows/*.workflow.json`；当前编辑中的未保存改动保存在 `data/drafts/`。
 
 ## AI 与技能
 
@@ -318,7 +318,7 @@ regression，并构建 wheel、隔离安装后调用标准命令。测试分层�
 
 - 新增配置项：同步维护对应领域 settings、`config/config.example.toml` 和环境变量映射。
 - 新增动作类型：更新 `ActionType`、动作参数 schema、GUI 表单和 WebSocket 执行器。
-- 新增技能：维护 `data/skills/skill_library.json`，或扩展默认技能定义。
+- 新增技能：在 `data/skills/<domain>/` 中维护单技能单文件的 `*.skill.json`，或扩展默认技能定义。
 - 新增 WebSocket 接口：在领域 handler 和 route/payload schema 中注册，并同步更新 `docs/websocket-api.md`。
 - 新增硬件能力：在 `DeviceRuntime` 注册 provider/adapter，由 Application Service 或执行 handler 调用统一协议。
 
@@ -348,7 +348,12 @@ uv run robot-llm --simulation
 
 ## 参考文档
 
+- [代码结构与模块说明](docs/codebase-architecture.md)
+- [GUI 应用架构](docs/gui-application-architecture.md)
 - [WebSocket 接口手册](docs/websocket-api.md)
 - [依赖、配置与用户数据治理](docs/data-config-governance.md)
 - [配置说明](docs/configuration.md)
+- [视觉架构](docs/vision-architecture.md)
+- [机器人 Provider 架构](docs/robot-provider-architecture.md)
+- [工程质量门禁](docs/quality-gates.md)
 - [配置模板](config/config.example.toml)
