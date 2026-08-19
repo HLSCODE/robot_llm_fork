@@ -391,6 +391,8 @@ uv run --frozen --group dev python scripts/run_quality_checks.py
 ## 9. 相关文档索引
 
 - [README](../README.md)：安装、配置和常用启动命令；
+- [版本更新日志](../CHANGELOG.md)：按版本和发布日期维护的对外变更记录；
+- [重构分支详细报告](refactor-changelog.md)：本分支的技术变更、不兼容迁移与待验收项；
 - [配置说明](configuration.md)：配置来源、相机目录、模型路由与字段规则；
 - [依赖、配置与用户数据治理](data-config-governance.md)：数据格式、迁移与持久化路径；
 - [GUI 应用架构](gui-application-architecture.md)：桌面工作台状态所有权与交互边界；

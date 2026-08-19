@@ -349,6 +349,8 @@ uv run robot-llm --simulation
 ## 参考文档
 
 - [代码结构与模块说明](docs/codebase-architecture.md)
+- [版本更新日志](CHANGELOG.md)
+- [重构分支详细报告](docs/refactor-changelog.md)
 - [GUI 应用架构](docs/gui-application-architecture.md)
 - [WebSocket 接口手册](docs/websocket-api.md)
 - [依赖、配置与用户数据治理](docs/data-config-governance.md)
