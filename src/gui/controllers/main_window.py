@@ -583,7 +583,7 @@ class MainWindow(RoundedMainWindow):
                 selected: ThemeMode = mode,
             ) -> None:
                 origin = self.mapFromGlobal(QCursor.pos())
-                self._theme_transition.apply_mode(
+                self._theme_transition.request_mode(
                     self._theme_controller,
                     selected,
                     origin,

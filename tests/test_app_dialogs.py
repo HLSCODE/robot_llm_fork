@@ -3,7 +3,13 @@ from __future__ import annotations
 import unittest
 
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QApplication, QComboBox, QDialogButtonBox, QFrame
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialogButtonBox,
+    QFrame,
+    QLabel,
+)
 
 from src.domain.models import ActionType
 from src.gui.about import AboutDialog
@@ -74,6 +80,11 @@ class AppDialogTests(unittest.TestCase):
             },
             set(dialog.runtime_value_labels),
         )
+        section_titles = {
+            label.text()
+            for label in dialog.findChildren(QLabel, "aboutInformationSectionTitle")
+        }
+        self.assertEqual({"软件信息", "系统信息"}, section_titles)
         self.assertEqual(
             "Windows x64 / Linux x86_64",
             dialog.runtime_value_labels["支持平台"].text(),

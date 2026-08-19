@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+from collections.abc import Sequence
 
 from PySide6 import __version__ as PYSIDE_VERSION
 from PySide6.QtCore import Qt, qVersion
@@ -10,9 +11,9 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialogButtonBox,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -27,13 +28,55 @@ from .branding import (
 )
 
 
+def _create_information_section(
+    parent: QWidget,
+    title: str,
+    entries: Sequence[tuple[str, str]],
+    value_labels: dict[str, QLabel],
+) -> QWidget:
+    """Build one Ubuntu-style information column on the dialog background."""
+    section = QWidget(parent)
+    section.setObjectName("aboutInformationSection")
+    section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    layout = QVBoxLayout(section)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(14)
+
+    title_label = QLabel(title, section)
+    title_label.setObjectName("aboutInformationSectionTitle")
+    layout.addWidget(title_label)
+
+    for label, value in entries:
+        field = QWidget(section)
+        field.setObjectName("aboutInformationField")
+        field_layout = QVBoxLayout(field)
+        field_layout.setContentsMargins(0, 0, 0, 0)
+        field_layout.setSpacing(2)
+
+        name_label = QLabel(label, field)
+        name_label.setObjectName("aboutRuntimeKey")
+        value_label = QLabel(value, field)
+        value_label.setObjectName("aboutRuntimeValue")
+        value_label.setWordWrap(True)
+        value_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        field_layout.addWidget(name_label)
+        field_layout.addWidget(value_label)
+        layout.addWidget(field)
+        value_labels[label] = value_label
+
+    layout.addStretch(1)
+    return section
+
+
 class AboutDialog(AppDialog):
     """Present stable product metadata and the active desktop runtime."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"关于 {APPLICATION_NAME}")
-        self.setMinimumWidth(470)
+        self.setMinimumWidth(600)
 
         identity_layout = QHBoxLayout()
         identity_layout.setContentsMargins(0, 0, 0, 4)
@@ -69,30 +112,32 @@ class AboutDialog(AppDialog):
 
         details = QFrame(self.content)
         details.setObjectName("aboutRuntimeDetails")
-        details_layout = QGridLayout(details)
-        details_layout.setContentsMargins(14, 12, 14, 12)
-        details_layout.setHorizontalSpacing(18)
-        details_layout.setVerticalSpacing(8)
-        runtime_values = {
-            "产品标识": APPLICATION_PRODUCT_ID,
-            "支持平台": APPLICATION_SUPPORTED_PLATFORMS,
-            "Python": platform.python_version(),
-            "Qt / PySide": f"{qVersion()} / {PYSIDE_VERSION}",
-            "当前系统": f"{platform.system()} {platform.release()}",
-            "系统架构": platform.machine() or "未知",
-        }
+        details_layout = QHBoxLayout(details)
+        details_layout.setContentsMargins(0, 6, 0, 4)
+        details_layout.setSpacing(48)
         self.runtime_value_labels: dict[str, QLabel] = {}
-        for row, (label, value) in enumerate(runtime_values.items()):
-            name_label = QLabel(label, details)
-            name_label.setObjectName("aboutRuntimeKey")
-            value_label = QLabel(value, details)
-            value_label.setObjectName("aboutRuntimeValue")
-            value_label.setTextInteractionFlags(
-                Qt.TextInteractionFlag.TextSelectableByMouse
-            )
-            details_layout.addWidget(name_label, row, 0)
-            details_layout.addWidget(value_label, row, 1)
-            self.runtime_value_labels[label] = value_label
+        self.software_information_section = _create_information_section(
+            details,
+            "软件信息",
+            (
+                ("产品标识", APPLICATION_PRODUCT_ID),
+                ("支持平台", APPLICATION_SUPPORTED_PLATFORMS),
+                ("Python", platform.python_version()),
+                ("Qt / PySide", f"{qVersion()} / {PYSIDE_VERSION}"),
+            ),
+            self.runtime_value_labels,
+        )
+        self.system_information_section = _create_information_section(
+            details,
+            "系统信息",
+            (
+                ("当前系统", f"{platform.system()} {platform.release()}"),
+                ("系统架构", platform.machine() or "未知"),
+            ),
+            self.runtime_value_labels,
+        )
+        details_layout.addWidget(self.software_information_section, 1)
+        details_layout.addWidget(self.system_information_section, 1)
         self.content_layout.addWidget(details)
 
         buttons = QDialogButtonBox(

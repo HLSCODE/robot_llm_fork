@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 import math
 
 from PySide6.QtCore import (
     QEasingCurve,
+    QElapsedTimer,
     QEvent,
     QObject,
     QPoint,
     QPointF,
     QRectF,
     Qt,
+    QTimer,
     QVariantAnimation,
     Signal,
 )
@@ -127,6 +130,7 @@ class ThemeController(QObject):
         apply_consistent_base_style(application)
         self._tooltip_service: ToolTipService = install_tooltip_service(application)
         self._mode = mode
+        self._applied_effective_mode: ThemeMode | None = None
         self._application.styleHints().colorSchemeChanged.connect(
             self._on_system_color_scheme_changed
         )
@@ -138,14 +142,20 @@ class ThemeController(QObject):
 
     @property
     def effective_mode(self) -> ThemeMode:
-        if self._mode is not ThemeMode.SYSTEM:
-            return self._mode
+        return self.resolve_effective_mode(self._mode)
+
+    def resolve_effective_mode(self, mode: ThemeMode) -> ThemeMode:
+        if mode is not ThemeMode.SYSTEM:
+            return mode
         scheme = self._application.styleHints().colorScheme()
         return (
             ThemeMode.DARK
             if scheme is Qt.ColorScheme.Dark
             else ThemeMode.LIGHT
         )
+
+    def changes_appearance(self, mode: ThemeMode) -> bool:
+        return self.resolve_effective_mode(mode) is not self.effective_mode
 
     def set_mode(self, mode: ThemeMode) -> None:
         if mode is self._mode:
@@ -156,10 +166,13 @@ class ThemeController(QObject):
 
     def apply(self) -> None:
         effective_mode = self.effective_mode
+        if effective_mode is self._applied_effective_mode:
+            return
         colors = colors_for_mode(effective_mode)
         self._application.setPalette(build_palette(colors))
         self._application.setStyleSheet(build_stylesheet(colors))
         self._application.setWindowIcon(application_icon_for_mode(effective_mode))
+        self._applied_effective_mode = effective_mode
 
     def _on_system_color_scheme_changed(self, _scheme: Qt.ColorScheme) -> None:
         if self._mode is ThemeMode.SYSTEM:
@@ -167,6 +180,9 @@ class ThemeController(QObject):
 
 
 THEME_TRANSITION_DURATION_MS = 260
+THEME_SLOW_TRANSITION_DURATION_MS = 160
+THEME_SLOW_APPLY_THRESHOLD_MS = 120
+THEME_SWITCH_DEFER_MS = 24
 
 
 class ThemeTransitionOverlay(QWidget):
@@ -183,6 +199,11 @@ class ThemeTransitionOverlay(QWidget):
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._animation.valueChanged.connect(self._set_radius)
         self._animation.finished.connect(self.finish)
+        self._defer_timer = QTimer(self)
+        self._defer_timer.setSingleShot(True)
+        self._defer_timer.setInterval(THEME_SWITCH_DEFER_MS)
+        self._defer_timer.timeout.connect(self._apply_pending_mode)
+        self._pending_request: tuple[ThemeController, ThemeMode, QPoint | None] | None = None
         self.setObjectName("themeTransitionOverlay")
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         window.installEventFilter(self)
@@ -200,6 +221,9 @@ class ThemeTransitionOverlay(QWidget):
     ) -> None:
         """Apply ``mode`` and animate when the host can present a snapshot."""
         if mode is controller.mode:
+            return
+        if not controller.changes_appearance(mode):
+            controller.set_mode(mode)
             return
         if not self._window.isVisible() or self._window.isMinimized():
             controller.set_mode(mode)
@@ -219,18 +243,42 @@ class ThemeTransitionOverlay(QWidget):
         self._origin = QPointF(local_origin)
         self._snapshot = snapshot
         self.setGeometry(self._window.rect())
-        self._window.setUpdatesEnabled(False)
-        try:
-            controller.set_mode(mode)
-        finally:
-            self._window.setUpdatesEnabled(True)
-
         self._radius = 0.0
         self.show()
         self.raise_()
+        self.setCursor(Qt.CursorShape.BusyCursor)
+        self.repaint()
+        apply_timer = QElapsedTimer()
+        apply_timer.start()
+        self._window.setUpdatesEnabled(False)
+        try:
+            controller.set_mode(mode)
+        except Exception:
+            self.finish()
+            raise
+        finally:
+            self._window.setUpdatesEnabled(True)
+            self.unsetCursor()
+
+        self.raise_()
+        self._animation.setDuration(
+            THEME_SLOW_TRANSITION_DURATION_MS
+            if apply_timer.elapsed() >= THEME_SLOW_APPLY_THRESHOLD_MS
+            else THEME_TRANSITION_DURATION_MS
+        )
         self._animation.setStartValue(0.0)
         self._animation.setEndValue(self._maximum_radius(local_origin))
         self._animation.start()
+
+    def request_mode(
+        self,
+        controller: ThemeController,
+        mode: ThemeMode,
+        origin: QPoint | None = None,
+    ) -> None:
+        """Coalesce requests and let an open menu paint its closed state first."""
+        self._pending_request = (controller, mode, origin)
+        self._defer_timer.start()
 
     def finish(self) -> None:
         """Stop and release the potentially large window snapshot."""
@@ -240,12 +288,22 @@ class ThemeTransitionOverlay(QWidget):
         self._snapshot = QPixmap()
         self._window.update()
 
+    def _apply_pending_mode(self) -> None:
+        pending = self._pending_request
+        self._pending_request = None
+        if pending is None:
+            return
+        controller, mode, origin = pending
+        self.apply_mode(controller, mode, origin)
+
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
         if watched is self._window and event.type() in {
             QEvent.Type.Resize,
             QEvent.Type.Hide,
             QEvent.Type.Close,
         }:
+            self._defer_timer.stop()
+            self._pending_request = None
             self.finish()
         return False
 
@@ -330,6 +388,7 @@ def build_palette(colors: ThemeColors) -> QPalette:
     return palette
 
 
+@lru_cache(maxsize=2)
 def build_stylesheet(colors: ThemeColors) -> str:
     combo_arrow = (
         ":/icons/chevron-down-on-dark.svg"
@@ -372,7 +431,15 @@ QLabel#aboutApplicationDescription {{
     background: transparent; border: none; color: {colors.text_muted};
 }}
 QFrame#aboutRuntimeDetails {{
-    background: {colors.surface_subtle}; border: none; border-radius: 8px;
+    background: transparent; border: none;
+}}
+QWidget#aboutInformationSection,
+QWidget#aboutInformationField {{
+    background: transparent; border: none;
+}}
+QLabel#aboutInformationSectionTitle {{
+    background: transparent; border: none; color: {colors.text};
+    font-size: 16px; font-weight: 700;
 }}
 QLabel#aboutRuntimeKey {{
     background: transparent; border: none; color: {colors.text_muted};

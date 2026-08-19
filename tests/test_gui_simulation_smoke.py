@@ -324,9 +324,12 @@ class GuiSimulationSmokeTests(unittest.TestCase):
 
     def test_theme_menu_switches_the_single_application_theme(self) -> None:
         self.window._theme_actions[ThemeMode.DARK].trigger()
-        QApplication.processEvents()
 
-        self.assertIs(ThemeMode.DARK, self.window._theme_controller.mode)
+        self.assertTrue(
+            _wait_until(
+                lambda: self.window._theme_controller.mode is ThemeMode.DARK
+            )
+        )
         self.assertTrue(self.window._theme_actions[ThemeMode.DARK].isChecked())
         self.assertEqual(
             QColor("#0f172a"),

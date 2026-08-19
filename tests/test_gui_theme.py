@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import unittest
 from typing import ClassVar
+from unittest.mock import patch
 
 from PySide6.QtCore import QFile, QPoint
+from PySide6.QtTest import QSignalSpy
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication, QComboBox, QStyle, QWidget
 
@@ -171,6 +173,10 @@ class GuiThemeTests(unittest.TestCase):
         self.assertIn("QTabWidget::pane { border: none", stylesheet)
         self.assertIn('QFrame[frameShape="6"] { border: none', stylesheet)
         self.assertIn("QFrame#workbenchActivityBar {", stylesheet)
+        self.assertIn(
+            "QFrame#aboutRuntimeDetails {\n    background: transparent; border: none;",
+            stylesheet,
+        )
         self.assertNotIn("border-right", stylesheet)
         self.assertNotIn(
             "QListWidget::item:selected { background: #1e3a5f; "
@@ -236,6 +242,56 @@ class GuiThemeTests(unittest.TestCase):
         self.assertFalse(overlay.isVisible())
         self.assertFalse(overlay.is_active)
         window.close()
+
+    def test_theme_request_is_deferred_until_menu_can_repaint(self) -> None:
+        controller = ThemeController(self.application, ThemeMode.LIGHT)
+        window = QWidget()
+        window.resize(320, 180)
+        window.show()
+        self.application.processEvents()
+        overlay = ThemeTransitionOverlay(window)
+        changed = QSignalSpy(controller.mode_changed)
+
+        overlay.request_mode(controller, ThemeMode.DARK, QPoint(24, 24))
+
+        self.assertIs(ThemeMode.LIGHT, controller.mode)
+        self.assertTrue(changed.wait(500))
+        self.assertIs(ThemeMode.DARK, controller.mode)
+        overlay.finish()
+        window.close()
+
+    def test_theme_apply_failure_releases_transition_overlay(self) -> None:
+        controller = ThemeController(self.application, ThemeMode.LIGHT)
+        window = QWidget()
+        window.resize(320, 180)
+        window.show()
+        self.application.processEvents()
+        overlay = ThemeTransitionOverlay(window)
+
+        with (
+            patch.object(controller, "set_mode", side_effect=RuntimeError("theme failed")),
+            self.assertRaisesRegex(RuntimeError, "theme failed"),
+        ):
+            overlay.apply_mode(controller, ThemeMode.DARK, QPoint(24, 24))
+
+        self.assertTrue(window.updatesEnabled())
+        self.assertFalse(overlay.isVisible())
+        self.assertFalse(overlay.is_active)
+        window.close()
+
+    def test_system_mode_does_not_reapply_matching_effective_theme(self) -> None:
+        system_mode = (
+            ThemeMode.DARK
+            if self.application.styleHints().colorScheme().name == "Dark"
+            else ThemeMode.LIGHT
+        )
+        controller = ThemeController(self.application, system_mode)
+        original_stylesheet = self.application.styleSheet()
+
+        controller.set_mode(ThemeMode.SYSTEM)
+
+        self.assertEqual(original_stylesheet, self.application.styleSheet())
+        self.assertIs(ThemeMode.SYSTEM, controller.mode)
 
 
 if __name__ == "__main__":
