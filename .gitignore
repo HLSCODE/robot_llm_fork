@@ -14,7 +14,13 @@ data/*
 !data/regression/llm_planning_cases.json
 !data/regression/performance_budgets.json
 temp_models/
-models/
+models/*
+!models/kws/
+models/kws/*
+!models/kws/README.md
+!models/kws/keywords.txt
+!models/kws/keywords_raw.txt
+!models/kws/keywords.example.txt
 
 # --- Python 缓存、测试产物与覆盖率 ---
 __pycache__/

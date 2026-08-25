@@ -5,6 +5,7 @@ description = "机器人操作编排系统，集成 AI 自然语言任务规划"
 requires-python = ">=3.12"
 dependencies = [
     "python-dotenv>=1.0.0",
+    "textual>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -79,6 +80,8 @@ full = [
 
 [project.scripts]
 robot-llm = "src.bootstrap.launcher:main"
+robot-init = "src.bootstrap.initialization_cli:main"
+robot-models-init = "src.bootstrap.initialization_cli:models_main"
 robot-config-init = "src.configuration.config_initializer:main"
 t5l-dgus = "src.devices.displays.t5l_dgusii.cli:main"
 robot-data-validate = "src.data_collection.validation:main"

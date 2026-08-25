@@ -27,6 +27,35 @@ uv run robot-config-init
 robot-config-init --project-root /path/to/robot_llm_fork
 ```
 
+## 交互式完整初始化
+
+`robot-init` 使用 Textual 全屏模式提供跨平台终端向导，并随终端尺寸自动伸缩。
+每次只显示当前问题，支持方向键移动、`Space` 勾选、`Enter` 进入下一步、`Esc`
+返回以及 `Ctrl+C` 安全取消。执行阶段每个步骤只显示状态摘要，详情默认收起，使用
+`Enter`/`→` 展开、`←` 收起、`C` 复制当前步骤的完整详情。模型下载默认不选中；选择后也会先检查本地缓存，
+ASR、VAD、标点或 KWS 模型完整存在时直接跳过下载。
+依赖同步时若检测到 uv 缓存与项目位于不同文件系统，初始化器会自动使用
+`--link-mode=copy`，避免跨盘硬链接警告；显式设置 `UV_LINK_MODE` 时以用户配置为准。
+
+```bash
+uv run robot-init
+```
+
+自动化环境使用非交互模式：
+
+```bash
+uv run robot-init --non-interactive \
+  --steps configuration,dependencies,asr_models,kws_model,validation \
+  --extras gui,server,ai,voice,kws
+```
+
+依赖同步默认使用 `--frozen`；需要主动更新锁文件时可传入 `--no-frozen`。
+`--dry-run` 只验证计划，不产生写入、下载或依赖变更。模型也可单独初始化：
+
+```bash
+uv run robot-models-init --asr --kws --check
+```
+
 运行时只读取不带 `.example` 的本机文件；修改模板不会直接改变当前运行配置。配置在进程
 启动时加载，修改后需要重启应用。默认先查找当前工作目录的 `config/config.toml`，找不到时
 回退到源码项目根目录，避免 IDE、快捷方式或服务管理器改变工作目录后静默丢失配置。
