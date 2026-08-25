@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import logging
-import time
 
 
 def main() -> int:
@@ -20,55 +20,28 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
+    from src.bootstrap.initialization import prepare_asr_models
     from src.configuration.config_loader import load_application_settings
-    from src.voice_interaction.speech.asr import FunASRRecognizer
-    from src.voice_interaction.speech.vad import FunASRVAD
 
-    voice_settings = load_application_settings().voice
-    suppress_model_output = not args.show_model_output
-
-    if not args.skip_vad:
-        vad_model = str(
-            args.vad_model or voice_settings.voice_vad_model or "fsmn-vad"
-        )
-        started_at = time.perf_counter()
-        print(f"Loading VAD model: {vad_model}")
-        FunASRVAD(
-            model=vad_model,
-            chunk_size_ms=voice_settings.voice_vad_chunk_ms,
-            suppress_model_output=suppress_model_output,
-        )
-        print(f"VAD ready, elapsed={(time.perf_counter() - started_at):.2f}s")
-
-    if not args.skip_asr:
-        asr_model = str(
-            args.asr_model
-            or voice_settings.voice_asr_model
-            or "iic/SenseVoiceSmall"
-        )
-        punc_model = args.punc_model
-        if punc_model is None:
-            punc_model = voice_settings.voice_asr_punc_model or None
-        elif punc_model == "":
-            punc_model = None
-        device = (
-            args.device
-            if args.device is not None
-            else voice_settings.voice_asr_device or None
-        )
-
-        started_at = time.perf_counter()
-        print(f"Loading ASR model: {asr_model}")
-        if punc_model:
-            print(f"Loading punctuation model: {punc_model}")
-        FunASRRecognizer(
-            model=asr_model,
-            punc_model=punc_model,
-            device=device,
-            batch_size_s=voice_settings.voice_asr_batch_size_s,
-            suppress_model_output=False,
-        )
-        print(f"ASR ready, elapsed={(time.perf_counter() - started_at):.2f}s")
+    configured = load_application_settings().voice
+    voice_settings = replace(
+        configured,
+        voice_vad_model=args.vad_model or configured.voice_vad_model,
+        voice_asr_model=args.asr_model or configured.voice_asr_model,
+        voice_asr_punc_model=(
+            configured.voice_asr_punc_model if args.punc_model is None else args.punc_model
+        ),
+        voice_asr_device=(
+            configured.voice_asr_device if args.device is None else args.device
+        ),
+        voice_suppress_model_output=not args.show_model_output,
+    )
+    prepare_asr_models(
+        voice_settings,
+        include_vad=not args.skip_vad,
+        include_asr=not args.skip_asr,
+        log=print,
+    )
 
     print("Done.")
     return 0
