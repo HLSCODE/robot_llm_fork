@@ -3,7 +3,7 @@
 voice_session_timeout_s = 30.0
 voice_session_history_turns = 6
 # GUI 初始化最多等待语音模型就绪的时间；超时后转为后台加载。
-voice_speech_startup_wait_timeout_s = 30.0
+voice_speech_startup_wait_timeout_s = 600.0
 # 是否请求 LLM/TTS 音频回复。
 voice_tts_enabled = false
 # 语音输入总开关；启用后同时装配 ASR 与关键词唤醒链路。
