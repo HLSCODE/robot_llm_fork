@@ -127,6 +127,79 @@ class InitializationTuiTests(unittest.TestCase):
             copy.assert_called_once_with("first line\nsecond line")
             self.assertFalse(item.detail.display)
 
+    def test_collapsing_focused_details_restores_step_navigation(self) -> None:
+        asyncio.run(self._exercise_detail_focus_restoration())
+
+    async def _exercise_detail_focus_restoration(self) -> None:
+        plan = InitializationPlan(
+            project_root=Path.cwd(),
+            steps=(
+                InitializationStep.CONFIGURATION,
+                InitializationStep.DEPENDENCIES,
+            ),
+            dry_run=True,
+        )
+        app = InitializationApp(plan)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            app._show_stage(WizardStage.EXECUTION, animate=False)
+            first = app.query_one("#step-configuration", StepItem)
+            second = app.query_one("#step-dependencies", StepItem)
+            for item in app.query(StepItem):
+                item.display = item in (first, second)
+            first.write_log("line 1")
+            first.write_log("line 2")
+            first.focus()
+
+            await pilot.press("right")
+            await pilot.press("down")
+            await pilot.pause()
+
+            self.assertIs(app.focused, first.detail)
+            await pilot.press("left")
+            await pilot.pause()
+
+            self.assertFalse(first.detail.display)
+            self.assertIs(app.focused, first)
+
+            await pilot.press("down")
+            await pilot.pause()
+            self.assertIs(app.focused, second)
+
+    def test_step_navigation_stays_inside_visible_list_at_boundaries(self) -> None:
+        asyncio.run(self._exercise_step_navigation_boundaries())
+
+    async def _exercise_step_navigation_boundaries(self) -> None:
+        plan = InitializationPlan(
+            project_root=Path.cwd(),
+            steps=(
+                InitializationStep.CONFIGURATION,
+                InitializationStep.DEPENDENCIES,
+            ),
+            dry_run=True,
+        )
+        app = InitializationApp(plan)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            app._show_stage(WizardStage.EXECUTION, animate=False)
+            first = app.query_one("#step-configuration", StepItem)
+            second = app.query_one("#step-dependencies", StepItem)
+            for item in app.query(StepItem):
+                item.display = item in (first, second)
+
+            first.focus()
+            await pilot.press("up")
+            await pilot.pause()
+            self.assertIs(app.focused, first)
+
+            await pilot.press("down", "down")
+            await pilot.pause()
+            self.assertIs(app.focused, second)
+
+            await pilot.press("up")
+            await pilot.pause()
+            self.assertIs(app.focused, first)
+
 
 if __name__ == "__main__":
     unittest.main()

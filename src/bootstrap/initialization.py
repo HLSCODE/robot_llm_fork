@@ -241,6 +241,14 @@ class InitializationRunner:
         command = ["uv", "sync"]
         if plan.frozen:
             command.append("--frozen")
+        cache_directory = _uv_cache_directory(plan.project_root)
+        if (
+            "UV_LINK_MODE" not in os.environ
+            and cache_directory is not None
+            and _are_on_different_filesystems(cache_directory, plan.project_root)
+        ):
+            command.append("--link-mode=copy")
+            self._log(step, "uv 缓存与项目位于不同文件系统，使用 copy 模式")
         for extra in plan.extras:
             command.extend(("--extra", extra))
         self._log(step, f"执行：{' '.join(command)}")
@@ -349,6 +357,50 @@ class InitializationRunner:
 
 def _has_required_files(directory: Path, required_files: Iterable[str]) -> bool:
     return directory.is_dir() and all((directory / name).is_file() for name in required_files)
+
+
+def _uv_cache_directory(project_root: Path) -> Path | None:
+    configured = os.environ.get("UV_CACHE_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    try:
+        result = subprocess.run(
+            ["uv", "cache", "dir"],
+            cwd=project_root,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    rendered = result.stdout.strip()
+    return Path(rendered).expanduser() if rendered else None
+
+
+def _are_on_different_filesystems(first: Path, second: Path) -> bool:
+    first_resolved = first.resolve()
+    second_resolved = second.resolve()
+    if os.name == "nt":
+        first_drive = first_resolved.drive.casefold()
+        second_drive = second_resolved.drive.casefold()
+        return bool(first_drive and second_drive and first_drive != second_drive)
+    first_existing = _nearest_existing_path(first_resolved)
+    second_existing = _nearest_existing_path(second_resolved)
+    if first_existing is None or second_existing is None:
+        return False
+    return first_existing.stat().st_dev != second_existing.stat().st_dev
+
+
+def _nearest_existing_path(path: Path) -> Path | None:
+    current = path
+    while not current.exists():
+        parent = current.parent
+        if parent == current:
+            return None
+        current = parent
+    return current
 
 
 def prepare_asr_models(

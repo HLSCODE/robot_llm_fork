@@ -34,6 +34,8 @@ robot-config-init --project-root /path/to/robot_llm_fork
 返回以及 `Ctrl+C` 安全取消。执行阶段每个步骤只显示状态摘要，详情默认收起，使用
 `Enter`/`→` 展开、`←` 收起、`C` 复制当前步骤的完整详情。模型下载默认不选中；选择后也会先检查本地缓存，
 ASR、VAD、标点或 KWS 模型完整存在时直接跳过下载。
+依赖同步时若检测到 uv 缓存与项目位于不同文件系统，初始化器会自动使用
+`--link-mode=copy`，避免跨盘硬链接警告；显式设置 `UV_LINK_MODE` 时以用户配置为准。
 
 ```bash
 uv run robot-init

@@ -88,6 +88,30 @@ class InitializationRunnerTests(unittest.TestCase):
         self.assertEqual(StepStatus.FAILED, results[0].status)
         self.assertEqual(StepStatus.SKIPPED, results[1].status)
 
+    def test_dependency_sync_uses_copy_mode_across_filesystems(self) -> None:
+        runner = InitializationRunner()
+        plan = InitializationPlan(
+            project_root=Path.cwd(),
+            steps=(InitializationStep.DEPENDENCIES,),
+            extras=("gui",),
+        )
+        with (
+            patch.dict("os.environ", {}, clear=True),
+            patch(
+                "src.bootstrap.initialization._uv_cache_directory",
+                return_value=Path("cache"),
+            ),
+            patch(
+                "src.bootstrap.initialization._are_on_different_filesystems",
+                return_value=True,
+            ),
+            patch.object(runner, "_run_subprocess") as run_subprocess,
+        ):
+            runner._sync_dependencies(plan, InitializationStep.DEPENDENCIES)
+
+        command = run_subprocess.call_args.args[0]
+        self.assertIn("--link-mode=copy", command)
+
     def test_configuration_step_preserves_existing_local_values(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

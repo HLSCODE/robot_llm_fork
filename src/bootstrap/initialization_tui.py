@@ -203,13 +203,13 @@ class StepItem(Vertical):
         self._render_summary()
 
     def action_toggle_details(self) -> None:
-        self.detail.display = not self.detail.display
+        self._set_details_expanded(not self.detail.display)
 
     def action_expand_details(self) -> None:
-        self.detail.display = True
+        self._set_details_expanded(True)
 
     def action_collapse_details(self) -> None:
-        self.detail.display = False
+        self._set_details_expanded(False)
 
     def action_copy_details(self) -> None:
         if not self._log_lines:
@@ -220,10 +220,13 @@ class StepItem(Vertical):
         self.app.notify(f"已复制 {self.step.label} 的完整详情")
 
     def action_previous_item(self) -> None:
-        self.screen.focus_previous()
+        self._focus_sibling(offset=-1)
 
     def action_next_item(self) -> None:
-        self.screen.focus_next()
+        if self.detail.display:
+            self.detail.focus()
+            return
+        self._focus_sibling(offset=1)
 
     def on_focus(self) -> None:
         self._render_summary()
@@ -234,6 +237,27 @@ class StepItem(Vertical):
     def on_click(self) -> None:
         self.focus()
         self.action_toggle_details()
+
+    def _set_details_expanded(self, expanded: bool) -> None:
+        self.detail.display = expanded
+        if not expanded:
+            # The detail RichLog is focusable so its arrow keys can scroll. Once it
+            # is hidden, return focus to the owning row; otherwise focus remains on
+            # an invisible widget and step navigation appears to stop working.
+            self.focus()
+
+    def _focus_sibling(self, *, offset: int) -> None:
+        visible_items = tuple(
+            item for item in self.screen.query(StepItem) if item.display
+        )
+        try:
+            current_index = visible_items.index(self)
+        except ValueError:
+            self.focus()
+            return
+        target_index = current_index + offset
+        if 0 <= target_index < len(visible_items):
+            visible_items[target_index].focus()
 
     def _render_summary(self) -> None:
         pointer = "›" if self.has_focus else " "
