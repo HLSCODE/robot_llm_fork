@@ -1,0 +1,72 @@
+[voice]
+# 唤醒会话闲置超时和发送给 LLM 的最大历史轮数。
+voice_session_timeout_s = 30.0
+voice_session_history_turns = 6
+# GUI 初始化最多等待语音模型就绪的时间；超时后转为后台加载。
+voice_speech_startup_wait_timeout_s = 30.0
+# 是否请求 LLM/TTS 音频回复。
+voice_tts_enabled = false
+# 语音输入总开关；启用后同时装配 ASR 与关键词唤醒链路。
+voice_input_enabled = false
+# 输入音频采样率、声道数、单块时长和队列容量。
+voice_audio_sample_rate = 16000
+voice_audio_channels = 1
+voice_audio_block_ms = 100
+voice_audio_queue_size = 300
+# sounddevice 延迟模式："high"、"low" 或设备支持的秒数；空设备名使用系统默认输入。
+voice_audio_latency = "high"
+voice_audio_device = ""
+# 是否输出底层音频采集状态日志。
+voice_audio_show_status = false
+# VAD 模型标识和送入模型的音频块时长。
+voice_vad_model = "fsmn-vad"
+voice_vad_chunk_ms = 200
+# 一句话的最短/最长持续时间及判定结束所需静音时长。
+voice_min_utterance_ms = 500
+voice_max_utterance_ms = 30000
+voice_end_silence_ms = 800
+# 开始说话的 RMS 阈值，以及连续多少个音频块满足阈值才确认开始。
+voice_speech_start_rms_threshold = 0.07
+voice_speech_start_confirm_chunks = 1
+# 首轮和连续对话等待用户开口的超时。
+voice_listening_timeout_s = 8.0
+voice_follow_up_listening_timeout_s = 25.0
+# 两次唤醒触发之间的冷却时间。
+voice_wake_cooldown_s = 1.5
+# 是否播放/生成唤醒反馈及默认反馈文本。
+voice_wake_feedback_enabled = true
+voice_wake_feedback_text = "你好"
+# 是否在唤醒后执行欢迎工作流；工作流名称为空时不执行。
+voice_wake_welcome_enabled = false
+voice_wake_welcome_workflow = ""
+# 静音 RMS 阈值；通常应低于 speech_start_rms_threshold。
+voice_silence_rms_threshold = 0.01
+# 是否抑制 ASR/唤醒模型直接向控制台输出，以及是否显示 ASR 耗时。
+voice_suppress_model_output = true
+voice_show_asr_timing = false
+# ASR 主模型、标点模型和计算设备；设备为空时由模型库自动选择。
+voice_asr_model = "iic/SenseVoiceSmall"
+voice_asr_punc_model = "ct-punc"
+voice_asr_device = ""
+# ASR 动态批处理的最大音频时长（秒）。
+voice_asr_batch_size_s = 60
+# 唤醒引擎："sherpa" 或 "openwakeword"。
+voice_wake_engine = "sherpa"
+# 是否绕过真实关键词，在启动后自动触发一次唤醒；仅建议调试使用。
+voice_wake_auto_trigger = false
+# sherpa-onnx KWS 的 encoder、decoder、joiner、tokens 和关键词文件路径。
+voice_kws_encoder = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/encoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+voice_kws_decoder = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/decoder-epoch-13-avg-2-chunk-16-left-64.onnx"
+voice_kws_joiner = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/joiner-epoch-13-avg-2-chunk-16-left-64.onnx"
+voice_kws_tokens = "models/kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/tokens.txt"
+voice_kws_keywords_file = "models/kws/keywords.txt"
+# KWS 执行 provider、触发阈值、关键词分数、线程数和搜索活跃路径数。
+voice_kws_provider = "cpu"
+voice_kws_threshold = 0.35
+voice_kws_score = 1.5
+voice_kws_num_threads = 1
+voice_kws_max_active_paths = 4
+# openWakeWord 模型路径；多个路径使用英文逗号分隔。
+voice_openwakeword_model_paths = ""
+# openWakeWord 触发阈值，范围通常为 0-1。
+voice_openwakeword_threshold = 0.6

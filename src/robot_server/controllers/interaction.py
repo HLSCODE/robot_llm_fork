@@ -237,15 +237,13 @@ class InteractionWebSocketHandler:
         try:
             settings = self._server._services.settings
             provider = registry.default_provider.upper()
-            provider_key = {
-                "openai": settings.secrets.openai_api_key,
-                "deepseek": settings.secrets.deepseek_api_key,
-                "dashscope": settings.secrets.dashscope_api_key,
-            }.get(provider.lower(), "")
+            provider_settings = settings.llm_providers.require(provider)
             api_key_set = (
-                bool(settings.llm.minicpm_gateway_host)
-                if provider.lower() == "minicpm"
-                else bool(provider_key)
+                bool(provider_settings.gateway_host)
+                if provider_settings.normalized_kind == "minicpm_realtime"
+                else bool(
+                    settings.secrets.credential(provider_settings.credential_env)
+                )
             )
         except Exception as exc:
             logger.debug(
@@ -759,12 +757,13 @@ class InteractionWebSocketHandler:
         """Load MiniCPM settings from the application snapshot."""
         try:
             settings = self._server._services.settings
+            provider = settings.llm_providers.require("minicpm")
             self._server._minicpm_cfg = MiniCPMChatConfig(
-                gateway_host=settings.llm.minicpm_gateway_host,
-                gateway_port=settings.llm.minicpm_gateway_port,
-                ws_scheme=settings.llm.minicpm_ws_scheme,
-                gateway_path_prefix=settings.llm.minicpm_gateway_path_prefix,
-                realtime_path=settings.llm.minicpm_realtime_path,
+                gateway_host=provider.gateway_host,
+                gateway_port=provider.gateway_port,
+                ws_scheme=provider.ws_scheme,
+                gateway_path_prefix=provider.gateway_path_prefix,
+                realtime_path=provider.realtime_path,
             )
             logger.info(
                 "MiniCPM 配置已加载: %s://%s%s%s",

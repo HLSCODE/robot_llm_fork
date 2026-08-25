@@ -1,0 +1,83 @@
+[data_collection]
+# 采集帧率及 OpenCV 摄像头索引。
+fps = 30
+camera_index = 0
+# 需要同步记录的机械臂逻辑 ID。
+arm_ids = ["left", "right"]
+# 数据集输出目录及数据格式变体。
+save_path = "data/demos"
+format_variant = "portable_simplified"
+# 启动录制要求的最小磁盘余量（字节）和空间预估放大系数。
+minimum_free_bytes = 1073741824
+storage_overhead_factor = 1.25
+# 超过该时长的未完成写入可视为陈旧任务。
+stale_write_seconds = 3600.0
+# 确定性抽样/划分使用的随机种子。
+random_seed = 42
+# 停止录制等待后台写入线程退出的最长时间。
+recording_stop_timeout_seconds = 5.0
+# 同一采集样本中不同数据源允许的最大时间偏差。
+maximum_sync_skew_ms = 100.0
+# 相机外参；空数组表示未配置。具体矩阵格式由采集格式定义。
+camera_extrinsics = []
+# 外参所基于的参考坐标系名称；空字符串表示未声明。
+camera_extrinsics_reference_frame = ""
+# 本次标定数据的稳定标识，用于数据追溯。
+calibration_id = ""
+
+[localization]
+# 外部定位 UDP 监听地址与端口；0.0.0.0 表示监听所有网卡。
+external_localization_host = "0.0.0.0"
+external_localization_port = 22222
+# 单次 UDP 接收缓冲区大小（字节）。
+external_localization_receive_size_bytes = 1024
+# Socket 轮询超时和服务停止时等待接收线程退出的时间。
+external_localization_socket_timeout_seconds = 0.2
+external_localization_join_timeout_seconds = 1.0
+
+[server]
+# 是否随 GUI 启动 WebSocket 附加服务。
+websocket_enabled = true
+# 是否启用 TLS、Token 和 Origin 等 WebSocket 安全策略；关闭时适合可信内网/本机调试。
+websocket_security_enabled = false
+# WebSocket 监听地址与端口；对外暴露前应同时启用安全策略。
+websocket_host = "127.0.0.1"
+websocket_port = 8765
+# 远程控制租约有效期，超时后释放控制权。
+websocket_control_lease_seconds = 30.0
+# 单条消息大小上限（字节）、每秒请求上限、并发请求上限和发送队列上限。
+websocket_max_message_size_bytes = 1048576
+websocket_max_requests_per_second = 120
+websocket_max_concurrent_requests = 16
+websocket_max_queued_messages = 16
+# 单次发送超时；超过 slow_send 阈值会记为慢发送。
+websocket_send_timeout_seconds = 2.0
+websocket_slow_send_threshold_seconds = 0.5
+# 允许的浏览器 Origin 精确列表；启用安全策略时远程部署必须明确配置。
+websocket_allowed_origins = []
+# TLS 证书链和私钥路径；仅在启用安全策略/TLS 时使用。认证 Token 放在 .env。
+websocket_tls_certificate_path = ""
+websocket_tls_private_key_path = ""
+# 位于可信反向代理后时启用；代理必须正确传递客户端与 Origin 信息。
+websocket_reverse_proxy_mode = false
+# 遥操作命令过期时间，超时命令不会继续下发硬件。
+teleoperation_command_timeout_seconds = 1.0
+# 附加服务（WebSocket、后续 HTTP 等）的启动和停止超时。
+auxiliary_service_start_timeout_seconds = 5.0
+auxiliary_service_stop_timeout_seconds = 10.0
+
+[execution]
+# 单个动作允许的最长执行时间。
+execution_action_timeout_seconds = 600.0
+# 机械臂动作最大尝试次数及重试间隔。
+execution_arm_move_max_attempts = 3
+execution_arm_move_retry_delay_seconds = 0.5
+# 身体轴状态轮询间隔。
+execution_body_poll_interval_seconds = 0.1
+# 夹爪动作最大尝试次数及重试间隔。
+execution_gripper_max_attempts = 3
+execution_gripper_retry_delay_seconds = 0.5
+# 轨迹完成状态轮询间隔。
+execution_trajectory_poll_interval_seconds = 0.5
+# 安全停止后等待执行线程确认退出的最长时间。
+safety_stop_wait_timeout_seconds = 2.0

@@ -9,15 +9,36 @@ from typing import cast, get_type_hints
 
 from dotenv import load_dotenv
 
+from .data_paths import PROJECT_ROOT
 from .environment import environment_overrides
 from .errors import ConfigLoadError
 from .settings import ApplicationSettings
-from .toml_source import load_toml_sections
+from .toml_source import configuration_document_paths, load_toml_sections
 
 
-def default_config_path() -> Path:
-    """Return the conventional project-local TOML configuration path."""
-    return Path.cwd() / "config" / "config.toml"
+def default_config_path(
+    *,
+    working_directory: Path | None = None,
+    project_root: Path = PROJECT_ROOT,
+) -> Path:
+    """Resolve local config without depending solely on process working directory."""
+    working_root = (working_directory or Path.cwd()).resolve()
+    working_candidate = working_root / "config" / "config.toml"
+    if working_candidate.is_file():
+        return working_candidate
+
+    project_candidate = project_root.resolve() / "config" / "config.toml"
+    if project_candidate.is_file():
+        return project_candidate
+    return working_candidate
+
+
+def configuration_source_paths(config_path: str | Path | None = None) -> tuple[Path, ...]:
+    """Return the entry and fragments that the application would load."""
+    resolved_config = _resolve_config_path(config_path)
+    if not resolved_config.is_file():
+        return ()
+    return configuration_document_paths(resolved_config)
 
 
 def load_application_settings(
@@ -30,11 +51,15 @@ def load_application_settings(
     A missing conventional config file is allowed so installed commands can use
     typed defaults. An explicitly supplied path must exist.
     """
-    resolved_config = Path(config_path) if config_path is not None else default_config_path()
+    resolved_config = _resolve_config_path(config_path)
     if config_path is not None and not resolved_config.is_file():
         raise ConfigLoadError(f"配置文件不存在: {resolved_config}")
 
-    resolved_env = Path(env_file) if env_file is not None else Path.cwd() / ".env"
+    resolved_env = (
+        Path(env_file)
+        if env_file is not None
+        else _default_env_path(resolved_config, has_explicit_config=config_path is not None)
+    )
     if resolved_env.is_file():
         load_dotenv(resolved_env, override=False)
 
@@ -46,6 +71,18 @@ def load_application_settings(
         raise
     except (OSError, TypeError, ValueError) as exc:
         raise ConfigLoadError("配置无法解析；请检查 config/config.toml 和 .env") from exc
+
+
+def _resolve_config_path(config_path: str | Path | None) -> Path:
+    if config_path is None:
+        return default_config_path()
+    return Path(config_path).expanduser().resolve()
+
+
+def _default_env_path(config_path: Path, *, has_explicit_config: bool) -> Path:
+    if not has_explicit_config and config_path.parent.name == "config":
+        return config_path.parent.parent / ".env"
+    return Path.cwd() / ".env"
 
 
 def _build_settings(

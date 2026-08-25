@@ -19,6 +19,8 @@ from threading import RLock
 from typing import Any, Dict, Optional, Sequence
 
 from ..configuration.settings import (
+    LLMProviderCatalogSettings,
+    LLMProviderSettings,
     LLMSettings,
     ModelRoutingSettings,
     SecretSettings,
@@ -57,11 +59,6 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
-DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
-DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-SUPPORTED_PROVIDERS = ("openai", "deepseek", "dashscope", "minicpm")
-
-
 class LLMRegistry:
     """Central registry for all supported LLM provider singletons."""
 
@@ -71,6 +68,7 @@ class LLMRegistry:
         secrets: SecretSettings,
         default_provider: str = "openai",
         model_routing: ModelRoutingSettings | None = None,
+        provider_catalog: LLMProviderCatalogSettings | None = None,
         providers: Optional[Dict[str, BaseLLMClient]] = None,
         metrics: LLMMetrics | None = None,
     ) -> None:
@@ -78,16 +76,17 @@ class LLMRegistry:
         self._secrets = secrets
         self.default_provider = self._normalize_provider(default_provider)
         self._model_routing = model_routing or ModelRoutingSettings()
+        self._provider_catalog = provider_catalog or LLMProviderCatalogSettings()
         self._providers: Dict[str, BaseLLMClient] = {}
         self._lock = RLock()
         self._closed = False
         self._metrics = metrics or LLMMetrics()
         self._fallback_providers = self._parse_provider_names(
-            settings.llm_fallback_providers
+            settings.fallback_providers
         )
         self._health = ProviderHealthTracker(
-            failure_threshold=settings.llm_circuit_failure_threshold,
-            recovery_seconds=settings.llm_circuit_recovery_seconds,
+            failure_threshold=settings.circuit_failure_threshold,
+            recovery_seconds=settings.circuit_recovery_seconds,
         )
 
         if providers:
@@ -125,14 +124,16 @@ class LLMRegistry:
         cls,
         settings: LLMSettings,
         secrets: SecretSettings,
+        provider_catalog: LLMProviderCatalogSettings,
         model_routing: ModelRoutingSettings | None = None,
     ) -> "LLMRegistry":
         """Create a registry from immutable LLM and secret snapshots."""
         registry = cls(
             settings=settings,
             secrets=secrets,
-            default_provider=settings.llm_default_provider or "openai",
+            default_provider=settings.default_provider or "openai",
             model_routing=model_routing,
+            provider_catalog=provider_catalog,
         )
         logger.info(
             "LLMRegistry 初始化完成: default=%s, providers=%s",
@@ -170,57 +171,33 @@ class LLMRegistry:
         cls,
         settings: LLMSettings,
         secrets: SecretSettings,
-        provider: str,
+        provider: LLMProviderSettings,
     ) -> BaseLLMClient:
-        provider = cls._normalize_provider(provider)
-        timeout_s = settings.llm_request_timeout_s
+        provider_id = provider.normalized_id
+        timeout_s = settings.request_timeout_s
 
-        if provider == "minicpm":
+        if provider.normalized_kind == "minicpm_realtime":
             return MiniCPMRealtimeClient(
-                gateway_host=settings.minicpm_gateway_host,
-                gateway_port=settings.minicpm_gateway_port,
-                ws_scheme=settings.minicpm_ws_scheme,
-                gateway_path_prefix=settings.minicpm_gateway_path_prefix,
-                realtime_path=settings.minicpm_realtime_path,
-                model=settings.minicpm_model,
+                gateway_host=provider.gateway_host,
+                gateway_port=provider.gateway_port,
+                ws_scheme=provider.ws_scheme,
+                gateway_path_prefix=provider.gateway_path_prefix,
+                realtime_path=provider.realtime_path,
+                model=provider.model,
                 timeout_s=timeout_s,
             )
 
-        if provider == "deepseek":
+        if provider.normalized_kind == "openai_compatible":
             return OpenAICompatibleClient(
-                provider_name="deepseek",
-                api_key=secrets.deepseek_api_key or secrets.openai_api_key,
-                model=settings.deepseek_model
-                or settings.openai_model
-                or "deepseek-reasoner",
-                base_url=settings.deepseek_base_url
-                or settings.openai_base_url
-                or DEEPSEEK_BASE_URL,
-                default_model="deepseek-reasoner",
+                provider_name=provider_id,
+                api_key=secrets.credential(provider.credential_env),
+                model=provider.model,
+                base_url=provider.base_url,
+                default_model=provider.model,
                 timeout_s=timeout_s,
             )
-
-        if provider == "dashscope":
-            return OpenAICompatibleClient(
-                provider_name="dashscope",
-                api_key=secrets.dashscope_api_key or secrets.openai_api_key,
-                model=settings.dashscope_model
-                or settings.openai_model
-                or "qwen-plus",
-                base_url=settings.dashscope_base_url
-                or settings.openai_base_url
-                or DASHSCOPE_BASE_URL,
-                default_model="qwen-plus",
-                timeout_s=timeout_s,
-            )
-
-        return OpenAICompatibleClient(
-            provider_name=provider if provider != "openai" else "openai",
-            api_key=secrets.openai_api_key,
-            model=settings.openai_model or "gpt-4o",
-            base_url=settings.openai_base_url,
-            default_model="gpt-4o",
-            timeout_s=timeout_s,
+        raise ValueError(
+            f"未知 LLM provider kind: {provider.kind} ({provider.id})"
         )
 
     @staticmethod
@@ -244,7 +221,7 @@ class LLMRegistry:
     def provider_names(self) -> tuple[str, ...]:
         with self._lock:
             loaded = tuple(self._providers)
-        return tuple(dict.fromkeys((*SUPPORTED_PROVIDERS, *loaded)))
+        return tuple(dict.fromkeys((*self._provider_catalog.enabled_ids, *loaded)))
 
     @property
     def loaded_provider_names(self) -> tuple[str, ...]:
@@ -255,9 +232,7 @@ class LLMRegistry:
         parts = []
         with self._lock:
             providers = dict(self._providers)
-        for name in tuple(
-            dict.fromkeys((*SUPPORTED_PROVIDERS, *providers))
-        ):
+        for name in tuple(dict.fromkeys((*self._provider_catalog.enabled_ids, *providers))):
             client = providers.get(name)
             if client is None:
                 parts.append(f"{name}:lazy")
@@ -279,17 +254,13 @@ class LLMRegistry:
             if provider_name in self._providers:
                 return self._providers[provider_name]
 
-            if provider_name not in SUPPORTED_PROVIDERS:
-                supported = ", ".join(SUPPORTED_PROVIDERS)
-                raise ValueError(
-                    f"未知 LLM provider: {provider_name}，支持: {supported}"
-                )
+            provider_settings = self._provider_catalog.require(provider_name)
 
             logger.info("懒加载 LLM provider: %s", provider_name)
             client = self._create_provider(
                 self._settings,
                 self._secrets,
-                provider_name,
+                provider_settings,
             )
             self._providers[provider_name] = client
             return client
@@ -349,7 +320,7 @@ class LLMRegistry:
         with self._lock:
             providers = dict(self._providers)
         names = tuple(dict.fromkeys(
-            (*SUPPORTED_PROVIDERS, *providers, *self._fallback_providers)
+            (*self._provider_catalog.enabled_ids, *providers, *self._fallback_providers)
         ))
         snapshots: dict[str, ProviderHealthSnapshot] = {}
         for name in names:
@@ -381,7 +352,7 @@ class LLMRegistry:
                 )
 
     def _validate_configured_providers(self) -> None:
-        known = set(SUPPORTED_PROVIDERS) | set(self._providers)
+        known = set(self._provider_catalog.enabled_ids) | set(self._providers)
         route_providers = tuple(
             provider
             for _name, route in self._model_routing.entries()

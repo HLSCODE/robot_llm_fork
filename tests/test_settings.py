@@ -60,7 +60,7 @@ class ApplicationSettingsTests(unittest.TestCase):
         self.assertEqual("future-arm", settings.robot.robot_provider)
         self.assertEqual("COM8", settings.devices.relay_serial_port)
         self.assertEqual(0.81, settings.vision.vision_default_confidence)
-        self.assertEqual("deepseek", settings.llm.llm_default_provider)
+        self.assertEqual("deepseek", settings.llm.default_provider)
         self.assertEqual("secret", settings.secrets.deepseek_api_key)
         self.assertTrue(settings.voice.voice_input_enabled)
         self.assertEqual(15, settings.data_collection.fps)

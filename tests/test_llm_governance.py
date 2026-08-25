@@ -3,7 +3,12 @@ from __future__ import annotations
 import unittest
 from typing import Any
 
-from src.configuration.settings import LLMSettings, SecretSettings
+from src.configuration.settings import (
+    LLMProviderCatalogSettings,
+    LLMProviderSettings,
+    LLMSettings,
+    SecretSettings,
+)
 from src.llm import (
     BaseLLMClient,
     LLMCapability,
@@ -100,13 +105,38 @@ def _config(
     threshold: int = 3,
 ) -> LLMSettings:
     return LLMSettings(
-        llm_fallback_providers=fallbacks,
-        llm_circuit_failure_threshold=threshold,
-        llm_circuit_recovery_seconds=30.0,
+        fallback_providers=fallbacks,
+        circuit_failure_threshold=threshold,
+        circuit_recovery_seconds=30.0,
     )
 
 
 class LLMProviderGovernanceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_registry_builds_named_instance_from_adapter_kind(self):
+        registry = LLMRegistry.from_settings(
+            LLMSettings(default_provider="laboratory_qwen"),
+            SecretSettings(openai_api_key="test-key"),
+            LLMProviderCatalogSettings(
+                providers=(
+                    *LLMProviderCatalogSettings().providers,
+                    LLMProviderSettings(
+                        id="laboratory_qwen",
+                        kind="openai_compatible",
+                        model="qwen-custom",
+                        base_url="http://127.0.0.1:9000/v1",
+                        credential_env="OPENAI_API_KEY",
+                    ),
+                )
+            ),
+        )
+
+        provider = registry.get_provider()
+
+        self.assertEqual("laboratory_qwen", provider.get_provider_name())
+        self.assertEqual("qwen-custom", provider.get_model_name())
+        self.assertIn("laboratory_qwen", registry.provider_names)
+        await registry.close()
+
     async def test_circuit_allows_only_one_half_open_probe(self):
         now = [100.0]
         tracker = ProviderHealthTracker(

@@ -13,6 +13,7 @@ from .data_paths import ApplicationDataPaths
 from .settings import (
     ApplicationSettings,
     DataCollectionSettings,
+    LLMProviderCatalogSettings,
     ModelRoutingSettings,
     ServerSettings,
 )
@@ -21,8 +22,10 @@ from .settings import (
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _LOG_LEVELS = frozenset({"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"})
 _GUI_THEMES = frozenset({"system", "light", "dark"})
-_LLM_PROVIDERS = frozenset({"openai", "deepseek", "dashscope", "minicpm"})
-_NATIVE_AUDIO_PROVIDERS = frozenset({"minicpm"})
+_LLM_PROVIDER_KINDS = frozenset({"openai_compatible", "minicpm_realtime"})
+_LLM_CREDENTIAL_ENV_NAMES = frozenset(
+    {"OPENAI_API_KEY", "DEEPSEEK_API_KEY", "DASHSCOPE_API_KEY"}
+)
 _RESPONSE_OUTPUT_MODES = frozenset({"text", "native_audio", "text_then_tts"})
 _PLACEHOLDER_SECRETS = frozenset(
     {
@@ -163,7 +166,7 @@ def validate_startup_configuration(
 
     _validate_data_paths(settings, issues)
     _validate_data_collection(settings.data_collection, issues)
-    _validate_model_routing(settings.model_routing, issues)
+    _validate_llm_configuration(settings, issues)
     if not settings.localization.external_localization_host.strip():
         _error(
             issues,
@@ -220,7 +223,6 @@ def validate_startup_configuration(
             ("ROBOT2_PORT", settings.robot.robot2_port),
             ("MOVE_CONTROLLER_PORT", settings.robot.move_controller_port),
             ("VISION_CAMERA_PORT", settings.vision.vision_camera_port),
-            ("MINICPM_GATEWAY_PORT", settings.llm.minicpm_gateway_port),
             (
                 "EXTERNAL_LOCALIZATION_PORT",
                 settings.localization.external_localization_port,
@@ -229,12 +231,13 @@ def validate_startup_configuration(
             _port_value(value, issues, field)
 
     api_keys = {
-        "openai": settings.secrets.openai_api_key,
-        "deepseek": (settings.secrets.deepseek_api_key or settings.secrets.openai_api_key),
-        "dashscope": (settings.secrets.dashscope_api_key or settings.secrets.openai_api_key),
+        provider.normalized_id: settings.secrets.credential(provider.credential_env)
+        for provider in settings.llm_providers.entries(enabled_only=True)
+        if provider.normalized_kind == "openai_compatible"
     }
     configured_providers = {
-        settings.llm.llm_default_provider.strip().lower(),
+        settings.llm.default_provider.strip().lower(),
+        *(item.strip().lower() for item in settings.llm.fallback_providers),
     }
     for _, route in settings.model_routing.entries():
         configured_providers.update(
@@ -250,11 +253,7 @@ def validate_startup_configuration(
         )
     for provider in sorted(configured_providers & api_keys.keys()):
         api_key = api_keys[provider].strip()
-        secret_field = {
-            "openai": "OPENAI_API_KEY",
-            "deepseek": "DEEPSEEK_API_KEY",
-            "dashscope": "DASHSCOPE_API_KEY",
-        }[provider]
+        secret_field = settings.llm_providers.require(provider).credential_env
         if not api_key:
             _warning(
                 issues,
@@ -304,14 +303,101 @@ def validate_startup_configuration(
     return ConfigurationReport(tuple(issues))
 
 
-def _validate_model_routing(
-    settings: ModelRoutingSettings,
+def _validate_llm_configuration(
+    settings: ApplicationSettings,
     issues: list[ConfigurationIssue],
 ) -> None:
+    catalog = settings.llm_providers
+    provider_ids = tuple(provider.normalized_id for provider in catalog.providers)
+    if any(not provider_id for provider_id in provider_ids):
+        _error(issues, "invalid_llm_provider_id", "llm_providers", "实例 ID 不能为空")
+    if len(provider_ids) != len(set(provider_ids)):
+        _error(issues, "duplicate_llm_provider_id", "llm_providers", "实例 ID 不能重复")
+
+    for provider in catalog.providers:
+        field_prefix = f"llm_providers.{provider.id or '<empty>'}"
+        if provider.normalized_kind not in _LLM_PROVIDER_KINDS:
+            _error(
+                issues,
+                "invalid_llm_provider_kind",
+                f"{field_prefix}.kind",
+                "必须引用已实现的 Provider 适配器",
+            )
+            continue
+        if not provider.model.strip():
+            _error(issues, "empty_llm_model", f"{field_prefix}.model", "不能为空")
+        modes = tuple(mode.strip().lower() for mode in provider.output_modes)
+        if not modes or any(mode not in {"text", "native_audio"} for mode in modes):
+            _error(
+                issues,
+                "invalid_llm_provider_output_modes",
+                f"{field_prefix}.output_modes",
+                "只能包含 text 或 native_audio",
+            )
+        if provider.normalized_kind == "openai_compatible":
+            credential_env = provider.credential_env.strip().upper()
+            if credential_env not in _LLM_CREDENTIAL_ENV_NAMES:
+                _error(
+                    issues,
+                    "invalid_llm_credential_reference",
+                    f"{field_prefix}.credential_env",
+                    "必须引用受支持的 API Key 环境变量",
+                )
+        elif provider.enabled:
+            if not provider.gateway_host.strip():
+                _error(
+                    issues,
+                    "empty_llm_gateway_host",
+                    f"{field_prefix}.gateway_host",
+                    "不能为空",
+                )
+            _port_value(provider.gateway_port, issues, f"{field_prefix}.gateway_port")
+
+    enabled = frozenset(catalog.enabled_ids)
+    default_provider = settings.llm.default_provider.strip().lower()
+    if default_provider not in enabled:
+        _error(
+            issues,
+            "invalid_default_llm_provider",
+            "llm.default_provider",
+            "必须引用已启用的 Provider 实例",
+        )
+    _validate_provider_fallbacks(
+        default_provider,
+        settings.llm.fallback_providers,
+        "llm.fallback_providers",
+        issues,
+        allowed=enabled,
+    )
+    _positive_value(settings.llm.request_timeout_s, issues, "llm.request_timeout_s")
+    _positive_value(
+        settings.llm.circuit_failure_threshold,
+        issues,
+        "llm.circuit_failure_threshold",
+    )
+    _positive_value(
+        settings.llm.circuit_recovery_seconds,
+        issues,
+        "llm.circuit_recovery_seconds",
+    )
+    _validate_model_routing(settings.model_routing, catalog, issues)
+
+
+def _validate_model_routing(
+    settings: ModelRoutingSettings,
+    catalog: LLMProviderCatalogSettings,
+    issues: list[ConfigurationIssue],
+) -> None:
+    enabled = frozenset(catalog.enabled_ids)
+    native_audio = frozenset(
+        provider.normalized_id
+        for provider in catalog.entries(enabled_only=True)
+        if provider.supports("native_audio")
+    )
     for profile_name, route in settings.entries():
         field_prefix = f"model_routing.{profile_name}"
         provider = route.provider.strip().lower()
-        if provider not in _LLM_PROVIDERS:
+        if provider not in enabled:
             _error(
                 issues,
                 "invalid_llm_route_provider",
@@ -323,6 +409,7 @@ def _validate_model_routing(
             route.fallback_providers,
             f"{field_prefix}.fallback_providers",
             issues,
+            allowed=enabled,
         )
 
         mode = route.output_mode.strip().lower()
@@ -337,7 +424,7 @@ def _validate_model_routing(
 
         speech_provider = route.speech_provider.strip().lower()
         if mode == "text_then_tts":
-            if speech_provider not in _NATIVE_AUDIO_PROVIDERS:
+            if speech_provider not in native_audio:
                 _error(
                     issues,
                     "invalid_speech_provider",
@@ -349,7 +436,7 @@ def _validate_model_routing(
                 route.speech_fallback_providers,
                 f"{field_prefix}.speech_fallback_providers",
                 issues,
-                allowed=_NATIVE_AUDIO_PROVIDERS,
+                allowed=native_audio,
             )
             continue
 
@@ -360,7 +447,7 @@ def _validate_model_routing(
                 f"{field_prefix}.speech_provider",
                 f"{mode} 模式不能配置独立语音 provider",
             )
-        if mode == "native_audio" and provider not in _NATIVE_AUDIO_PROVIDERS:
+        if mode == "native_audio" and provider not in native_audio:
             _error(
                 issues,
                 "provider_lacks_native_audio",
@@ -375,7 +462,7 @@ def _validate_provider_fallbacks(
     field: str,
     issues: list[ConfigurationIssue],
     *,
-    allowed: frozenset[str] = _LLM_PROVIDERS,
+    allowed: frozenset[str],
 ) -> None:
     normalized = tuple(item.strip().lower() for item in fallbacks)
     if (

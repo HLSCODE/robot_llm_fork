@@ -10,7 +10,11 @@ from .auxiliary_services import (
     AuxiliaryServiceHost,
     AuxiliaryServiceSnapshot,
 )
-from ..configuration.config_loader import ConfigLoadError, load_application_settings
+from ..configuration.config_loader import (
+    ConfigLoadError,
+    configuration_source_paths,
+    load_application_settings,
+)
 from ..configuration.config_validation import (
     ConfigurationReport,
     StartupOptions,
@@ -499,6 +503,7 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         print(f"日志初始化失败: {exc}", file=sys.stderr)
         return 2
+    _log_configuration_sources(args.config)
     report = validate_startup_configuration(settings, options)
     _log_configuration_report(report)
     if report.errors:
@@ -534,6 +539,20 @@ def _log_configuration_report(report: ConfigurationReport) -> None:
             issue.field,
             issue.message,
         )
+
+
+def _log_configuration_sources(config_path: str | None) -> None:
+    try:
+        sources = configuration_source_paths(config_path)
+    except ConfigLoadError as exc:
+        logger.warning("无法读取配置来源信息: %s", exc)
+        return
+    if not sources:
+        logger.warning("未找到本机配置文件，当前使用类型化默认值与环境变量")
+        return
+    logger.info("配置入口已加载: %s", sources[0])
+    for source in sources[1:]:
+        logger.info("配置子文件已加载: %s", source)
 
 
 if __name__ == "__main__":

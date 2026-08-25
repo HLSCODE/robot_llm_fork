@@ -69,7 +69,8 @@ def create_application_services(
     llm = LLMRegistry.from_settings(
         settings.llm,
         settings.secrets,
-        settings.model_routing,
+        settings.llm_providers,
+        model_routing=settings.model_routing,
     )
     camera_access = CameraAccessService(device_runtime, resources)
     register_balance_reader(

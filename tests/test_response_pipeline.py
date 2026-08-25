@@ -110,7 +110,7 @@ class ResponsePipelineTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         registry = LLMRegistry(
-            settings=LLMSettings(llm_default_provider="dashscope"),
+            settings=LLMSettings(default_provider="dashscope"),
             secrets=SecretSettings(),
             model_routing=routes,
             providers={"openai": inference, "minicpm": speech},
@@ -230,7 +230,7 @@ class ModelRoutingConfigurationTests(unittest.TestCase):
             root = Path(temporary_directory)
             config_path = root / "config.toml"
             config_path.write_text(
-                """schema_version = 3
+                """schema_version = 5
 
 [model_routing.general_chat]
 provider = "openai"
@@ -258,7 +258,7 @@ speech_fallback_providers = []
             root = Path(temporary_directory)
             config_path = root / "config.toml"
             config_path.write_text(
-                """schema_version = 3
+                """schema_version = 5
 
 [model_routing.general_chat]
 provider = "dashscope"

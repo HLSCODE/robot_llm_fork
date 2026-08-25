@@ -54,24 +54,27 @@ uv sync --frozen --extra full
 
 ### 2. 准备配置
 
-复制 TOML 配置模板和密钥模板：
+增量初始化 TOML 配置、全部子配置和密钥模板：
 
 ```bash
-cp config/config.example.toml config/config.toml
-cp .env.example .env
+uv run robot-config-init
 ```
 
-Windows PowerShell：
-
-```powershell
-Copy-Item config/config.example.toml config/config.toml
-Copy-Item .env.example .env
-```
+该命令同时处理 `.env.example`、`config/config.example.toml` 和
+`config/fragments/*.example.toml`。只创建缺失文件，已存在的本机配置会跳过且不会被修改。
 
 按实际环境修改 `config/config.toml`。最常用配置项：
 
 ```toml
-schema_version = 3
+schema_version = 4
+
+include = [
+  "fragments/application.toml",
+  "fragments/services.toml",
+  "fragments/ai.toml",
+  "fragments/devices.toml",
+  "fragments/voice.toml",
+]
 
 [runtime]
 simulation_mode = false
@@ -85,9 +88,14 @@ websocket_host = "127.0.0.1"
 websocket_port = 8765
 
 [llm]
-llm_default_provider = "dashscope"
-openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-openai_model = "qwen-turbo"
+default_provider = "dashscope"
+
+[llm_providers.dashscope]
+kind = "openai_compatible"
+model = "qwen-turbo"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+credential_env = "DASHSCOPE_API_KEY"
+output_modes = ["text"]
 
 [model_routing.general_chat]
 provider = "dashscope"
@@ -105,6 +113,8 @@ robot2_port = 8080
 
 API Key、认证 Token 等敏感信息只写入 `.env`。`config/config.toml` 与 `.env`
 均为本机文件，默认不提交；系统环境变量和命令行参数可以继续覆盖配置。
+入口文件也可以不使用 `include`，直接声明全部配置。使用子配置时，加载顺序为
+`代码默认值 < include（从前到后）< 入口 TOML < 环境变量`，数组字段整体替换。
 
 启动 GUI 或连接硬件前可以单独校验配置：
 
@@ -261,7 +271,8 @@ AI 规划流程：
 4. 用户确认后发送 `ai_confirm`
 5. 服务端执行序列并推送执行事件
 
-LLM provider 的连接参数位于 `[llm]`；各固定任务实际使用哪个推理模型、是否降级，以及语音由推理模型直接输出还是交给独立语音模型，统一由 `[model_routing.<task>]` 配置。`TaskProfile` 只保留 Prompt、版本和能力需求，不再硬编码部署 provider。当前支持 `openai`、`deepseek`、`dashscope` 和 `minicpm`。
+`[llm]` 只保存全局推理策略；具体模型、连接地址和能力声明位于
+`[llm_providers.<id>]`。各固定任务实际引用哪个 Provider 实例、是否降级，以及语音由推理模型直接输出还是交给独立语音模型，统一由 `[model_routing.<task>]` 配置。`TaskProfile` 只保留 Prompt、版本和能力需求，不再硬编码部署 Provider。
 
 ## 相机与视觉
 
@@ -316,7 +327,7 @@ uv run --frozen --group dev python scripts/run_quality_checks.py
 regression，并构建 wheel、隔离安装后调用标准命令。测试分层、静态检查范围和 CI 规则见
 [工程质量门禁](docs/quality-gates.md)。
 
-- 新增配置项：同步维护对应领域 settings、`config/config.example.toml` 和环境变量映射。
+- 新增配置项：同步维护对应领域 settings、对应的 `config/fragments/*.example.toml` 和环境变量映射。
 - 新增动作类型：更新 `ActionType`、动作参数 schema、GUI 表单和 WebSocket 执行器。
 - 新增技能：在 `data/skills/<domain>/` 中维护单技能单文件的 `*.skill.json`，或扩展默认技能定义。
 - 新增 WebSocket 接口：在领域 handler 和 route/payload schema 中注册，并同步更新 `docs/websocket-api.md`。
@@ -339,7 +350,7 @@ uv run robot-llm --simulation
 
 ### AI 规划不可用
 
-检查对应的 `[model_routing.<task>]`、其中引用的 `[llm]` provider 连接参数，并调用 `ai_status` 查看服务端状态。
+检查对应的 `[model_routing.<task>]`、其中引用的 `[llm_providers.<id>]` 连接参数，并调用 `ai_status` 查看服务端状态。
 
 ### 相机没有画面
 
