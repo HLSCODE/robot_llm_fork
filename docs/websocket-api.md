@@ -101,12 +101,13 @@ uv sync --frozen
 
 ### 2.2 准备配置文件
 
-仓库不提交本机配置，请复制 TOML 与密钥模板：
+仓库不提交本机配置，请增量初始化入口 TOML、子配置与密钥文件：
 
 ```bash
-cp config/config.example.toml config/config.toml
-cp .env.example .env
+uv run robot-config-init
 ```
+
+已有文件会跳过，不会覆盖本机修改。
 
 也可以不创建本机文件，使用类型化默认值和系统环境变量覆盖；完整规则见
 [配置系统](configuration.md)。
@@ -176,13 +177,23 @@ auxiliary_service_start_timeout_seconds = 5.0
 auxiliary_service_stop_timeout_seconds = 10.0
 
 [llm]
-llm_default_provider = "dashscope"
-openai_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-openai_model = "qwen-turbo"
-minicpm_gateway_host = "10.10.17.13"
-minicpm_gateway_port = 8006
-minicpm_ws_scheme = "wss"
-minicpm_realtime_path = "/v1/realtime"
+default_provider = "dashscope"
+
+[llm_providers.dashscope]
+kind = "openai_compatible"
+model = "qwen-turbo"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+credential_env = "DASHSCOPE_API_KEY"
+output_modes = ["text"]
+
+[llm_providers.minicpm]
+kind = "minicpm_realtime"
+model = "minicpm-o"
+output_modes = ["text", "native_audio"]
+gateway_host = "10.10.17.13"
+gateway_port = 8006
+ws_scheme = "wss"
+realtime_path = "/v1/realtime"
 
 [vision]
 

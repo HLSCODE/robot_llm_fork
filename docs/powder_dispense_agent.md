@@ -156,8 +156,12 @@ roles = ["balance"]
 arms = []
 
 # balance_reading 默认使用 dashscope 视觉模型
-[llm]
-dashscope_model = "qwen-vl-max"
+[llm_providers.dashscope]
+kind = "openai_compatible"
+model = "qwen-vl-max"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+credential_env = "DASHSCOPE_API_KEY"
+output_modes = ["text"]
 ```
 
 `DASHSCOPE_API_KEY` 必须写入 `.env`，不能写入 TOML。

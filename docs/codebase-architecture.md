@@ -60,7 +60,7 @@ Robot Action Orchestrator 是一个面向机器人动作编排、设备控制和
 
 | 路径 | 内容 | 使用方式 |
 |---|---|---|
-| `config/` | `config.example.toml` 和本机 `config.toml` | 非敏感部署配置；本机文件不提交 |
+| `config/` | 入口 TOML、`fragments/` 和本机 `config.toml` | 非敏感部署配置；入口可 include 模块子配置，本机文件不提交 |
 | `.env.example` | 密钥、Token 等环境变量模板 | 复制为 `.env` 后填写敏感信息 |
 | `data/` | 用户动作、工作流、技能、轨迹、草稿、调试产物 | 运行数据，默认不提交 |
 | `docs/` | 架构、接口、配置、Provider、测试和重构文档 | 设计与维护依据 |

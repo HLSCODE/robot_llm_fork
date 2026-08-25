@@ -34,6 +34,8 @@ htmlcov/
 
 # --- 本地配置与虚拟环境 ---
 config/config.toml
+config/fragments/*.toml
+!config/fragments/*.example.toml
 env/
 venv/
 .env

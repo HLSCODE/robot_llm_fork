@@ -578,7 +578,7 @@ VOICE_KWS_KEYWORDS_FILE=models/kws/keywords.txt
 
 ```toml
 [llm]
-llm_default_provider = "minicpm"
+default_provider = "minicpm"
 
 [model_routing.general_chat]
 provider = "dashscope"

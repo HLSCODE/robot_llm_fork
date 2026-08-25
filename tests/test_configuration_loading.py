@@ -6,11 +6,61 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from src.configuration.config_loader import ConfigLoadError, load_application_settings
+from src.configuration.config_loader import (
+    ConfigLoadError,
+    configuration_source_paths,
+    default_config_path,
+    load_application_settings,
+)
 from src.configuration.settings import CameraRole
 
 
 class ConfigurationLoadingTests(unittest.TestCase):
+    def test_default_config_path_prefers_working_directory_then_project_root(self) -> None:
+        with TemporaryDirectory() as working_directory, TemporaryDirectory() as project_directory:
+            working_root = Path(working_directory)
+            project_root = Path(project_directory)
+            project_config = project_root / "config" / "config.toml"
+            project_config.parent.mkdir()
+            project_config.write_text("schema_version = 5\n", encoding="utf-8")
+
+            self.assertEqual(
+                project_config,
+                default_config_path(
+                    working_directory=working_root,
+                    project_root=project_root,
+                ),
+            )
+
+            working_config = working_root / "config" / "config.toml"
+            working_config.parent.mkdir()
+            working_config.write_text("schema_version = 5\n", encoding="utf-8")
+            self.assertEqual(
+                working_config,
+                default_config_path(
+                    working_directory=working_root,
+                    project_root=project_root,
+                ),
+            )
+
+    def test_default_env_follows_project_config_when_started_elsewhere(self) -> None:
+        with TemporaryDirectory() as temporary_directory, patch.dict(os.environ, {}, clear=True):
+            root = Path(temporary_directory)
+            config_path = root / "config" / "config.toml"
+            config_path.parent.mkdir()
+            config_path.write_text(
+                'schema_version = 5\n[gui]\ntheme = "light"\n',
+                encoding="utf-8",
+            )
+            (root / ".env").write_text('GUI_THEME="dark"\n', encoding="utf-8")
+            with patch(
+                "src.configuration.config_loader.default_config_path",
+                return_value=config_path,
+            ):
+                settings = load_application_settings()
+
+        self.assertEqual("dark", settings.gui.theme)
+
     def test_missing_conventional_file_uses_typed_defaults(self) -> None:
         with (
             TemporaryDirectory() as temporary_directory,
@@ -35,7 +85,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 3
+                schema_version = 5
                 [gui]
                 theme = "light"
                 [server]
@@ -60,10 +110,147 @@ class ConfigurationLoadingTests(unittest.TestCase):
         self.assertEqual(("https://robot.example",), settings.server.websocket_allowed_origins)
         self.assertEqual((1.0, 2.0, 3.0, 4.0, 5.0, 6.0), settings.robot.robot1_initial_pose)
 
+    def test_includes_are_ordered_entry_overrides_fragments_and_env_wins(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fragments = root / "fragments"
+            fragments.mkdir()
+            self._write_named(
+                fragments / "base.toml",
+                """
+                [gui]
+                theme = "dark"
+                [server]
+                websocket_port = 9000
+                websocket_allowed_origins = ["https://base.example"]
+                """,
+            )
+            self._write_named(
+                fragments / "override.toml",
+                """
+                [gui]
+                theme = "system"
+                [server]
+                websocket_port = 9100
+                websocket_allowed_origins = ["https://override.example"]
+                """,
+            )
+            config_path = self._write(
+                root,
+                """
+                schema_version = 5
+                include = [
+                  "fragments/base.toml",
+                  "fragments/override.toml",
+                ]
+                [gui]
+                theme = "light"
+                """,
+            )
+            with patch.dict(os.environ, {"WEBSOCKET_PORT": "9200"}, clear=True):
+                settings = load_application_settings(
+                    config_path,
+                    env_file=root / "missing.env",
+                )
+            sources = configuration_source_paths(config_path)
+
+        self.assertEqual("light", settings.gui.theme)
+        self.assertEqual(9200, settings.server.websocket_port)
+        self.assertEqual(
+            ("https://override.example",),
+            settings.server.websocket_allowed_origins,
+        )
+        self.assertEqual(
+            (
+                config_path.resolve(),
+                (fragments / "base.toml").resolve(),
+                (fragments / "override.toml").resolve(),
+            ),
+            sources,
+        )
+
+    def test_sequence_fields_are_replaced_instead_of_appended(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fragments = root / "fragments"
+            fragments.mkdir()
+            self._write_named(
+                fragments / "cameras.toml",
+                """
+                [vision]
+                [[vision.cameras]]
+                name = "included"
+                provider = "realsense"
+                device_id = "included-serial"
+                roles = []
+                arms = []
+                """,
+            )
+            config_path = self._write(
+                root,
+                """
+                schema_version = 5
+                include = ["fragments/cameras.toml"]
+                [vision]
+                [[vision.cameras]]
+                name = "entry"
+                provider = "realsense"
+                device_id = "entry-serial"
+                roles = []
+                arms = []
+                """,
+            )
+            settings = load_application_settings(
+                config_path,
+                env_file=root / "missing.env",
+            )
+
+        self.assertEqual(("entry",), tuple(camera.name for camera in settings.vision.cameras))
+
+    def test_include_paths_are_confined_unique_and_must_exist(self) -> None:
+        cases = (
+            ('include = ["missing.toml"]', "配置文件不存在"),
+            ('include = ["../outside.toml"]', "不允许超出"),
+            ('include = ["fragment.toml", "fragment.toml"]', "include 重复"),
+        )
+        for include_declaration, expected_error in cases:
+            with self.subTest(include=include_declaration), TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                self._write_named(root / "fragment.toml", "[gui]\ntheme = \"dark\"")
+                config_path = self._write(
+                    root,
+                    f"schema_version = 5\n{include_declaration}",
+                )
+                with self.assertRaisesRegex(ConfigLoadError, expected_error):
+                    load_application_settings(
+                        config_path,
+                        env_file=root / "missing.env",
+                    )
+
+    def test_fragment_cannot_declare_metadata_and_errors_name_the_source(self) -> None:
+        documents = (
+            ("schema_version = 5", "不得声明"),
+            ('include = ["nested.toml"]', "不得声明"),
+            ("[gui]\ntypo = true", "fragment.toml"),
+        )
+        for fragment_document, expected_error in documents:
+            with self.subTest(fragment=fragment_document), TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                self._write_named(root / "fragment.toml", fragment_document)
+                config_path = self._write(
+                    root,
+                    'schema_version = 5\ninclude = ["fragment.toml"]',
+                )
+                with self.assertRaisesRegex(ConfigLoadError, expected_error):
+                    load_application_settings(
+                        config_path,
+                        env_file=root / "missing.env",
+                    )
+
     def test_dotenv_is_loaded_without_overriding_process_environment(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 3\n")
+            config_path = self._write(root, "schema_version = 5\n")
             env_path = root / ".env"
             env_path.write_text(
                 'OPENAI_API_KEY="file-secret"\nGUI_THEME="light"\n',
@@ -77,8 +264,8 @@ class ConfigurationLoadingTests(unittest.TestCase):
 
     def test_unknown_table_and_field_are_rejected(self) -> None:
         documents = (
-            "schema_version = 3\n[unknown]\nvalue = 1\n",
-            "schema_version = 3\n[gui]\ntheme = \"dark\"\ntypo = true\n",
+            "schema_version = 5\n[unknown]\nvalue = 1\n",
+            "schema_version = 5\n[gui]\ntheme = \"dark\"\ntypo = true\n",
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -93,7 +280,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 3
+                schema_version = 5
                 [vision]
                 vision_default_workflow = "bottle"
 
@@ -141,7 +328,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 3
+                schema_version = 5
                 [vision]
                 camera_provider = "realsense"
                 realsense_device_sn = "serial-left"
@@ -160,7 +347,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 3
+                schema_version = 5
                 [voice]
                 voice_wake_welcome_enabled = true
                 voice_wake_welcome_workflow = "welcome.workflow.json"
@@ -186,7 +373,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             legacy_config_path = self._write(
                 root,
                 """
-                schema_version = 3
+                schema_version = 5
                 [voice]
                 voice_wake_welcome_task = "welcome.task"
                 """,
@@ -203,9 +390,55 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 3
+                schema_version = 5
                 [llm]
                 minicpm_ask_enabled = true
+                """,
+            )
+            with self.assertRaisesRegex(ConfigLoadError, "未知"):
+                load_application_settings(
+                    config_path,
+                    env_file=root / "missing.env",
+                )
+
+    def test_llm_provider_instances_are_loaded_from_named_subtables(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 5
+                [llm]
+                default_provider = "laboratory_qwen"
+
+                [llm_providers.laboratory_qwen]
+                kind = "openai_compatible"
+                model = "qwen-custom"
+                base_url = "http://127.0.0.1:9000/v1"
+                credential_env = "OPENAI_API_KEY"
+                output_modes = ["text"]
+                """,
+            )
+            settings = load_application_settings(
+                config_path,
+                env_file=root / "missing.env",
+            )
+
+        provider = settings.llm_providers.require("laboratory_qwen")
+        self.assertEqual("openai_compatible", provider.normalized_kind)
+        self.assertEqual("qwen-custom", provider.model)
+        self.assertEqual(("laboratory_qwen",), settings.llm_providers.enabled_ids)
+
+    def test_legacy_provider_fields_in_llm_table_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 5
+                [llm]
+                llm_default_provider = "openai"
+                openai_model = "gpt-4o"
                 """,
             )
             with self.assertRaisesRegex(ConfigLoadError, "未知"):
@@ -219,7 +452,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             root = Path(temporary_directory)
             config_path = self._write(
                 root,
-                'schema_version = 3\n[secrets]\nopenai_api_key = "do-not-store"\n',
+                'schema_version = 5\n[secrets]\nopenai_api_key = "do-not-store"\n',
             )
             with self.assertRaisesRegex(ConfigLoadError, "敏感字段不得写入 TOML"):
                 load_application_settings(config_path, env_file=root / "missing.env")
@@ -229,7 +462,9 @@ class ConfigurationLoadingTests(unittest.TestCase):
             "[gui]\ntheme = \"dark\"\n",
             "schema_version = 1\n",
             "schema_version = 2\n",
-            'schema_version = 3\n[server]\nwebsocket_port = "8765"\n',
+            "schema_version = 3\n",
+            "schema_version = 4\n",
+            'schema_version = 5\n[server]\nwebsocket_port = "8765"\n',
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -241,7 +476,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_invalid_environment_value_names_field_without_echoing_secret(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 3\n")
+            config_path = self._write(root, "schema_version = 5\n")
             with (
                 patch.dict(
                     os.environ,
@@ -269,6 +504,10 @@ class ConfigurationLoadingTests(unittest.TestCase):
         path = root / "config.toml"
         path.write_text(content.strip() + "\n", encoding="utf-8")
         return path
+
+    @staticmethod
+    def _write_named(path: Path, content: str) -> None:
+        path.write_text(content.strip() + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

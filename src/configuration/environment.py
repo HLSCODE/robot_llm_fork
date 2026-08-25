@@ -35,6 +35,13 @@ _FIELD_ENV_NAMES: dict[tuple[str, str], str] = {
         "DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME"
     ),
     ("data_collection", "calibration_id"): "DATA_COLLECTION_CALIBRATION_ID",
+    ("llm", "default_provider"): "LLM_DEFAULT_PROVIDER",
+    ("llm", "default_temperature"): "LLM_DEFAULT_TEMPERATURE",
+    ("llm", "default_max_tokens"): "LLM_DEFAULT_MAX_TOKENS",
+    ("llm", "request_timeout_s"): "LLM_REQUEST_TIMEOUT_S",
+    ("llm", "fallback_providers"): "LLM_FALLBACK_PROVIDERS",
+    ("llm", "circuit_failure_threshold"): "LLM_CIRCUIT_FAILURE_THRESHOLD",
+    ("llm", "circuit_recovery_seconds"): "LLM_CIRCUIT_RECOVERY_SECONDS",
 }
 
 

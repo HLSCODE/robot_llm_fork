@@ -117,18 +117,17 @@ class AIController(QObject):
         client = self._get_status_client()
         if client:
             return client.get_provider_name().upper()
-        return self._settings.llm.llm_default_provider.upper()
+        return self._settings.llm.default_provider.upper()
 
     def is_api_key_set(self) -> bool:
-        provider = self._settings.llm.llm_default_provider.lower()
-        if provider == "minicpm":
-            return bool(self._settings.llm.minicpm_gateway_host)
-        keys = {
-            "openai": self._settings.secrets.openai_api_key,
-            "deepseek": self._settings.secrets.deepseek_api_key,
-            "dashscope": self._settings.secrets.dashscope_api_key,
-        }
-        return bool(keys.get(provider, ""))
+        provider = self._settings.llm_providers.get(
+            self._settings.llm.default_provider
+        )
+        if provider is None or not provider.enabled:
+            return False
+        if provider.normalized_kind == "minicpm_realtime":
+            return bool(provider.gateway_host)
+        return bool(self._settings.secrets.credential(provider.credential_env))
 
     def _get_status_client(self) -> BaseLLMClient:
         if self._status_client is None:

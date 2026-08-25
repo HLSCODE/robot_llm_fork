@@ -1,0 +1,105 @@
+[llm]
+default_provider = "minicpm"
+default_temperature = 0.3
+default_max_tokens = 512
+request_timeout_s = 60.0
+fallback_providers = []
+circuit_failure_threshold = 3
+circuit_recovery_seconds = 30.0
+
+# Provider 实例 ID 由子表名定义；kind 选择代码中的适配器实现。
+# API Key 不写入 TOML，credential_env 只引用 .env 中的变量名。
+[llm_providers.openai]
+kind = "openai_compatible"
+enabled = true
+model = "qwen3.6-flash"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+credential_env = "OPENAI_API_KEY"
+output_modes = ["text"]
+
+[llm_providers.deepseek]
+kind = "openai_compatible"
+enabled = true
+model = "deepseek-reasoner"
+base_url = "https://api.deepseek.com/v1"
+credential_env = "DEEPSEEK_API_KEY"
+output_modes = ["text"]
+
+[llm_providers.dashscope]
+kind = "openai_compatible"
+enabled = true
+model = "qwen-plus"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+credential_env = "DASHSCOPE_API_KEY"
+output_modes = ["text"]
+
+[llm_providers.minicpm]
+kind = "minicpm_realtime"
+enabled = true
+model = "minicpm-o"
+output_modes = ["text", "native_audio"]
+gateway_host = "10.10.17.15"
+gateway_port = 8006
+ws_scheme = "wss"
+gateway_path_prefix = ""
+realtime_path = "/v1/realtime"
+
+# 每个 TaskProfile 的推理路由和语音输出策略。
+# output_mode 可选：
+# - "text"：只输出文字；
+# - "native_audio"：推理 provider 在同一次请求中直接输出语音；
+# - "text_then_tts"：先生成文字，再调用 speech_provider 合成语音。
+# fallback_providers 与 speech_fallback_providers 均按顺序尝试。
+[model_routing.instruction_classifier]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text"
+speech_provider = ""
+speech_fallback_providers = []
+
+[model_routing.general_chat]
+# provider = "dashscope"
+# fallback_providers = []
+# output_mode = "text_then_tts"
+# speech_provider = "minicpm"
+# speech_fallback_providers = []
+provider = "minicpm"
+fallback_providers = []
+output_mode = "native_audio"
+speech_provider = ""
+speech_fallback_providers = []
+
+[model_routing.robot_command_planner]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text"
+speech_provider = ""
+speech_fallback_providers = []
+
+[model_routing.vision_fusion]
+provider = "minicpm"
+fallback_providers = []
+output_mode = "native_audio"
+speech_provider = ""
+speech_fallback_providers = []
+
+[model_routing.voice_feedback]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text_then_tts"
+speech_provider = "minicpm"
+speech_fallback_providers = []
+
+[model_routing.repeat]
+provider = "minicpm"
+fallback_providers = []
+output_mode = "native_audio"
+speech_provider = ""
+speech_fallback_providers = []
+
+[model_routing.balance_reading]
+provider = "dashscope"
+fallback_providers = []
+output_mode = "text"
+speech_provider = ""
+speech_fallback_providers = []

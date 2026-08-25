@@ -141,6 +141,15 @@ class SecretSettings:
     dashscope_api_key: str = ""
     websocket_auth_token: str = ""
 
+    def credential(self, environment_name: str) -> str:
+        """Resolve one supported credential reference without reading the process env."""
+        credentials = {
+            "OPENAI_API_KEY": self.openai_api_key,
+            "DEEPSEEK_API_KEY": self.deepseek_api_key,
+            "DASHSCOPE_API_KEY": self.dashscope_api_key,
+        }
+        return credentials.get(environment_name.strip().upper(), "")
+
 
 @dataclass(frozen=True, slots=True)
 class ExecutionSettings:
@@ -156,25 +165,109 @@ class ExecutionSettings:
 
 @dataclass(frozen=True, slots=True)
 class LLMSettings:
-    openai_model: str = "gpt-4o"
-    openai_base_url: str = ""
-    deepseek_model: str = ""
-    deepseek_base_url: str = ""
-    dashscope_model: str = ""
-    dashscope_base_url: str = ""
-    llm_default_provider: str = "openai"
-    llm_default_temperature: float = 0.3
-    llm_default_max_tokens: int = 512
-    llm_request_timeout_s: float = 60.0
-    llm_fallback_providers: tuple[str, ...] = ()
-    llm_circuit_failure_threshold: int = 3
-    llm_circuit_recovery_seconds: float = 30.0
-    minicpm_gateway_host: str = "localhost"
-    minicpm_gateway_port: int = 8006
-    minicpm_ws_scheme: str = "wss"
-    minicpm_gateway_path_prefix: str = ""
-    minicpm_realtime_path: str = "/v1/realtime"
-    minicpm_model: str = "minicpm-o"
+    """Global inference policy; concrete endpoints live in ``llm_providers``."""
+
+    default_provider: str = "openai"
+    default_temperature: float = 0.3
+    default_max_tokens: int = 512
+    request_timeout_s: float = 60.0
+    fallback_providers: tuple[str, ...] = ()
+    circuit_failure_threshold: int = 3
+    circuit_recovery_seconds: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class LLMProviderSettings:
+    """One named provider instance and its adapter-specific connection data."""
+
+    id: str
+    kind: str
+    enabled: bool = True
+    model: str = ""
+    base_url: str = ""
+    credential_env: str = ""
+    output_modes: tuple[str, ...] = ("text",)
+    gateway_host: str = ""
+    gateway_port: int = 0
+    ws_scheme: str = "wss"
+    gateway_path_prefix: str = ""
+    realtime_path: str = "/v1/realtime"
+
+    @property
+    def normalized_id(self) -> str:
+        return self.id.strip().lower()
+
+    @property
+    def normalized_kind(self) -> str:
+        return self.kind.strip().lower()
+
+    def supports(self, output_mode: str) -> bool:
+        normalized = output_mode.strip().lower()
+        return normalized in {item.strip().lower() for item in self.output_modes}
+
+
+def _default_llm_providers() -> tuple[LLMProviderSettings, ...]:
+    return (
+        LLMProviderSettings(
+            id="openai",
+            kind="openai_compatible",
+            model="gpt-4o",
+            credential_env="OPENAI_API_KEY",
+        ),
+        LLMProviderSettings(
+            id="deepseek",
+            kind="openai_compatible",
+            model="deepseek-reasoner",
+            base_url="https://api.deepseek.com/v1",
+            credential_env="DEEPSEEK_API_KEY",
+        ),
+        LLMProviderSettings(
+            id="dashscope",
+            kind="openai_compatible",
+            model="qwen-plus",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            credential_env="DASHSCOPE_API_KEY",
+        ),
+        LLMProviderSettings(
+            id="minicpm",
+            kind="minicpm_realtime",
+            model="minicpm-o",
+            output_modes=("text", "native_audio"),
+            gateway_host="localhost",
+            gateway_port=8006,
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class LLMProviderCatalogSettings:
+    """Immutable catalog addressed by provider instance ID."""
+
+    providers: tuple[LLMProviderSettings, ...] = field(
+        default_factory=_default_llm_providers
+    )
+
+    def entries(self, *, enabled_only: bool = False) -> tuple[LLMProviderSettings, ...]:
+        if not enabled_only:
+            return self.providers
+        return tuple(provider for provider in self.providers if provider.enabled)
+
+    def get(self, provider_id: str) -> LLMProviderSettings | None:
+        normalized = provider_id.strip().lower()
+        for provider in self.providers:
+            if provider.normalized_id == normalized:
+                return provider
+        return None
+
+    def require(self, provider_id: str) -> LLMProviderSettings:
+        provider = self.get(provider_id)
+        if provider is None or not provider.enabled:
+            raise ValueError(f"未知或未启用的 LLM provider: {provider_id}")
+        return provider
+
+    @property
+    def enabled_ids(self) -> tuple[str, ...]:
+        return tuple(provider.normalized_id for provider in self.entries(enabled_only=True))
 
 
 @dataclass(frozen=True, slots=True)
@@ -995,6 +1088,7 @@ class ApplicationSettings:
     secrets: SecretSettings
     execution: ExecutionSettings
     llm: LLMSettings
+    llm_providers: LLMProviderCatalogSettings
     model_routing: ModelRoutingSettings
     robot: RobotSettings
     devices: DeviceSettings
@@ -1026,7 +1120,8 @@ class ApplicationSettings:
             server=_snapshot(ServerSettings, config),
             secrets=_snapshot(SecretSettings, config),
             execution=_snapshot(ExecutionSettings, config),
-            llm=_snapshot(LLMSettings, config),
+            llm=_snapshot(LLMSettings, config, source_names=_LLM_SOURCE_NAMES),
+            llm_providers=_snapshot(LLMProviderCatalogSettings, config),
             model_routing=_snapshot(ModelRoutingSettings, config),
             robot=_snapshot(RobotSettings, config),
             devices=_snapshot(DeviceSettings, config),
@@ -1047,6 +1142,7 @@ class ApplicationSettings:
             secrets=SecretSettings(),
             execution=ExecutionSettings(),
             llm=LLMSettings(),
+            llm_providers=LLMProviderCatalogSettings(),
             model_routing=ModelRoutingSettings(),
             robot=RobotSettings(),
             devices=DeviceSettings(),
@@ -1093,6 +1189,17 @@ _DATA_COLLECTION_SOURCE_NAMES = {
     "camera_extrinsics": "DATA_COLLECTION_CAMERA_EXTRINSICS",
     "camera_extrinsics_reference_frame": ("DATA_COLLECTION_CAMERA_EXTRINSICS_REFERENCE_FRAME"),
     "calibration_id": "DATA_COLLECTION_CALIBRATION_ID",
+}
+
+
+_LLM_SOURCE_NAMES = {
+    "default_provider": "LLM_DEFAULT_PROVIDER",
+    "default_temperature": "LLM_DEFAULT_TEMPERATURE",
+    "default_max_tokens": "LLM_DEFAULT_MAX_TOKENS",
+    "request_timeout_s": "LLM_REQUEST_TIMEOUT_S",
+    "fallback_providers": "LLM_FALLBACK_PROVIDERS",
+    "circuit_failure_threshold": "LLM_CIRCUIT_FAILURE_THRESHOLD",
+    "circuit_recovery_seconds": "LLM_CIRCUIT_RECOVERY_SECONDS",
 }
 
 

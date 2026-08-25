@@ -6,20 +6,32 @@
 ## 文件
 
 ```text
-config/config.example.toml  可提交的完整 TOML 模板
-config/config.toml          本机主配置，版本库忽略
-.env.example                可提交的敏感字段模板
-.env                        本机密钥与覆盖，版本库忽略
+config/config.example.toml      可提交的入口配置模板
+config/fragments/*.example.toml 可提交的模块子配置模板
+config/config.toml              本机入口配置，版本库忽略
+config/fragments/*.toml         本机模块子配置，版本库忽略
+.env.example                    可提交的敏感字段模板
+.env                            本机密钥与覆盖，版本库忽略
 ```
 
 初始化：
 
-```powershell
-Copy-Item config/config.example.toml config/config.toml
-Copy-Item .env.example .env
+```bash
+uv run robot-config-init
 ```
 
-也可以通过 `--config` 使用其他完整 TOML 文件：
+初始化命令会复制入口配置、所有子配置和 `.env`，采用增量方式执行：目标文件不存在时
+创建，已经存在时跳过，绝不覆盖本机修改。可以安全重复执行。若从项目根目录之外调用：
+
+```bash
+robot-config-init --project-root /path/to/robot_llm_fork
+```
+
+运行时只读取不带 `.example` 的本机文件；修改模板不会直接改变当前运行配置。配置在进程
+启动时加载，修改后需要重启应用。默认先查找当前工作目录的 `config/config.toml`，找不到时
+回退到源码项目根目录，避免 IDE、快捷方式或服务管理器改变工作目录后静默丢失配置。
+
+也可以通过 `--config` 使用其他入口 TOML 文件；其 include 相对该入口文件所在目录解析：
 
 ```powershell
 uv run robot-llm --config config/profiles/simulation.toml --check-config
@@ -30,18 +42,24 @@ uv run robot-llm --config config/profiles/simulation.toml --check-config
 从低到高依次为：
 
 1. `src.configuration.settings` 中的类型化默认值；
-2. TOML 配置；
-3. `.env` 和系统环境变量，其中系统环境变量不会被 `.env` 覆盖；
-4. 启动命令行参数。
+2. `include` 子配置，按声明顺序由前到后覆盖；
+3. 入口 TOML 自身声明的字段；
+4. `.env` 和系统环境变量，其中系统环境变量不会被 `.env` 覆盖；
+5. 启动命令行参数。
 
 环境变量名称保持大写形式，例如 `WEBSOCKET_PORT`、`GUI_THEME`、
 `VOICE_INPUT_ENABLED`。只有 Settings schema 中声明的变量会被读取，其他环境变量不会进入配置。
 
 ## TOML 规则
 
-- 根节点必须包含 `schema_version = 3`；旧版本不再兼容。
+- 入口文件必须包含 `schema_version = 5`；旧版本不再兼容。
+- `include` 是可选的相对路径数组；不使用时可以继续在入口文件中声明全部配置。
+- 子配置不能声明 `schema_version` 或再次使用 `include`，避免循环依赖和隐式加载图。
+- 后加载的子配置覆盖先加载的同名字段，入口文件覆盖所有子配置；数组字段整体替换，不做隐式拼接。
+- include 路径必须位于入口配置目录内，缺失、重复、绝对路径和目录越界都会使启动失败。
 - 表名对应 `ApplicationSettings` 分组：`runtime`、`gui`、`logging`、`data`、
-  `data_collection`、`localization`、`server`、`execution`、`llm`、`model_routing`、`robot`、
+  `data_collection`、`localization`、`server`、`execution`、`llm`、`llm_providers`、
+  `model_routing`、`robot`、
   `devices`、`vision` 和 `voice`。
 - TOML 中的未知表和未知字段会使启动失败，避免拼写错误被静默忽略。
 - 数字、布尔值和数组必须使用 TOML 原生类型，不能用字符串代替。
@@ -50,10 +68,41 @@ uv run robot-llm --config config/profiles/simulation.toml --check-config
 示例：
 
 ```toml
-schema_version = 3
+schema_version = 5
+
+include = [
+  "fragments/application.toml",
+  "fragments/services.toml",
+  "fragments/ai.toml",
+  "fragments/devices.toml",
+  "fragments/voice.toml",
+]
 
 [runtime]
 simulation_mode = true
+
+[llm]
+default_provider = "minicpm"
+request_timeout_s = 60.0
+fallback_providers = []
+
+[llm_providers.dashscope]
+kind = "openai_compatible"
+enabled = true
+model = "qwen-plus"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+credential_env = "DASHSCOPE_API_KEY"
+output_modes = ["text"]
+
+[llm_providers.minicpm]
+kind = "minicpm_realtime"
+enabled = true
+model = "minicpm-o"
+output_modes = ["text", "native_audio"]
+gateway_host = "10.10.17.15"
+gateway_port = 8006
+ws_scheme = "wss"
+realtime_path = "/v1/realtime"
 
 [model_routing.general_chat]
 provider = "dashscope"
@@ -95,6 +144,11 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 # end_effector_to_camera。
 ```
 
+`llm_providers.<id>` 定义可被路由引用的 Provider 实例。`id` 是部署内稳定名称，
+`kind` 是代码中的适配器类型；因此可以配置多个使用同一
+`openai_compatible` 适配器、但模型或地址不同的实例。`credential_env` 只保存环境变量名，
+真实密钥仍位于 `.env`。禁用实例不会进入可用 Provider 集合。
+
 `model_routing` 的子表名称对应稳定的 `TaskProfile.name`。每条路由分别配置推理 provider、推理降级顺序和输出策略：
 
 - `text`：只输出文字，不调用语音模型；
@@ -105,7 +159,7 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 
 ## 相机目录
 
-配置 schema v3 使用 `[[vision.cameras]]` 作为相机身份、用途和标定的唯一事实来源，
+配置 schema v5 使用 `[[vision.cameras]]` 作为相机身份、用途和标定的唯一事实来源，
 不再接受 `camera_provider`、逗号分隔的设备/名称字段、`vision_camera_name` 或
 `vision_relocalization_left/right_*` 字段。每个 profile 包含：
 
@@ -154,7 +208,7 @@ uv run robot-llm --check-config --simulation --disable-websocket
 新增配置字段时必须同步完成：
 
 1. 在对应 Settings dataclass 中增加字段和唯一默认值；
-2. 在 `config/config.example.toml` 中增加示例；
+2. 在对应的 `config/fragments/*.example.toml` 中增加示例；
 3. 如环境变量名称不能由字段名直接转为大写，在 `environment.py` 中声明映射；
 4. 增加解析、覆盖优先级和非法输入测试；
 5. 更新使用该字段的专题文档。
