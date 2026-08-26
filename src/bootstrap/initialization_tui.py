@@ -93,6 +93,11 @@ class ChoiceList(OptionList):
         if self.option_count:
             self.highlighted = 0
 
+    def watch_highlighted(self, highlighted: int | None) -> None:
+        super().watch_highlighted(highlighted)
+        if self.option_count:
+            self._refresh_prompts()
+
     def select_all(self) -> None:
         if not self._multiple:
             return
@@ -132,12 +137,22 @@ class ChoiceList(OptionList):
     def _render_choice(self, choice_id: str) -> Text:
         label, description = self._choices[choice_id]
         is_selected = choice_id in self._selected_ids
+        highlighted_option = self.highlighted_option
+        is_highlighted = (
+            highlighted_option is not None and highlighted_option.id == choice_id
+        )
         marker = "●" if is_selected else "○"
         marker_style = "bold #3ddbd9" if is_selected else "#687386"
+        label_style = (
+            "bold #3ddbd9"
+            if is_highlighted
+            else ("bold #43d17d" if is_selected else "#c2cad8")
+        )
+        description_style = "#aeb8c8" if is_highlighted else "#778195"
         rendered = Text()
         rendered.append(f"{marker}  ", style=marker_style)
-        rendered.append(label, style="bold #e9eef7" if is_selected else "#c2cad8")
-        rendered.append(f"\n   {description}", style="#778195")
+        rendered.append(label, style=label_style)
+        rendered.append(f"\n   {description}", style=description_style)
         return rendered
 
 
@@ -263,8 +278,9 @@ class StepItem(Vertical):
         pointer = "›" if self.has_focus else " "
         symbol, style = self._status_symbol()
         message = f"  {self.message}" if self.message else ""
+        label_style = "bold #3ddbd9" if self.has_focus else "bold #eef3fb"
         self.summary.update(
-            f"[{style}]{pointer} {symbol}[/] [bold]{self.step.label}[/]"
+            f"[{style}]{pointer} {symbol}[/] [{label_style}]{self.step.label}[/]"
             f"[#778195]{message}[/]"
         )
 
@@ -330,9 +346,12 @@ class InitializationApp(App[int]):
         background: transparent;
     }
     ChoiceList > .option-list--option-highlighted {
-        background: #1c2028;
-        color: #f4f7fb;
-        text-style: none;
+        background: transparent;
+        color: #3ddbd9;
+        text-style: bold;
+    }
+    ChoiceList > .option-list--option-hover {
+        background: transparent;
     }
     #review-summary {
         height: auto;
@@ -348,7 +367,8 @@ class InitializationApp(App[int]):
         text-style: bold;
     }
     ReviewPrompt:focus {
-        background: #1c2028;
+        color: #3ddbd9;
+        background: transparent;
     }
     #execution-page {
         height: 1fr;
@@ -366,7 +386,7 @@ class InitializationApp(App[int]):
         background: transparent;
     }
     .step-item:focus {
-        background: #1c2028;
+        background: transparent;
     }
     .step-summary {
         height: 1;
@@ -416,7 +436,7 @@ class InitializationApp(App[int]):
                     widget_id="steps-list",
                 )
                 yield Static(
-                    "↑↓ 移动   Space 选择   Enter 继续   Esc 退出",
+                    "↑↓ 移动   Space 选择   Ctrl+A 全选   Enter 继续   Esc 退出",
                     classes="help-text",
                 )
             with Vertical(id="extras-page", classes="page"):
@@ -431,7 +451,7 @@ class InitializationApp(App[int]):
                     widget_id="extras-list",
                 )
                 yield Static(
-                    "↑↓ 移动   Space 选择   Enter 继续   Esc 返回",
+                    "↑↓ 移动   Space 选择   Ctrl+A 全选   Enter 继续   Esc 返回",
                     classes="help-text",
                 )
             with Vertical(id="kws-page", classes="page"):
@@ -449,8 +469,11 @@ class InitializationApp(App[int]):
             with Vertical(id="review-page", classes="page"):
                 yield Label("[#3ddbd9]?[/]  确认初始化计划", classes="question")
                 yield Static(id="review-summary")
-                yield ReviewPrompt("›  开始初始化    Enter", id="review-start")
-                yield Static("Esc 返回修改   Ctrl+C 退出", classes="help-text")
+                yield ReviewPrompt("›  开始初始化", id="review-start")
+                yield Static(
+                    "Enter 开始初始化   Esc 返回修改   Ctrl+C 退出",
+                    classes="help-text",
+                )
             with Vertical(id="execution-page", classes="page"):
                 yield Label(
                     "[#3ddbd9]◆[/]  正在初始化",

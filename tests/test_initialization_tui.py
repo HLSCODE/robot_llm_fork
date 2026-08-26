@@ -39,6 +39,9 @@ class InitializationTuiTests(unittest.TestCase):
             await pilot.pause()
             self.assertEqual(WizardStage.EXTRAS, app._stage)
 
+            await pilot.press("ctrl+a")
+            extras_list = app.query_one("#extras-list", ChoiceList)
+            self.assertEqual(extras_list.option_count, len(extras_list.selected_ids))
             await pilot.press("enter")
             await pilot.pause()
             self.assertEqual(WizardStage.KWS_MODEL, app._stage)
