@@ -13,6 +13,7 @@ from .json_documents import (
     write_json_atomic,
 )
 from ..domain.models import ActionDefinition
+from ..domain.models import LoopBlock, ParallelBlock, SequenceEntry, SequenceItem, SubworkflowBlock
 from ..domain.action_schema import validate_action_parameters
 from ..domain.workflow import WorkflowDocument, WorkflowDocumentError
 
@@ -22,8 +23,8 @@ ACTION_LIBRARY_DOCUMENT = CollectionDocumentSpec(
     schema="robot_llm.actions",
     collection_key="actions",
     legacy_kind="list",
-    current_version=2,
-    schema_reference="../schemas/action-library.schema.json",
+    current_version=3,
+    schema_reference="../../../schemas/action-library.schema.json",
 )
 ACTION_LIBRARY_FILE_NAME = "library.json"
 WORKFLOW_FILE_SUFFIX = ".workflow.json"
@@ -37,10 +38,14 @@ class JsonCompositionRepository:
     def __init__(
         self,
         *,
+        robot_profile_id: str = "unscoped",
         actions_directory: Path | None = None,
         workflows_directory: Path | None = None,
         workflow_drafts_directory: Path | None = None,
     ) -> None:
+        from ..domain.robot_profile import normalize_robot_profile_id
+
+        self._robot_profile_id = normalize_robot_profile_id(robot_profile_id)
         self._actions_directory = (
             actions_directory
             if actions_directory is not None
@@ -62,6 +67,10 @@ class JsonCompositionRepository:
     def workflows_directory(self) -> Path:
         return self._workflows_directory
 
+    @property
+    def robot_profile_id(self) -> str:
+        return self._robot_profile_id
+
     def load_actions(self) -> list[ActionDefinition]:
         with self._lock:
             actions_file = self._actions_path()
@@ -75,18 +84,27 @@ class JsonCompositionRepository:
                 raise JsonDocumentSchemaError(
                     f"{actions_file.name} must use the versioned action-library schema"
                 )
+            declared_profile = str(document.metadata.get("robot_profile_id", ""))
+            self._require_profile(declared_profile, actions_file.name)
             return self._parse_actions(actions_file, document.collection)
 
     def save_actions(
         self,
         actions: Sequence[ActionDefinition],
     ) -> None:
-        payload = [action.to_dict() for action in actions]
+        payload = []
+        for action in actions:
+            self._require_profile(
+                action.robot_profile_id,
+                f"action {action.name!r}",
+            )
+            payload.append(action.to_dict())
         with self._lock:
             write_collection_document(
                 self._actions_path(),
                 ACTION_LIBRARY_DOCUMENT,
                 payload,
+                metadata={"robot_profile_id": self._robot_profile_id},
             )
 
     def list_workflow_names(self) -> tuple[str, ...]:
@@ -112,7 +130,10 @@ class JsonCompositionRepository:
             if not path.is_file():
                 return None
             try:
-                return WorkflowDocument.from_dict(read_json_document(path))
+                document = WorkflowDocument.from_dict(read_json_document(path))
+                self._require_profile(document.robot_profile_id, path.name)
+                self._require_entry_profiles(document.to_entries(), path.name)
+                return document
             except WorkflowDocumentError as exc:
                 raise JsonDocumentSchemaError(
                     f"{path.name} is not a valid workflow document"
@@ -123,6 +144,8 @@ class JsonCompositionRepository:
         workflow_name: str,
         document: WorkflowDocument,
     ) -> str:
+        self._require_profile(document.robot_profile_id, workflow_name)
+        self._require_entry_profiles(document.to_entries(), workflow_name)
         path = self._workflow_path(workflow_name)
         with self._lock:
             write_json_atomic(path, document.to_dict())
@@ -142,7 +165,10 @@ class JsonCompositionRepository:
             if not path.is_file():
                 return None
             try:
-                return WorkflowDocument.from_dict(read_json_document(path))
+                document = WorkflowDocument.from_dict(read_json_document(path))
+                self._require_profile(document.robot_profile_id, path.name)
+                self._require_entry_profiles(document.to_entries(), path.name)
+                return document
             except WorkflowDocumentError as exc:
                 raise JsonDocumentSchemaError(
                     f"{path.name} is not a valid workflow draft"
@@ -153,6 +179,8 @@ class JsonCompositionRepository:
         document: WorkflowDocument,
         draft_name: str = CURRENT_DRAFT_NAME,
     ) -> None:
+        self._require_profile(document.robot_profile_id, draft_name)
+        self._require_entry_profiles(document.to_entries(), draft_name)
         with self._lock:
             write_json_atomic(
                 self._workflow_draft_path(draft_name),
@@ -219,6 +247,10 @@ class JsonCompositionRepository:
                 raise JsonDocumentSchemaError(
                     f"{actions_file.name} action at index {index} is invalid"
                 ) from exc
+            self._require_profile(
+                action.robot_profile_id,
+                f"{actions_file.name} action {action.name!r}",
+            )
             if action.id in action_ids:
                 raise JsonDocumentSchemaError(
                     f"{actions_file.name} contains duplicate action id {action.id!r}"
@@ -243,6 +275,30 @@ class JsonCompositionRepository:
 
     def _actions_path(self) -> Path:
         return self._actions_directory / ACTION_LIBRARY_FILE_NAME
+
+    def _require_profile(self, declared_profile: str, resource: str) -> None:
+        if declared_profile != self._robot_profile_id:
+            raise JsonDocumentSchemaError(
+                f"{resource} belongs to Robot Profile {declared_profile!r}; "
+                f"active profile is {self._robot_profile_id!r}"
+            )
+
+    def _require_entry_profiles(
+        self,
+        entries: Sequence[SequenceEntry],
+        resource: str,
+    ) -> None:
+        for entry in entries:
+            if isinstance(entry, SequenceItem):
+                self._require_profile(
+                    entry.definition.robot_profile_id,
+                    f"{resource} action {entry.definition.name!r}",
+                )
+            elif isinstance(entry, (LoopBlock, SubworkflowBlock)):
+                self._require_entry_profiles(entry.items, resource)
+            elif isinstance(entry, ParallelBlock):
+                for branch in entry.branches:
+                    self._require_entry_profiles(branch.items, resource)
 
     @staticmethod
     def _plain_name(value: str, label: str) -> str:

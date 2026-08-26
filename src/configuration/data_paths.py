@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .settings import DataSettings
+from .robot_profile import normalize_robot_profile_id
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 @dataclass(frozen=True, slots=True)
 class ApplicationDataPaths:
     root: Path
+    robot_profile_id: str
+    profile_root: Path
     actions_directory: Path
     workflows_directory: Path
     workflow_drafts_directory: Path
@@ -21,24 +24,32 @@ class ApplicationDataPaths:
     trajectories_directory: Path
 
     @classmethod
-    def from_settings(cls, settings: DataSettings) -> ApplicationDataPaths:
+    def from_settings(
+        cls,
+        settings: DataSettings,
+        robot_profile_id: str = "unscoped",
+    ) -> ApplicationDataPaths:
         root = _resolve_path(
             settings.robot_data_dir,
             base=PROJECT_ROOT,
         )
+        profile_id = normalize_robot_profile_id(robot_profile_id)
+        profile_root = root / "profiles" / profile_id
         return cls(
             root=root,
+            robot_profile_id=profile_id,
+            profile_root=profile_root,
             actions_directory=_resolve_override(
                 settings.actions_library_directory,
-                default=root / "actions",
+                default=profile_root / "actions",
             ),
             workflows_directory=_resolve_override(
                 settings.workflows_directory,
-                default=root / "workflows",
+                default=profile_root / "workflows",
             ),
             workflow_drafts_directory=_resolve_override(
                 settings.workflow_drafts_directory,
-                default=root / "drafts",
+                default=profile_root / "drafts",
             ),
             skills_directory=_resolve_override(
                 settings.skill_library_directory,
@@ -46,7 +57,7 @@ class ApplicationDataPaths:
             ),
             trajectories_directory=_resolve_override(
                 settings.trajectories_directory,
-                default=root / "trajectories",
+                default=profile_root / "trajectories",
             ),
         )
 

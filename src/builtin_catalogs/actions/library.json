@@ -1,7 +1,8 @@
 {
   "$schema": "../schemas/action-library.schema.json",
   "schema": "robot_llm.actions",
-  "schema_version": 2,
+  "schema_version": 3,
+  "robot_profile_id": "realman-rm75-dual",
   "actions": [
     {
       "id": "b103f3c6-cae5-4732-b18f-21bba117f9a6",

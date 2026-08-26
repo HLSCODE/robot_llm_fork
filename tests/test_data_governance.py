@@ -37,14 +37,15 @@ class ActionCatalogTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_save_and_load_use_schema_v2_directory_catalog(self) -> None:
+    def test_save_and_load_use_schema_v3_profiled_catalog(self) -> None:
         self.repository.save_actions((_action(),))
 
         document = _read_json(self.actions_directory / "library.json")
 
         self.assertEqual("robot_llm.actions", document["schema"])
-        self.assertEqual(2, document["schema_version"])
-        self.assertEqual("../schemas/action-library.schema.json", document["$schema"])
+        self.assertEqual(3, document["schema_version"])
+        self.assertEqual("unscoped", document["robot_profile_id"])
+        self.assertEqual("../../../schemas/action-library.schema.json", document["$schema"])
         self.assertEqual(["action-1"], [item.id for item in self.repository.load_actions()])
 
     def test_runtime_rejects_legacy_action_collection(self) -> None:
@@ -150,11 +151,15 @@ class BuiltinCatalogTests(unittest.TestCase):
         root = Path(self.temporary_directory.name)
         self.paths = ApplicationDataPaths(
             root=root,
-            actions_directory=root / "actions",
-            workflows_directory=root / "workflows",
-            workflow_drafts_directory=root / "drafts",
+            robot_profile_id="realman-rm75-dual",
+            profile_root=root / "profiles" / "realman-rm75-dual",
+            actions_directory=root / "profiles" / "realman-rm75-dual" / "actions",
+            workflows_directory=root / "profiles" / "realman-rm75-dual" / "workflows",
+            workflow_drafts_directory=root / "profiles" / "realman-rm75-dual" / "drafts",
             skills_directory=root / "skills",
-            trajectories_directory=root / "trajectories",
+            trajectories_directory=(
+                root / "profiles" / "realman-rm75-dual" / "trajectories"
+            ),
         )
         SkillRegistry().reset()
 
@@ -172,6 +177,7 @@ class BuiltinCatalogTests(unittest.TestCase):
         report = validate_catalogs(
             self.paths.actions_directory,
             self.paths.skills_directory,
+            robot_profile_id=self.paths.robot_profile_id,
         )
 
         self.assertEqual(17, len(first.created_files))
@@ -191,7 +197,7 @@ class CatalogMigrationTests(unittest.TestCase):
         SkillRegistry().reset()
         self.temporary_directory.cleanup()
 
-    def test_legacy_collections_migrate_to_valid_v2_catalogs(self) -> None:
+    def test_legacy_collections_migrate_to_valid_profiled_catalogs(self) -> None:
         legacy_actions = self.root / "actions_library.json"
         legacy_skills = self.root / "skill_library.json"
         legacy_actions.write_text(

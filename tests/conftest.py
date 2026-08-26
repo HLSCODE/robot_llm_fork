@@ -38,16 +38,22 @@ def isolate_default_application_data(
     ) as temporary_directory:
         root = Path(temporary_directory)
 
-        def resolve(settings) -> ApplicationDataPaths:
+        def resolve(
+            settings,
+            robot_profile_id: str = "unscoped",
+        ) -> ApplicationDataPaths:
             if settings.robot_data_dir != "data":
-                return original_resolver(settings)
+                return original_resolver(settings, robot_profile_id)
+            profile_root = root / "profiles" / robot_profile_id
             return ApplicationDataPaths(
                 root=root,
-                actions_directory=root / "actions",
-                workflows_directory=root / "workflows",
-                workflow_drafts_directory=root / "drafts",
+                robot_profile_id=robot_profile_id,
+                profile_root=profile_root,
+                actions_directory=profile_root / "actions",
+                workflows_directory=profile_root / "workflows",
+                workflow_drafts_directory=profile_root / "drafts",
                 skills_directory=root / "skills",
-                trajectories_directory=root / "trajectories",
+                trajectories_directory=profile_root / "trajectories",
             )
 
         monkeypatch.setattr(

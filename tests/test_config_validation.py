@@ -400,10 +400,13 @@ class ConfigurationValidationTests(unittest.TestCase):
             )
 
         self.assertEqual(root.resolve(), paths.root)
-        self.assertEqual(root.resolve() / "actions", paths.actions_directory)
+        self.assertEqual(
+            root.resolve() / "profiles" / "unscoped" / "actions",
+            paths.actions_directory,
+        )
         self.assertEqual(root.resolve() / "skills", paths.skills_directory)
         self.assertEqual(
-            root.resolve() / "trajectories",
+            root.resolve() / "profiles" / "unscoped" / "trajectories",
             paths.trajectories_directory,
         )
         self.assertEqual(

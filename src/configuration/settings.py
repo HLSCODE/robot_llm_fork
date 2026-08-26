@@ -338,6 +338,7 @@ class RobotSettings:
     """Provider-independent dual-arm selection and motion defaults."""
 
     provider: str = "realman"
+    profile_id: str = ""
     move_velocity: int = 10
     move_radius: int = 0
     move_connect: int = 0
@@ -1244,6 +1245,23 @@ class ApplicationSettings:
             tianji=self.robot_tianji,
         )
 
+    def robot_profile_id(self) -> str:
+        """Return the explicit or provider/model-derived executable-data profile."""
+        from .robot_profile import (
+            compose_robot_profile_id,
+            normalize_robot_profile_id,
+        )
+
+        if self.robot.profile_id.strip():
+            return normalize_robot_profile_id(self.robot.profile_id)
+        provider = self.robot.provider.strip().lower()
+        model = (
+            self.robot_tianji.model
+            if provider == "tianji"
+            else self.robot_realman.model
+        )
+        return compose_robot_profile_id(provider, model)
+
 
 def _snapshot(
     settings_type: type[_SettingsT],
@@ -1298,6 +1316,7 @@ _LLM_SOURCE_NAMES = {
 
 _ROBOT_SOURCE_NAMES = {
     "provider": "ROBOT_PROVIDER",
+    "profile_id": "ROBOT_PROFILE_ID",
     "move_velocity": "MOVE_VELOCITY",
     "move_radius": "MOVE_RADIUS",
     "move_connect": "MOVE_CONNECT",

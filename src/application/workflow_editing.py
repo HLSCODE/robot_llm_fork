@@ -24,7 +24,9 @@ class WorkflowEditingSession:
     def __init__(self, composition: CompositionService) -> None:
         self._composition = composition
         self._lock = RLock()
-        self._state = WorkflowEditingState(_empty_document())
+        self._state = WorkflowEditingState(
+            _empty_document(composition.robot_profile_id)
+        )
 
     def snapshot(self) -> WorkflowEditingState:
         with self._lock:
@@ -43,6 +45,7 @@ class WorkflowEditingSession:
             name=normalized,
             revision=0,
             entries=(),
+            robot_profile_id=self._composition.robot_profile_id,
         )
         return self._set_state(document, workflow_name="", dirty=False)
 
@@ -97,6 +100,7 @@ class WorkflowEditingSession:
             name=workflow_name.removesuffix(".workflow.json"),
             revision=0,
             entries=document.to_entries(),
+            robot_profile_id=self._composition.robot_profile_id,
             positions=document.position_map(),
         )
         stored_name, stored = self._composition.save_workflow(
@@ -133,10 +137,11 @@ class WorkflowEditingSession:
         return self.snapshot()
 
 
-def _empty_document() -> WorkflowDocument:
+def _empty_document(robot_profile_id: str) -> WorkflowDocument:
     return WorkflowDocument.from_entries(
         workflow_id=str(uuid4()),
         name="未命名任务",
         revision=0,
         entries=(),
+        robot_profile_id=robot_profile_id,
     )

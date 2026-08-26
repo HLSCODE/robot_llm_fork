@@ -37,11 +37,13 @@ def migrate_startup_workflows(
     settings: ApplicationSettings,
 ) -> WorkflowMigrationResult:
     """Upgrade legacy user workflows before repositories read active data."""
-    paths = ApplicationDataPaths.from_settings(settings.data)
+    robot_profile_id = settings.robot_profile_id()
+    paths = ApplicationDataPaths.from_settings(settings.data, robot_profile_id)
     return migrate_legacy_workflows(
         paths.root,
         workflows_directory=paths.workflows_directory,
         drafts_directory=paths.workflow_drafts_directory,
+        robot_profile_id=robot_profile_id,
     )
 
 

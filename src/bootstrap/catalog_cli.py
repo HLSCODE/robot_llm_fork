@@ -1,4 +1,4 @@
-"""Validate active catalogs or migrate legacy catalog files to schema v2."""
+"""Validate active catalogs or migrate legacy files to profiled catalogs."""
 
 from __future__ import annotations
 
@@ -55,8 +55,11 @@ class CatalogReport:
 def validate_catalogs(
     actions_directory: Path,
     skills_directory: Path,
+    *,
+    robot_profile_id: str = "unscoped",
 ) -> CatalogReport:
     repository = JsonCompositionRepository(
+        robot_profile_id=robot_profile_id,
         actions_directory=actions_directory,
         workflows_directory=actions_directory.parent / "workflows",
         workflow_drafts_directory=actions_directory.parent / "drafts",
@@ -75,9 +78,13 @@ def migrate_catalogs(
     actions_directory: Path,
     skills_directory: Path,
     archive_directory: Path | None = None,
+    robot_profile_id: str = "unscoped",
 ) -> CatalogReport:
-    """Stage and validate all v2 documents before publishing any target file."""
-    actions = _load_legacy_actions(legacy_actions_file)
+    """Stage and validate all documents before publishing any target file."""
+    actions = [
+        _with_robot_profile(action, robot_profile_id)
+        for action in _load_legacy_actions(legacy_actions_file)
+    ]
     skills = _load_legacy_skills(legacy_skills_file)
 
     staging_parent = actions_directory.parent
@@ -86,8 +93,18 @@ def migrate_catalogs(
         staging_root = Path(name)
         staged_actions = staging_root / "actions"
         staged_skills = staging_root / "skills"
-        _write_catalogs(staged_actions, staged_skills, actions, skills)
-        staged_report = validate_catalogs(staged_actions, staged_skills)
+        _write_catalogs(
+            staged_actions,
+            staged_skills,
+            actions,
+            skills,
+            robot_profile_id=robot_profile_id,
+        )
+        staged_report = validate_catalogs(
+            staged_actions,
+            staged_skills,
+            robot_profile_id=robot_profile_id,
+        )
         expected_report = _report(actions, skills)
         if staged_report != expected_report:
             raise RuntimeError("staged catalog semantic fingerprint mismatch")
@@ -98,7 +115,11 @@ def migrate_catalogs(
             actions_directory,
             skills_directory,
         )
-    active_report = validate_catalogs(actions_directory, skills_directory)
+    active_report = validate_catalogs(
+        actions_directory,
+        skills_directory,
+        robot_profile_id=robot_profile_id,
+    )
     if active_report != expected_report:
         raise RuntimeError("published catalog semantic fingerprint mismatch")
     if archive_directory is not None:
@@ -125,6 +146,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--skills-directory", type=Path)
     parser.add_argument("--legacy-actions-file", type=Path)
     parser.add_argument("--legacy-skills-file", type=Path)
+    parser.add_argument("--robot-profile", default="unscoped")
     parser.add_argument(
         "--archive-legacy",
         action="store_true",
@@ -135,7 +157,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     actions_directory = (arguments.actions_directory or root / "actions").resolve()
     skills_directory = (arguments.skills_directory or root / "skills").resolve()
     if arguments.operation == "validate":
-        report = validate_catalogs(actions_directory, skills_directory)
+        report = validate_catalogs(
+            actions_directory,
+            skills_directory,
+            robot_profile_id=arguments.robot_profile,
+        )
     else:
         report = migrate_catalogs(
             legacy_actions_file=(
@@ -152,6 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 if arguments.archive_legacy
                 else None
             ),
+            robot_profile_id=arguments.robot_profile,
         )
     print(json.dumps(asdict(report), ensure_ascii=False, indent=2))
     return 0
@@ -207,11 +234,11 @@ def _load_legacy_skills(path: Path) -> list[Skill]:
 
 
 def normalize_action_catalog(actions_directory: Path) -> int:
-    """Rewrite legacy textual robot poses in an active v2 catalog as arrays."""
+    """Rewrite legacy textual robot poses in an active profiled catalog."""
     path = actions_directory / "library.json"
     document = load_collection_document(path, ACTION_LIBRARY_DOCUMENT)
     if document.requires_migration:
-        raise JsonDocumentSchemaError(f"{path.name} is not an action schema v2 document")
+        raise JsonDocumentSchemaError(f"{path.name} is not an action schema v3 document")
     actions = [
         ActionDefinition.from_dict(raw_action)
         for raw_action in document.collection
@@ -229,6 +256,7 @@ def normalize_action_catalog(actions_directory: Path) -> int:
             path,
             ACTION_LIBRARY_DOCUMENT,
             [action.to_dict() for action in normalized],
+            metadata=document.metadata,
         )
     return changed
 
@@ -242,7 +270,17 @@ def _normalize_action(action: ActionDefinition) -> ActionDefinition:
         name=action.name,
         type=action.type,
         parameters=parameters,
+        robot_profile_id=action.robot_profile_id,
     )
+
+
+def _with_robot_profile(
+    action: ActionDefinition,
+    robot_profile_id: str,
+) -> ActionDefinition:
+    normalized = action.to_dict()
+    normalized["robot_profile_id"] = robot_profile_id
+    return ActionDefinition.from_dict(normalized)
 
 
 def normalize_skill_catalog(skills_directory: Path) -> int:
@@ -280,11 +318,14 @@ def _write_catalogs(
     skills_directory: Path,
     actions: Sequence[ActionDefinition],
     skills: Sequence[Skill],
+    *,
+    robot_profile_id: str,
 ) -> None:
     write_collection_document(
         actions_directory / "library.json",
         ACTION_LIBRARY_DOCUMENT,
         [action.to_dict() for action in actions],
+        metadata={"robot_profile_id": robot_profile_id},
     )
     for skill in skills:
         path = skills_directory / skill.category.name.lower() / f"{skill.id}.skill.json"

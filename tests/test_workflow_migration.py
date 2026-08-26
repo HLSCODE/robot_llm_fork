@@ -57,6 +57,14 @@ class WorkflowMigrationTests(unittest.TestCase):
             self.assertEqual(1, result.migrated_count)
             self.assertEqual((target,), result.migrated_files)
             self.assertTrue(target.is_file())
+            migrated = WorkflowDocument.from_dict(read_json_document(target))
+            self.assertEqual(settings.robot_profile_id(), migrated.robot_profile_id)
+            migrated_item = migrated.to_entries()[0]
+            assert isinstance(migrated_item, SequenceItem)
+            self.assertEqual(
+                settings.robot_profile_id(),
+                migrated_item.definition.robot_profile_id,
+            )
             self.assertTrue(
                 (result.backup_directory / "legacy.task").is_file()
             )

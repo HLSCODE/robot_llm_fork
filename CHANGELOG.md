@@ -11,6 +11,8 @@
 
 ### Added
 
+- 新增严格 Robot Profile 隔离：动作、工作流、草稿和轨迹按机械臂 Provider/型号分区存储，并在持久化、编译和执行前拒绝跨 Profile 数据；旧共享 RealMan 数据仅做一次幂等迁移。
+
 - 新增基于 Textual 全屏模式的极简 `robot-init` 逐步向导，支持全键盘选择、执行 Spinner、默认折叠的步骤详情以及失败详情自动展开。
 - 新增 `robot-models-init`，可独立准备 ASR/VAD 与 KWS 模型，并支持无交互初始化。
 - 初始化语音模型前检查本地缓存，完整存在时跳过下载；ASR 准备在可取消子进程中执行，`Ctrl+C` 可安全停止初始化。
