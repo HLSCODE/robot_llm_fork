@@ -19,7 +19,7 @@ ROBOT_PROVIDERS: Mapping[str, RobotProviderDefinition] = MappingProxyType({
 
 
 def resolve_robot_provider(settings: RobotSettings) -> RobotProviderDefinition:
-    provider_name = settings.robot_provider.strip().lower()
+    provider_name = settings.provider.strip().lower()
     try:
         return ROBOT_PROVIDERS[provider_name]
     except KeyError as exc:

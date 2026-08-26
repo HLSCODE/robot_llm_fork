@@ -42,6 +42,8 @@ htmlcov/
 config/config.toml
 config/fragments/*.toml
 !config/fragments/*.example.toml
+config/fragments/**/*.toml
+!config/fragments/**/*.example.toml
 env/
 venv/
 .env

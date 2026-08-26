@@ -5,12 +5,16 @@
 # 如需使用单文件配置，可删除 include 并将所有配置表直接写入本文件。
 # API Key、认证 Token 等敏感值只能配置在 .env 或系统环境变量中。
 
-schema_version = 5
+schema_version = 6
 
 include = [
   "fragments/application.toml",
   "fragments/services.toml",
   "fragments/ai.toml",
+  "fragments/robot.toml",
+  "fragments/robots/realman.toml",
+  "fragments/robots/tianji.toml",
+  "fragments/mobile-base.toml",
   "fragments/devices.toml",
   "fragments/voice.toml",
 ]

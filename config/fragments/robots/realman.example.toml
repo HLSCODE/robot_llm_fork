@@ -1,0 +1,32 @@
+[robot_providers.realman]
+kind = "realman"
+model = "rm75-dual"
+
+# 左/右控制器连接与启动 TCP 位姿。
+left_controller_ip = "192.168.3.18"
+left_controller_port = 8080
+left_initial_pose = [-0.04844, -0.269769, -0.101888, 3.109, -0.094, -1.592]
+right_controller_ip = "192.168.3.19"
+right_controller_port = 8080
+right_initial_pose = [-0.053437, 0.24741, -0.120801, 3.114, -0.032, -2.935]
+
+# 工具架换装配置。
+tool_rack_arm = "right"
+tool_rack_slot_1_approach_pose = [-0.119418, -0.088287, -0.380201, 3.11, 0.001, -2.893]
+tool_rack_slot_1_attach_pose = [-0.119418, -0.088287, -0.480201, 3.11, 0.001, -2.893]
+tool_rack_slot_1_detach_pose = [-0.119418, -0.088287, -0.455201, 3.11, 0.001, -2.893]
+tool_rack_slot_1_attach_dwell_seconds = 0.5
+tool_rack_slot_1_detach_dwell_seconds = 1.0
+tool_rack_slot_2_approach_pose = [-0.117419, -0.066539, -0.380577, 3.135, -0.009, -2.869]
+tool_rack_slot_2_attach_pose = [-0.117419, -0.066539, -0.480577, 3.135, -0.009, -2.869]
+tool_rack_slot_2_detach_pose = [-0.117419, -0.066539, -0.465577, 3.135, -0.009, -2.869]
+tool_rack_slot_2_attach_dwell_seconds = 0.5
+tool_rack_slot_2_detach_dwell_seconds = 0.5
+
+# RealMan 夹爪参数。
+max_attempts = 5
+gripper_pick_speed = 200
+gripper_pick_force = 1000
+gripper_pick_timeout = 3
+gripper_release_speed = 100
+gripper_release_timeout = 3

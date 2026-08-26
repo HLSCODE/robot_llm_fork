@@ -42,6 +42,27 @@ _FIELD_ENV_NAMES: dict[tuple[str, str], str] = {
     ("llm", "fallback_providers"): "LLM_FALLBACK_PROVIDERS",
     ("llm", "circuit_failure_threshold"): "LLM_CIRCUIT_FAILURE_THRESHOLD",
     ("llm", "circuit_recovery_seconds"): "LLM_CIRCUIT_RECOVERY_SECONDS",
+    ("robot", "provider"): "ROBOT_PROVIDER",
+    ("robot", "move_velocity"): "MOVE_VELOCITY",
+    ("robot", "move_radius"): "MOVE_RADIUS",
+    ("robot", "move_connect"): "MOVE_CONNECT",
+    ("robot", "move_block"): "MOVE_BLOCK",
+    ("robot_realman", "model"): "REALMAN_MODEL",
+    ("robot_realman", "left_controller_ip"): "REALMAN_LEFT_CONTROLLER_IP",
+    ("robot_realman", "left_controller_port"): "REALMAN_LEFT_CONTROLLER_PORT",
+    ("robot_realman", "left_initial_pose"): "REALMAN_LEFT_INITIAL_POSE",
+    ("robot_realman", "right_controller_ip"): "REALMAN_RIGHT_CONTROLLER_IP",
+    ("robot_realman", "right_controller_port"): "REALMAN_RIGHT_CONTROLLER_PORT",
+    ("robot_realman", "right_initial_pose"): "REALMAN_RIGHT_INITIAL_POSE",
+    ("robot_tianji", "model"): "TIANJI_MODEL",
+    ("robot_tianji", "controller_ip"): "TIANJI_CONTROLLER_IP",
+    ("robot_tianji", "subscription_interval_seconds"): (
+        "TIANJI_SUBSCRIPTION_INTERVAL_SECONDS"
+    ),
+    ("mobile_base", "host"): "MOBILE_BASE_HOST",
+    ("mobile_base", "port"): "MOBILE_BASE_PORT",
+    ("mobile_base", "client_bind_port"): "MOBILE_BASE_CLIENT_BIND_PORT",
+    ("mobile_base", "timeout_seconds"): "MOBILE_BASE_TIMEOUT_SECONDS",
 }
 
 

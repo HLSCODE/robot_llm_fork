@@ -7,9 +7,9 @@
 
 ```text
 config/config.example.toml      可提交的入口配置模板
-config/fragments/*.example.toml 可提交的模块子配置模板
+config/fragments/**/*.example.toml 可提交的模块子配置模板
 config/config.toml              本机入口配置，版本库忽略
-config/fragments/*.toml         本机模块子配置，版本库忽略
+config/fragments/**/*.toml      本机模块子配置，版本库忽略
 .env.example                    可提交的敏感字段模板
 .env                            本机密钥与覆盖，版本库忽略
 ```
@@ -81,14 +81,14 @@ uv run robot-llm --config config/profiles/simulation.toml --check-config
 
 ## TOML 规则
 
-- 入口文件必须包含 `schema_version = 5`；旧版本不再兼容。
+- 入口文件必须包含 `schema_version = 6`；旧版本不再兼容。
 - `include` 是可选的相对路径数组；不使用时可以继续在入口文件中声明全部配置。
 - 子配置不能声明 `schema_version` 或再次使用 `include`，避免循环依赖和隐式加载图。
 - 后加载的子配置覆盖先加载的同名字段，入口文件覆盖所有子配置；数组字段整体替换，不做隐式拼接。
 - include 路径必须位于入口配置目录内，缺失、重复、绝对路径和目录越界都会使启动失败。
 - 表名对应 `ApplicationSettings` 分组：`runtime`、`gui`、`logging`、`data`、
   `data_collection`、`localization`、`server`、`execution`、`llm`、`llm_providers`、
-  `model_routing`、`robot`、
+  `model_routing`、`robot`、`robot_providers.<kind>`、
   `devices`、`vision` 和 `voice`。
 - TOML 中的未知表和未知字段会使启动失败，避免拼写错误被静默忽略。
 - 数字、布尔值和数组必须使用 TOML 原生类型，不能用字符串代替。
@@ -97,12 +97,15 @@ uv run robot-llm --config config/profiles/simulation.toml --check-config
 示例：
 
 ```toml
-schema_version = 5
+schema_version = 6
 
 include = [
   "fragments/application.toml",
   "fragments/services.toml",
   "fragments/ai.toml",
+  "fragments/robot.toml",
+  "fragments/robots/realman.toml",
+  "fragments/robots/tianji.toml",
   "fragments/devices.toml",
   "fragments/voice.toml",
 ]
@@ -141,10 +144,24 @@ speech_provider = "minicpm"
 speech_fallback_providers = []
 
 [robot]
-robot_provider = "realman"
-robot1_ip = "192.168.3.18"
-robot1_port = 8080
-robot1_initial_pose = [-0.04844, -0.269769, -0.101888, 3.109, -0.094, -1.592]
+provider = "realman"
+move_velocity = 10
+move_radius = 0
+move_connect = 0
+move_block = 1
+
+[robot_providers.realman]
+kind = "realman"
+model = "rm75-dual"
+left_controller_ip = "192.168.3.18"
+left_controller_port = 8080
+left_initial_pose = [-0.04844, -0.269769, -0.101888, 3.109, -0.094, -1.592]
+
+[mobile_base]
+host = "192.168.3.216"
+port = 12345
+client_bind_port = 54321
+timeout_seconds = 5.0
 
 [server]
 websocket_enabled = true
@@ -188,7 +205,7 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 
 ## 相机目录
 
-配置 schema v5 使用 `[[vision.cameras]]` 作为相机身份、用途和标定的唯一事实来源，
+配置 schema v6 使用 `[[vision.cameras]]` 作为相机身份、用途和标定的唯一事实来源，
 不再接受 `camera_provider`、逗号分隔的设备/名称字段、`vision_camera_name` 或
 `vision_relocalization_left/right_*` 字段。每个 profile 包含：
 
@@ -233,6 +250,16 @@ uv run robot-llm --check-config --simulation --disable-websocket
 
 配置文件不存在时，未显式指定 `--config` 的启动可以使用类型化默认值；显式指定但不存在的文件会直接失败。
 解析错误只报告文件名或字段名，不回显被拒绝的原始值。密钥、Token、私钥和凭据在诊断输出中统一脱敏。
+
+`[robot]` 只选择当前实现并保存 Provider 无关的运动默认值；
+`[robot_providers.realman]`、`[robot_providers.tianji]` 保存厂商专属型号、连接、
+标定和工具参数。所有 Provider 配置同时加载，但运行时只初始化 `[robot].provider`
+选中的实现，因此切换机械臂只需修改一个字段。旧的 `[robot_realman]`、
+`[robot_tianji]` 表不再接受。
+
+配置入口仍是唯一 include 根；`fragments/robot.toml` 和 `fragments/robots/*.toml`
+均不得再次声明 include。初始化命令递归复制所有 `**/*.example.toml`，并保持原有
+目录结构。
 
 新增配置字段时必须同步完成：
 

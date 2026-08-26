@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ....configuration.settings import RobotSettings
+from ....configuration.settings import RealManRobotSettings, RobotConfiguration
 from ...runtime.arm_models import ArmId, CartesianPose, MotionOptions
 from ...runtime.contracts import RobotSystem
 from ...runtime.models import DeviceCapability, DeviceInitializationError
@@ -53,39 +53,41 @@ class RealManProviderSettings:
             raise ValueError("RealMan model must not be empty")
 
     @classmethod
-    def from_settings(cls, settings: RobotSettings) -> RealManProviderSettings:
+    def from_settings(cls, settings: RobotConfiguration) -> RealManProviderSettings:
+        common = settings.common
+        provider = settings.realman
         try:
             return cls(
-                model=settings.robot_model.strip(),
+                model=provider.model.strip(),
                 left_arm=RealManArmConnection(
-                    ip=settings.robot1_ip,
-                    port=settings.robot1_port,
+                    ip=provider.left_controller_ip,
+                    port=provider.left_controller_port,
                     initial_pose=CartesianPose.from_iterable(
-                        settings.robot1_initial_pose
+                        provider.left_initial_pose
                     ),
                 ),
                 right_arm=RealManArmConnection(
-                    ip=settings.robot2_ip,
-                    port=settings.robot2_port,
+                    ip=provider.right_controller_ip,
+                    port=provider.right_controller_port,
                     initial_pose=CartesianPose.from_iterable(
-                        settings.robot2_initial_pose
+                        provider.right_initial_pose
                     ),
                 ),
                 motion=MotionOptions(
-                    velocity_percent=settings.move_velocity,
-                    blend_radius=settings.move_radius,
-                    connected=_binary_flag(settings.move_connect, "MOVE_CONNECT"),
-                    blocking=_binary_flag(settings.move_block, "MOVE_BLOCK"),
+                    velocity_percent=common.move_velocity,
+                    blend_radius=common.move_radius,
+                    connected=_binary_flag(common.move_connect, "MOVE_CONNECT"),
+                    blocking=_binary_flag(common.move_block, "MOVE_BLOCK"),
                 ),
                 gripper=RealManGripperOptions(
-                    pick_speed=settings.gripper_pick_speed,
-                    pick_force=settings.gripper_pick_force,
-                    pick_timeout_s=settings.gripper_pick_timeout,
-                    release_speed=settings.gripper_release_speed,
-                    release_timeout_s=settings.gripper_release_timeout,
-                    max_attempts=settings.max_attempts,
+                    pick_speed=provider.gripper_pick_speed,
+                    pick_force=provider.gripper_pick_force,
+                    pick_timeout_s=provider.gripper_pick_timeout,
+                    release_speed=provider.gripper_release_speed,
+                    release_timeout_s=provider.gripper_release_timeout,
+                    max_attempts=provider.max_attempts,
                 ),
-                tool_rack=_tool_rack_options(settings),
+                tool_rack=_tool_rack_options(provider),
             )
         except (AttributeError, TypeError, ValueError) as exc:
             raise DeviceInitializationError(
@@ -93,7 +95,7 @@ class RealManProviderSettings:
             ) from exc
 
 
-def _create_realman_robot(settings: RobotSettings) -> RobotSystem:
+def _create_realman_robot(settings: RobotConfiguration) -> RobotSystem:
     try:
         from .driver import RobotController
     except ImportError as exc:
@@ -127,7 +129,7 @@ def _binary_flag(value: int, field_name: str) -> bool:
     return bool(value)
 
 
-def _tool_rack_options(settings: RobotSettings) -> RealManToolRackOptions:
+def _tool_rack_options(settings: RealManRobotSettings) -> RealManToolRackOptions:
     slots = tuple(
         RealManToolRackSlot(
             slot_id=slot_id,
@@ -147,24 +149,24 @@ def _tool_rack_options(settings: RobotSettings) -> RealManToolRackOptions:
         ) in (
             (
                 1,
-                settings.robot_tool_rack_slot_1_approach_pose,
-                settings.robot_tool_rack_slot_1_attach_pose,
-                settings.robot_tool_rack_slot_1_detach_pose,
-                settings.robot_tool_rack_slot_1_attach_dwell_seconds,
-                settings.robot_tool_rack_slot_1_detach_dwell_seconds,
+                settings.tool_rack_slot_1_approach_pose,
+                settings.tool_rack_slot_1_attach_pose,
+                settings.tool_rack_slot_1_detach_pose,
+                settings.tool_rack_slot_1_attach_dwell_seconds,
+                settings.tool_rack_slot_1_detach_dwell_seconds,
             ),
             (
                 2,
-                settings.robot_tool_rack_slot_2_approach_pose,
-                settings.robot_tool_rack_slot_2_attach_pose,
-                settings.robot_tool_rack_slot_2_detach_pose,
-                settings.robot_tool_rack_slot_2_attach_dwell_seconds,
-                settings.robot_tool_rack_slot_2_detach_dwell_seconds,
+                settings.tool_rack_slot_2_approach_pose,
+                settings.tool_rack_slot_2_attach_pose,
+                settings.tool_rack_slot_2_detach_pose,
+                settings.tool_rack_slot_2_attach_dwell_seconds,
+                settings.tool_rack_slot_2_detach_dwell_seconds,
             ),
         )
     )
     return RealManToolRackOptions(
-        arm=ArmId.parse(settings.robot_tool_rack_arm),
+        arm=ArmId.parse(settings.tool_rack_arm),
         slots=slots,
     )
 

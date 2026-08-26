@@ -360,7 +360,7 @@ class ConfigurationValidationTests(unittest.TestCase):
         ):
             with TemporaryDirectory() as temporary_directory:
                 config_path = Path(temporary_directory) / "config.toml"
-                config_path.write_text("schema_version = 5\n", encoding="utf-8")
+                config_path.write_text("schema_version = 6\n", encoding="utf-8")
                 with self.assertRaises(ConfigLoadError) as error:
                     load_application_settings(config_path)
 
@@ -377,7 +377,7 @@ class ConfigurationValidationTests(unittest.TestCase):
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             config_path = root / "config.toml"
-            config_path.write_text("schema_version = 5\n", encoding="utf-8")
+            config_path.write_text("schema_version = 6\n", encoding="utf-8")
             with patch.dict("os.environ", legacy_environment, clear=True):
                 settings = load_application_settings(
                     config_path,

@@ -26,8 +26,6 @@ class TianjiDriver(Protocol):
 
     def read_state(self, arm: str) -> dict[str, object]: ...
 
-    def stop_arm(self, arm: str, *, emergency: bool) -> bool: ...
-
     def close(self) -> None: ...
 
 
@@ -45,25 +43,13 @@ class TianjiRobotAdapter:
 
     @property
     def supported_stop_modes(self) -> frozenset[StopMode]:
-        return frozenset({StopMode.QUICK, StopMode.EMERGENCY})
+        return frozenset()
 
     def stop(self, mode: StopMode) -> None:
-        if mode not in self.supported_stop_modes:
-            raise ValueError(f"unsupported robot stop mode: {mode}")
-        failures: list[str] = []
-        for arm in ArmId:
-            try:
-                succeeded = self._driver.stop_arm(
-                    self._arm_key(arm),
-                    emergency=mode is StopMode.EMERGENCY,
-                )
-            except Exception as exc:
-                failures.append(f"{arm.value}: {exc}")
-            else:
-                if not succeeded:
-                    failures.append(f"{arm.value}: SDK rejected stop")
-        if failures:
-            raise RuntimeError(f"{mode.value} stop failed for " + "; ".join(failures))
+        raise ValueError(
+            f"unsupported robot stop mode: {mode}; Tianji SDK 0.2 does not "
+            "expose a public stop operation"
+        )
 
     def move_to_pose(
         self,
@@ -74,6 +60,15 @@ class TianjiRobotAdapter:
     ) -> None:
         if not isinstance(mode, MotionMode):
             raise TypeError("mode must be a MotionMode")
+        if mode is not MotionMode.LINEAR:
+            raise RobotOperationError(
+                "move_to_pose",
+                arm,
+                detail=(
+                    "Tianji SDK 0.2 only exposes linear Cartesian-target "
+                    "motion; use move_l"
+                ),
+            )
         selected = options or self._default_motion
         if selected.blend_radius != 0 or selected.connected:
             raise RobotOperationError(
@@ -84,18 +79,28 @@ class TianjiRobotAdapter:
                     "connected motion"
                 ),
             )
-        succeeded = self._driver.move_to_pose(
-            self._arm_key(arm),
-            pose.to_list(),
-            linear=mode is MotionMode.LINEAR,
-            velocity_percent=selected.velocity_percent,
-            blocking=selected.blocking,
-        )
+        try:
+            succeeded = self._driver.move_to_pose(
+                self._arm_key(arm),
+                pose.to_list(),
+                linear=True,
+                velocity_percent=selected.velocity_percent,
+                blocking=selected.blocking,
+            )
+        except RobotOperationError:
+            raise
+        except Exception as exc:
+            raise _operation_error("move_to_pose", arm, exc) from exc
         if not succeeded:
             raise RobotOperationError("move_to_pose", arm, detail="SDK rejected motion")
 
     def read_arm_state(self, arm: ArmId) -> ArmState:
-        payload = self._driver.read_state(self._arm_key(arm))
+        try:
+            payload = self._driver.read_state(self._arm_key(arm))
+        except RobotOperationError:
+            raise
+        except Exception as exc:
+            raise _operation_error("read_arm_state", arm, exc) from exc
         try:
             raw_error_code = payload.get("error_code", 0)
             if not isinstance(raw_error_code, (int, float, str)):
@@ -144,3 +149,15 @@ class TianjiRobotAdapter:
         if not isinstance(arm, ArmId):
             raise TypeError("arm must be an ArmId")
         return "A" if arm is ArmId.LEFT else "B"
+
+
+def _operation_error(
+    operation: str,
+    arm: ArmId,
+    error: Exception,
+) -> RobotOperationError:
+    native_code = getattr(error, "native_code", None)
+    code = native_code if isinstance(native_code, int) else None
+    sdk_detail = str(getattr(error, "detail", "")).strip()
+    detail = sdk_detail or str(error).strip() or type(error).__name__
+    return RobotOperationError(operation, arm, code=code, detail=detail)

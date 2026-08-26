@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .....configuration.settings import RobotSettings
+from .....configuration.settings import MobileBaseSettings
 from ....runtime.contracts import MobileBase
 from .adapter import TcpMobileBaseAdapter
 from .client import TcpMobileBaseClient
@@ -14,13 +14,13 @@ from .client import TcpMobileBaseClient
 class TcpMobileBaseProvider:
     name: str = "tcp"
 
-    def create(self, settings: RobotSettings) -> MobileBase:
+    def create(self, settings: MobileBaseSettings) -> MobileBase:
         adapter = TcpMobileBaseAdapter(
             TcpMobileBaseClient(
-                host=settings.move_controller_host,
-                port=settings.move_controller_port,
-                bind_port=settings.move_controller_client_bind_port,
-                timeout_seconds=settings.move_controller_timeout_seconds,
+                host=settings.host,
+                port=settings.port,
+                bind_port=settings.client_bind_port,
+                timeout_seconds=settings.timeout_seconds,
             )
         )
         adapter.connect()

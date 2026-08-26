@@ -335,55 +335,120 @@ class ModelRoutingSettings:
 
 @dataclass(frozen=True, slots=True)
 class RobotSettings:
-    robot_provider: str = "realman"
-    robot_model: str = "rm75-dual"
-    robot1_ip: str = "192.168.3.18"
-    robot1_port: int = 8080
-    robot1_initial_pose: tuple[float, ...] = ()
-    robot2_ip: str = "192.168.3.19"
-    robot2_port: int = 8080
-    robot2_initial_pose: tuple[float, ...] = ()
-    robot_tool_rack_arm: str = "right"
-    robot_tool_rack_slot_1_approach_pose: tuple[float, ...] = ()
-    robot_tool_rack_slot_1_attach_pose: tuple[float, ...] = ()
-    robot_tool_rack_slot_1_detach_pose: tuple[float, ...] = ()
-    robot_tool_rack_slot_1_attach_dwell_seconds: float = 0.5
-    robot_tool_rack_slot_1_detach_dwell_seconds: float = 1.0
-    robot_tool_rack_slot_2_approach_pose: tuple[float, ...] = ()
-    robot_tool_rack_slot_2_attach_pose: tuple[float, ...] = ()
-    robot_tool_rack_slot_2_detach_pose: tuple[float, ...] = ()
-    robot_tool_rack_slot_2_attach_dwell_seconds: float = 0.5
-    robot_tool_rack_slot_2_detach_dwell_seconds: float = 0.5
-    move_controller_host: str = "192.168.1.216"
-    move_controller_port: int = 12345
-    move_controller_client_bind_port: int | None = None
-    move_controller_timeout_seconds: float = 5.0
+    """Provider-independent dual-arm selection and motion defaults."""
+
+    provider: str = "realman"
     move_velocity: int = 10
     move_radius: int = 0
     move_connect: int = 0
     move_block: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class RealManRobotSettings:
+    """Connection, tool-rack and gripper settings used only by RealMan."""
+
+    model: str = "rm75-dual"
+    left_controller_ip: str = "192.168.3.18"
+    left_controller_port: int = 8080
+    left_initial_pose: tuple[float, ...] = ()
+    right_controller_ip: str = "192.168.3.19"
+    right_controller_port: int = 8080
+    right_initial_pose: tuple[float, ...] = ()
+    tool_rack_arm: str = "right"
+    tool_rack_slot_1_approach_pose: tuple[float, ...] = ()
+    tool_rack_slot_1_attach_pose: tuple[float, ...] = ()
+    tool_rack_slot_1_detach_pose: tuple[float, ...] = ()
+    tool_rack_slot_1_attach_dwell_seconds: float = 0.5
+    tool_rack_slot_1_detach_dwell_seconds: float = 1.0
+    tool_rack_slot_2_approach_pose: tuple[float, ...] = ()
+    tool_rack_slot_2_attach_pose: tuple[float, ...] = ()
+    tool_rack_slot_2_detach_pose: tuple[float, ...] = ()
+    tool_rack_slot_2_attach_dwell_seconds: float = 0.5
+    tool_rack_slot_2_detach_dwell_seconds: float = 0.5
     max_attempts: int = 5
     gripper_pick_speed: int = 200
     gripper_pick_force: int = 1000
     gripper_pick_timeout: int = 3
     gripper_release_speed: int = 100
     gripper_release_timeout: int = 3
-    tianji_controller_ip: str = "192.168.1.190"
-    tianji_kinematics_config: str = "ccs_m6_40.MvKDCfg"
-    tianji_acceleration_percent: int = 50
-    tianji_linear_acceleration_m_s2: float = 0.5
+
+
+@dataclass(frozen=True, slots=True)
+class TianjiRobotSettings:
+    """Controller, calibration and limits used only by Tianji robots."""
+
+    model: str = "tianji-dual"
+    controller_ip: str = "192.168.1.190"
+    subscription_interval_seconds: float = 0.01
+    left_base_transform: tuple[tuple[float, ...], ...] = (
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 1.0, 0.1),
+        (0.0, -1.0, 0.0, 0.6),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+    right_base_transform: tuple[tuple[float, ...], ...] = (
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, -1.0, -0.1),
+        (0.0, 1.0, 0.0, 0.6),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+    left_tool_transform: tuple[tuple[float, ...], ...] = (
+        (0.0, 0.0, -1.0, 0.0),
+        (0.0, 1.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+    right_tool_transform: tuple[tuple[float, ...], ...] = (
+        (0.0, 0.0, -1.0, 0.0),
+        (0.0, 1.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+    )
+    joint_limits_rad: tuple[tuple[float, ...], ...] = (
+        (-3.1067, 3.1067),
+        (-2.0944, 2.0944),
+        (-3.1067, 3.1067),
+        (-2.5307, 1.0472),
+        (-3.1067, 3.1067),
+        (-1.0472, 1.0472),
+        (-1.5708, 1.5708),
+    )
 
     def __post_init__(self) -> None:
-        if self.move_controller_timeout_seconds <= 0:
-            raise ValueError("move_controller_timeout_seconds must be positive")
+        if self.subscription_interval_seconds <= 0:
+            raise ValueError("subscription_interval_seconds must be positive")
 
-    def move_controller_config(self) -> dict[str, object]:
+
+@dataclass(frozen=True, slots=True)
+class MobileBaseSettings:
+    """TCP connection settings for the independently registered mobile base."""
+
+    host: str = "192.168.1.216"
+    port: int = 12345
+    client_bind_port: int | None = None
+    timeout_seconds: float = 5.0
+
+    def __post_init__(self) -> None:
+        if self.timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be positive")
+
+    def connection_config(self) -> dict[str, object]:
         return {
-            "host": self.move_controller_host,
-            "port": self.move_controller_port,
-            "client_bind_port": self.move_controller_client_bind_port,
-            "timeout_seconds": self.move_controller_timeout_seconds,
+            "host": self.host,
+            "port": self.port,
+            "client_bind_port": self.client_bind_port,
+            "timeout_seconds": self.timeout_seconds,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class RobotConfiguration:
+    """Complete robot-provider configuration assembled at the process boundary."""
+
+    common: RobotSettings
+    realman: RealManRobotSettings
+    tianji: TianjiRobotSettings
 
 
 @dataclass(frozen=True, slots=True)
@@ -1091,6 +1156,9 @@ class ApplicationSettings:
     llm_providers: LLMProviderCatalogSettings
     model_routing: ModelRoutingSettings
     robot: RobotSettings
+    robot_realman: RealManRobotSettings
+    robot_tianji: TianjiRobotSettings
+    mobile_base: MobileBaseSettings
     devices: DeviceSettings
     vision: VisionSettings
     voice: VoiceSettings
@@ -1123,7 +1191,22 @@ class ApplicationSettings:
             llm=_snapshot(LLMSettings, config, source_names=_LLM_SOURCE_NAMES),
             llm_providers=_snapshot(LLMProviderCatalogSettings, config),
             model_routing=_snapshot(ModelRoutingSettings, config),
-            robot=_snapshot(RobotSettings, config),
+            robot=_snapshot(RobotSettings, config, source_names=_ROBOT_SOURCE_NAMES),
+            robot_realman=_snapshot(
+                RealManRobotSettings,
+                config,
+                source_names=_REALMAN_SOURCE_NAMES,
+            ),
+            robot_tianji=_snapshot(
+                TianjiRobotSettings,
+                config,
+                source_names=_TIANJI_SOURCE_NAMES,
+            ),
+            mobile_base=_snapshot(
+                MobileBaseSettings,
+                config,
+                source_names=_MOBILE_BASE_SOURCE_NAMES,
+            ),
             devices=_snapshot(DeviceSettings, config),
             vision=_snapshot(VisionSettings, config),
             voice=_snapshot(VoiceSettings, config),
@@ -1145,9 +1228,20 @@ class ApplicationSettings:
             llm_providers=LLMProviderCatalogSettings(),
             model_routing=ModelRoutingSettings(),
             robot=RobotSettings(),
+            robot_realman=RealManRobotSettings(),
+            robot_tianji=TianjiRobotSettings(),
+            mobile_base=MobileBaseSettings(),
             devices=DeviceSettings(),
             vision=VisionSettings(),
             voice=VoiceSettings(),
+        )
+
+    def robot_configuration(self) -> RobotConfiguration:
+        """Return the aggregate passed to the selected robot provider."""
+        return RobotConfiguration(
+            common=self.robot,
+            realman=self.robot_realman,
+            tianji=self.robot_tianji,
         )
 
 
@@ -1200,6 +1294,37 @@ _LLM_SOURCE_NAMES = {
     "fallback_providers": "LLM_FALLBACK_PROVIDERS",
     "circuit_failure_threshold": "LLM_CIRCUIT_FAILURE_THRESHOLD",
     "circuit_recovery_seconds": "LLM_CIRCUIT_RECOVERY_SECONDS",
+}
+
+_ROBOT_SOURCE_NAMES = {
+    "provider": "ROBOT_PROVIDER",
+    "move_velocity": "MOVE_VELOCITY",
+    "move_radius": "MOVE_RADIUS",
+    "move_connect": "MOVE_CONNECT",
+    "move_block": "MOVE_BLOCK",
+}
+
+_REALMAN_SOURCE_NAMES = {
+    "model": "REALMAN_MODEL",
+    "left_controller_ip": "REALMAN_LEFT_CONTROLLER_IP",
+    "left_controller_port": "REALMAN_LEFT_CONTROLLER_PORT",
+    "left_initial_pose": "REALMAN_LEFT_INITIAL_POSE",
+    "right_controller_ip": "REALMAN_RIGHT_CONTROLLER_IP",
+    "right_controller_port": "REALMAN_RIGHT_CONTROLLER_PORT",
+    "right_initial_pose": "REALMAN_RIGHT_INITIAL_POSE",
+}
+
+_TIANJI_SOURCE_NAMES = {
+    "model": "TIANJI_MODEL",
+    "controller_ip": "TIANJI_CONTROLLER_IP",
+    "subscription_interval_seconds": "TIANJI_SUBSCRIPTION_INTERVAL_SECONDS",
+}
+
+_MOBILE_BASE_SOURCE_NAMES = {
+    "host": "MOBILE_BASE_HOST",
+    "port": "MOBILE_BASE_PORT",
+    "client_bind_port": "MOBILE_BASE_CLIENT_BIND_PORT",
+    "timeout_seconds": "MOBILE_BASE_TIMEOUT_SECONDS",
 }
 
 

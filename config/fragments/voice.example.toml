@@ -46,7 +46,8 @@ voice_suppress_model_output = true
 voice_show_asr_timing = false
 # ASR 主模型、标点模型和计算设备；设备为空时由模型库自动选择。
 voice_asr_model = "iic/SenseVoiceSmall"
-voice_asr_punc_model = "ct-punc"
+# ct-punc
+voice_asr_punc_model = ""
 voice_asr_device = ""
 # ASR 动态批处理的最大音频时长（秒）。
 voice_asr_batch_size_s = 60

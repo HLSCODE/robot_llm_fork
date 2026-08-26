@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ...configuration.settings import RobotSettings
+from ...configuration.settings import RobotConfiguration
 from ..runtime.contracts import RobotSystem
 from ..runtime.models import DeviceCapability
 
@@ -16,7 +16,7 @@ class RobotProviderDefinition:
 
     name: str
     capabilities: frozenset[DeviceCapability]
-    create: Callable[[RobotSettings], RobotSystem]
+    create: Callable[[RobotConfiguration], RobotSystem]
 
     def __post_init__(self) -> None:
         if not self.name.strip():

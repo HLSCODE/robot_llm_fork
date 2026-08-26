@@ -349,13 +349,13 @@ def _tool_rack_options(
 def _provider_config(**overrides: object) -> SimpleNamespace:
     values: dict[str, object] = {
         "ROBOT_PROVIDER": "realman",
-        "ROBOT_MODEL": "rm75-dual",
-        "ROBOT1_IP": "192.0.2.1",
-        "ROBOT1_PORT": 8080,
-        "ROBOT1_INITIAL_POSE": _pose(1).to_list(),
-        "ROBOT2_IP": "192.0.2.2",
-        "ROBOT2_PORT": 8080,
-        "ROBOT2_INITIAL_POSE": _pose(2).to_list(),
+        "REALMAN_MODEL": "rm75-dual",
+        "REALMAN_LEFT_CONTROLLER_IP": "192.0.2.1",
+        "REALMAN_LEFT_CONTROLLER_PORT": 8080,
+        "REALMAN_LEFT_INITIAL_POSE": _pose(1).to_list(),
+        "REALMAN_RIGHT_CONTROLLER_IP": "192.0.2.2",
+        "REALMAN_RIGHT_CONTROLLER_PORT": 8080,
+        "REALMAN_RIGHT_INITIAL_POSE": _pose(2).to_list(),
         "MOVE_VELOCITY": 20,
         "MOVE_RADIUS": 0,
         "MOVE_CONNECT": 0,
@@ -366,21 +366,21 @@ def _provider_config(**overrides: object) -> SimpleNamespace:
         "GRIPPER_RELEASE_SPEED": 100,
         "GRIPPER_RELEASE_TIMEOUT": 3,
         "MAX_ATTEMPTS": 5,
-        "ROBOT_TOOL_RACK_ARM": "right",
+        "TOOL_RACK_ARM": "right",
     }
     for slot_id in (1, 2):
         values.update({
-            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_APPROACH_POSE": (
+            f"TOOL_RACK_SLOT_{slot_id}_APPROACH_POSE": (
                 _pose(slot_id * 10).to_list()
             ),
-            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_ATTACH_POSE": (
+            f"TOOL_RACK_SLOT_{slot_id}_ATTACH_POSE": (
                 _pose(slot_id * 10 + 1).to_list()
             ),
-            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_DETACH_POSE": (
+            f"TOOL_RACK_SLOT_{slot_id}_DETACH_POSE": (
                 _pose(slot_id * 10 + 2).to_list()
             ),
-            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_ATTACH_DWELL_SECONDS": 0,
-            f"ROBOT_TOOL_RACK_SLOT_{slot_id}_DETACH_DWELL_SECONDS": 0,
+            f"TOOL_RACK_SLOT_{slot_id}_ATTACH_DWELL_SECONDS": 0,
+            f"TOOL_RACK_SLOT_{slot_id}_DETACH_DWELL_SECONDS": 0,
         })
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -630,7 +630,7 @@ class RobotProviderTests(unittest.TestCase):
     def test_unknown_provider_fails_explicitly(self):
         settings = replace(
             ApplicationSettings.defaults(),
-            robot=RobotSettings(robot_provider="unknown"),
+            robot=RobotSettings(provider="unknown"),
         )
         with self.assertRaisesRegex(
             DeviceInitializationError,
@@ -654,7 +654,9 @@ class RobotProviderTests(unittest.TestCase):
 
     def test_realman_settings_validate_model_specific_configuration(self):
         settings = RealManProviderSettings.from_settings(
-            ApplicationSettings.from_config(_provider_config()).robot
+            ApplicationSettings.from_config(
+                _provider_config()
+            ).robot_configuration()
         )
 
         self.assertFalse(settings.motion.connected)
@@ -669,7 +671,7 @@ class RobotProviderTests(unittest.TestCase):
             RealManProviderSettings.from_settings(
                 ApplicationSettings.from_config(
                     _provider_config(MOVE_CONNECT="sometimes")
-                ).robot
+                ).robot_configuration()
             )
 
         with self.assertRaisesRegex(
@@ -678,8 +680,8 @@ class RobotProviderTests(unittest.TestCase):
         ):
             RealManProviderSettings.from_settings(
                 ApplicationSettings.from_config(
-                    _provider_config(ROBOT1_INITIAL_POSE=[1, 2])
-                ).robot
+                    _provider_config(REALMAN_LEFT_INITIAL_POSE=[1, 2])
+                ).robot_configuration()
             )
 
 

@@ -1,0 +1,6 @@
+[mobile_base]
+# 移动底盘是独立设备，不属于机械臂 Provider。
+host = "192.168.3.216"
+port = 12345
+client_bind_port = 54321
+timeout_seconds = 5.0

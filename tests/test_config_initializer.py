@@ -15,7 +15,7 @@ class ConfigInitializerTests(unittest.TestCase):
 
             result = initialize_configuration(root)
 
-            self.assertEqual(4, len(result.created))
+            self.assertEqual(5, len(result.created))
             self.assertFalse(result.skipped)
             self.assertEqual("secret-template\n", (root / ".env").read_text(encoding="utf-8"))
             self.assertEqual(
@@ -25,6 +25,12 @@ class ConfigInitializerTests(unittest.TestCase):
             self.assertEqual(
                 "app-template\n",
                 (root / "config" / "fragments" / "application.toml").read_text(
+                    encoding="utf-8"
+                ),
+            )
+            self.assertEqual(
+                "robot-template\n",
+                (root / "config" / "fragments" / "robots" / "realman.toml").read_text(
                     encoding="utf-8"
                 ),
             )
@@ -40,7 +46,7 @@ class ConfigInitializerTests(unittest.TestCase):
             result = initialize_configuration(root)
 
             self.assertFalse(result.created)
-            self.assertEqual(4, len(result.skipped))
+            self.assertEqual(5, len(result.skipped))
             self.assertEqual("user-value\n", local_config.read_text(encoding="utf-8"))
 
     def test_missing_required_template_returns_error(self) -> None:
@@ -64,6 +70,11 @@ class ConfigInitializerTests(unittest.TestCase):
         )
         (fragment_directory / "devices.example.toml").write_text(
             "device-template\n", encoding="utf-8"
+        )
+        robot_directory = fragment_directory / "robots"
+        robot_directory.mkdir()
+        (robot_directory / "realman.example.toml").write_text(
+            "robot-template\n", encoding="utf-8"
         )
 
 
