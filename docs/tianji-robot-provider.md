@@ -1,89 +1,96 @@
 # 天机机械臂 Provider
 
-天机双机械臂已通过 `src.devices.robots.tianji` 接入统一设备运行时。应用层、
-执行器和 GUI 仍只使用 `ArmMotion`、`ArmStateReader`、`StoppableDevice` 等项目
-能力接口，不直接导入厂商 SDK。
+天机双臂通过 `src.devices.robots.tianji` 接入统一设备运行时。应用层、执行器与
+GUI 只依赖项目的 `ArmMotion`、`ArmStateReader` 等能力接口，厂商 SDK 仅允许在
+Tianji 驱动边界内导入。
 
-## 安装
+## SDK 与平台
 
-当前 artifact 仅支持 Windows x86-64、CPython 3.12：
+当前固定使用 `tj-robot-proj 0.2.0` 的公开入口 `RobotClient`，不再依赖
+`TJArmsApp` 或 SDK 内部的 `native/session`、`SDK_PYTHON` 模块。
 
-```powershell
-uv sync --extra hardware
-```
-
-wheel 固定保存在：
+项目内置以下平台 wheel：
 
 ```text
 third_party/wheels/windows-x86_64/
-  tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl
+  tj_robot_proj-0.2.0-py3-none-win_amd64.whl
+third_party/wheels/linux-x86_64/
+  tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl
 ```
 
-SHA-256：
-`BB4EBD0D5F47C2D157A4D556C1D1C74B84A103BA9430FFC20FA4A27A9448C3FD`
+在 Windows AMD64 或 Linux x86_64 上执行：
 
-仓库根目录的 `tj_robot_proj/` 是 SDK 源码临时资料目录，不是运行时依赖，可以
-删除。未安装 wheel 时，这个同名目录可能被 Python 识别成不完整的 namespace
-package，但它不能替代 `uv sync --extra hardware`；wheel 安装完成后会解析到虚拟
-环境中的正式包。
+```shell
+uv sync --extra hardware
+```
+
+仓库根目录的 `tj_robot_proj/` 仍是 SDK 源码与构建产物的临时参考目录，不参与
+运行时导入；正式运行使用 `third_party/wheels` 中的平台 wheel。
 
 ## 配置
 
-在 `config/config.toml` 的 `[robot]` 中选择 Provider：
+在 `config/fragments/robot.example.toml` 的 `[robot]` 中选择 Provider。完整字段和
+注释见 `config/fragments/robots/tianji.example.toml`：
 
 ```toml
-robot_provider = "tianji"
-robot_model = "tj-dual-7"
-tianji_controller_ip = "192.168.1.190"
-tianji_kinematics_config = "ccs_m6_40.MvKDCfg"
-tianji_acceleration_percent = 50
-tianji_linear_acceleration_m_s2 = 0.5
-
-# 统一运动参数
+[robot]
+provider = "tianji"
 move_velocity = 10
 move_radius = 0
 move_connect = 0
 move_block = 1
+
+[robot_providers.tianji]
+kind = "tianji"
+model = "tianji-dual"
+controller_ip = "192.168.1.190"
+subscription_interval_seconds = 0.01
 ```
 
-`left/right` 分别映射到 SDK 的 `A/B` 臂。统一位姿使用米和弧度；Provider 在
-SDK 边界转换为毫米和角度。`move_radius` 和 `move_connect` 当前必须保持为
-`0`，因为天机 SDK 的本次接入没有等价语义，非零配置会被明确拒绝。
+还必须核对以下现场标定参数：
+
+- `left_base_transform`、`right_base_transform`：两臂基座相对
+  世界坐标系的 4x4 齐次变换；
+- `left_tool_transform`、`right_tool_transform`：工具相对末端
+  的 4x4 齐次变换；
+- `joint_limits_rad`：七个关节的弧度限位。
+
+示例值来自 SDK 0.2 文档，仅作为默认机型起点，不能替代真实设备标定。
+
+## 坐标、单位与臂映射
+
+- 项目 `left/right` 映射到 SDK `Arm.LEFT/Arm.RIGHT`；驱动内部稳定键为 `A/B`；
+- 笛卡尔位姿均为 `[x, y, z, rx, ry, rz]`，平移单位米，XYZ 欧拉角单位弧度；
+- 关节状态由统一接口继续使用角度，驱动在 SDK 边界读取 `pos_deg`；
+- SDK 0.2 的笛卡尔目标是世界坐标系目标，因此基座和工具变换必须正确。
 
 ## 当前能力
 
 已接入：
 
-- 双臂笛卡尔目标运动；
-- `LINEAR` 直线规划；
-- `JOINT` 逆解后关节路径运动；
-- 双臂状态、关节角和 TCP 位姿读取；
-- 快速停止与软件急停；
-- 统一连接、锁、订阅和幂等释放生命周期。
+- 双臂连接、初始化、状态订阅与幂等关闭；
+- 双臂 TCP 位姿和七关节角读取；
+- `move_l` 直线笛卡尔目标运动；
+- SDK 异常向统一 `RobotOperationError` 的错误码与诊断信息转换。
 
-尚未声明：
+明确不声明：
 
-- 集成夹爪；
-- 遥操作跟随；
-- 拖拽示教、轨迹保存与复现；
-- 标准化遥测；
-- 工具架换装。
+- `move_j` 笛卡尔目标运动：SDK 的 `movej` 只接受关节角，没有公开笛卡尔目标
+  逆解接口；
+- 快速停止、软件急停：SDK 0.2 的 `RobotClient` 没有公开停止方法；
+- 夹爪、遥操作、拖拽示教、轨迹保存与复现、工具架换装。
 
-这些能力不会复用 RealMan 实现，也不会以空方法伪装支持。运行时会依据 Provider
-声明的 capability 明确拒绝不支持的操作。若天机末端夹爪通过独立协议接入，应
-优先注册独立的夹爪设备或新增天机夹爪 capability adapter。
+这些能力不会通过访问 `_session` 等私有属性或空实现伪装支持。若 SDK 后续新增
+公开接口，应先升级 SDK wheel，再扩展本 Provider 的能力声明。
 
-## Linux x86-64 后续接入
+## 验收
 
-获得 Linux wheel 后：
+自动测试验证配置、能力声明、A/B 映射、单位边界、异常转换和资源释放，不连接
+真实设备。上线前还需要在 Windows 与 Linux 分别完成：
 
-1. 放入 `third_party/wheels/linux-x86_64/`；
-2. 在 `pyproject.toml` 中为 `tj-robot-proj` 增加 Linux 平台 source；
-3. 核对 wheel 内含 `libMarvinSDK.so`、`libKine.so` 和机型配置；
-4. 在 Linux CPython 3.12 上运行导入、Provider 契约和真实双臂验收。
-
-## 验收边界
-
-自动测试使用 fake SDK 验证配置、能力声明、单位转换、A/B 臂映射、两种运动模式、
-停止和资源释放，不会连接真实设备。上线前仍必须验证控制器连接、左右臂映射、
-坐标系、关节限位、速度/加速度、阻塞完成判定、停止距离和断线恢复。
+1. wheel 导入及原生动态库加载；
+2. 控制器连接与左右臂映射；
+3. 世界/基座/工具坐标标定；
+4. 关节限位和目标可达性；
+5. 阻塞与非阻塞直线运动；
+6. 断线、控制器拒绝、设备故障与关闭流程。

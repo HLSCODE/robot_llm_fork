@@ -4,7 +4,7 @@ import socket
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.configuration.settings import RobotSettings
+from src.configuration.settings import MobileBaseSettings
 from src.devices.motion.mobile_base.tcp.client import TcpMobileBaseClient
 from src.devices.motion.mobile_base.tcp.provider import TcpMobileBaseProvider
 
@@ -51,15 +51,15 @@ class TcpMobileBaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "timeout must be positive"):
             TcpMobileBaseClient("192.0.2.10", 12345, timeout_seconds=0)
 
-    def test_robot_settings_reject_non_positive_mobile_base_timeout(self) -> None:
+    def test_mobile_base_settings_reject_non_positive_timeout(self) -> None:
         with self.assertRaisesRegex(
             ValueError,
-            "move_controller_timeout_seconds must be positive",
+            "timeout_seconds must be positive",
         ):
-            RobotSettings(move_controller_timeout_seconds=0)
+            MobileBaseSettings(timeout_seconds=0)
 
     def test_provider_forwards_configured_timeout(self) -> None:
-        settings = RobotSettings(move_controller_timeout_seconds=3.5)
+        settings = MobileBaseSettings(timeout_seconds=3.5)
         client = MagicMock()
         adapter = MagicMock()
 
@@ -77,9 +77,9 @@ class TcpMobileBaseTests(unittest.TestCase):
 
         self.assertIs(adapter, result)
         client_factory.assert_called_once_with(
-            host=settings.move_controller_host,
-            port=settings.move_controller_port,
-            bind_port=settings.move_controller_client_bind_port,
+            host=settings.host,
+            port=settings.port,
+            bind_port=settings.client_bind_port,
             timeout_seconds=3.5,
         )
         adapter.connect.assert_called_once_with()

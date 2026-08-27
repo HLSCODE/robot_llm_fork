@@ -230,7 +230,7 @@ class ModelRoutingConfigurationTests(unittest.TestCase):
             root = Path(temporary_directory)
             config_path = root / "config.toml"
             config_path.write_text(
-                """schema_version = 5
+                """schema_version = 6
 
 [model_routing.general_chat]
 provider = "openai"
@@ -258,7 +258,7 @@ speech_fallback_providers = []
             root = Path(temporary_directory)
             config_path = root / "config.toml"
             config_path.write_text(
-                """schema_version = 5
+                """schema_version = 6
 
 [model_routing.general_chat]
 provider = "dashscope"

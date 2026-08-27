@@ -26,6 +26,7 @@ from ..domain.execution_context import ExecutionContext
 from ..vision.service import VisionService
 from ..vision.simulation import VisionPipelineFixture
 from .builtin_data import BuiltinDataInstaller
+from .robot_profile_migration import LegacyRobotProfileMigrator
 from .command_runtime import CommandRuntime
 from .command_catalog import CommandCatalog
 from .composition import CompositionService
@@ -54,10 +55,19 @@ def create_application_services(
     *,
     simulation: bool,
 ) -> ApplicationServices:
-    data_paths = ApplicationDataPaths.from_settings(settings.data)
+    robot_profile_id = settings.robot_profile_id()
+    data_paths = ApplicationDataPaths.from_settings(
+        settings.data,
+        robot_profile_id,
+    )
+    LegacyRobotProfileMigrator(
+        data_paths,
+        provider=settings.robot.provider,
+    ).migrate_missing()
     BuiltinDataInstaller(data_paths).install_missing()
     composition = CompositionService(
         JsonCompositionRepository(
+            robot_profile_id=robot_profile_id,
             actions_directory=data_paths.actions_directory,
             workflows_directory=data_paths.workflows_directory,
             workflow_drafts_directory=data_paths.workflow_drafts_directory,
@@ -104,16 +114,22 @@ def create_application_services(
         external_localization.latest,
         execution_context,
         vision,
+        robot_profile_id=robot_profile_id,
     )
     manager = ExecutionManager(
         engine=engine,
         resource_arbiter=resources,
         execution_resources=engine.required_resources,
     )
-    execution = ExecutionService(manager)
-    skill_engine = SkillEngine()
+    execution = ExecutionService(
+        manager,
+        robot_profile_id=robot_profile_id,
+    )
+    skill_engine = SkillEngine(robot_profile_id=robot_profile_id)
     skill_engine.load_skills(str(data_paths.skills_directory))
-    workflow_compiler = WorkflowCompiler()
+    workflow_compiler = WorkflowCompiler(
+        expected_robot_profile_id=robot_profile_id,
+    )
     command_catalog = CommandCatalog(
         composition,
         skill_engine,
@@ -125,6 +141,7 @@ def create_application_services(
         composition=composition,
         workflow_compiler=workflow_compiler,
         catalog=command_catalog,
+        robot_profile_id=robot_profile_id,
         preview_ttl_s=settings.runtime.command_preview_ttl_seconds,
     )
     manual_control = ManualControlService(device_runtime, resources)

@@ -8,7 +8,7 @@ from enum import Enum
 import logging
 from pathlib import Path
 from threading import RLock
-from typing import Protocol, overload
+from typing import Protocol
 from uuid import uuid4
 
 from ..domain.models import (
@@ -52,6 +52,9 @@ class CompositionRevisionConflict(RuntimeError):
 
 
 class CompositionRepository(Protocol):
+    @property
+    def robot_profile_id(self) -> str: ...
+
     @property
     def workflows_directory(self) -> Path: ...
 
@@ -99,6 +102,7 @@ class CompositionService:
 
     def __init__(self, repository: CompositionRepository) -> None:
         self._repository = repository
+        self._robot_profile_id = repository.robot_profile_id
         self._lock = RLock()
         self._actions = [
             _clone_action(action)
@@ -115,6 +119,14 @@ class CompositionService:
     @property
     def workflows_directory(self) -> Path:
         return self._repository.workflows_directory
+
+    @property
+    def robot_profile_id(self) -> str:
+        return self._robot_profile_id
+
+    def scope_workflow(self, document: WorkflowDocument) -> WorkflowDocument:
+        """Bind unscoped editor nodes to this repository's Robot Profile."""
+        return _profiled_workflow(document, self._robot_profile_id)
 
     @property
     def revision(self) -> int:
@@ -160,7 +172,7 @@ class CompositionService:
         *,
         origin: str,
     ) -> ActionDefinition:
-        stored = _validated_action(action)
+        stored = _validated_action(action, self._robot_profile_id)
         with self._lock:
             if any(
                 existing.id == stored.id
@@ -191,7 +203,7 @@ class CompositionService:
     ) -> ActionDefinition:
         replacement = _clone_action(action)
         replacement.id = _required_text(action_id, "action id")
-        replacement = _validated_action(replacement)
+        replacement = _validated_action(replacement, self._robot_profile_id)
         with self._lock:
             target_index = self._find_action_index_unlocked(action_id)
             updated_actions = list(self._actions)
@@ -243,7 +255,10 @@ class CompositionService:
         origin: str,
         expected_revision: int | None = None,
     ) -> tuple[SequenceEntry, ...]:
-        replacement = [_pending_entry(entry) for entry in entries]
+        replacement = [
+            _profiled_pending_entry(entry, self._robot_profile_id)
+            for entry in entries
+        ]
         with self._lock:
             current_revision = self._change_revisions[
                 CompositionChangeType.SEQUENCE
@@ -271,7 +286,10 @@ class CompositionService:
         *,
         origin: str,
     ) -> tuple[SequenceEntry, ...]:
-        additions = [_pending_entry(entry) for entry in entries]
+        additions = [
+            _profiled_pending_entry(entry, self._robot_profile_id)
+            for entry in entries
+        ]
         if not additions:
             raise ValueError("at least one sequence entry is required")
         with self._lock:
@@ -417,7 +435,10 @@ class CompositionService:
         *,
         origin: str,
     ) -> str:
-        stored_entries = [_pending_entry(entry) for entry in entries]
+        stored_entries = [
+            _profiled_pending_entry(entry, self._robot_profile_id)
+            for entry in entries
+        ]
         if not stored_entries:
             raise ValueError("cannot save an empty task")
         with self._lock:
@@ -513,8 +534,9 @@ class CompositionService:
                     f"expected revision {expected_revision}, "
                     f"current revision {current_revision}"
                 )
+            profiled = _profiled_workflow(document, self._robot_profile_id)
             stored = replace(
-                _clone_workflow(document),
+                profiled,
                 revision=current_revision + 1,
             )
             stored_name = self._repository.save_workflow(
@@ -553,7 +575,7 @@ class CompositionService:
     def save_workflow_draft(self, document: WorkflowDocument) -> None:
         with self._lock:
             self._repository.save_workflow_draft(
-                _clone_workflow(document)
+                _profiled_workflow(document, self._robot_profile_id)
             )
 
     def discard_workflow_draft(self) -> bool:
@@ -568,7 +590,10 @@ class CompositionService:
         index: int | None,
         origin: str,
     ) -> tuple[SequenceEntry, ...]:
-        additions = [_pending_entry(entry) for entry in entries]
+        additions = [
+            _profiled_pending_entry(entry, self._robot_profile_id)
+            for entry in entries
+        ]
         if not additions:
             raise ValueError("at least one task entry is required")
         with self._lock:
@@ -680,6 +705,7 @@ class CompositionService:
             name=workflow_id,
             revision=revision,
             entries=entries,
+            robot_profile_id=self._robot_profile_id,
         )
         return self._repository.save_workflow(task_name, document)
 
@@ -711,12 +737,22 @@ class CompositionService:
                 )
 
 
-def _validated_action(action: ActionDefinition) -> ActionDefinition:
+def _validated_action(
+    action: ActionDefinition,
+    robot_profile_id: str,
+) -> ActionDefinition:
     cloned = _clone_action(action)
     cloned.id = _required_text(cloned.id, "action id")
     cloned.name = _required_text(cloned.name, "action name")
     if not isinstance(cloned.parameters, dict):
         raise TypeError("action parameters must be a dictionary")
+    if cloned.robot_profile_id == "unscoped":
+        cloned.robot_profile_id = robot_profile_id
+    if cloned.robot_profile_id != robot_profile_id:
+        raise ValueError(
+            "action Robot Profile does not match the active profile: "
+            f"{cloned.robot_profile_id} != {robot_profile_id}"
+        )
     return cloned
 
 
@@ -735,22 +771,6 @@ def _clone_entry(entry: SequenceEntry) -> SequenceEntry:
     return sequence_entry_from_dict(deepcopy(entry.to_dict()))
 
 
-@overload
-def _pending_entry(entry: SequenceItem) -> SequenceItem: ...
-
-
-@overload
-def _pending_entry(entry: LoopBlock) -> LoopBlock: ...
-
-
-@overload
-def _pending_entry(entry: ParallelBlock) -> ParallelBlock: ...
-
-
-@overload
-def _pending_entry(entry: SubworkflowBlock) -> SubworkflowBlock: ...
-
-
 def _pending_entry(entry: SequenceEntry) -> SequenceEntry:
     cloned = _clone_entry(entry)
     if isinstance(cloned, SequenceItem):
@@ -764,6 +784,58 @@ def _pending_entry(entry: SequenceEntry) -> SequenceEntry:
     elif isinstance(cloned, SubworkflowBlock):
         cloned.items = [_pending_entry(child) for child in cloned.items]
     return cloned
+
+
+def _profiled_pending_entry(
+    entry: SequenceEntry,
+    robot_profile_id: str,
+) -> SequenceEntry:
+    cloned = _pending_entry(entry)
+    for item in _flatten_entry_items(cloned):
+        declared = item.definition.robot_profile_id
+        if declared == "unscoped":
+            item.definition.robot_profile_id = robot_profile_id
+        elif declared != robot_profile_id:
+            raise ValueError(
+                "sequence contains an action from another Robot Profile: "
+                f"{declared} != {robot_profile_id}"
+            )
+    return cloned
+
+
+def _profiled_workflow(
+    document: WorkflowDocument,
+    robot_profile_id: str,
+) -> WorkflowDocument:
+    if document.robot_profile_id not in {"unscoped", robot_profile_id}:
+        raise ValueError(
+            "workflow Robot Profile does not match the active profile: "
+            f"{document.robot_profile_id} != {robot_profile_id}"
+        )
+    entries = tuple(
+        _profiled_pending_entry(entry, robot_profile_id)
+        for entry in document.to_entries()
+    )
+    return WorkflowDocument.from_entries(
+        workflow_id=document.workflow_id,
+        name=document.name,
+        revision=document.revision,
+        entries=entries,
+        robot_profile_id=robot_profile_id,
+        positions=document.position_map(),
+    )
+
+
+def _flatten_entry_items(entry: SequenceEntry) -> list[SequenceItem]:
+    if isinstance(entry, SequenceItem):
+        return [entry]
+    if isinstance(entry, LoopBlock):
+        children = entry.items
+    elif isinstance(entry, SubworkflowBlock):
+        children = entry.items
+    else:
+        children = [child for branch in entry.branches for child in branch.items]
+    return [item for child in children for item in _flatten_entry_items(child)]
 
 
 def _clone_workflow(document: WorkflowDocument) -> WorkflowDocument:
@@ -781,7 +853,10 @@ def _flatten_entries(
     flattened: list[SequenceItem] = []
     for entry in entries:
         if isinstance(entry, SequenceItem):
-            flattened.append(_pending_entry(entry))
+            pending = _pending_entry(entry)
+            if not isinstance(pending, SequenceItem):
+                raise AssertionError("sequence item clone changed its entry type")
+            flattened.append(pending)
             continue
         if isinstance(entry, LoopBlock):
             for _ in range(entry.repeat_count):

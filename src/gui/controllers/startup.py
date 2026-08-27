@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+import logging
 from threading import Event
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,9 @@ from ...devices.runtime.ids import BODY_AXIS, MOBILE_BASE, PIPETTE, ROBOT_SYSTEM
 
 if TYPE_CHECKING:
     from ...application import ApplicationServices
+
+
+logger = logging.getLogger(__name__)
 
 
 class GuiStartupState(str, Enum):
@@ -147,12 +151,21 @@ class GuiHardwareStartupWorker(QObject):
         try:
             result = operation()
         except Exception as exc:
+            logger.exception(
+                "Hardware startup step failed: device_id=%s, error=%s",
+                device_id,
+                exc,
+            )
             return HardwareStartupStepResult(
                 device_id=device_id,
                 succeeded=False,
                 error=str(exc),
             )
         if device_id == PIPETTE and result is not True:
+            logger.warning(
+                "Hardware startup step was not confirmed: device_id=%s",
+                device_id,
+            )
             return HardwareStartupStepResult(
                 device_id=device_id,
                 succeeded=False,

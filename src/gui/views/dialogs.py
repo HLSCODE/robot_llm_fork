@@ -1219,6 +1219,9 @@ class ActionConfigDialog(AppDialog):
             name=name,
             type=self.action_type,
             parameters=validation.parameters,
+            robot_profile_id=str(
+                self.action_data.get("robot_profile_id", "unscoped")
+            ),
         )
         self.accept()
 

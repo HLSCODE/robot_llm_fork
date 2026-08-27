@@ -24,8 +24,8 @@ from .models import (
 
 
 WORKFLOW_DOCUMENT_SCHEMA = "robot_llm.workflow"
-WORKFLOW_DOCUMENT_VERSION = 4
-WORKFLOW_SCHEMA_REFERENCE = "../schemas/workflow.schema.json"
+WORKFLOW_DOCUMENT_VERSION = 5
+WORKFLOW_SCHEMA_REFERENCE = "../../../schemas/workflow.schema.json"
 
 
 class WorkflowDocumentError(ValueError):
@@ -345,12 +345,14 @@ class WorkflowDocument:
     workflow_id: str
     name: str
     revision: int
+    robot_profile_id: str
     root: WorkflowSequence
     positions: tuple[tuple[str, CanvasPosition], ...] = ()
 
     def __post_init__(self) -> None:
         _require_text(self.workflow_id, "workflow_id")
         _require_text(self.name, "workflow name")
+        _require_text(self.robot_profile_id, "robot_profile_id")
         if isinstance(self.revision, bool) or not isinstance(self.revision, int):
             raise TypeError("workflow revision must be an integer")
         if self.revision < 0:
@@ -374,6 +376,7 @@ class WorkflowDocument:
             "workflow_id": self.workflow_id,
             "name": self.name,
             "revision": self.revision,
+            "robot_profile_id": self.robot_profile_id,
             "root": self.root.to_dict(),
             "presentation": {
                 "positions": {
@@ -411,6 +414,7 @@ class WorkflowDocument:
                 workflow_id=data["workflow_id"],
                 name=data["name"],
                 revision=data["revision"],
+                robot_profile_id=data["robot_profile_id"],
                 root=WorkflowSequence.from_dict(raw_root),
                 positions=tuple(
                     (node_id, CanvasPosition.from_dict(position))
@@ -434,6 +438,7 @@ class WorkflowDocument:
         name: str,
         revision: int,
         entries: Sequence[SequenceEntry],
+        robot_profile_id: str = "unscoped",
         positions: Mapping[str, CanvasPosition] | None = None,
     ) -> WorkflowDocument:
         nodes: list[WorkflowNode] = []
@@ -483,6 +488,7 @@ class WorkflowDocument:
             workflow_id=workflow_id,
             name=name,
             revision=revision,
+            robot_profile_id=robot_profile_id,
             root=WorkflowSequence(tuple(nodes)),
             positions=tuple(
                 (node.node_id, selected_positions[node.node_id])
@@ -685,6 +691,7 @@ def _sequence_from_entries(entries: Sequence[SequenceEntry]) -> WorkflowSequence
         name="nested",
         revision=0,
         entries=entries,
+        robot_profile_id="unscoped",
     ).root
 
 
@@ -693,6 +700,7 @@ def _entries_from_sequence(sequence: WorkflowSequence) -> tuple[SequenceEntry, .
         workflow_id="nested",
         name="nested",
         revision=0,
+        robot_profile_id="unscoped",
         root=sequence,
     )
     return document.to_entries()

@@ -44,7 +44,7 @@ def _template_mappings(project_root: Path) -> tuple[tuple[Path, Path], ...]:
         rendered = ", ".join(str(path) for path in missing)
         raise FileNotFoundError(f"缺少配置模板: {rendered}")
 
-    fragment_templates = tuple(sorted(fragment_directory.glob("*.example.toml")))
+    fragment_templates = tuple(sorted(fragment_directory.rglob("*.example.toml")))
     if not fragment_templates:
         raise FileNotFoundError(f"未找到子配置模板: {fragment_directory}")
 

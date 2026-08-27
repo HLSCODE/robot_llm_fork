@@ -2365,7 +2365,8 @@ full = [
     { name = "sherpa-onnx" },
     { name = "sherpa-onnx-core" },
     { name = "sounddevice" },
-    { name = "tj-robot-proj", marker = "python_full_version < '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'" },
+    { name = "tj-robot-proj", version = "0.2.0", source = { path = "third_party/wheels/linux-x86_64/tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "tj-robot-proj", version = "0.2.0", source = { path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.2.0-py3-none-win_amd64.whl" }, marker = "platform_machine == 'AMD64' and sys_platform == 'win32'" },
     { name = "torch", version = "2.13.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
     { name = "torch", version = "2.13.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version >= '3.15' or sys_platform != 'darwin'" },
     { name = "torchaudio", version = "2.11.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "python_full_version < '3.15' and sys_platform == 'darwin'" },
@@ -2382,7 +2383,8 @@ hardware = [
     { name = "pyrealsense2" },
     { name = "pyserial" },
     { name = "robotic-arm" },
-    { name = "tj-robot-proj", marker = "python_full_version < '3.13' and platform_machine == 'AMD64' and sys_platform == 'win32'" },
+    { name = "tj-robot-proj", version = "0.2.0", source = { path = "third_party/wheels/linux-x86_64/tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl" }, marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "tj-robot-proj", version = "0.2.0", source = { path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.2.0-py3-none-win_amd64.whl" }, marker = "platform_machine == 'AMD64' and sys_platform == 'win32'" },
 ]
 kws = [
     { name = "sherpa-onnx" },
@@ -2464,8 +2466,10 @@ requires-dist = [
     { name = "sounddevice", marker = "extra == 'full'", specifier = ">=0.5" },
     { name = "sounddevice", marker = "extra == 'voice'", specifier = ">=0.5" },
     { name = "textual", specifier = ">=1.0.0" },
-    { name = "tj-robot-proj", marker = "python_full_version == '3.12.*' and platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'full'", path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl" },
-    { name = "tj-robot-proj", marker = "python_full_version == '3.12.*' and platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'hardware'", path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl" },
+    { name = "tj-robot-proj", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'full'", path = "third_party/wheels/linux-x86_64/tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl" },
+    { name = "tj-robot-proj", marker = "platform_machine == 'x86_64' and sys_platform == 'linux' and extra == 'hardware'", path = "third_party/wheels/linux-x86_64/tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl" },
+    { name = "tj-robot-proj", marker = "platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'full'", path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.2.0-py3-none-win_amd64.whl" },
+    { name = "tj-robot-proj", marker = "platform_machine == 'AMD64' and sys_platform == 'win32' and extra == 'hardware'", path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.2.0-py3-none-win_amd64.whl" },
     { name = "torch", marker = "extra == 'full'", specifier = ">=2.3", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch", marker = "extra == 'voice'", specifier = ">=2.3", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchaudio", marker = "extra == 'full'", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cpu" },
@@ -2970,23 +2974,41 @@ wheels = [
 
 [[package]]
 name = "tj-robot-proj"
-version = "0.1.0"
-source = { path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl" }
+version = "0.2.0"
+source = { path = "third_party/wheels/linux-x86_64/tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform != 'darwin' and sys_platform != 'win32'",
+    "python_full_version >= '3.13' and python_full_version < '3.15' and sys_platform != 'darwin' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform != 'darwin' and sys_platform != 'win32'",
+]
 dependencies = [
-    { name = "matplotlib", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
-    { name = "numpy", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
-    { name = "opencv-python", marker = "python_full_version < '3.13' and sys_platform == 'win32'" },
+    { name = "numpy", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
 ]
 wheels = [
-    { filename = "tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl", hash = "sha256:bb4ebd0d5f47c2d157a4d556c1d1c74b84a103ba9430ffc20fa4a27a9448c3fd" },
+    { filename = "tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", hash = "sha256:f26edecc4959435cce8e82d9ce3466383cad2eb4c5273cb6523b488be2e76683" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "matplotlib", specifier = ">=3.5" },
-    { name = "numpy", specifier = ">=1.21" },
-    { name = "opencv-python", specifier = ">=4.5" },
+requires-dist = [{ name = "numpy", specifier = ">=1.21" }]
+
+[[package]]
+name = "tj-robot-proj"
+version = "0.2.0"
+source = { path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.2.0-py3-none-win_amd64.whl" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.13' and python_full_version < '3.15' and sys_platform == 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
 ]
+dependencies = [
+    { name = "numpy", marker = "sys_platform == 'win32'" },
+]
+wheels = [
+    { filename = "tj_robot_proj-0.2.0-py3-none-win_amd64.whl", hash = "sha256:10bd24acdc2b5242234e8c10a97b44423a6ba6472d5b90b4198ad3b6235568f8" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "numpy", specifier = ">=1.21" }]
 
 [[package]]
 name = "tokenizers"

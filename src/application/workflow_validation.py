@@ -34,6 +34,7 @@ class WorkflowIssueCode(str, Enum):
     INVALID_SUBWORKFLOW = "invalid_subworkflow"
     EXPANSION_LIMIT = "expansion_limit"
     NESTING_LIMIT = "nesting_limit"
+    ROBOT_PROFILE_MISMATCH = "robot_profile_mismatch"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +62,7 @@ class _ValidationState:
     entry_uuids: set[str]
     item_uuids: set[str]
     branch_ids: set[str]
+    expected_robot_profile_id: str
 
 
 class WorkflowValidator:
@@ -72,6 +74,7 @@ class WorkflowValidator:
         max_expanded_steps: int = DEFAULT_MAX_EXPANDED_STEPS,
         max_nesting_depth: int = DEFAULT_MAX_NESTING_DEPTH,
         max_parallel_branches: int = DEFAULT_MAX_PARALLEL_BRANCHES,
+        expected_robot_profile_id: str = "",
     ) -> None:
         self._max_expanded_steps = _positive_int(
             max_expanded_steps,
@@ -85,9 +88,22 @@ class WorkflowValidator:
             max_parallel_branches,
             "max_parallel_branches",
         )
+        self._expected_robot_profile_id = expected_robot_profile_id.strip().lower()
 
     def validate(self, document: WorkflowDocument) -> WorkflowValidationResult:
-        state = _ValidationState([], set(), set(), set(), set())
+        state = _ValidationState(
+            [], set(), set(), set(), set(), self._expected_robot_profile_id
+        )
+        if (
+            self._expected_robot_profile_id
+            and document.robot_profile_id != self._expected_robot_profile_id
+        ):
+            state.issues.append(WorkflowValidationIssue(
+                WorkflowIssueCode.ROBOT_PROFILE_MISMATCH,
+                "工作流 Robot Profile 不匹配: "
+                f"{document.robot_profile_id} != {self._expected_robot_profile_id}",
+                field="robot_profile_id",
+            ))
         if not document.root.children:
             state.issues.append(WorkflowValidationIssue(
                 WorkflowIssueCode.EMPTY,
@@ -270,6 +286,17 @@ class WorkflowValidator:
             state.issues,
         )
         definition = node.definition
+        if (
+            state.expected_robot_profile_id
+            and definition.robot_profile_id != state.expected_robot_profile_id
+        ):
+            state.issues.append(WorkflowValidationIssue(
+                WorkflowIssueCode.ROBOT_PROFILE_MISMATCH,
+                "动作 Robot Profile 不匹配: "
+                f"{definition.robot_profile_id} != {state.expected_robot_profile_id}",
+                node_id=node.node_id,
+                field="definition.robot_profile_id",
+            ))
         if not definition.id.strip() or not definition.name.strip():
             state.issues.append(WorkflowValidationIssue(
                 WorkflowIssueCode.INVALID_ACTION,

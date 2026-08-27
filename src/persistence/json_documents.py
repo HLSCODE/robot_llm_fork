@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import tempfile
 from typing import Any
+from collections.abc import Mapping
 
 
 CURRENT_DOCUMENT_VERSION = 1
@@ -43,6 +44,7 @@ class CollectionDocumentSpec:
 class LoadedCollectionDocument:
     collection: list[Any]
     requires_migration: bool
+    metadata: dict[str, Any]
 
 
 def load_collection_document(
@@ -56,6 +58,7 @@ def load_collection_document(
         return LoadedCollectionDocument(
             collection=legacy_collection,
             requires_migration=True,
+            metadata={},
         )
 
     if not isinstance(raw_document, dict):
@@ -80,6 +83,11 @@ def load_collection_document(
     return LoadedCollectionDocument(
         collection=collection,
         requires_migration=False,
+        metadata={
+            key: value
+            for key, value in raw_document.items()
+            if key not in {"$schema", "schema", "schema_version", spec.collection_key}
+        },
     )
 
 
@@ -97,6 +105,8 @@ def write_collection_document(
     path: Path,
     spec: CollectionDocumentSpec,
     collection: list[Any],
+    *,
+    metadata: Mapping[str, Any] | None = None,
 ) -> None:
     if not isinstance(collection, list):
         raise TypeError("collection must be a list")
@@ -105,6 +115,12 @@ def write_collection_document(
         "schema_version": spec.current_version,
         spec.collection_key: collection,
     }
+    if metadata:
+        reserved = {"$schema", "schema", "schema_version", spec.collection_key}
+        overlap = reserved.intersection(metadata)
+        if overlap:
+            raise ValueError(f"collection metadata uses reserved keys: {sorted(overlap)}")
+        payload.update(metadata)
     if spec.schema_reference is not None:
         payload = {"$schema": spec.schema_reference, **payload}
     write_json_atomic(path, payload)

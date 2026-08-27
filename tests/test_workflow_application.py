@@ -111,7 +111,7 @@ class WorkflowDocumentTests(unittest.TestCase):
         with self.assertRaises(UnsupportedWorkflowDocumentVersion):
             WorkflowDocument.from_dict(payload)
 
-    def test_nested_parallel_and_loop_round_trip_as_v4(self) -> None:
+    def test_nested_parallel_and_loop_round_trip_as_v5(self) -> None:
         parallel = ParallelBlock(
             uuid="parallel-1",
             branches=[
@@ -132,7 +132,7 @@ class WorkflowDocumentTests(unittest.TestCase):
         payload = document.to_dict()
         restored = WorkflowDocument.from_dict(payload)
 
-        self.assertEqual(4, payload["schema_version"])
+        self.assertEqual(5, payload["schema_version"])
         restored_parallel = restored.root.children[0]
         self.assertIsInstance(restored_parallel, WorkflowParallelNode)
         assert isinstance(restored_parallel, WorkflowParallelNode)

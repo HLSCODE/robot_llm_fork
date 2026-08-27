@@ -40,6 +40,19 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libegl1 \
+            libgl1 \
+            libopengl0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            xauth \
+            xvfb
+
       - name: Install uv and Python
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
@@ -50,8 +63,18 @@ jobs:
       - name: Install locked development environment
         run: uv sync --frozen --group dev ${{ matrix.extras }}
 
-      - name: Run quality gates
+      - name: Run quality gates on Windows
+        if: runner.os != 'Linux'
         run: >-
+          uv run --frozen --group dev ${{ matrix.extras }}
+          python scripts/run_quality_checks.py
+
+      - name: Run quality gates on Linux
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: >-
+          xvfb-run --auto-servernum
           uv run --frozen --group dev ${{ matrix.extras }}
           python scripts/run_quality_checks.py
 
@@ -76,6 +99,19 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux' && matrix.extra == 'gui'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libegl1 \
+            libgl1 \
+            libopengl0 \
+            libxkbcommon-x11-0 \
+            libxcb-cursor0 \
+            xauth \
+            xvfb
+
       - name: Install uv and Python
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
@@ -87,6 +123,16 @@ jobs:
         run: uv sync --frozen --no-dev --extra ${{ matrix.extra }}
 
       - name: Smoke-test optional dependency group
+        if: runner.os != 'Linux' || matrix.extra != 'gui'
         run: >-
           uv run --frozen --no-dev --extra ${{ matrix.extra }}
           python scripts/validate_optional_extra.py ${{ matrix.extra }}
+
+      - name: Smoke-test Linux GUI dependency group
+        if: runner.os == 'Linux' && matrix.extra == 'gui'
+        env:
+          QT_QPA_PLATFORM: xcb
+        run: >-
+          xvfb-run --auto-servernum
+          uv run --frozen --no-dev --extra gui
+          python scripts/validate_optional_extra.py gui

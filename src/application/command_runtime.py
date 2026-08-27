@@ -222,6 +222,7 @@ class CommandRuntime:
         composition: CompositionService,
         workflow_compiler: WorkflowCompiler,
         catalog: CommandCatalog,
+        robot_profile_id: str = "unscoped",
         preview_ttl_s: float = 120.0,
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
@@ -231,7 +232,10 @@ class CommandRuntime:
             raise ValueError("preview_ttl_s must be positive")
         self._execution = execution
         self._skill_engine = skill_engine
+        from ..domain.robot_profile import normalize_robot_profile_id
+
         self._composition = composition
+        self._robot_profile_id = normalize_robot_profile_id(robot_profile_id)
         self._workflow_compiler = workflow_compiler
         self._catalog = catalog
         self._preview_ttl_s = float(preview_ttl_s)
@@ -474,6 +478,7 @@ class CommandRuntime:
             name=command.action_name or (definition.name if definition else "单步动作"),
             type=command.action_type,
             parameters=validation.parameters,
+            robot_profile_id=self._robot_profile_id,
         )
         return (
             [SequenceItem.from_definition(action)],

@@ -444,6 +444,8 @@ class ActionControlPreflightTests(unittest.TestCase):
             result.error_operation,
         )
         self.assertEqual(ROBOT_SYSTEM, result.error_device_id)
+        self.assertIn("缺少 emergency, quick", result.error or "")
+        self.assertIn("不能通过关闭安全预检继续执行", result.error or "")
         self.assertFalse(initialized)
         self.assertEqual(
             ActionCancellationMode.DEVICE_ASSISTED,

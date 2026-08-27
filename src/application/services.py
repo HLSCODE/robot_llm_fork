@@ -35,7 +35,8 @@ from ..execution import (
     ExecutionManager,
     ExecutionSnapshot,
 )
-from ..domain.execution_plan import ExecutionPlan
+from ..domain.execution_plan import ExecutionPlan, iter_execution_steps
+from ..domain.robot_profile import normalize_robot_profile_id
 from ..domain.models import SequenceEntry
 from ..llm import LLMRegistry
 from ..persistence.trajectory_storage import TrajectoryStorage
@@ -77,8 +78,14 @@ def _device_operation(
 class ExecutionService:
     """Application entry for every sequence execution source."""
 
-    def __init__(self, manager: ExecutionManager) -> None:
+    def __init__(
+        self,
+        manager: ExecutionManager,
+        *,
+        robot_profile_id: str = "unscoped",
+    ) -> None:
         self._manager = manager
+        self._robot_profile_id = normalize_robot_profile_id(robot_profile_id)
 
     def start(
         self,
@@ -87,6 +94,7 @@ class ExecutionService:
         origin: str,
         listener: ExecutionListener | None = None,
     ) -> ExecutionHandle:
+        self._assign_unscoped_profile(plan)
         return self._manager.submit(
             plan,
             origin=origin,
@@ -111,7 +119,13 @@ class ExecutionService:
         plan: ExecutionPlan,
     ) -> tuple[str, ...]:
         """Resolve resources for a non-reserving UI preflight check."""
+        self._assign_unscoped_profile(plan)
         return self._manager.required_resources(plan)
+
+    def _assign_unscoped_profile(self, plan: ExecutionPlan) -> None:
+        for _identity, item in iter_execution_steps(plan):
+            if item.definition.robot_profile_id == "unscoped":
+                item.definition.robot_profile_id = self._robot_profile_id
 
     def required_resources_for_entries(
         self,

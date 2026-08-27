@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from ..domain.execution_context import ExecutionContext
+from ..domain.robot_profile import normalize_robot_profile_id
 from ..domain.models import (
     ActionType,
     SequenceItem,
@@ -93,10 +94,13 @@ class ActionEngine:
         external_localization_reader: Callable[..., dict[str, Any] | None],
         execution_context: ExecutionContext,
         vision_service: VisionService,
+        *,
+        robot_profile_id: str = "unscoped",
     ) -> None:
         self._device_runtime = device_runtime
         self.execution_context = execution_context
         self._vision_service = vision_service
+        self._robot_profile_id = normalize_robot_profile_id(robot_profile_id)
         self._callbacks: EngineCallbacks | None = None
         self._default_action_timeout_seconds = execution_settings.execution_action_timeout_seconds
         if self._default_action_timeout_seconds <= 0:
@@ -228,6 +232,7 @@ class ActionEngine:
         callbacks: EngineCallbacks,
     ) -> EngineResult:
         """Execute one structured plan in the manager-owned worker."""
+        self._require_plan_profile(plan)
         self._callbacks = callbacks
         self.execution_context.clear()
         identities = {
@@ -249,7 +254,17 @@ class ActionEngine:
         plan: ExecutionPlan,
     ) -> tuple[str, ...]:
         """Resolve leases and reject conflicting parallel branches."""
+        self._require_plan_profile(plan)
         return self._node_resources(plan.root)
+
+    def _require_plan_profile(self, plan: ExecutionPlan) -> None:
+        for _identity, item in iter_execution_steps(plan):
+            declared = item.definition.robot_profile_id
+            if declared != self._robot_profile_id:
+                raise ValueError(
+                    "execution action belongs to Robot Profile "
+                    f"{declared!r}; active profile is {self._robot_profile_id!r}"
+                )
 
     def _execute_sequence(
         self,
@@ -619,7 +634,12 @@ class ActionEngine:
             )
             return ActionHandlerResult.failed(
                 ActionResultCode.CONTROL_POLICY_MISMATCH,
-                f"设备停止能力不满足动作控制策略: {target.device_id} 缺少 {missing_values}",
+                (
+                    "设备停止能力不满足动作控制策略: "
+                    f"{target.device_id} 缺少 {missing_values}；"
+                    "当前机器人 Provider 必须通过公共驱动接口实现并声明这些停止能力，"
+                    "不能通过关闭安全预检继续执行"
+                ),
                 operation=self._CONTROL_POLICY_OPERATION,
                 device_id=target.device_id,
             )

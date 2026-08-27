@@ -13,9 +13,12 @@ from src.configuration.settings import (
     GuiSettings,
     LLMSettings,
     LoggingSettings,
+    MobileBaseSettings,
+    RealManRobotSettings,
     RobotSettings,
     SecretSettings,
     ServerSettings,
+    TianjiRobotSettings,
     VisionSettings,
     VoiceSettings,
 )
@@ -44,6 +47,9 @@ class ApplicationSettingsTests(unittest.TestCase):
 
         self.assertIsInstance(settings.server, ServerSettings)
         self.assertIsInstance(settings.robot, RobotSettings)
+        self.assertIsInstance(settings.robot_realman, RealManRobotSettings)
+        self.assertIsInstance(settings.robot_tianji, TianjiRobotSettings)
+        self.assertIsInstance(settings.mobile_base, MobileBaseSettings)
         self.assertIsInstance(settings.devices, DeviceSettings)
         self.assertIsInstance(settings.vision, VisionSettings)
         self.assertIsInstance(settings.llm, LLMSettings)
@@ -57,7 +63,7 @@ class ApplicationSettingsTests(unittest.TestCase):
         )
         self.assertEqual(9000, settings.server.websocket_port)
         self.assertTrue(settings.server.websocket_security_enabled)
-        self.assertEqual("future-arm", settings.robot.robot_provider)
+        self.assertEqual("future-arm", settings.robot.provider)
         self.assertEqual("COM8", settings.devices.relay_serial_port)
         self.assertEqual(0.81, settings.vision.vision_default_confidence)
         self.assertEqual("deepseek", settings.llm.default_provider)
@@ -82,12 +88,14 @@ class ApplicationSettingsTests(unittest.TestCase):
 
     def test_snapshots_and_nested_sequences_are_immutable(self) -> None:
         source_pose = [1, 2, 3, 4, 5, 6]
-        settings = ApplicationSettings.from_config(SimpleNamespace(ROBOT1_INITIAL_POSE=source_pose))
+        settings = ApplicationSettings.from_config(
+            SimpleNamespace(REALMAN_LEFT_INITIAL_POSE=source_pose)
+        )
         source_pose[0] = 99
 
         self.assertEqual(
             (1, 2, 3, 4, 5, 6),
-            settings.robot.robot1_initial_pose,
+            settings.robot_realman.left_initial_pose,
         )
         with self.assertRaises(FrozenInstanceError):
             settings.server.websocket_port = 9001

@@ -8,14 +8,24 @@ import tomllib
 from typing import get_type_hints
 
 from .errors import ConfigLoadError
-from .settings import ApplicationSettings
+from .settings import (
+    ApplicationSettings,
+    RealManRobotSettings,
+    TianjiRobotSettings,
+)
 from .value_parsing import coerce_value
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 _INCLUDE_KEY = "include"
 _RESERVED_ROOT_KEYS = frozenset({"schema_version", _INCLUDE_KEY})
 _FORBIDDEN_TOML_GROUPS = frozenset({"secrets"})
+_ROBOT_PROVIDER_GROUP = "robot_providers"
+_INTERNAL_ONLY_GROUPS = frozenset({"robot_realman", "robot_tianji"})
+_ROBOT_PROVIDER_TYPES = {
+    "realman": ("robot_realman", RealManRobotSettings),
+    "tianji": ("robot_tianji", TianjiRobotSettings),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +124,9 @@ def _parse_sections(
 ) -> dict[str, dict[str, object]]:
     group_types = get_type_hints(ApplicationSettings)
     allowed_metadata = _RESERVED_ROOT_KEYS if is_entry else frozenset()
-    unknown_root = set(document.content) - set(group_types) - allowed_metadata
+    public_groups = set(group_types) - _INTERNAL_ONLY_GROUPS
+    public_groups.add(_ROBOT_PROVIDER_GROUP)
+    unknown_root = set(document.content) - public_groups - allowed_metadata
     if unknown_root:
         _raise_unknown("配置表", unknown_root, document.path)
 
@@ -125,8 +137,22 @@ def _parse_sections(
         )
 
     sections: dict[str, dict[str, object]] = {}
+    raw_robot_providers = document.content.get(_ROBOT_PROVIDER_GROUP)
+    if raw_robot_providers is not None:
+        if not isinstance(raw_robot_providers, dict):
+            raise ConfigLoadError(
+                f"配置项 {_ROBOT_PROVIDER_GROUP} 必须是 TOML 表: {document.path}"
+            )
+        sections.update(
+            _normalize_robot_provider_sections(raw_robot_providers, document.path)
+        )
+
     for group_name, settings_type in group_types.items():
-        if group_name in _FORBIDDEN_TOML_GROUPS or group_name not in document.content:
+        if (
+            group_name in _FORBIDDEN_TOML_GROUPS
+            or group_name in _INTERNAL_ONLY_GROUPS
+            or group_name not in document.content
+        ):
             continue
         raw_section = document.content[group_name]
         if not isinstance(raw_section, dict):
@@ -166,6 +192,63 @@ def _normalize_llm_provider_catalog(
             )
         providers.append({"id": provider_id, **raw_provider})
     return {"providers": providers}
+
+
+def _normalize_robot_provider_sections(
+    raw_section: dict[str, object],
+    source_path: Path,
+) -> dict[str, dict[str, object]]:
+    """Convert ``[robot_providers.<kind>]`` tables to typed provider groups."""
+    sections: dict[str, dict[str, object]] = {}
+    for provider_name, raw_provider in raw_section.items():
+        normalized_name = provider_name.strip().lower()
+        if not normalized_name:
+            raise ConfigLoadError(f"Robot provider 名称不能为空: {source_path}")
+        try:
+            group_name, settings_type = _ROBOT_PROVIDER_TYPES[normalized_name]
+        except KeyError as exc:
+            supported = ", ".join(sorted(_ROBOT_PROVIDER_TYPES))
+            raise ConfigLoadError(
+                f"未知 Robot provider 配置: {provider_name}; 支持: {supported}: "
+                f"{source_path}"
+            ) from exc
+        if not isinstance(raw_provider, dict):
+            raise ConfigLoadError(
+                f"配置项 robot_providers.{provider_name} 必须是 TOML 表: "
+                f"{source_path}"
+            )
+
+        provider_values = dict(raw_provider)
+        raw_kind = provider_values.pop("kind", None)
+        if not isinstance(raw_kind, str) or not raw_kind.strip():
+            raise ConfigLoadError(
+                f"配置项 robot_providers.{provider_name}.kind 必须是非空字符串: "
+                f"{source_path}"
+            )
+        if raw_kind.strip().lower() != normalized_name:
+            raise ConfigLoadError(
+                f"配置项 robot_providers.{provider_name}.kind 必须为 "
+                f"{normalized_name}: {source_path}"
+            )
+
+        field_types = get_type_hints(settings_type)
+        unknown_fields = set(provider_values) - set(field_types)
+        if unknown_fields:
+            _raise_unknown(
+                f"[robot_providers.{provider_name}] 字段",
+                unknown_fields,
+                source_path,
+            )
+        sections[group_name] = {
+            name: _coerce_document_value(
+                value,
+                field_types[name],
+                f"robot_providers.{provider_name}.{name}",
+                source_path,
+            )
+            for name, value in provider_values.items()
+        }
+    return sections
 
 
 def _coerce_document_value(

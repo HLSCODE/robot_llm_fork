@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from copy import copy
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, replace
@@ -106,10 +107,14 @@ class JsonLogFormatter(logging.Formatter):
 
 
 class ConsoleLogFormatter(logging.Formatter):
-    """Render readable console output with correlation fields when present."""
+    """Render concise console output without exception tracebacks."""
 
     def format(self, record: logging.LogRecord) -> str:
-        message = super().format(record)
+        console_record = copy(record)
+        console_record.exc_info = None
+        console_record.exc_text = None
+        console_record.stack_info = None
+        message = super().format(console_record)
         fields = [
             f"{name}={value}"
             for name in ("run_id", "request_id", "operation")

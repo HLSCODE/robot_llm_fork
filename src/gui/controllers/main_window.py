@@ -176,6 +176,7 @@ class MainWindow(RoundedMainWindow):
                 name=state.document.name,
                 revision=state.document.revision,
                 entries=initial_entries,
+                robot_profile_id=state.document.robot_profile_id,
             )
             self._services.workflow_editing.replace_document(document)
         self._render_sequence(
@@ -1157,7 +1158,8 @@ class MainWindow(RoundedMainWindow):
         action_data = {
             "id": action.id,
             "name": action.name,
-            "parameters": action.parameters
+            "parameters": action.parameters,
+            "robot_profile_id": action.robot_profile_id,
         }
         dialog = ActionConfigDialog(
             action.type,
@@ -1246,6 +1248,7 @@ class MainWindow(RoundedMainWindow):
                 name=state.document.name,
                 revision=state.document.revision,
                 entries=self._services.composition.sequence_entries(),
+                robot_profile_id=state.document.robot_profile_id,
             )
             self._services.workflow_editing.replace_document(document)
             self._render_sequence(document.to_entries())
@@ -1258,6 +1261,7 @@ class MainWindow(RoundedMainWindow):
             revision=state.document.revision,
             entries=self.workflow_view.sequence_list.get_entries(),
             positions=state.document.position_map(),
+            robot_profile_id=state.document.robot_profile_id,
         )
         self._services.workflow_editing.replace_document(document)
 
@@ -1583,6 +1587,7 @@ class MainWindow(RoundedMainWindow):
                     name=state.document.name,
                     revision=state.document.revision,
                     entries=sequence,
+                    robot_profile_id=state.document.robot_profile_id,
                 )
                 compiled = self._services.workflow_compiler.compile(document)
             except WorkflowCompilationError as exc:
@@ -1756,6 +1761,7 @@ class MainWindow(RoundedMainWindow):
             name=state.document.name,
             revision=state.document.revision,
             entries=entries,
+            robot_profile_id=state.document.robot_profile_id,
         )
         try:
             compiled = self._services.workflow_compiler.compile(document)
@@ -1865,6 +1871,7 @@ class MainWindow(RoundedMainWindow):
             "id": action_def.id,
             "name": action_def.name,
             "parameters": action_def.parameters,
+            "robot_profile_id": action_def.robot_profile_id,
         }
         dialog = ActionConfigDialog(
             action_def.type,

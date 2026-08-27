@@ -6,8 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..configuration.data_paths import ApplicationDataPaths
-from ..persistence.json_documents import read_json_document, write_json_atomic
-from ..persistence.storage import ACTION_LIBRARY_FILE_NAME
+from ..persistence.json_documents import (
+    read_json_document,
+    write_collection_document,
+    write_json_atomic,
+)
+from ..persistence.storage import ACTION_LIBRARY_DOCUMENT, ACTION_LIBRARY_FILE_NAME
 
 
 _BUILTIN_CATALOG_ROOT = Path(__file__).resolve().parents[1] / "builtin_catalogs"
@@ -32,17 +36,35 @@ class BuiltinDataInstaller:
 
         for source in sorted((_BUILTIN_CATALOG_ROOT / "schemas").glob("*.json")):
             destination = self._paths.root / "schemas" / source.name
-            if not destination.exists():
+            destination_missing = not destination.exists()
+            if destination_missing or _json_documents_differ(source, destination):
                 _copy_json(source, destination)
+            if destination_missing:
                 created_files.append(destination)
 
         actions_file = (
             self._paths.actions_directory / ACTION_LIBRARY_FILE_NAME
         )
         if not actions_file.exists():
-            _copy_json(
-                _BUILTIN_CATALOG_ROOT / "actions" / ACTION_LIBRARY_FILE_NAME,
+            source = read_json_document(
+                _BUILTIN_CATALOG_ROOT / "actions" / ACTION_LIBRARY_FILE_NAME
+            )
+            source_profile = str(source.get("robot_profile_id", ""))
+            actions = (
+                source.get("actions", [])
+                if self._paths.robot_profile_id == source_profile
+                else []
+            )
+            profiled_actions = [
+                {**action, "robot_profile_id": self._paths.robot_profile_id}
+                for action in actions
+                if isinstance(action, dict)
+            ]
+            write_collection_document(
                 actions_file,
+                ACTION_LIBRARY_DOCUMENT,
+                profiled_actions,
+                metadata={"robot_profile_id": self._paths.robot_profile_id},
             )
             created_files.append(actions_file)
 
@@ -73,3 +95,10 @@ def _copy_json(source: Path, destination: Path) -> None:
         if reference is not None:
             document["$schema"] = reference
     write_json_atomic(destination, document)
+
+
+def _json_documents_differ(source: Path, destination: Path) -> bool:
+    try:
+        return read_json_document(source) != read_json_document(destination)
+    except (OSError, ValueError):
+        return True

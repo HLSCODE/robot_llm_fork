@@ -57,14 +57,22 @@ class SkillEngine:
     3. 验证动作序列的合法性
     """
 
-    def __init__(self, registry: Optional[SkillCatalog] = None):
+    def __init__(
+        self,
+        registry: Optional[SkillCatalog] = None,
+        *,
+        robot_profile_id: str = "unscoped",
+    ):
         """
         初始化技能引擎
 
         Args:
             registry: 可选，技能注册表实例。默认为单例
         """
+        from ..domain.robot_profile import normalize_robot_profile_id
+
         self._registry = registry or SkillRegistry()
+        self._robot_profile_id = normalize_robot_profile_id(robot_profile_id)
         logger.info("SkillEngine 初始化完成")
 
     def load_skills(self, directory: str) -> int:
@@ -226,6 +234,7 @@ class SkillEngine:
                 name=step.action_name,
                 type=action_type,
                 parameters=action_validation.parameters,
+                robot_profile_id=self._robot_profile_id,
             )
 
             # 创建 SequenceItem
@@ -328,6 +337,8 @@ class SkillEngine:
             if not isinstance(value, bool):
                 return None, "类型必须是 bool"
             return value, None
+
+        raise AssertionError(f"unsupported skill parameter type: {parameter.type}")
 
     @staticmethod
     def _validate_parameter_bindings(

@@ -66,6 +66,7 @@ class ParallelNodeMapping:
 @dataclass(frozen=True, slots=True)
 class CompiledWorkflow:
     workflow_id: str
+    robot_profile_id: str
     revision: int
     plan: ExecutionPlan
     entries: tuple[SequenceEntry, ...]
@@ -107,8 +108,15 @@ class WorkflowCompilationError(ValueError):
 class WorkflowCompiler:
     """Pure compiler; it never submits execution or touches a device."""
 
-    def __init__(self, validator: WorkflowValidator | None = None) -> None:
-        self._validator = validator or WorkflowValidator()
+    def __init__(
+        self,
+        validator: WorkflowValidator | None = None,
+        *,
+        expected_robot_profile_id: str = "",
+    ) -> None:
+        self._validator = validator or WorkflowValidator(
+            expected_robot_profile_id=expected_robot_profile_id
+        )
 
     def compile(self, document: WorkflowDocument) -> CompiledWorkflow:
         validation = self._validator.validate(document)
@@ -134,6 +142,7 @@ class WorkflowCompiler:
         self._collect_mappings(document.root, loops, parallels)
         return CompiledWorkflow(
             workflow_id=document.workflow_id,
+            robot_profile_id=document.robot_profile_id,
             revision=document.revision,
             plan=plan,
             entries=entries,
@@ -236,6 +245,7 @@ class WorkflowCompiler:
                 name=definition.name,
                 type=definition.type,
                 parameters=deepcopy(validation.parameters),
+                robot_profile_id=definition.robot_profile_id,
             ),
             status=SequenceItemStatus.PENDING,
         )

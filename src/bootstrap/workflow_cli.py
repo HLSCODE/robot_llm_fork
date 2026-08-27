@@ -1,4 +1,4 @@
-"""Explicit one-way migration from legacy task/workflow files to workflow v4."""
+"""Explicit one-way migration from legacy task/workflow files to workflow v5."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from ..domain.models import (
     SubworkflowBlock,
     sequence_entry_from_dict,
 )
+from ..domain.robot_profile import UNSCOPED_ROBOT_PROFILE, normalize_robot_profile_id
 from ..domain.workflow import CanvasPosition, WorkflowDocument
 from ..geometry.pose_compensation import parse_pose
 from ..persistence.json_documents import read_json_document, write_json_atomic
@@ -49,9 +50,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--data-root", type=Path, default=Path("data"))
     parser.add_argument("--apply", action="store_true")
     parser.add_argument(
+        "--robot-profile",
+        default=UNSCOPED_ROBOT_PROFILE,
+        help="Robot Profile written to migrated workflow documents.",
+    )
+    parser.add_argument(
         "--normalize-active",
         action="store_true",
-        help="Rewrite textual poses in active v4 workflows as numeric arrays.",
+        help="Rewrite textual poses in active v5 workflows as numeric arrays.",
     )
     args = parser.parse_args(argv)
     root = args.data_root.resolve()
@@ -66,7 +72,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"normalized {changed} active workflow documents")
         return 0
 
-    items = _plan(source_directory, workflows_directory, drafts_directory)
+    robot_profile_id = normalize_robot_profile_id(args.robot_profile)
+    items = _plan(
+        source_directory,
+        workflows_directory,
+        drafts_directory,
+        robot_profile_id=robot_profile_id,
+    )
     print(f"legacy documents: {len(items)}")
     for item in items:
         print(f"  {item.source.name} -> {item.target.relative_to(root)}")
@@ -77,6 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         root,
         workflows_directory=workflows_directory,
         drafts_directory=drafts_directory,
+        robot_profile_id=robot_profile_id,
     )
     print(
         f"migrated {result.migrated_count} documents; "
@@ -90,6 +103,7 @@ def migrate_legacy_workflows(
     *,
     workflows_directory: Path | None = None,
     drafts_directory: Path | None = None,
+    robot_profile_id: str = UNSCOPED_ROBOT_PROFILE,
 ) -> WorkflowMigrationResult:
     """Migrate legacy files below ``data_root/tasks`` exactly once.
 
@@ -97,6 +111,7 @@ def migrate_legacy_workflows(
     configuration. Existing canonical workflows are never overwritten.
     """
     root = data_root.resolve()
+    normalized_profile_id = normalize_robot_profile_id(robot_profile_id)
     source_directory = root / "tasks"
     active_workflows_directory = (
         workflows_directory.resolve()
@@ -108,11 +123,12 @@ def migrate_legacy_workflows(
         if drafts_directory is not None
         else root / "drafts"
     )
-    backup_directory = root / "migration-backups" / "workflow-v4"
+    backup_directory = root / "migration-backups" / "workflow-v5"
     items = _plan(
         source_directory,
         active_workflows_directory,
         active_drafts_directory,
+        robot_profile_id=normalized_profile_id,
     )
     if items:
         _apply(
@@ -131,6 +147,8 @@ def _plan(
     source_directory: Path,
     workflows_directory: Path,
     drafts_directory: Path,
+    *,
+    robot_profile_id: str = UNSCOPED_ROBOT_PROFILE,
 ) -> tuple[MigrationItem, ...]:
     if not source_directory.is_dir():
         return ()
@@ -141,14 +159,14 @@ def _plan(
             continue
         if source.name.endswith(".task"):
             name = source.name.removesuffix(".task")
-            document = _task_document(source, name)
+            document = _task_document(source, name, robot_profile_id)
             target = workflows_directory / f"{name}{WORKFLOW_FILE_SUFFIX}"
         elif source.name.endswith(".workflow"):
             name = source.name.removesuffix(".workflow")
-            document = _workflow_v1_document(source)
+            document = _workflow_v1_document(source, robot_profile_id)
             target = workflows_directory / f"{name}{WORKFLOW_FILE_SUFFIX}"
         elif source.name == ".workflow-draft":
-            document = _workflow_v1_document(source)
+            document = _workflow_v1_document(source, robot_profile_id)
             target = drafts_directory / "current.draft.workflow.json"
         else:
             continue
@@ -161,7 +179,11 @@ def _plan(
     return tuple(items)
 
 
-def _task_document(path: Path, name: str) -> WorkflowDocument:
+def _task_document(
+    path: Path,
+    name: str,
+    robot_profile_id: str,
+) -> WorkflowDocument:
     raw = read_json_document(path)
     raw_entries: object
     if isinstance(raw, list):
@@ -172,16 +194,20 @@ def _task_document(path: Path, name: str) -> WorkflowDocument:
         raw_entries = None
     if not isinstance(raw_entries, list):
         raise ValueError(f"{path.name}: task entries must be an array")
-    entries = _entries(path, raw_entries)
+    entries = _entries(path, raw_entries, robot_profile_id)
     return WorkflowDocument.from_entries(
         workflow_id=name,
         name=name,
         revision=1,
         entries=entries,
+        robot_profile_id=robot_profile_id,
     )
 
 
-def _workflow_v1_document(path: Path) -> WorkflowDocument:
+def _workflow_v1_document(
+    path: Path,
+    robot_profile_id: str,
+) -> WorkflowDocument:
     raw = read_json_document(path)
     if not isinstance(raw, Mapping):
         raise ValueError(f"{path.name}: workflow must be an object")
@@ -215,6 +241,7 @@ def _workflow_v1_document(path: Path) -> WorkflowDocument:
     entries = _normalize_entries(
         [nodes[node_id][0] for node_id in order],
         workflow_id=str(raw.get("workflow_id", "")).strip() or path.stem,
+        robot_profile_id=robot_profile_id,
     )
     positions = {entry.uuid: nodes[node_id][1] for node_id, entry in zip(order, entries)}
     return WorkflowDocument.from_entries(
@@ -223,13 +250,19 @@ def _workflow_v1_document(path: Path) -> WorkflowDocument:
         revision=int(raw.get("revision", 0)),
         entries=entries,
         positions=positions,
+        robot_profile_id=robot_profile_id,
     )
 
 
-def _entries(path: Path, raw_entries: list[object]) -> list[SequenceEntry]:
+def _entries(
+    path: Path,
+    raw_entries: list[object],
+    robot_profile_id: str,
+) -> list[SequenceEntry]:
     return _normalize_entries(
         [_entry(path, raw_entry) for raw_entry in raw_entries],
         workflow_id=path.stem,
+        robot_profile_id=robot_profile_id,
     )
 
 
@@ -247,7 +280,7 @@ def normalize_active_workflows(
     workflows_directory: Path,
     backup_directory: Path | None = None,
 ) -> int:
-    """Rewrite valid v4 workflows to the canonical pose representation."""
+    """Rewrite valid v5 workflows to the canonical pose representation."""
     if not workflows_directory.is_dir():
         return 0
 
@@ -258,6 +291,7 @@ def normalize_active_workflows(
             _normalize_entries(
                 list(document.to_entries()),
                 workflow_id=document.workflow_id,
+                robot_profile_id=document.robot_profile_id,
             )
         )
         normalized = WorkflowDocument.from_entries(
@@ -266,6 +300,7 @@ def normalize_active_workflows(
             revision=document.revision,
             entries=entries,
             positions=document.position_map(),
+            robot_profile_id=document.robot_profile_id,
         )
         if normalized.to_dict() != document.to_dict():
             changes.append((path, normalized))
@@ -315,6 +350,7 @@ def _normalize_entries(
     entries: list[SequenceEntry],
     *,
     workflow_id: str,
+    robot_profile_id: str,
 ) -> list[SequenceEntry]:
     normalized = [_normalize_entry(entry) for entry in entries]
     used_uuids: set[str] = set()
@@ -332,6 +368,7 @@ def _normalize_entries(
         used_uuids.add(entry_uuid)
 
         if isinstance(entry, SequenceItem):
+            entry.definition.robot_profile_id = robot_profile_id
             if not entry.definition.id.strip():
                 entry.definition.id = f"legacy-{entry_uuid}"
             if not entry.definition.name.strip():
@@ -373,7 +410,7 @@ def _apply(
     if collisions:
         raise FileExistsError(collisions[0])
 
-    with TemporaryDirectory(prefix="workflow-v4-", dir=workflows_directory.parent) as raw_stage:
+    with TemporaryDirectory(prefix="workflow-v5-", dir=workflows_directory.parent) as raw_stage:
         stage = Path(raw_stage)
         staged: list[tuple[Path, MigrationItem]] = []
         for index, item in enumerate(items):

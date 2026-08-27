@@ -1,7 +1,7 @@
 # 依赖、配置与用户数据治理
 
 > 状态：当前实现（M8 数据格式切换已完成）
-> 最近更新：2026-08-07
+> 最近更新：2026-08-26
 
 ## 1. 依赖单一事实来源
 
@@ -25,18 +25,15 @@ uv sync --frozen --extra voice --extra kws
 
 ```text
 data/
-├── actions/
-│   └── library.json
-├── workflows/
-│   └── <name>.workflow.json
-├── drafts/
-│   └── <workflow-id>.draft.workflow.json
+├── profiles/
+│   └── <robot-profile-id>/
+│       ├── actions/library.json
+│       ├── workflows/<name>.workflow.json
+│       ├── drafts/<workflow-id>.draft.workflow.json
+│       └── trajectories/<arm>/
 ├── skills/
 │   └── <domain>/
 │       └── <id>.skill.json
-├── trajectories/
-│   ├── left/
-│   └── right/
 └── schemas/
     ├── action-library.schema.json
     ├── skill.schema.json
@@ -60,10 +57,11 @@ skill_library_directory = ""
 trajectories_directory = ""
 ```
 
-五个覆盖项留空时从 `ROBOT_DATA_DIR` 推导。显式相对路径以项目根目录为基准；生产部署可以使用
-绝对路径将用户数据放在独立持久卷。
+覆盖项留空时，Action、Workflow、Draft 和 Trajectory 从活动 Robot Profile 目录推导；
+Skill 保持跨机械臂共享。显式相对路径以项目根目录为基准，且目标文档中的
+`robot_profile_id` 仍必须与活动 Profile 完全一致。
 
-轨迹录制由应用服务在 `trajectories/<arm>/` 下分配递增文件名并自动保存。GUI 不得把轨迹
+轨迹录制由应用服务在 `profiles/<robot-profile-id>/trajectories/<arm>/` 下分配递增文件名并自动保存。GUI 不得把轨迹
 写入 `src/`，也不在每次录制前要求用户选择文件系统路径；文件选择器仅用于选择已有轨迹。
 
 ## 3. 文档格式
@@ -72,9 +70,10 @@ trajectories_directory = ""
 
 ```json
 {
-  "$schema": "../schemas/action-library.schema.json",
+  "$schema": "../../../schemas/action-library.schema.json",
   "schema": "robot_llm.actions",
-  "schema_version": 2,
+  "schema_version": 3,
+  "robot_profile_id": "realman-rm75-dual",
   "actions": []
 }
 ```
@@ -83,9 +82,10 @@ trajectories_directory = ""
 
 ```json
 {
-  "$schema": "../schemas/workflow.schema.json",
+  "$schema": "../../../schemas/workflow.schema.json",
   "schema": "robot_llm.workflow",
-  "schema_version": 2,
+  "schema_version": 5,
+  "robot_profile_id": "realman-rm75-dual",
   "workflow_id": "demo",
   "name": "demo",
   "revision": 1,
@@ -105,15 +105,27 @@ trajectories_directory = ""
 }
 ```
 
-Action/Skill/Workflow 均使用 schema v2。未知 schema、未来版本、重复/缺失稳定 ID、重复
+Action 使用 schema v3、Skill 使用 schema v2、Workflow 使用 schema v5。未知 schema、未来版本、重复/缺失稳定 ID、重复
 动作名称、损坏节点和非法文件名会被显式拒绝，不会被当成空库或自动回退成内置数据。
-Workflow 的 `root` 保存结构化 Sequence/Action/Loop，`presentation` 只保存布局；运行状态由
+Action 库、Workflow 顶层和 Workflow 内每个 Action 快照都携带同一个
+`robot_profile_id`。Workflow 的 `root` 保存结构化 Sequence/Action/Loop/Parallel/Subworkflow，`presentation` 只保存布局；运行状态由
 ExecutionRuntime 持有，不进入定义文件。
 
-## 4. 一次性前向迁移
+## 4. Robot Profile 隔离与迁移
 
-普通 Repository/Registry 的 `load`、`list` 操作保持只读。旧版 Action schema v1 集合和
-`robot_llm.skills` 集合只允许由显式工具迁移为 v2 目录：
+Robot Profile 默认由 `robot.provider + provider model` 生成，也可通过
+`[robot].profile_id` 显式指定。启动时只挂载活动 Profile 的动作库、工作流、草稿和轨迹；
+Repository、WorkflowCompiler 与 ActionEngine 会分别在持久化、编译和硬件执行前拒绝
+Profile 不一致的数据，不能把 RealMan 的 Action/Workflow 直接交给 Tianji 执行。
+
+首次使用 RealMan Profile 时，旧共享目录中的 Action、Workflow、Draft 和 Trajectory
+会以“目标不存在才复制”的方式写入对应 Profile，并补齐 Profile 标识；原文件不删除，重复
+启动不重复迁移。Tianji 等其他 Provider 不继承这批旧 RealMan 数据，初始动作库为空。
+
+## 5. 一次性前向迁移
+
+普通 Repository/Registry 的 `load`、`list` 操作保持只读。历史 Action/Skill 集合只允许
+由显式工具迁移到当前目录格式：
 
 ```powershell
 robot-library-data validate
@@ -122,8 +134,8 @@ robot-workflow-data
 robot-workflow-data --apply
 ```
 
-`validate` 只校验活动 v2 目录并输出数量和 SHA-256 语义指纹，不创建目录、备份或改写源
-文件；`migrate` 读取显式 legacy 输入，在临时目录生成并重新加载全部 v2 文件，指纹一致后
+`validate` 只校验活动目录并输出数量和 SHA-256 语义指纹，不创建目录、备份或改写源
+文件；`migrate` 读取显式 legacy 输入，在临时目录生成并重新加载当前格式，指纹一致后
 才发布。增加 `--archive-legacy` 时，旧集合文件移动到
 `data/migration-backups/catalog-v1/`：
 
@@ -131,12 +143,12 @@ robot-workflow-data --apply
 2. 在临时目录生成 Action 集合和按领域拆分的 Skill 单文件。
 3. 重新加载并比较数量、稳定 ID、完整参数及规范 JSON 语义指纹。
 4. 逐文件原子发布；可选移动旧源到可恢复备份目录。
-5. runtime 只扫描 v2 目录，不包含 v0/v1 集合解析分支。
+5. runtime 只扫描当前目录，不包含历史集合解析分支。
 
 `robot-workflow-data` 默认 dry-run，完整解析 `data/tasks` 中的 `.task`/旧 `.workflow`，检查
-目标冲突；`--apply` 在临时目录生成并重新加载全部 WorkflowDocument v2，验证成功后原子
-发布到 `workflows/`，再把所有旧任务及 `.bak` 移入
-`data/migration-backups/workflow-v1/`。正常 Repository 只认识 `*.workflow.json`。
+目标冲突；`--apply` 在临时目录生成并重新加载全部 WorkflowDocument v5，验证成功后原子
+发布到目标 Profile 的 `workflows/`，再把所有旧任务及 `.bak` 移入
+`data/migration-backups/workflow-v5/`。正常 Repository 只认识 `*.workflow.json`。
 
 迁移不是长期兼容双栈。未来版本高于当前程序时直接失败，必须先升级应用；迁移或解析失败
 不会覆盖原文件。需要人工恢复时，先停止应用，保留故障文件，再从 `.v0.bak` 复制恢复并
@@ -145,28 +157,25 @@ robot-workflow-data --apply
 > M8 迁移已完成：活动数据为 46 actions / 13 skills / 17 workflows；旧 Action/Skill
 > 集合和 `.task`/旧 `.workflow` 仅保留在迁移备份中，runtime 不包含旧格式入口。
 
-## 5. 当前用户数据结构
+## 6. 当前用户数据结构
 
 M8 已将用户数据直接切换为以下结构：
 
 ```text
 data/
-├── actions/
-│   └── library.json
-├── workflows/
-│   └── <name>.workflow.json
-├── drafts/
-│   └── <workflow-id>.draft.workflow.json
+├── profiles/
+│   ├── realman-rm75-dual/
+│   │   ├── actions/library.json
+│   │   ├── workflows/<name>.workflow.json
+│   │   ├── drafts/<workflow-id>.draft.workflow.json
+│   │   └── trajectories/<arm>/
+│   └── tianji-tianji-dual/
+│       └── ...
 ├── skills/
 │   ├── manipulation/
 │   │   └── <name>.skill.json
 │   └── <domain>/
 │       └── <name>.skill.json
-├── trajectories/
-│   ├── left/
-│   │   └── trajectory_<sequence>.txt
-│   └── right/
-│       └── trajectory_<sequence>.txt
 └── schemas/
     ├── action-library.schema.json
     ├── skill.schema.json
@@ -176,6 +185,7 @@ data/
 约束：
 
 - 用户可见“任务”只有 `*.workflow.json` 一种正式格式；`.task` 不再保存派生执行快照。
+- Robot Profile 是 Action、Workflow、Draft、Trajectory 的强隔离边界，不是展示标签。
 - WorkflowDocument 区分结构化控制流与 presentation 元数据，执行状态不写入定义。
 - 动作 ID 全局唯一，参数使用稳定机器字段和规范 JSON 类型；中文标签由 ActionSchema 派生。
 - 每个 `*.skill.json` 只定义一个 Skill；目录只用于组织，skill category 仍由文档字段声明。
@@ -197,10 +207,11 @@ SKILL_LIBRARY_DIRECTORY=
 TRAJECTORIES_DIRECTORY=
 ```
 
-切换已按 dry-run、备份、转换、重新加载、数量/ID/参数/语义比对和原子发布完成。旧路径
-配置、旧格式读取和隐式迁移均已删除，未设置兼容开关。
+切换已按 dry-run、备份、转换、重新加载、数量/ID/参数/语义比对和原子发布完成。运行时
+旧格式读取已删除；启动时只保留一次、窄范围且幂等的 RealMan 共享数据 Profile 迁移，
+不会为 Tianji 或其他 Profile 推断兼容关系。
 
-## 6. 启动配置校验
+## 7. 启动配置校验
 
 可以在不启动 Qt、网络服务和硬件的情况下检查配置：
 
@@ -216,7 +227,7 @@ uv run robot-llm --check-config --simulation --disable-websocket
 当前集中检查日志级别、日志目录与保留周期、有效端口、正数超时和容量、数据路径冲突、活动硬件端口、
 WebSocket 暴露方式以及示例占位凭据。配置解析错误不会回显被拒绝的原始值。
 
-## 7. 敏感信息策略
+## 8. 敏感信息策略
 
 - `config/config.toml` 保存本机非敏感配置，`.env` 保存密钥与部署覆盖；两者均被版本库忽略。
 - 密钥、token、password、secret 和 credential 字段在诊断映射中统一显示为

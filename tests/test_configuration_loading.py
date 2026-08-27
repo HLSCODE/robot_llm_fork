@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from src.configuration.config_initializer import initialize_configuration
 from src.configuration.config_loader import (
     ConfigLoadError,
     configuration_source_paths,
@@ -22,25 +24,27 @@ class ConfigurationLoadingTests(unittest.TestCase):
             project_root = Path(project_directory)
             project_config = project_root / "config" / "config.toml"
             project_config.parent.mkdir()
-            project_config.write_text("schema_version = 5\n", encoding="utf-8")
+            project_config.write_text("schema_version = 6\n", encoding="utf-8")
 
-            self.assertEqual(
-                project_config,
-                default_config_path(
-                    working_directory=working_root,
-                    project_root=project_root,
-                ),
+            self.assertTrue(
+                project_config.samefile(
+                    default_config_path(
+                        working_directory=working_root,
+                        project_root=project_root,
+                    )
+                )
             )
 
             working_config = working_root / "config" / "config.toml"
             working_config.parent.mkdir()
-            working_config.write_text("schema_version = 5\n", encoding="utf-8")
-            self.assertEqual(
-                working_config,
-                default_config_path(
-                    working_directory=working_root,
-                    project_root=project_root,
-                ),
+            working_config.write_text("schema_version = 6\n", encoding="utf-8")
+            self.assertTrue(
+                working_config.samefile(
+                    default_config_path(
+                        working_directory=working_root,
+                        project_root=project_root,
+                    )
+                )
             )
 
     def test_default_env_follows_project_config_when_started_elsewhere(self) -> None:
@@ -49,7 +53,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = root / "config" / "config.toml"
             config_path.parent.mkdir()
             config_path.write_text(
-                'schema_version = 5\n[gui]\ntheme = "light"\n',
+                'schema_version = 6\n[gui]\ntheme = "light"\n',
                 encoding="utf-8",
             )
             (root / ".env").write_text('GUI_THEME="dark"\n', encoding="utf-8")
@@ -85,14 +89,15 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [gui]
                 theme = "light"
                 [server]
                 websocket_port = 9000
                 websocket_allowed_origins = ["https://robot.example"]
-                [robot]
-                robot1_initial_pose = [1, 2, 3, 4, 5, 6]
+                [robot_providers.realman]
+                kind = "realman"
+                left_initial_pose = [1, 2, 3, 4, 5, 6]
                 """,
             )
             with patch.dict(
@@ -108,7 +113,10 @@ class ConfigurationLoadingTests(unittest.TestCase):
         self.assertEqual("dark", settings.gui.theme)
         self.assertEqual(9100, settings.server.websocket_port)
         self.assertEqual(("https://robot.example",), settings.server.websocket_allowed_origins)
-        self.assertEqual((1.0, 2.0, 3.0, 4.0, 5.0, 6.0), settings.robot.robot1_initial_pose)
+        self.assertEqual(
+            (1.0, 2.0, 3.0, 4.0, 5.0, 6.0),
+            settings.robot_realman.left_initial_pose,
+        )
 
     def test_includes_are_ordered_entry_overrides_fragments_and_env_wins(self) -> None:
         with TemporaryDirectory() as temporary_directory:
@@ -138,7 +146,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 include = [
                   "fragments/base.toml",
                   "fragments/override.toml",
@@ -169,6 +177,90 @@ class ConfigurationLoadingTests(unittest.TestCase):
             sources,
         )
 
+    def test_robot_provider_and_mobile_base_sections_are_isolated(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 6
+                [robot]
+                provider = "tianji"
+                move_velocity = 25
+
+                [robot_providers.tianji]
+                kind = "tianji"
+                model = "tianji-lab"
+                controller_ip = "192.0.2.20"
+                subscription_interval_seconds = 0.02
+
+                [mobile_base]
+                host = "192.0.2.30"
+                timeout_seconds = 3.5
+                """,
+            )
+            settings = load_application_settings(
+                config_path,
+                env_file=root / "missing.env",
+            )
+
+        self.assertEqual("tianji", settings.robot.provider)
+        self.assertEqual(25, settings.robot.move_velocity)
+        self.assertEqual("tianji-lab", settings.robot_tianji.model)
+        self.assertEqual("192.0.2.20", settings.robot_tianji.controller_ip)
+        self.assertEqual("192.0.2.30", settings.mobile_base.host)
+        self.assertEqual("192.168.3.18", settings.robot_realman.left_controller_ip)
+
+    def test_legacy_flat_robot_provider_fields_are_rejected(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 6
+                [robot]
+                robot_provider = "realman"
+                robot1_ip = "192.0.2.1"
+                """,
+            )
+            with self.assertRaisesRegex(ConfigLoadError, "未知"):
+                load_application_settings(
+                    config_path,
+                    env_file=root / "missing.env",
+                )
+
+    def test_legacy_robot_provider_tables_are_rejected(self) -> None:
+        for table_name in ("robot_realman", "robot_tianji"):
+            with self.subTest(table=table_name), TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory)
+                config_path = self._write(
+                    root,
+                    f"schema_version = 6\n[{table_name}]\nmodel = \"legacy\"\n",
+                )
+                with self.assertRaisesRegex(ConfigLoadError, "未知配置表"):
+                    load_application_settings(
+                        config_path,
+                        env_file=root / "missing.env",
+                    )
+
+    def test_robot_provider_kind_must_match_named_table(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config_path = self._write(
+                root,
+                """
+                schema_version = 6
+                [robot_providers.realman]
+                kind = "tianji"
+                model = "invalid"
+                """,
+            )
+            with self.assertRaisesRegex(ConfigLoadError, "kind 必须为 realman"):
+                load_application_settings(
+                    config_path,
+                    env_file=root / "missing.env",
+                )
+
     def test_sequence_fields_are_replaced_instead_of_appended(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -189,7 +281,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 include = ["fragments/cameras.toml"]
                 [vision]
                 [[vision.cameras]]
@@ -219,7 +311,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
                 self._write_named(root / "fragment.toml", "[gui]\ntheme = \"dark\"")
                 config_path = self._write(
                     root,
-                    f"schema_version = 5\n{include_declaration}",
+                    f"schema_version = 6\n{include_declaration}",
                 )
                 with self.assertRaisesRegex(ConfigLoadError, expected_error):
                     load_application_settings(
@@ -239,7 +331,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
                 self._write_named(root / "fragment.toml", fragment_document)
                 config_path = self._write(
                     root,
-                    'schema_version = 5\ninclude = ["fragment.toml"]',
+                    'schema_version = 6\ninclude = ["fragment.toml"]',
                 )
                 with self.assertRaisesRegex(ConfigLoadError, expected_error):
                     load_application_settings(
@@ -250,7 +342,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_dotenv_is_loaded_without_overriding_process_environment(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 5\n")
+            config_path = self._write(root, "schema_version = 6\n")
             env_path = root / ".env"
             env_path.write_text(
                 'OPENAI_API_KEY="file-secret"\nGUI_THEME="light"\n',
@@ -264,8 +356,8 @@ class ConfigurationLoadingTests(unittest.TestCase):
 
     def test_unknown_table_and_field_are_rejected(self) -> None:
         documents = (
-            "schema_version = 5\n[unknown]\nvalue = 1\n",
-            "schema_version = 5\n[gui]\ntheme = \"dark\"\ntypo = true\n",
+            "schema_version = 6\n[unknown]\nvalue = 1\n",
+            "schema_version = 6\n[gui]\ntheme = \"dark\"\ntypo = true\n",
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -280,7 +372,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [vision]
                 vision_default_workflow = "bottle"
 
@@ -328,7 +420,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [vision]
                 camera_provider = "realsense"
                 realsense_device_sn = "serial-left"
@@ -347,7 +439,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [voice]
                 voice_wake_welcome_enabled = true
                 voice_wake_welcome_workflow = "welcome.workflow.json"
@@ -373,7 +465,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             legacy_config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [voice]
                 voice_wake_welcome_task = "welcome.task"
                 """,
@@ -390,7 +482,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [llm]
                 minicpm_ask_enabled = true
                 """,
@@ -407,7 +499,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [llm]
                 default_provider = "laboratory_qwen"
 
@@ -435,7 +527,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             config_path = self._write(
                 root,
                 """
-                schema_version = 5
+                schema_version = 6
                 [llm]
                 llm_default_provider = "openai"
                 openai_model = "gpt-4o"
@@ -452,7 +544,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             root = Path(temporary_directory)
             config_path = self._write(
                 root,
-                'schema_version = 5\n[secrets]\nopenai_api_key = "do-not-store"\n',
+                'schema_version = 6\n[secrets]\nopenai_api_key = "do-not-store"\n',
             )
             with self.assertRaisesRegex(ConfigLoadError, "敏感字段不得写入 TOML"):
                 load_application_settings(config_path, env_file=root / "missing.env")
@@ -464,7 +556,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
             "schema_version = 2\n",
             "schema_version = 3\n",
             "schema_version = 4\n",
-            'schema_version = 5\n[server]\nwebsocket_port = "8765"\n',
+            'schema_version = 6\n[server]\nwebsocket_port = "8765"\n',
         )
         for document in documents:
             with self.subTest(document=document), TemporaryDirectory() as temporary_directory:
@@ -476,7 +568,7 @@ class ConfigurationLoadingTests(unittest.TestCase):
     def test_invalid_environment_value_names_field_without_echoing_secret(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
-            config_path = self._write(root, "schema_version = 5\n")
+            config_path = self._write(root, "schema_version = 6\n")
             with (
                 patch.dict(
                     os.environ,
@@ -492,12 +584,35 @@ class ConfigurationLoadingTests(unittest.TestCase):
         self.assertNotIn("very-secret-invalid-value", message)
 
     def test_repository_example_is_a_complete_valid_document(self) -> None:
-        example = Path(__file__).resolve().parents[1] / "config" / "config.example.toml"
-        with patch.dict(os.environ, {}, clear=True):
-            settings = load_application_settings(example, env_file=example.parent / "missing.env")
+        repository_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temporary_directory:
+            initialized_root = Path(temporary_directory)
+            self._copy_configuration_templates(repository_root, initialized_root)
+            initialize_configuration(initialized_root)
+            config_path = initialized_root / "config" / "config.toml"
+            with patch.dict(os.environ, {}, clear=True):
+                settings = load_application_settings(
+                    config_path,
+                    env_file=initialized_root / "missing.env",
+                )
 
-        self.assertEqual("realman", settings.robot.robot_provider)
+        self.assertEqual("realman", settings.robot.provider)
         self.assertTrue(settings.server.websocket_enabled)
+
+    @staticmethod
+    def _copy_configuration_templates(source_root: Path, target_root: Path) -> None:
+        shutil.copy2(source_root / ".env.example", target_root / ".env.example")
+        source_config = source_root / "config"
+        target_config = target_root / "config"
+        target_config.mkdir()
+        shutil.copy2(
+            source_config / "config.example.toml",
+            target_config / "config.example.toml",
+        )
+        for source in (source_config / "fragments").rglob("*.example.toml"):
+            destination = target_config / source.relative_to(source_config)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
 
     @staticmethod
     def _write(root: Path, content: str) -> Path:

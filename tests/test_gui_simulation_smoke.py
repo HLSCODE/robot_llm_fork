@@ -20,7 +20,7 @@ from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.branding import APPLICATION_NAME
-from src.gui.controllers.startup import GuiStartupLifecycle
+from src.gui.controllers.startup import GuiHardwareStartupWorker, GuiStartupLifecycle
 from src.gui.theme import ThemeController, ThemeMode
 from src.gui.shortcuts import DEFAULT_SHORTCUTS
 from src.gui.views import StartupProgressCard
@@ -64,6 +64,25 @@ class GuiStartupLifecycleTests(unittest.TestCase):
 
         self.assertEqual(GuiStartupState.FAILED, lifecycle.state)
         self.assertFalse(lifecycle.begin_hardware_initialization())
+
+    def test_hardware_startup_failure_records_device_and_traceback(self) -> None:
+        def fail_initialization() -> None:
+            raise RuntimeError("native initialization failed")
+
+        with self.assertLogs(
+            "src.gui.controllers.startup",
+            level="ERROR",
+        ) as captured:
+            result = GuiHardwareStartupWorker._run_step(
+                ROBOT_SYSTEM,
+                fail_initialization,
+            )
+
+        self.assertFalse(result.succeeded)
+        self.assertEqual("native initialization failed", result.error)
+        message = "\n".join(captured.output)
+        self.assertIn("device_id=robot-system", message)
+        self.assertIn("RuntimeError: native initialization failed", message)
 
 
 class GuiSimulationSmokeTests(unittest.TestCase):

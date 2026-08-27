@@ -4,11 +4,12 @@
   "title": "Robot LLM Action Library",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "schema", "schema_version", "actions"],
+  "required": ["$schema", "schema", "schema_version", "robot_profile_id", "actions"],
   "properties": {
     "$schema": {"type": "string"},
     "schema": {"const": "robot_llm.actions"},
-    "schema_version": {"const": 2},
+    "schema_version": {"const": 3},
+    "robot_profile_id": {"type": "string", "minLength": 1},
     "actions": {
       "type": "array",
       "items": {
@@ -16,6 +17,7 @@
         "additionalProperties": false,
         "required": ["id", "name", "type", "parameters"],
         "properties": {
+          "robot_profile_id": {"type": "string", "minLength": 1},
           "id": {"type": "string", "minLength": 1},
           "name": {"type": "string", "minLength": 1},
           "type": {"enum": ["MOVE_TO_POINT", "BASE_MOVE", "ARM_ACTION", "INSPECT_AND_OUTPUT", "WAIT", "CHANGE_GUN", "VISION_CAPTURE", "VISION_RELOCALIZE", "TRAJECTORY"]},

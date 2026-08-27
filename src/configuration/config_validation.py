@@ -218,16 +218,28 @@ def validate_startup_configuration(
     if options.websocket_enabled:
         _validate_websocket(settings.server, settings.secrets.websocket_auth_token, options, issues)
     if not options.simulation:
-        for field, value in (
-            ("ROBOT1_PORT", settings.robot.robot1_port),
-            ("ROBOT2_PORT", settings.robot.robot2_port),
-            ("MOVE_CONTROLLER_PORT", settings.robot.move_controller_port),
+        ports = [
+            ("MOBILE_BASE_PORT", settings.mobile_base.port),
             ("VISION_CAMERA_PORT", settings.vision.vision_camera_port),
             (
                 "EXTERNAL_LOCALIZATION_PORT",
                 settings.localization.external_localization_port,
             ),
-        ):
+        ]
+        if settings.robot.provider.strip().lower() == "realman":
+            ports.extend(
+                (
+                    (
+                        "REALMAN_LEFT_CONTROLLER_PORT",
+                        settings.robot_realman.left_controller_port,
+                    ),
+                    (
+                        "REALMAN_RIGHT_CONTROLLER_PORT",
+                        settings.robot_realman.right_controller_port,
+                    ),
+                )
+            )
+        for field, value in ports:
             _port_value(value, issues, field)
 
     api_keys = {

@@ -36,7 +36,7 @@ hardware = [
     "numpy>=1.26",
     "pyserial>=3.5",
     "robotic-arm>=1.1.5",
-    "tj-robot-proj==0.1.0; python_version == '3.12' and sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "tj-robot-proj==0.2.0; (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
     "pyrealsense2>=2.57.7.10387",
 ]
 voice = [
@@ -73,7 +73,7 @@ full = [
     "sounddevice>=0.5",
     "torch>=2.3",
     "torchaudio>=2.11.0",
-    "tj-robot-proj==0.1.0; python_version == '3.12' and sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "tj-robot-proj==0.2.0; (sys_platform == 'win32' and platform_machine == 'AMD64') or (sys_platform == 'linux' and platform_machine == 'x86_64')",
     "ultralytics>=8.4.36",
     "websockets>=12.0",
 ]
@@ -179,7 +179,10 @@ ignore_missing_imports = true
 follow_imports = "skip"
 
 [tool.uv.sources]
-tj-robot-proj = { path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl" }
+tj-robot-proj = [
+    { path = "third_party/wheels/windows-x86_64/tj_robot_proj-0.2.0-py3-none-win_amd64.whl", marker = "sys_platform == 'win32' and platform_machine == 'AMD64'" },
+    { path = "third_party/wheels/linux-x86_64/tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", marker = "sys_platform == 'linux' and platform_machine == 'x86_64'" },
+]
 torch = { index = "pytorch-cpu" }
 torchaudio = { index = "pytorch-cpu" }
 

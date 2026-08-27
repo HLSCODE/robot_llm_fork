@@ -165,7 +165,7 @@ def _register_real_devices(
         _registration(
             ROBOT_SYSTEM,
             set(robot_provider.capabilities),
-            lambda: robot_provider.create(settings.robot),
+            lambda: robot_provider.create(settings.robot_configuration()),
         )
     )
     runtime.register(
@@ -179,7 +179,7 @@ def _register_real_devices(
         _registration(
             MOBILE_BASE,
             {DeviceCapability.MOTION, DeviceCapability.MOBILE_BASE},
-            lambda: TCP_MOBILE_BASE_PROVIDER.create(settings.robot),
+            lambda: TCP_MOBILE_BASE_PROVIDER.create(settings.mobile_base),
         )
     )
     runtime.register(

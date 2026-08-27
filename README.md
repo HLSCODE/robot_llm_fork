@@ -120,10 +120,8 @@ speech_provider = "minicpm"
 speech_fallback_providers = []
 
 [robot]
-robot1_ip = "192.168.3.19"
-robot1_port = 8080
-robot2_ip = "192.168.3.18"
-robot2_port = 8080
+provider = "realman"
+profile_id = "" # 留空时由 provider 与型号稳定推导
 ```
 
 API Key、认证 Token 等敏感信息只写入 `.env`。`config/config.toml` 与 `.env`
@@ -243,16 +241,18 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 
 ```text
 data/
-├── actions/library.json
-├── workflows/<name>.workflow.json
-├── drafts/<workflow-id>.draft.workflow.json
+├── profiles/<robot-profile-id>/
+│   ├── actions/library.json
+│   ├── workflows/<name>.workflow.json
+│   ├── drafts/<workflow-id>.draft.workflow.json
+│   └── trajectories/<left|right>/
 ├── skills/<domain>/<id>.skill.json
-├── trajectories/<left|right>/
 └── vision/debug/<operation>/<run-id>/
 ```
 
 可通过 `[data]` 配置项将各目录迁移到独立持久卷；正式任务文件只使用
-`*.workflow.json`，旧 `.task` 文件需使用迁移工具转换。
+`*.workflow.json`，旧 `.task` 文件需使用迁移工具转换。动作、工作流、草稿和轨迹
+严格属于一个 Robot Profile；跨 Profile 数据会在保存、编译和执行前被拒绝。
 
 ## 动作类型
 
@@ -269,8 +269,9 @@ data/
 | `VISION_CAPTURE` | 视觉采集 |
 | `TRAJECTORY` | 轨迹执行 |
 
-动作库保存在 `data/actions/library.json`，正式任务保存在
-`data/workflows/*.workflow.json`；当前编辑中的未保存改动保存在 `data/drafts/`。
+动作库保存在 `data/profiles/<robot-profile-id>/actions/library.json`，正式任务保存在
+同一 Profile 的 `workflows/*.workflow.json`；当前编辑中的未保存改动保存在其
+`drafts/` 目录。切换机械臂 Profile 不会自动复用其他机械臂的动作或工作流。
 
 ## AI 与技能
 

@@ -27,10 +27,11 @@ retention_days = 14
 [data]
 # 项目运行数据根目录。
 robot_data_dir = "data"
-# 以下目录为空时，分别使用 robot_data_dir 下的默认 actions、workflows、drafts、skills、trajectories 目录。
+# 留空时，Action/Workflow/Draft/Trajectory 自动进入
+# robot_data_dir/profiles/<robot-profile-id>/；Skill 与 Schema 保持全局共享。
 actions_library_directory = ""
 workflows_directory = ""
 workflow_drafts_directory = ""
 skill_library_directory = ""
-# 轨迹录制默认自动保存到该目录；留空使用 robot_data_dir/trajectories。
+# 轨迹录制默认自动保存；留空使用当前 Robot Profile 的 trajectories 目录。
 trajectories_directory = ""

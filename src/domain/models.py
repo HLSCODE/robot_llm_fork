@@ -32,13 +32,15 @@ class ActionDefinition:
     name: str
     type: ActionType
     parameters: Dict[str, Any]
+    robot_profile_id: str = "unscoped"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
             "type": self.type.value,
-            "parameters": self.parameters
+            "parameters": self.parameters,
+            "robot_profile_id": self.robot_profile_id,
         }
 
     @classmethod
@@ -47,7 +49,8 @@ class ActionDefinition:
             id=data.get("id", ""),
             name=data["name"],
             type=ActionType(data["type"]),
-            parameters=data["parameters"]
+            parameters=data["parameters"],
+            robot_profile_id=str(data.get("robot_profile_id", "unscoped")),
         )
 
 

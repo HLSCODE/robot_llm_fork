@@ -4,11 +4,12 @@
   "title": "Robot LLM Workflow Document",
   "type": "object",
   "additionalProperties": false,
-  "required": ["$schema", "schema", "schema_version", "workflow_id", "name", "revision", "root", "presentation"],
+  "required": ["$schema", "schema", "schema_version", "robot_profile_id", "workflow_id", "name", "revision", "root", "presentation"],
   "properties": {
     "$schema": {"type": "string"},
     "schema": {"const": "robot_llm.workflow"},
-    "schema_version": {"const": 4},
+    "schema_version": {"const": 5},
+    "robot_profile_id": {"type": "string", "minLength": 1},
     "workflow_id": {"type": "string", "minLength": 1},
     "name": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 0},
@@ -62,8 +63,9 @@
         "definition": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "name", "type", "parameters"],
+          "required": ["robot_profile_id", "id", "name", "type", "parameters"],
           "properties": {
+            "robot_profile_id": {"type": "string", "minLength": 1},
             "id": {"type": "string", "minLength": 1},
             "name": {"type": "string", "minLength": 1},
             "type": {"type": "string", "minLength": 1},

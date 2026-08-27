@@ -819,7 +819,7 @@ src/
 当前问题：
 
 - 内置动作/技能与本机用户数据已分离；缺失用户库时只安装一次内置目录。
-- Action、Skill 使用 schema v2，Workflow 使用 schema v3；三者均具备原始备份和原子替换。
+- Action 使用 schema v3、Skill 使用 schema v2、Workflow 使用 schema v5；三者均具备原始备份和原子替换。
 - 用户可见“任务”只保存为 `workflows/*.workflow.json`；草稿进入 `drafts/`，旧 `.task`、
   `.workflow` 和备份已移入 `migration-backups/workflow-v1/`。
 - WorkflowDocument 使用结构化 Sequence/Action/Loop 根节点，布局独立进入 presentation，
@@ -921,6 +921,7 @@ src/
 | G-030 | P1 | DONE | Action 已直切 `actions/library.json` schema v2；拒绝重复 ID/名称并逐项执行 ActionSchema 参数校验，34 个机械臂点位由字符串迁移为 6 元素 JSON 数组；Workflow 当前保存完整 ActionDefinition 快照以保证可复现，ID 仅用于来源追踪，不在执行时动态解析最新目录版本 |
 | G-031 | P1 | DONE | 集中式技能集合已拆为 `skills/<domain>/<id>.skill.json`；SkillRegistry 确定性递归加载、逐文件 schema/动作类型/参数/绑定校验、跨文件 ID 唯一校验并在全部成功后替换内存目录；`default_skills.py` 和手写索引已删除，内置与用户数据共享 JSON 格式 |
 | G-032 | P1 | DONE | Action/Skill/Workflow 显式迁移均已完成；`robot-workflow-data` 默认 dry-run，临时生成、重新加载和目标冲突校验后原子发布，17 个旧任务及 `.bak` 已移入可恢复归档；runtime 旧集合、`.task` 和旧 `.workflow` 入口全部删除 |
+| G-034 | P0 | DONE | 建立严格 Robot Profile 隔离：Profile ID 由 provider/model 推导或显式配置；Action/Workflow/Draft/Trajectory 进入 `data/profiles/<profile-id>/`；Action schema v3、Workflow schema v5 在文档及动作快照携带 Profile；Repository、Compiler、ExecutionService/ActionEngine 分层拒绝跨 Profile 数据；旧共享 RealMan 数据幂等复制并盖章，其他 Provider 不继承 |
 | G-033 | P2 | DONE | `actions/`、`skills/`、`workflows/`、`drafts/`、四个目录级配置、三个版本控制内 JSON Schema、`$schema`、内置资源和 wheel package-data 已落地；GUI 文件对话框与 WebSocket 任务名统一使用 `*.workflow.json` |
 | G-034 | P1 | DONE | 全仓手写 Python 静态检查历史问题清零；Mypy 从 72 个文件的 570 个错误收敛为默认检查全部 `src/` 与 `scripts/`，仅排除自动生成的 `src/gui/resources_rc.py`；Ruff 默认检查 `src/`、`scripts/` 和 `tests/`，并以边界测试禁止白名单和扩大排除范围回归 |
 | G-035 | P1 | DONE | 296 项扁平 `config.env` 一次迁移为 schema v1 `config/config.toml`；默认值只保留在不可变 Settings，TOML/环境来源拆分、未知字段与原生类型严格校验、密钥禁止进入 TOML、`.env`/系统环境覆盖和 `--config` 入口均已落地，旧主格式及 1200 行逐项解析器直接删除 |
