@@ -55,7 +55,8 @@ class WorkflowMigrationTests(unittest.TestCase):
 
             target = workflows / "legacy.workflow.json"
             self.assertEqual(1, result.migrated_count)
-            self.assertEqual((target,), result.migrated_files)
+            self.assertEqual(1, len(result.migrated_files))
+            self.assertTrue(target.samefile(result.migrated_files[0]))
             self.assertTrue(target.is_file())
             migrated = WorkflowDocument.from_dict(read_json_document(target))
             self.assertEqual(settings.robot_profile_id(), migrated.robot_profile_id)

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
+from src.configuration.config_initializer import initialize_configuration
 from src.configuration.config_loader import (
     ConfigLoadError,
     configuration_source_paths,
@@ -24,23 +26,25 @@ class ConfigurationLoadingTests(unittest.TestCase):
             project_config.parent.mkdir()
             project_config.write_text("schema_version = 6\n", encoding="utf-8")
 
-            self.assertEqual(
-                project_config,
-                default_config_path(
-                    working_directory=working_root,
-                    project_root=project_root,
-                ),
+            self.assertTrue(
+                project_config.samefile(
+                    default_config_path(
+                        working_directory=working_root,
+                        project_root=project_root,
+                    )
+                )
             )
 
             working_config = working_root / "config" / "config.toml"
             working_config.parent.mkdir()
             working_config.write_text("schema_version = 6\n", encoding="utf-8")
-            self.assertEqual(
-                working_config,
-                default_config_path(
-                    working_directory=working_root,
-                    project_root=project_root,
-                ),
+            self.assertTrue(
+                working_config.samefile(
+                    default_config_path(
+                        working_directory=working_root,
+                        project_root=project_root,
+                    )
+                )
             )
 
     def test_default_env_follows_project_config_when_started_elsewhere(self) -> None:
@@ -580,12 +584,35 @@ class ConfigurationLoadingTests(unittest.TestCase):
         self.assertNotIn("very-secret-invalid-value", message)
 
     def test_repository_example_is_a_complete_valid_document(self) -> None:
-        example = Path(__file__).resolve().parents[1] / "config" / "config.example.toml"
-        with patch.dict(os.environ, {}, clear=True):
-            settings = load_application_settings(example, env_file=example.parent / "missing.env")
+        repository_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temporary_directory:
+            initialized_root = Path(temporary_directory)
+            self._copy_configuration_templates(repository_root, initialized_root)
+            initialize_configuration(initialized_root)
+            config_path = initialized_root / "config" / "config.toml"
+            with patch.dict(os.environ, {}, clear=True):
+                settings = load_application_settings(
+                    config_path,
+                    env_file=initialized_root / "missing.env",
+                )
 
         self.assertEqual("realman", settings.robot.provider)
         self.assertTrue(settings.server.websocket_enabled)
+
+    @staticmethod
+    def _copy_configuration_templates(source_root: Path, target_root: Path) -> None:
+        shutil.copy2(source_root / ".env.example", target_root / ".env.example")
+        source_config = source_root / "config"
+        target_config = target_root / "config"
+        target_config.mkdir()
+        shutil.copy2(
+            source_config / "config.example.toml",
+            target_config / "config.example.toml",
+        )
+        for source in (source_config / "fragments").rglob("*.example.toml"):
+            destination = target_config / source.relative_to(source_config)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
 
     @staticmethod
     def _write(root: Path, content: str) -> Path:
