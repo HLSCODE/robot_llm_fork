@@ -124,6 +124,10 @@ class CompositionService:
     def robot_profile_id(self) -> str:
         return self._robot_profile_id
 
+    def scope_workflow(self, document: WorkflowDocument) -> WorkflowDocument:
+        """Bind unscoped editor nodes to this repository's Robot Profile."""
+        return _profiled_workflow(document, self._robot_profile_id)
+
     @property
     def revision(self) -> int:
         with self._lock:

@@ -555,6 +555,25 @@ class SchemaActionFormTests(unittest.TestCase):
         )
         dialog.close()
 
+    def test_action_dialog_preserves_robot_profile_when_editing(self) -> None:
+        dialog = ActionConfigDialog(
+            ActionType.WAIT,
+            {
+                "id": "wait",
+                "name": "wait",
+                "parameters": {"wait_seconds": 1.0},
+                "robot_profile_id": "tianji-tianji-dual",
+            },
+        )
+
+        dialog._validate_and_accept()
+
+        self.assertEqual(
+            "tianji-tianji-dual",
+            dialog.get_action_definition().robot_profile_id,
+        )
+        dialog.close()
+
     def test_preselected_move_target_is_locked_without_a_duplicate_selector(self) -> None:
         dialog = ActionConfigDialog(
             ActionType.MOVE,

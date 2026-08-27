@@ -5,8 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from src.application.composition import CompositionService
 from src.application.robot_profile_migration import LegacyRobotProfileMigrator
 from src.application.factory import create_application_services
+from src.application.workflow_editing import WorkflowEditingSession
 from src.application.workflow_compiler import WorkflowCompilationError, WorkflowCompiler
 from src.configuration.data_paths import ApplicationDataPaths
 from src.configuration.settings import ApplicationSettings, DataSettings
@@ -67,6 +69,51 @@ class RobotProfileIsolationTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "active profile"):
             services.execution.start_entries((item,), origin="profile-test")
+
+    def test_editor_scopes_unscoped_actions_to_the_active_profile(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            repository = JsonCompositionRepository(
+                robot_profile_id=TIANJI_PROFILE,
+                actions_directory=root / "actions",
+                workflows_directory=root / "workflows",
+                workflow_drafts_directory=root / "drafts",
+            )
+            editing = WorkflowEditingSession(CompositionService(repository))
+            document = WorkflowDocument.from_entries(
+                workflow_id="edited",
+                name="edited",
+                revision=0,
+                entries=(SequenceItem.from_definition(_wait_action("unscoped")),),
+                robot_profile_id=TIANJI_PROFILE,
+            )
+
+            state = editing.replace_document(document)
+
+            action = state.document.to_entries()[0]
+            assert isinstance(action, SequenceItem)
+            self.assertEqual(TIANJI_PROFILE, action.definition.robot_profile_id)
+
+    def test_editor_rejects_actions_from_another_profile(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            repository = JsonCompositionRepository(
+                robot_profile_id=TIANJI_PROFILE,
+                actions_directory=root / "actions",
+                workflows_directory=root / "workflows",
+                workflow_drafts_directory=root / "drafts",
+            )
+            editing = WorkflowEditingSession(CompositionService(repository))
+            document = WorkflowDocument.from_entries(
+                workflow_id="foreign",
+                name="foreign",
+                revision=0,
+                entries=(SequenceItem.from_definition(_wait_action(REALMAN_PROFILE)),),
+                robot_profile_id=TIANJI_PROFILE,
+            )
+
+            with self.assertRaisesRegex(ValueError, "another Robot Profile"):
+                editing.replace_document(document)
 
     def test_legacy_realman_data_is_copied_and_stamped_once(self) -> None:
         with TemporaryDirectory() as temporary_directory:

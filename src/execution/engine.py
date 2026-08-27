@@ -634,7 +634,12 @@ class ActionEngine:
             )
             return ActionHandlerResult.failed(
                 ActionResultCode.CONTROL_POLICY_MISMATCH,
-                f"设备停止能力不满足动作控制策略: {target.device_id} 缺少 {missing_values}",
+                (
+                    "设备停止能力不满足动作控制策略: "
+                    f"{target.device_id} 缺少 {missing_values}；"
+                    "当前机器人 Provider 必须通过公共驱动接口实现并声明这些停止能力，"
+                    "不能通过关闭安全预检继续执行"
+                ),
                 operation=self._CONTROL_POLICY_OPERATION,
                 device_id=target.device_id,
             )

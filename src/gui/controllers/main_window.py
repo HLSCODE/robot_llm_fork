@@ -1158,7 +1158,8 @@ class MainWindow(RoundedMainWindow):
         action_data = {
             "id": action.id,
             "name": action.name,
-            "parameters": action.parameters
+            "parameters": action.parameters,
+            "robot_profile_id": action.robot_profile_id,
         }
         dialog = ActionConfigDialog(
             action.type,
@@ -1870,6 +1871,7 @@ class MainWindow(RoundedMainWindow):
             "id": action_def.id,
             "name": action_def.name,
             "parameters": action_def.parameters,
+            "robot_profile_id": action_def.robot_profile_id,
         }
         dialog = ActionConfigDialog(
             action_def.type,

@@ -2985,7 +2985,7 @@ dependencies = [
     { name = "numpy", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
 ]
 wheels = [
-    { filename = "tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", hash = "sha256:8c77a2aaf90902ec5b0c223be30a5ec12a222dce4ab903fb7aae5be630fb955f" },
+    { filename = "tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", hash = "sha256:f26edecc4959435cce8e82d9ce3466383cad2eb4c5273cb6523b488be2e76683" },
 ]
 
 [package.metadata]
@@ -3004,7 +3004,7 @@ dependencies = [
     { name = "numpy", marker = "sys_platform == 'win32'" },
 ]
 wheels = [
-    { filename = "tj_robot_proj-0.2.0-py3-none-win_amd64.whl", hash = "sha256:e6c2b976a77b5136890fe139dbe3171383274ddfdae3c8833b9ab8072630f08f" },
+    { filename = "tj_robot_proj-0.2.0-py3-none-win_amd64.whl", hash = "sha256:10bd24acdc2b5242234e8c10a97b44423a6ba6472d5b90b4198ad3b6235568f8" },
 ]
 
 [package.metadata]

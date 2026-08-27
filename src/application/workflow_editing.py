@@ -127,8 +127,9 @@ class WorkflowEditingSession:
         workflow_name: str,
         dirty: bool,
     ) -> WorkflowEditingState:
+        scoped_document = self._composition.scope_workflow(document)
         state = WorkflowEditingState(
-            WorkflowDocument.from_dict(document.to_dict()),
+            WorkflowDocument.from_dict(scoped_document.to_dict()),
             workflow_name,
             dirty,
         )
