@@ -40,6 +40,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libegl1 \
+            libgl1 \
+            libopengl0
+
       - name: Install uv and Python
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
@@ -75,6 +84,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
+
+      - name: Install Linux Qt runtime libraries
+        if: runner.os == 'Linux' && matrix.extra == 'gui'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libegl1 \
+            libgl1 \
+            libopengl0
 
       - name: Install uv and Python
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
