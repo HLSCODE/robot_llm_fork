@@ -191,6 +191,55 @@ class RobotProfileIsolationTests(unittest.TestCase):
             self.assertEqual((), result.migrated_files)
             self.assertFalse((paths.actions_directory / "library.json").exists())
 
+    def test_legacy_realman_text_pose_is_normalized_during_migration(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            paths = ApplicationDataPaths.from_settings(
+                DataSettings(robot_data_dir=str(root)),
+                REALMAN_PROFILE,
+            )
+            legacy_actions = root / "actions" / "library.json"
+            legacy_actions.parent.mkdir(parents=True)
+            legacy_actions.write_text(
+                json.dumps(
+                    {
+                        "schema": "robot_llm.actions",
+                        "schema_version": 2,
+                        "actions": [_move_action("unscoped").to_dict()],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            migrator = LegacyRobotProfileMigrator(paths, provider="realman")
+
+            migrator.migrate_missing()
+
+            repository = JsonCompositionRepository(
+                robot_profile_id=REALMAN_PROFILE,
+                actions_directory=paths.actions_directory,
+                workflows_directory=paths.workflows_directory,
+                workflow_drafts_directory=paths.workflow_drafts_directory,
+            )
+            self.assertEqual(
+                [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                repository.load_actions()[0].parameters["点位"],
+            )
+
+            target = paths.actions_directory / "library.json"
+            migrated_document = json.loads(target.read_text(encoding="utf-8"))
+            migrated_document["actions"][0]["parameters"]["点位"] = (
+                "pose = [6, 5, 4, 3, 2, 1]"
+            )
+            target.write_text(json.dumps(migrated_document), encoding="utf-8")
+
+            repaired = migrator.migrate_missing()
+
+            self.assertEqual((target,), repaired.migrated_files)
+            self.assertEqual(
+                [6.0, 5.0, 4.0, 3.0, 2.0, 1.0],
+                repository.load_actions()[0].parameters["点位"],
+            )
+
 
 def _wait_action(robot_profile_id: str) -> ActionDefinition:
     return ActionDefinition(
@@ -198,6 +247,22 @@ def _wait_action(robot_profile_id: str) -> ActionDefinition:
         name="wait",
         type=ActionType.WAIT,
         parameters={"wait_seconds": 1.0},
+        robot_profile_id=robot_profile_id,
+    )
+
+
+def _move_action(robot_profile_id: str) -> ActionDefinition:
+    return ActionDefinition(
+        id="1",
+        name="legacy move",
+        type=ActionType.MOVE,
+        parameters={
+            "目标": "机械臂",
+            "臂": "左",
+            "模式": "move_j",
+            "点位": "pose = [1, 2, 3, 4, 5, 6]",
+            "补偿": {"mode": "none"},
+        },
         robot_profile_id=robot_profile_id,
     )
 

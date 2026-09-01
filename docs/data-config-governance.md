@@ -40,10 +40,10 @@ data/
     └── workflow.schema.json
 ```
 
-应用组合根启动时只安装完全缺失的动作库或空技能目录；已存在的用户文件永不被内置目录
-覆盖。内置 Action/Skill 和编辑器 JSON Schema 均来自 `src/builtin_catalogs/` 的版本化 JSON
-资源，Python 不再维护第二份完整技能数据。自动化测试使用独立临时数据根，不读取或迁移
-工作站的真实 `data/`。
+应用组合根启动时只创建缺失的空 Action 库、Skill 目录及 Profile 数据目录；不会把内置
+Action、Skill 或 Workflow 示例复制到用户 `data/`，已存在的用户文件也不会被覆盖。
+编辑器 JSON Schema 仍从 `src/builtin_catalogs/schemas/` 安装。自动化测试使用独立临时
+数据根，不读取或迁移工作站的真实 `data/`。
 
 数据路径配置：
 
@@ -192,7 +192,8 @@ data/
 - Skill Registry 递归、确定性扫描文件，并在全部文件、跨文件 ID、动作类型和参数绑定
   校验成功后一次替换内存目录；SkillStep 保存可执行快照，`action_name` 是展示名称而非
   Action Catalog 外键；不维护手写 index。
-- Python 源码不再维护完整动作/技能数据副本；内置示例同样由版本化 JSON 资源交付。
+- Python 源码不再维护完整动作/技能数据副本；内置示例仅作为随应用发布的资源，不在首次
+  启动时写入用户数据目录。
 - `*.workflow.json`/`*.skill.json` 使用 `$schema` 关联版本控制内 JSON Schema，获得编辑器
   高亮、补全和校验。
 

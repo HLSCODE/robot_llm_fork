@@ -276,8 +276,8 @@ data/
 ## AI 与技能
 
 技能系统位于 `src/skill_system/`。启动时从 `SKILL_LIBRARY_DIRECTORY` 确定性递归加载
-`<domain>/*.skill.json`；目录为空时，安装器从 `src/builtin_catalogs/skills/` 复制版本化
-JSON 资源。每个文件只定义一个 Skill，跨文件 ID 重复会使整个目录加载失败。
+`<domain>/*.skill.json`；首次启动只创建空技能目录，不复制内置示例。每个文件只定义一个
+Skill，跨文件 ID 重复会使整个目录加载失败。
 
 AI 规划流程：
 

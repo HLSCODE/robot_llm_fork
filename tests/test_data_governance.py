@@ -167,7 +167,7 @@ class BuiltinCatalogTests(unittest.TestCase):
         SkillRegistry().reset()
         self.temporary_directory.cleanup()
 
-    def test_missing_catalogs_are_seeded_from_json_resources_once(self) -> None:
+    def test_missing_catalogs_create_empty_user_data_once(self) -> None:
         installer = BuiltinDataInstaller(self.paths)
 
         first = installer.install_missing()
@@ -180,11 +180,12 @@ class BuiltinCatalogTests(unittest.TestCase):
             robot_profile_id=self.paths.robot_profile_id,
         )
 
-        self.assertEqual(17, len(first.created_files))
+        self.assertEqual(4, len(first.created_files))
         self.assertEqual((), second.created_files)
         self.assertEqual(original, (self.paths.actions_directory / "library.json").read_bytes())
-        self.assertEqual(46, report.action_count)
-        self.assertEqual(13, report.skill_count)
+        self.assertEqual(0, report.action_count)
+        self.assertEqual(0, report.skill_count)
+        self.assertEqual([], list(self.paths.skills_directory.rglob("*.skill.json")))
 
 
 class CatalogMigrationTests(unittest.TestCase):

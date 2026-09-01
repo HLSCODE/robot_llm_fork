@@ -7,8 +7,11 @@ from pathlib import Path
 import shutil
 from typing import Any
 
+from .action_catalog_normalization import normalize_legacy_action
 from ..configuration.data_paths import ApplicationDataPaths
+from ..domain.models import ActionDefinition
 from ..persistence.json_documents import (
+    load_collection_document,
     read_json_document,
     write_collection_document,
     write_json_atomic,
@@ -45,6 +48,8 @@ class LegacyRobotProfileMigrator:
             if source is not None:
                 self._migrate_actions(source, action_target)
                 migrated.append(action_target)
+        elif self._normalize_existing_actions(action_target):
+            migrated.append(action_target)
 
         migrated.extend(
             self._migrate_workflow_directory(
@@ -89,13 +94,36 @@ class LegacyRobotProfileMigrator:
                 raise ValueError(f"{source.name}: action {index} must be an object")
             profiled = dict(action)
             profiled["robot_profile_id"] = self._paths.robot_profile_id
-            profiled_actions.append(profiled)
+            profiled_actions.append(
+                normalize_legacy_action(ActionDefinition.from_dict(profiled)).to_dict()
+            )
         write_collection_document(
             target,
             ACTION_LIBRARY_DOCUMENT,
             profiled_actions,
             metadata={"robot_profile_id": self._paths.robot_profile_id},
         )
+
+    def _normalize_existing_actions(self, target: Path) -> bool:
+        document = load_collection_document(target, ACTION_LIBRARY_DOCUMENT)
+        actions: list[ActionDefinition] = []
+        for index, raw_action in enumerate(document.collection):
+            if not isinstance(raw_action, dict):
+                raise ValueError(f"{target.name}: action {index} must be an object")
+            actions.append(normalize_legacy_action(ActionDefinition.from_dict(raw_action)))
+
+        if all(
+            raw_action == action.to_dict()
+            for raw_action, action in zip(document.collection, actions, strict=True)
+        ):
+            return False
+        write_collection_document(
+            target,
+            ACTION_LIBRARY_DOCUMENT,
+            [action.to_dict() for action in actions],
+            metadata=document.metadata,
+        )
+        return True
 
     def _migrate_workflow_directory(
         self,

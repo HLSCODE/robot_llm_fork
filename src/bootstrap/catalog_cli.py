@@ -12,6 +12,7 @@ import re
 from tempfile import TemporaryDirectory
 from typing import Sequence
 
+from ..application.action_catalog_normalization import normalize_legacy_action
 from ..persistence.json_documents import (
     CollectionDocumentSpec,
     JsonDocumentSchemaError,
@@ -202,7 +203,7 @@ def _load_legacy_actions(path: Path) -> list[ActionDefinition]:
             )
         ids.add(action.id)
         names.add(action.name)
-        actions.append(_normalize_action(action))
+        actions.append(normalize_legacy_action(action))
     return actions
 
 
@@ -246,7 +247,7 @@ def normalize_action_catalog(actions_directory: Path) -> int:
     ]
     if len(actions) != len(document.collection):
         raise JsonDocumentSchemaError(f"{path.name} contains a non-object action")
-    normalized = [_normalize_action(action) for action in actions]
+    normalized = [normalize_legacy_action(action) for action in actions]
     changed = sum(
         before.parameters != after.parameters
         for before, after in zip(actions, normalized, strict=True)
@@ -259,19 +260,6 @@ def normalize_action_catalog(actions_directory: Path) -> int:
             metadata=document.metadata,
         )
     return changed
-
-
-def _normalize_action(action: ActionDefinition) -> ActionDefinition:
-    parameters = deepcopy(action.parameters)
-    if action.type is ActionType.MOVE and "点位" in parameters:
-        parameters["点位"] = parse_pose(parameters["点位"])
-    return ActionDefinition(
-        id=action.id,
-        name=action.name,
-        type=action.type,
-        parameters=parameters,
-        robot_profile_id=action.robot_profile_id,
-    )
 
 
 def _with_robot_profile(

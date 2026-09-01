@@ -91,7 +91,7 @@ Robot Action Orchestrator 是一个面向机器人动作编排、设备控制和
 | `geometry/` | 无设备副作用的坐标与位姿补偿计算 | UDP / 视觉补偿后的目标点计算 |
 | `data_collection/` | 示教数据 schema、录制、写入和校验 | 采集机器人与相机数据集 |
 | `observability/` | 日志格式、上下文与审计辅助 | 关联一次执行的 `run_id`、记录设备失败 |
-| `builtin_catalogs/` | 随应用发布的动作、技能和 JSON Schema 资源 | 首次安装默认数据、编辑器 schema 支持 |
+| `builtin_catalogs/` | 随应用发布的动作、技能和 JSON Schema 资源 | 显式内置能力、编辑器 schema 支持；不自动填充用户数据 |
 
 ## 5. 核心模块与关键文件
 

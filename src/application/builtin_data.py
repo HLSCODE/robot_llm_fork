@@ -1,4 +1,4 @@
-"""Install immutable built-in catalogs into an empty user data directory."""
+"""Create an empty, schema-aware user data layout on first startup."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ class BuiltinDataInstallResult:
 
 
 class BuiltinDataInstaller:
-    """Seed missing user catalogs once without overwriting user changes."""
+    """Create missing user data containers without seeding example content."""
 
     def __init__(self, paths: ApplicationDataPaths) -> None:
         self._paths = paths
@@ -33,6 +33,7 @@ class BuiltinDataInstaller:
         self._paths.workflows_directory.mkdir(parents=True, exist_ok=True)
         self._paths.workflow_drafts_directory.mkdir(parents=True, exist_ok=True)
         self._paths.trajectories_directory.mkdir(parents=True, exist_ok=True)
+        self._paths.skills_directory.mkdir(parents=True, exist_ok=True)
 
         for source in sorted((_BUILTIN_CATALOG_ROOT / "schemas").glob("*.json")):
             destination = self._paths.root / "schemas" / source.name
@@ -46,37 +47,13 @@ class BuiltinDataInstaller:
             self._paths.actions_directory / ACTION_LIBRARY_FILE_NAME
         )
         if not actions_file.exists():
-            source = read_json_document(
-                _BUILTIN_CATALOG_ROOT / "actions" / ACTION_LIBRARY_FILE_NAME
-            )
-            source_profile = str(source.get("robot_profile_id", ""))
-            actions = (
-                source.get("actions", [])
-                if self._paths.robot_profile_id == source_profile
-                else []
-            )
-            profiled_actions = [
-                {**action, "robot_profile_id": self._paths.robot_profile_id}
-                for action in actions
-                if isinstance(action, dict)
-            ]
             write_collection_document(
                 actions_file,
                 ACTION_LIBRARY_DOCUMENT,
-                profiled_actions,
+                [],
                 metadata={"robot_profile_id": self._paths.robot_profile_id},
             )
             created_files.append(actions_file)
-
-        if not any(self._paths.skills_directory.rglob("*.skill.json")):
-            source_directory = _BUILTIN_CATALOG_ROOT / "skills"
-            for source in sorted(source_directory.rglob("*.skill.json")):
-                destination = (
-                    self._paths.skills_directory
-                    / source.relative_to(source_directory)
-                )
-                _copy_json(source, destination)
-                created_files.append(destination)
 
         return BuiltinDataInstallResult(tuple(created_files))
 
