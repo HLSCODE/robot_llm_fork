@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
@@ -59,8 +60,20 @@ class LegacyRobotProfileMigrator:
             )
         )
         migrated.extend(
+            self._normalize_workflow_directory(
+                self._paths.workflows_directory,
+                "*.workflow.json",
+            )
+        )
+        migrated.extend(
             self._migrate_workflow_directory(
                 self._paths.root / "drafts",
+                self._paths.workflow_drafts_directory,
+                "*.workflow.json",
+            )
+        )
+        migrated.extend(
+            self._normalize_workflow_directory(
                 self._paths.workflow_drafts_directory,
                 "*.workflow.json",
             )
@@ -152,14 +165,36 @@ class LegacyRobotProfileMigrator:
             migrated.append(target)
         return migrated
 
+    def _normalize_workflow_directory(
+        self,
+        directory: Path,
+        pattern: str,
+    ) -> list[Path]:
+        if not directory.is_dir():
+            return []
+        normalized_files: list[Path] = []
+        for target in sorted(directory.glob(pattern)):
+            raw = read_json_document(target)
+            if not isinstance(raw, dict) or raw.get("schema") != "robot_llm.workflow":
+                continue
+            normalized = deepcopy(raw)
+            self._stamp_action_profiles(normalized)
+            if normalized == raw:
+                continue
+            write_json_atomic(target, normalized)
+            normalized_files.append(target)
+        return normalized_files
+
     def _stamp_action_profiles(self, value: object) -> None:
         if isinstance(value, dict):
             if value.get("kind") == "action" and isinstance(
                 value.get("definition"), dict
             ):
-                value["definition"]["robot_profile_id"] = (
-                    self._paths.robot_profile_id
-                )
+                definition = dict(value["definition"])
+                definition["robot_profile_id"] = self._paths.robot_profile_id
+                value["definition"] = normalize_legacy_action(
+                    ActionDefinition.from_dict(definition)
+                ).to_dict()
             for nested in value.values():
                 self._stamp_action_profiles(nested)
         elif isinstance(value, list):

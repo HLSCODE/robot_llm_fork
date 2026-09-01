@@ -10,8 +10,8 @@ from tempfile import TemporaryDirectory
 from typing import Mapping, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
+from ..application.action_catalog_normalization import normalize_legacy_action
 from ..domain.models import (
-    ActionType,
     LoopBlock,
     ParallelBlock,
     SequenceEntry,
@@ -21,7 +21,6 @@ from ..domain.models import (
 )
 from ..domain.robot_profile import UNSCOPED_ROBOT_PROFILE, normalize_robot_profile_id
 from ..domain.workflow import CanvasPosition, WorkflowDocument
-from ..geometry.pose_compensation import parse_pose
 from ..persistence.json_documents import read_json_document, write_json_atomic
 from ..persistence.storage import WORKFLOW_FILE_SUFFIX
 
@@ -324,10 +323,7 @@ def normalize_active_workflows(
 
 def _normalize_entry(entry: SequenceEntry) -> SequenceEntry:
     if isinstance(entry, SequenceItem):
-        if entry.definition.type is ActionType.MOVE and "点位" in entry.definition.parameters:
-            entry.definition.parameters["点位"] = _parse_legacy_pose(
-                entry.definition.parameters["点位"]
-            )
+        entry.definition = normalize_legacy_action(entry.definition)
         return entry
     if isinstance(entry, LoopBlock | SubworkflowBlock):
         entry.items = [_normalize_entry(item) for item in entry.items]
@@ -337,13 +333,6 @@ def _normalize_entry(entry: SequenceEntry) -> SequenceEntry:
             branch.items = [_normalize_entry(item) for item in branch.items]
         return entry
     raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
-
-
-def _parse_legacy_pose(value: object) -> list[float]:
-    if isinstance(value, str):
-        # Some legacy files captured the terminal bracketed-paste marker as text.
-        value = value.strip().removeprefix("[200~")
-    return parse_pose(value)
 
 
 def _normalize_entries(

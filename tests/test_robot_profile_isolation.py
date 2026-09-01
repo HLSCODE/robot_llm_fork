@@ -240,6 +240,38 @@ class RobotProfileIsolationTests(unittest.TestCase):
                 repository.load_actions()[0].parameters["点位"],
             )
 
+    def test_existing_profiled_workflow_marker_is_normalized(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            paths = ApplicationDataPaths.from_settings(
+                DataSettings(robot_data_dir=str(root)),
+                REALMAN_PROFILE,
+            )
+            target = paths.workflows_directory / "vision.workflow.json"
+            target.parent.mkdir(parents=True)
+            document = WorkflowDocument.from_entries(
+                workflow_id="vision",
+                name="vision",
+                revision=1,
+                entries=(SequenceItem.from_definition(_vision_action()),),
+                robot_profile_id=REALMAN_PROFILE,
+            )
+            target.write_text(json.dumps(document.to_dict()), encoding="utf-8")
+
+            result = LegacyRobotProfileMigrator(
+                paths,
+                provider="realman",
+            ).migrate_missing()
+
+            self.assertEqual((target,), result.migrated_files)
+            restored = WorkflowDocument.from_dict(
+                json.loads(target.read_text(encoding="utf-8"))
+            ).to_entries()[0]
+            assert isinstance(restored, SequenceItem)
+            self.assertNotIn("marker", restored.definition.parameters)
+            self.assertEqual(0.158, restored.definition.parameters["marker_width"])
+            self.assertEqual(0.159, restored.definition.parameters["marker_height"])
+
 
 def _wait_action(robot_profile_id: str) -> ActionDefinition:
     return ActionDefinition(
@@ -264,6 +296,22 @@ def _move_action(robot_profile_id: str) -> ActionDefinition:
             "补偿": {"mode": "none"},
         },
         robot_profile_id=robot_profile_id,
+    )
+
+
+def _vision_action() -> ActionDefinition:
+    return ActionDefinition(
+        id="vision-1",
+        name="shijiao-1",
+        type=ActionType.VISION_RELOCALIZE,
+        parameters={
+            "action_mode": "teach",
+            "arm": "left",
+            "station_name": "station-1",
+            "marker": {"width": 0.158, "height": 0.159},
+            "move_mode": "move_j",
+        },
+        robot_profile_id=REALMAN_PROFILE,
     )
 
 

@@ -103,6 +103,28 @@ class ActionCatalogTests(unittest.TestCase):
         restored = self.repository.load_actions()[0]
         self.assertEqual([1.0, 2.0, 3.0, 4.0, 5.0, 6.0], restored.parameters["点位"])
 
+    def test_legacy_relocalization_marker_is_flattened(self) -> None:
+        action = ActionDefinition(
+            id="vision-1",
+            name="shijiao-1",
+            type=ActionType.VISION_RELOCALIZE,
+            parameters={
+                "action_mode": "teach",
+                "arm": "left",
+                "station_name": "station-1",
+                "marker": {"width": "0.21", "height": 0.22},
+                "move_mode": "move_j",
+            },
+        )
+        self.repository.save_actions((action,))
+
+        self.assertEqual(1, normalize_action_catalog(self.actions_directory))
+
+        parameters = self.repository.load_actions()[0].parameters
+        self.assertNotIn("marker", parameters)
+        self.assertEqual(0.21, parameters["marker_width"])
+        self.assertEqual(0.22, parameters["marker_height"])
+
 
 class SkillDirectoryTests(unittest.TestCase):
     def setUp(self) -> None:
