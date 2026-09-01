@@ -124,7 +124,7 @@ class ActionLibraryView(QWidget):
         )
         self.camera_test_button = self.header.add_action(
             IconName.CAMERA,
-            "测试相机",
+            "重新检测相机",
             self.camera_test_requested.emit,
         )
         layout.addWidget(self.header)
@@ -177,7 +177,7 @@ class ActionLibraryView(QWidget):
 
     def set_camera_test_running(self, running: bool) -> None:
         self.camera_test_button.setEnabled(not running)
-        label = "相机测试运行中" if running else "测试相机"
+        label = "正在重新检测相机" if running else "重新检测相机"
         self.camera_test_button.setToolTip(label)
         self.camera_test_button.setAccessibleName(label)
 

@@ -25,9 +25,11 @@ class _ConfiguredCamera(TypedDict):
     serial: str
     name: str
 
+
 try:
     import numpy as np
     import pyrealsense2 as rs
+
     _RS_AVAILABLE = True
 except ImportError:
     _RS_AVAILABLE = False
@@ -35,6 +37,7 @@ except ImportError:
 
 try:
     import cv2
+
     _CV_AVAILABLE = True
 except ImportError:
     _CV_AVAILABLE = False
@@ -126,6 +129,10 @@ class RealSenseManager:
         return self._running
 
     def start(self) -> dict:
+        """Compatibility alias that activates every configured camera."""
+        return self.activate()
+
+    def activate(self, camera_names: Sequence[str] = ()) -> dict:
         """开启相机并启动后台采集线程。
 
         Returns:
@@ -140,6 +147,23 @@ class RealSenseManager:
         if not _CV_AVAILABLE:
             raise RuntimeError("opencv-python 未安装")
 
+        selected_names = {name.strip() for name in camera_names if name.strip()}
+        selected_cameras = [
+            camera
+            for camera in self._cameras
+            if not selected_names
+            or camera["name"] in selected_names
+            or camera["serial"] in selected_names
+        ]
+        if selected_names and not selected_cameras:
+            raise ValueError(f"unknown camera selection: {', '.join(sorted(selected_names))}")
+        active_names = {name for _serial, name, _pipeline in self._pipelines}
+        desired_names = {camera["name"] for camera in selected_cameras}
+        if self._running and active_names == desired_names:
+            return {"started": len(self._pipelines), "failed": 0}
+        if self._running or self._pipelines:
+            self.stop()
+
         self._pipelines.clear()
         self._failed_cameras.clear()
 
@@ -147,8 +171,7 @@ class RealSenseManager:
         try:
             ctx = rs.context()
             connected_serials = {
-                d.get_info(rs.camera_info.serial_number)
-                for d in ctx.query_devices()
+                d.get_info(rs.camera_info.serial_number) for d in ctx.query_devices()
             }
         except Exception:
             connected_serials = set()
@@ -169,7 +192,7 @@ class RealSenseManager:
         except Exception:
             pass
 
-        for cam in self._cameras:
+        for cam in selected_cameras:
             serial: str = cam["serial"]
             name: str = cam["name"]
 
@@ -188,8 +211,15 @@ class RealSenseManager:
                         fw = d.get_info(rs.camera_info.firmware_version)
                         usb = d.get_info(rs.camera_info.usb_type_descriptor)
                         sensors = device_sensors.get(serial, [])
-                        logger.info("相机 %s (%s): 产品=%s 固件=%s USB=%s 传感器=%s",
-                                    name, serial, product, fw, usb, sensors)
+                        logger.info(
+                            "相机 %s (%s): 产品=%s 固件=%s USB=%s 传感器=%s",
+                            name,
+                            serial,
+                            product,
+                            fw,
+                            usb,
+                            sensors,
+                        )
                         break
             except Exception:
                 pass
@@ -205,10 +235,16 @@ class RealSenseManager:
                     pass
                 if serial:
                     _cfg.enable_device(serial)
-                _cfg.enable_stream(rs.stream.color, self._width, self._height,
-                                   rs.format.bgr8, self._fps)
-                _cfg.enable_stream(rs.stream.depth, self._depth_width, self._depth_height,
-                                   rs.format.z16, self._depth_fps)
+                _cfg.enable_stream(
+                    rs.stream.color, self._width, self._height, rs.format.bgr8, self._fps
+                )
+                _cfg.enable_stream(
+                    rs.stream.depth,
+                    self._depth_width,
+                    self._depth_height,
+                    rs.format.z16,
+                    self._depth_fps,
+                )
                 return _pipeline, _cfg
 
             # 带重试的启动（USB 带宽协商偶尔需要多次尝试）
@@ -219,14 +255,24 @@ class RealSenseManager:
                 try:
                     pipeline.start(cfg)
                     self._pipelines.append((serial, name, pipeline))
-                    logger.info("RealSense 相机已启动: name=%s serial=%s (attempt %d)",
-                                name, serial, attempt + 1)
+                    logger.info(
+                        "RealSense 相机已启动: name=%s serial=%s (attempt %d)",
+                        name,
+                        serial,
+                        attempt + 1,
+                    )
                     started = True
                     break
                 except Exception as exc:
                     last_error = str(exc)
-                    logger.warning("相机 %s (%s) 启动失败 (attempt %d/%d): %s",
-                                   name, serial, attempt + 1, 3, last_error)
+                    logger.warning(
+                        "相机 %s (%s) 启动失败 (attempt %d/%d): %s",
+                        name,
+                        serial,
+                        attempt + 1,
+                        3,
+                        last_error,
+                    )
                     # 清理失败的 pipeline
                     try:
                         pipeline.stop()
@@ -236,8 +282,13 @@ class RealSenseManager:
                         _time.sleep(1.0)  # 等 USB 带宽释放再重试
 
             if not started:
-                logger.warning("相机 %s (%s) 三次尝试均失败: %s\n%s",
-                               name, serial, last_error, traceback.format_exc())
+                logger.warning(
+                    "相机 %s (%s) 三次尝试均失败: %s\n%s",
+                    name,
+                    serial,
+                    last_error,
+                    traceback.format_exc(),
+                )
                 self._failed_cameras.append({"serial": serial, "name": name, "error": last_error})
 
             # 相机之间错开启动，避免 USB 带宽协商碰撞
@@ -262,12 +313,11 @@ class RealSenseManager:
             self._encode_thread.start()
             logger.info(
                 "相机采集线程已启动: %d 路在线, %d 路失败",
-                len(self._pipelines), len(self._failed_cameras),
+                len(self._pipelines),
+                len(self._failed_cameras),
             )
         else:
-            logger.warning(
-                "所有配置相机均无法启动 (%d 路失败)", len(self._failed_cameras)
-            )
+            logger.warning("所有配置相机均无法启动 (%d 路失败)", len(self._failed_cameras))
 
         return {"started": len(self._pipelines), "failed": len(self._failed_cameras)}
 
@@ -317,12 +367,14 @@ class RealSenseManager:
             if serial in online_serials:
                 result.append({"serial": serial, "name": cam["name"], "online": True})
             else:
-                result.append({
-                    "serial": serial,
-                    "name": cam["name"],
-                    "online": False,
-                    "error": failed_map.get(serial, "未启动"),
-                })
+                result.append(
+                    {
+                        "serial": serial,
+                        "name": cam["name"],
+                        "online": False,
+                        "error": failed_map.get(serial, "未启动"),
+                    }
+                )
         return result
 
     # ------------------------------------------------------------------
@@ -333,6 +385,7 @@ class RealSenseManager:
         """每路相机独立线程：持续采集彩色+深度帧及内参，写入 _raw_frames。"""
         # 给相机自动曝光/白平衡留出初始化时间
         import time as _time
+
         _time.sleep(1.0)
 
         align = rs.align(rs.stream.color) if self._align_depth_to_color else None
@@ -346,7 +399,9 @@ class RealSenseManager:
                 depth_frame = frameset.get_depth_frame()
                 if color_frame and depth_frame:
                     if fail_count > 0:
-                        logger.info("相机 %s (%s) 帧恢复，之前连续失败 %d 次", name, serial, fail_count)
+                        logger.info(
+                            "相机 %s (%s) 帧恢复，之前连续失败 %d 次", name, serial, fail_count
+                        )
                     fail_count = 0
                     color_arr = np.asanyarray(color_frame.get_data()).copy()
                     depth_arr = np.asanyarray(depth_frame.get_data()).copy()
@@ -355,12 +410,20 @@ class RealSenseManager:
                         profile = color_frame.get_profile()
                         intr = profile.as_video_stream_profile().get_intrinsics()
                         self._intrinsics_cache[serial] = {
-                            "fx": intr.fx, "fy": intr.fy,
-                            "ppx": intr.ppx, "ppy": intr.ppy,
+                            "fx": intr.fx,
+                            "fy": intr.fy,
+                            "ppx": intr.ppx,
+                            "ppy": intr.ppy,
                             "distortion_coefficients": list(intr.coeffs),
                             "distortion_model": _enum_name(intr.model),
                         }
-                        logger.info("相机 %s (%s) 内参已缓存: fx=%.1f fy=%.1f", name, serial, intr.fx, intr.fy)
+                        logger.info(
+                            "相机 %s (%s) 内参已缓存: fx=%.1f fy=%.1f",
+                            name,
+                            serial,
+                            intr.fx,
+                            intr.fy,
+                        )
                     intrinsics = self._intrinsics_cache[serial]
                     color_domain = _enum_name(color_frame.get_frame_timestamp_domain())
                     depth_domain = _enum_name(depth_frame.get_frame_timestamp_domain())
@@ -388,12 +451,8 @@ class RealSenseManager:
                         ),
                         distortion_model=str(intrinsics["distortion_model"]),
                         depth_scale_metres=float(depth_frame.get_units()),
-                        color_hardware_timestamp_ms=float(
-                            color_frame.get_timestamp()
-                        ),
-                        depth_hardware_timestamp_ms=float(
-                            depth_frame.get_timestamp()
-                        ),
+                        color_hardware_timestamp_ms=float(color_frame.get_timestamp()),
+                        depth_hardware_timestamp_ms=float(depth_frame.get_timestamp()),
                         color_frame_number=int(color_frame.get_frame_number()),
                         depth_frame_number=int(depth_frame.get_frame_number()),
                         hardware_timestamp_domain=timestamp_domain,
@@ -406,15 +465,21 @@ class RealSenseManager:
                 else:
                     fail_count += 1
                     if fail_count <= 3:
-                        logger.warning("相机 %s (%s) 帧不完整: color=%s depth=%s",
-                                       name, serial,
-                                       color_frame is not None, depth_frame is not None)
+                        logger.warning(
+                            "相机 %s (%s) 帧不完整: color=%s depth=%s",
+                            name,
+                            serial,
+                            color_frame is not None,
+                            depth_frame is not None,
+                        )
             except Exception as exc:
                 fail_count += 1
                 if fail_count <= 3:
                     logger.warning("相机 %s (%s) 取帧异常: %s", name, serial, exc)
                 elif fail_count == 4:
-                    logger.warning("相机 %s (%s) 连续取帧失败已达 %d 次，后续静默", name, serial, fail_count)
+                    logger.warning(
+                        "相机 %s (%s) 连续取帧失败已达 %d 次，后续静默", name, serial, fail_count
+                    )
 
     def get_latest_raw_frames(
         self,
@@ -482,16 +547,12 @@ class RealSenseManager:
     ) -> list[tuple[str, str, bytes]]:
         result = []
         for serial, name, img in raw_frames:
-            ok, buf = cv2.imencode(
-                ".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality]
-            )
+            ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
             if ok:
                 result.append((serial, name, bytes(buf)))
         return result
 
-    def _encode_stitched(
-        self, raw_frames: list[tuple[str, str, "np.ndarray"]]
-    ) -> bytes | None:
+    def _encode_stitched(self, raw_frames: list[tuple[str, str, "np.ndarray"]]) -> bytes | None:
         if not raw_frames:
             return None
         imgs = [img for _, _, img in raw_frames]
@@ -509,25 +570,19 @@ class RealSenseManager:
             blank = np.zeros_like(normed[0])
             normed += [blank] * (COLS - remainder)
 
-        rows = [np.hstack(normed[i:i + COLS]) for i in range(0, len(normed), COLS)]
+        rows = [np.hstack(normed[i : i + COLS]) for i in range(0, len(normed), COLS)]
         stitched = np.vstack(rows) if len(rows) > 1 else rows[0]
 
         if self._output_width > 0 and self._output_height > 0:
             stitched = cv2.resize(stitched, (self._output_width, self._output_height))
         elif self._output_width > 0:
             scale = self._output_width / stitched.shape[1]
-            stitched = cv2.resize(
-                stitched, (self._output_width, int(stitched.shape[0] * scale))
-            )
+            stitched = cv2.resize(stitched, (self._output_width, int(stitched.shape[0] * scale)))
         elif self._output_height > 0:
             scale = self._output_height / stitched.shape[0]
-            stitched = cv2.resize(
-                stitched, (int(stitched.shape[1] * scale), self._output_height)
-            )
+            stitched = cv2.resize(stitched, (int(stitched.shape[1] * scale), self._output_height))
 
-        ok, buf = cv2.imencode(
-            ".jpg", stitched, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality]
-        )
+        ok, buf = cv2.imencode(".jpg", stitched, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
         return bytes(buf) if ok else None
 
 
@@ -536,3 +591,79 @@ def _enum_name(value: object) -> str:
     if isinstance(name, str) and name:
         return name
     return str(value)
+
+
+def probe_realsense_cameras(
+    cameras: Sequence[Mapping[str, object]],
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    timeout_seconds: float,
+    max_attempts: int,
+) -> tuple[dict[str, object], ...]:
+    """Probe cameras one at a time without capture or encoding workers."""
+    if not _RS_AVAILABLE:
+        raise RuntimeError("pyrealsense2 未安装")
+    context = rs.context()
+    connected = {
+        device.get_info(rs.camera_info.serial_number) for device in context.query_devices()
+    }
+    results: list[dict[str, object]] = []
+    timeout_ms = max(1, int(timeout_seconds * 1000))
+    for raw_camera in cameras:
+        serial = str(raw_camera.get("serial", ""))
+        name = str(raw_camera.get("name", "") or serial)
+        base = {"serial": serial, "name": name}
+        if serial and serial not in connected:
+            results.append(
+                {
+                    **base,
+                    "online": False,
+                    "frame_received": False,
+                    "error": "未连接",
+                }
+            )
+            continue
+
+        last_error = "未获得有效帧"
+        succeeded = False
+        for attempt in range(max_attempts):
+            pipeline = rs.pipeline(context)
+            config = rs.config()
+            try:
+                config.disable_all_streams()
+            except Exception:
+                logger.debug("RealSense SDK does not support disable_all_streams")
+            if serial:
+                config.enable_device(serial)
+            config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+            try:
+                pipeline.start(config)
+                frames = pipeline.wait_for_frames(timeout_ms=timeout_ms)
+                succeeded = bool(frames.get_color_frame())
+                if succeeded:
+                    break
+                last_error = f"{timeout_seconds:g} 秒内未获得彩色帧"
+            except Exception as exc:
+                last_error = str(exc) or type(exc).__name__
+            finally:
+                try:
+                    pipeline.stop()
+                except Exception:
+                    logger.debug(
+                        "Ignoring RealSense probe cleanup failure: %s",
+                        name,
+                        exc_info=True,
+                    )
+            if attempt + 1 < max_attempts:
+                time.sleep(0.2)
+        results.append(
+            {
+                **base,
+                "online": succeeded,
+                "frame_received": succeeded,
+                **({} if succeeded else {"error": last_error}),
+            }
+        )
+    return tuple(results)

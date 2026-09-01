@@ -29,8 +29,9 @@ class _CameraAccess:
         self.released = False
 
     @contextmanager
-    def open(self, purpose: str):
+    def open(self, purpose: str, *, camera_names=()):
         self.purpose = purpose
+        self.camera_names = tuple(camera_names)
         try:
             yield self.camera
         finally:
@@ -89,6 +90,7 @@ class BalanceReaderTests(unittest.TestCase):
 
         self.assertEqual(b"balance", capture())
         self.assertEqual("balance-reading", access.purpose)
+        self.assertEqual(("balance",), access.camera_names)
         self.assertTrue(access.released)
 
     def test_managed_capture_requires_an_explicit_camera_identity(self) -> None:

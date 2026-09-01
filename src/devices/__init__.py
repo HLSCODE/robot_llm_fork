@@ -36,6 +36,7 @@ from .runtime.contracts import (
     PowderDispenser,
     RobotSystem,
     RobotTeleoperation,
+    SelectableCameraSource,
     StoppableDevice,
     ToolChanger,
     ToolRackControl,
@@ -59,6 +60,7 @@ from .runtime.models import (
 )
 from .runtime.resources import ResourceArbiter, ResourceLease
 from .runtime.runtime import DeviceRegistration, DeviceRuntime
+from .cameras import resolve_camera_provider
 
 __all__ = [
     "ArmId",
@@ -103,9 +105,11 @@ __all__ = [
     "ResourceArbiter",
     "ResourceBusyError",
     "ResourceLease",
+    "resolve_camera_provider",
     "RobotOperationError",
     "RobotSystem",
     "RobotTeleoperation",
+    "SelectableCameraSource",
     "StopMode",
     "StoppableDevice",
     "ToolChanger",

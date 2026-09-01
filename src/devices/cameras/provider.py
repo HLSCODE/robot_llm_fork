@@ -17,14 +17,13 @@ class CameraProviderDefinition:
     name: str
     capabilities: frozenset[DeviceCapability]
     create: Callable[[VisionSettings], CameraSource]
+    probe: Callable[[VisionSettings, float, int], tuple[dict[str, object], ...]]
 
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("camera provider name must not be empty")
         if DeviceCapability.CAMERA not in self.capabilities:
-            raise ValueError(
-                f"camera provider '{self.name}' lacks camera capability"
-            )
+            raise ValueError(f"camera provider '{self.name}' lacks camera capability")
 
 
 __all__ = ["CameraProviderDefinition"]

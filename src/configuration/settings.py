@@ -643,6 +643,7 @@ class CameraProfile:
     provider: str
     device_id: str
     label: str = ""
+    required: bool = False
     roles: tuple[str, ...] = ()
     arms: tuple[str, ...] = ()
     capture_rotation_matrix: tuple[float, ...] = ()
@@ -771,6 +772,9 @@ class VisionSettings:
     realsense_jpeg_quality: int = 85
     realsense_align_depth_to_color: bool = True
     camera_encode_fps: int = 5
+    camera_probe_timeout_seconds: float = 2.5
+    camera_probe_max_attempts: int = 2
+    camera_idle_timeout_seconds: float = 10.0
     webcam_width: int = 640
     webcam_height: int = 480
     webcam_fps: int = 30
@@ -835,6 +839,12 @@ class VisionSettings:
     max_attempts: int = 5
 
     def __post_init__(self) -> None:
+        if self.camera_probe_timeout_seconds <= 0:
+            raise ValueError("camera_probe_timeout_seconds must be positive")
+        if self.camera_probe_max_attempts not in {1, 2}:
+            raise ValueError("camera_probe_max_attempts must be 1 or 2")
+        if self.camera_idle_timeout_seconds < 0:
+            raise ValueError("camera_idle_timeout_seconds must not be negative")
         names: set[str] = set()
         devices: set[tuple[str, str]] = set()
         providers: set[str] = set()

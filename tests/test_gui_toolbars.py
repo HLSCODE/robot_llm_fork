@@ -94,7 +94,7 @@ class GuiToolbarTests(unittest.TestCase):
         view.set_camera_test_running(True)
 
         self.assertFalse(view.camera_test_button.isEnabled())
-        self.assertEqual("相机测试运行中", view.camera_test_button.toolTip())
+        self.assertEqual("正在重新检测相机", view.camera_test_button.toolTip())
         view.close()
 
     def test_action_library_context_menu_exposes_item_operations(self) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -220,6 +220,13 @@ class DepthCameraSource(CameraSource, Protocol):
         self,
         camera_name: str | None = None,
     ) -> DepthCameraFrame | None: ...
+
+
+@runtime_checkable
+class SelectableCameraSource(CameraSource, Protocol):
+    """Camera runtime that starts only explicitly selected profiles."""
+
+    def activate(self, camera_names: Sequence[str] = ()) -> dict[str, Any]: ...
 
 
 @runtime_checkable

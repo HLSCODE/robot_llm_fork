@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from ...devices.runtime.ids import BODY_AXIS, MOBILE_BASE, PIPETTE, ROBOT_SYSTEM
+from ...devices.runtime.ids import BODY_AXIS, CAMERA, MOBILE_BASE, PIPETTE, ROBOT_SYSTEM
 
 
 if TYPE_CHECKING:
@@ -141,7 +141,27 @@ class GuiHardwareStartupWorker(QObject):
                 ),
             )
         )
+        if not self._services.simulation:
+            operations.append((CAMERA, self._probe_cameras))
         return tuple(operations)
+
+    def _probe_cameras(self) -> object:
+        status = self._services.camera_access.probe_all()
+        required_failures = tuple(
+            camera
+            for camera in status.cameras
+            if camera.get("required") is True and camera.get("frame_received") is not True
+        )
+        if not required_failures:
+            return status
+        details = "; ".join(
+            f"{camera.get('name', '?')}: {camera.get('error', '未获得有效帧')}"
+            for camera in required_failures
+        )
+        message = "必需相机检测失败"
+        if details:
+            message = f"{message}（{details}）"
+        raise RuntimeError(message)
 
     @staticmethod
     def _run_step(

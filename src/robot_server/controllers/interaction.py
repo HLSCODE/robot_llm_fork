@@ -539,7 +539,13 @@ class InteractionWebSocketHandler:
         return self._server._services.llm.get_chat_client(provider)
 
     def _camera_capture_session(self) -> CameraSession[CameraSource]:
-        return self._server._services.camera_access.open("websocket-voice-capture")
+        camera_name = self._server._services.settings.vision.camera_name_for_role(
+            CameraRole.VISION_CAPTURE
+        )
+        return self._server._services.camera_access.open(
+            "websocket-voice-capture",
+            camera_names=(camera_name,) if camera_name else (),
+        )
 
     def _get_planner_client(self, provider: Optional[str] = None) -> BaseLLMClient:
         return self._server._services.llm.get_planner_client(provider)

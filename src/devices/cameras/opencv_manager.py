@@ -1,7 +1,9 @@
 """OpenCV 本地摄像头管理器 — 采集与流式推送。"""
 
 import logging
+import platform
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from typing import Optional, TypedDict
 
@@ -12,8 +14,10 @@ class _ConfiguredCamera(TypedDict):
     index: int
     name: str
 
+
 try:
     import cv2
+
     _CV_AVAILABLE = True
 except ImportError:
     _CV_AVAILABLE = False
@@ -39,7 +43,7 @@ class OpenCVCameraManager:
         self._height = height
         self._jpeg_quality = jpeg_quality
         self._encode_fps = max(1, encode_fps or fps)
-        self._backend = backend if backend is not None else getattr(cv2, "CAP_DSHOW", 0)
+        self._backend = backend if backend is not None else _default_backend()
 
         self._captures: list[tuple[int, str, "cv2.VideoCapture"]] = []
         self._failed_cameras: list[dict] = []
@@ -61,13 +65,35 @@ class OpenCVCameraManager:
         return self._running
 
     def start(self) -> dict:
+        """Compatibility alias that activates every configured camera."""
+        return self.activate()
+
+    def activate(self, camera_names: Sequence[str] = ()) -> dict:
         if not _CV_AVAILABLE:
             raise RuntimeError("opencv-python 未安装")
+
+        selected_names = {name.strip() for name in camera_names if name.strip()}
+        selected_cameras = [
+            camera
+            for camera in self._cameras
+            if not selected_names
+            or camera["name"] in selected_names
+            or str(camera["index"]) in selected_names
+            or f"webcam:{camera['index']}" in selected_names
+        ]
+        if selected_names and not selected_cameras:
+            raise ValueError(f"unknown camera selection: {', '.join(sorted(selected_names))}")
+        active_names = {name for _index, name, _capture in self._captures}
+        desired_names = {camera["name"] for camera in selected_cameras}
+        if self._running and active_names == desired_names:
+            return {"started": len(self._captures), "failed": 0}
+        if self._running or self._captures:
+            self.stop()
 
         self._captures.clear()
         self._failed_cameras.clear()
 
-        for cam in self._cameras:
+        for cam in selected_cameras:
             index = cam["index"]
             name = cam["name"]
             capture = cv2.VideoCapture(index, self._backend)
@@ -160,3 +186,72 @@ def _normalize_camera(config: Mapping[str, object]) -> _ConfiguredCamera:
     raw_name = config.get("name", "")
     name = str(raw_name) if raw_name else f"webcam-{index}"
     return {"index": index, "name": name}
+
+
+def probe_opencv_cameras(
+    cameras: Sequence[Mapping[str, object]],
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    backend: int | None,
+    timeout_seconds: float,
+    max_attempts: int,
+) -> tuple[dict[str, object], ...]:
+    """Probe local cameras sequentially without encoding frames."""
+    if not _CV_AVAILABLE:
+        raise RuntimeError("opencv-python 未安装")
+    selected_backend = backend if backend is not None else _default_backend()
+    results: list[dict[str, object]] = []
+    for raw_camera in cameras:
+        camera = _normalize_camera(raw_camera)
+        index = camera["index"]
+        name = camera["name"]
+        succeeded = False
+        last_error = "摄像头无法打开"
+        for attempt in range(max_attempts):
+            capture = cv2.VideoCapture(index, selected_backend)
+            try:
+                read_timeout_property = getattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC", None)
+                if read_timeout_property is not None:
+                    capture.set(read_timeout_property, max(1, int(timeout_seconds * 1000)))
+                capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+                capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+                capture.set(cv2.CAP_PROP_FPS, fps)
+                if not capture.isOpened():
+                    last_error = "未连接"
+                else:
+                    deadline = time.monotonic() + timeout_seconds
+                    while time.monotonic() < deadline:
+                        ok, frame = capture.read()
+                        if ok and frame is not None:
+                            succeeded = True
+                            break
+                    if not succeeded:
+                        last_error = f"{timeout_seconds:g} 秒内未获得有效帧"
+            except Exception as exc:
+                last_error = str(exc) or type(exc).__name__
+            finally:
+                capture.release()
+            if succeeded:
+                break
+            if last_error == "未连接":
+                break
+            if attempt + 1 < max_attempts:
+                time.sleep(0.2)
+        results.append(
+            {
+                "serial": f"webcam:{index}",
+                "name": name,
+                "online": succeeded,
+                "frame_received": succeeded,
+                **({} if succeeded else {"error": last_error}),
+            }
+        )
+    return tuple(results)
+
+
+def _default_backend() -> int:
+    if platform.system() == "Windows":
+        return int(getattr(cv2, "CAP_DSHOW", 0))
+    return int(getattr(cv2, "CAP_ANY", 0))

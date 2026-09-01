@@ -47,7 +47,10 @@ class ManagedBalanceCameraCapture:
         self._sleep = sleep
 
     def __call__(self) -> bytes:
-        with self._camera_access.open("balance-reading") as camera:
+        with self._camera_access.open(
+            "balance-reading",
+            camera_names=(self._camera_name,),
+        ) as camera:
             return self._wait_for_frame(camera)
 
     def _wait_for_frame(self, camera: CameraSource) -> bytes:

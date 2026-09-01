@@ -58,6 +58,16 @@ class DeviceHealthView(QWidget):
             self._statuses[key] = (indicator, text)
             status_grid.addWidget(widget, index // 2, index % 2)
         layout.addLayout(status_grid)
+        camera_title = QLabel("相机")
+        camera_title_font = camera_title.font()
+        camera_title_font.setBold(True)
+        camera_title.setFont(camera_title_font)
+        layout.addWidget(camera_title)
+        self._camera_layout = QVBoxLayout()
+        self._camera_layout.setContentsMargins(0, 0, 0, 0)
+        self._camera_layout.setSpacing(4)
+        layout.addLayout(self._camera_layout)
+        self.render_cameras(())
         return panel
 
     @staticmethod
@@ -89,6 +99,37 @@ class DeviceHealthView(QWidget):
             indicator.setStyleSheet(f"background-color: {color}; border-radius: 8px;")
             status_text = "已连接" if ready else "未连接"
             label.setText(f"{_DEVICE_STATUS_TITLES[key]}: {status_text}")
+
+    def render_cameras(self, cameras: tuple[dict[str, object], ...]) -> None:
+        while self._camera_layout.count():
+            item = self._camera_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        if not cameras:
+            label = QLabel("尚未检测")
+            label.setObjectName("cameraStatusEmpty")
+            self._camera_layout.addWidget(label)
+            return
+        for camera in cameras:
+            label_text = str(camera.get("label") or camera.get("name") or "未命名相机")
+            healthy = camera.get("frame_received") is True
+            required = camera.get("required") is True
+            error = str(camera.get("error") or "未获得有效帧")
+            if healthy:
+                status_text = "正常"
+                color = "#22c55e"
+            elif error == "未连接" or "未找到" in error:
+                status_text = "未连接"
+                color = "#ef4444" if required else "#f59e0b"
+            else:
+                status_text = f"启动失败：{error}"
+                color = "#ef4444" if required else "#f59e0b"
+            row = QLabel(f"●  {label_text}：{status_text}")
+            row.setWordWrap(True)
+            row.setStyleSheet(f"color: {color};")
+            row.setToolTip(error if not healthy else f"{label_text} 工作正常")
+            self._camera_layout.addWidget(row)
 
 
 class DevicePoseView(QWidget):

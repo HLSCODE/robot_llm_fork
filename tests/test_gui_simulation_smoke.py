@@ -14,6 +14,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QSizePolicy
 
 from src.application import create_application_services
+from src.application.camera_access import CameraStatus
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.configuration.settings import ApplicationSettings
 from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
@@ -83,6 +84,50 @@ class GuiStartupLifecycleTests(unittest.TestCase):
         message = "\n".join(captured.output)
         self.assertIn("device_id=robot-system", message)
         self.assertIn("RuntimeError: native initialization failed", message)
+
+    def test_optional_camera_failure_does_not_fail_startup_probe(self) -> None:
+        camera_access = unittest.mock.MagicMock()
+        camera_access.probe_all.return_value = CameraStatus(
+            available=True,
+            camera_count=1,
+            cameras=(
+                {"name": "left", "required": True, "frame_received": True},
+                {
+                    "name": "head",
+                    "required": False,
+                    "frame_received": False,
+                    "error": "未连接",
+                },
+            ),
+        )
+        services = unittest.mock.MagicMock()
+        services.camera_access = camera_access
+        worker = GuiHardwareStartupWorker(services, initialize_mobile_base=False)
+
+        status = worker._probe_cameras()
+
+        self.assertIs(status, camera_access.probe_all.return_value)
+
+    def test_required_camera_failure_fails_startup_probe(self) -> None:
+        camera_access = unittest.mock.MagicMock()
+        camera_access.probe_all.return_value = CameraStatus(
+            available=False,
+            camera_count=0,
+            cameras=(
+                {
+                    "name": "right",
+                    "required": True,
+                    "frame_received": False,
+                    "error": "启动失败",
+                },
+            ),
+        )
+        services = unittest.mock.MagicMock()
+        services.camera_access = camera_access
+        worker = GuiHardwareStartupWorker(services, initialize_mobile_base=False)
+
+        with self.assertRaisesRegex(RuntimeError, "right: 启动失败"):
+            worker._probe_cameras()
 
 
 class GuiSimulationSmokeTests(unittest.TestCase):

@@ -48,41 +48,31 @@ class CameraProviderTests(unittest.TestCase):
         ):
             resolve_camera_provider(VisionSettings())
 
-    def test_opencv_provider_rejects_when_no_camera_starts(self) -> None:
+    def test_opencv_provider_is_created_idle(self) -> None:
         manager = MagicMock()
-        manager.start.return_value = {"started": 0, "failed": 1}
-        settings = VisionSettings(
-            cameras=(CameraProfile("fixture", "opencv", "0"),)
-        )
+        settings = VisionSettings(cameras=(CameraProfile("fixture", "opencv", "0"),))
 
-        with (
-            patch(
-                "src.devices.cameras.providers.opencv.OpenCVCameraManager",
-                return_value=manager,
-            ),
-            self.assertRaisesRegex(DeviceInitializationError, "could not start any"),
+        with patch(
+            "src.devices.cameras.providers.opencv.OpenCVCameraManager",
+            return_value=manager,
         ):
-            create_opencv_camera(settings)
+            created = create_opencv_camera(settings)
 
-        manager.stop.assert_called_once_with()
+        self.assertIs(manager, created)
+        manager.start.assert_not_called()
 
-    def test_realsense_provider_rejects_when_no_camera_starts(self) -> None:
+    def test_realsense_provider_is_created_idle(self) -> None:
         manager = MagicMock()
-        manager.start.return_value = {"started": 0, "failed": 1}
-        settings = VisionSettings(
-            cameras=(CameraProfile("fixture", "realsense", "serial"),)
-        )
+        settings = VisionSettings(cameras=(CameraProfile("fixture", "realsense", "serial"),))
 
-        with (
-            patch(
-                "src.devices.cameras.providers.realsense.RealSenseManager",
-                return_value=manager,
-            ),
-            self.assertRaisesRegex(DeviceInitializationError, "could not start any"),
+        with patch(
+            "src.devices.cameras.providers.realsense.RealSenseManager",
+            return_value=manager,
         ):
-            create_realsense_camera(settings)
+            created = create_realsense_camera(settings)
 
-        manager.stop.assert_called_once_with()
+        self.assertIs(manager, created)
+        manager.start.assert_not_called()
 
 
 class DisplayProviderTests(unittest.TestCase):
@@ -117,10 +107,12 @@ class _FakeMobileBaseClient:
 
 class TcpMobileBaseAdapterTests(unittest.TestCase):
     def test_adapter_translates_move_and_ignores_status_updates(self) -> None:
-        client = _FakeMobileBaseClient([
-            {"cmd": 1, "execute": 0.3},
-            {"cmd": 1, "result": True},
-        ])
+        client = _FakeMobileBaseClient(
+            [
+                {"cmd": 1, "execute": 0.3},
+                {"cmd": 1, "result": True},
+            ]
+        )
         adapter = TcpMobileBaseAdapter(client)
 
         self.assertTrue(adapter.move_to_position(4, 2))

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 import unittest
 from contextlib import contextmanager
 from types import ModuleType
@@ -22,6 +23,7 @@ from src.devices import (
     DeviceOperationError,
     DeviceRegistration,
     DeviceRuntime,
+    DeviceState,
     ResourceArbiter,
     ResourceBusyError,
 )
@@ -31,7 +33,193 @@ from src.robot_server.ws_server import RobotWebSocketServer
 from src.voice_interaction import CameraCaptureError, CamerasModuleProvider
 
 
+class _ProbeCamera:
+    def __init__(self) -> None:
+        self._running = True
+        self.activated_names: tuple[str, ...] = ()
+
+    @property
+    def camera_count(self) -> int:
+        return 1 if self._running else 0
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    def start(self) -> dict[str, object]:
+        self._running = True
+        return {"left": True}
+
+    def activate(self, camera_names=()) -> dict[str, object]:
+        self.activated_names = tuple(camera_names)
+        self._running = True
+        return {"started": 1, "failed": 0}
+
+    def stop(self) -> None:
+        self._running = False
+
+    def get_cameras_info(self) -> list[dict[str, object]]:
+        return [{"serial": "001", "name": "left", "online": self._running}]
+
+    def get_latest_jpegs(self) -> list[tuple[str, str, bytes]]:
+        if not self._running:
+            return []
+        return [("001", "left", b"jpeg")]
+
+
 class CameraAccessServiceTests(unittest.TestCase):
+    def test_session_activates_selected_camera_and_closes_after_idle_timeout(self):
+        runtime = DeviceRuntime()
+        resources = ResourceArbiter()
+        camera = _ProbeCamera()
+        runtime.register(
+            DeviceRegistration(
+                device_id=CAMERA,
+                capabilities=frozenset({DeviceCapability.CAMERA}),
+                factory=lambda: camera,
+                close=lambda instance: instance.stop(),
+            )
+        )
+        service = CameraAccessService(
+            runtime,
+            resources,
+            idle_timeout_seconds=0.01,
+        )
+
+        session = service.open("selected", camera_names=("left",))
+        self.assertEqual(("left",), camera.activated_names)
+        session.close()
+
+        deadline = time.monotonic() + 1.0
+        while runtime.snapshot(CAMERA).state is not DeviceState.STOPPED:
+            if time.monotonic() >= deadline:
+                self.fail("camera runtime did not return to STOPPED")
+            time.sleep(0.01)
+        self.assertFalse(camera.is_running)
+
+    def test_provider_probe_does_not_initialize_streaming_runtime(self):
+        runtime = DeviceRuntime()
+        resources = ResourceArbiter()
+        runtime_factory_called = False
+        probe_arguments: list[tuple[float, int]] = []
+
+        def create_camera() -> _ProbeCamera:
+            nonlocal runtime_factory_called
+            runtime_factory_called = True
+            return _ProbeCamera()
+
+        def probe(timeout: float, attempts: int):
+            probe_arguments.append((timeout, attempts))
+            return (
+                {
+                    "serial": "001",
+                    "name": "left",
+                    "online": True,
+                    "frame_received": True,
+                },
+            )
+
+        runtime.register(
+            DeviceRegistration(
+                device_id=CAMERA,
+                capabilities=frozenset({DeviceCapability.CAMERA}),
+                factory=create_camera,
+                close=lambda camera: camera.stop(),
+            )
+        )
+        service = CameraAccessService(
+            runtime,
+            resources,
+            configured_cameras=(
+                {
+                    "serial": "001",
+                    "name": "left",
+                    "label": "左臂相机",
+                    "required": True,
+                },
+            ),
+            probe=probe,
+            probe_timeout_seconds=2.5,
+            probe_max_attempts=2,
+        )
+
+        status = service.probe_all()
+
+        self.assertFalse(runtime_factory_called)
+        self.assertEqual([(2.5, 2)], probe_arguments)
+        self.assertEqual(DeviceState.STOPPED, runtime.snapshot(CAMERA).state)
+        self.assertEqual("左臂相机", status.cameras[0]["label"])
+        self.assertTrue(status.cameras[0]["required"])
+
+    def test_probe_all_stops_pipeline_and_caches_health_snapshot(self):
+        runtime = DeviceRuntime()
+        resources = ResourceArbiter()
+        instances: list[_ProbeCamera] = []
+
+        def create_camera() -> _ProbeCamera:
+            camera = _ProbeCamera()
+            instances.append(camera)
+            return camera
+
+        runtime.register(
+            DeviceRegistration(
+                device_id=CAMERA,
+                capabilities=frozenset({DeviceCapability.CAMERA}),
+                factory=create_camera,
+                close=lambda camera: camera.stop(),
+            )
+        )
+        service = CameraAccessService(
+            runtime,
+            resources,
+            configured_cameras=({"serial": "001", "name": "left"},),
+        )
+
+        status = service.probe_all(frame_timeout_seconds=0.1)
+
+        self.assertTrue(status.available)
+        self.assertEqual(1, status.camera_count)
+        self.assertTrue(status.cameras[0]["frame_received"])
+        self.assertFalse(instances[0].is_running)
+        self.assertEqual(DeviceState.STOPPED, runtime.snapshot(CAMERA).state)
+        self.assertIsNone(resources.owner_of(CAMERA))
+        self.assertEqual(status, service.status())
+
+        session = service.open("after-probe")
+        self.assertEqual(2, len(instances))
+        self.assertTrue(session.camera.is_running)
+        session.close()
+        runtime.shutdown(CAMERA)
+
+    def test_probe_failure_returns_runtime_to_stopped_and_releases_lease(self):
+        runtime = DeviceRuntime()
+        resources = ResourceArbiter()
+
+        def fail_to_create_camera() -> _ProbeCamera:
+            raise RuntimeError("offline")
+
+        runtime.register(
+            DeviceRegistration(
+                device_id=CAMERA,
+                capabilities=frozenset({DeviceCapability.CAMERA}),
+                factory=fail_to_create_camera,
+                close=lambda _camera: None,
+            )
+        )
+        service = CameraAccessService(
+            runtime,
+            resources,
+            configured_cameras=({"serial": "001", "name": "left"},),
+        )
+
+        with self.assertRaises(DeviceOperationError):
+            service.probe_all(frame_timeout_seconds=0.1)
+
+        self.assertEqual(DeviceState.STOPPED, runtime.snapshot(CAMERA).state)
+        self.assertIsNone(resources.owner_of(CAMERA))
+        self.assertFalse(service.status().available)
+        self.assertTrue(service.status().cameras[0]["error"])
+
     def test_status_returns_presentation_safe_snapshot(self):
         services = create_application_services(
             ApplicationSettings.defaults(),

@@ -33,7 +33,6 @@ from ...application import (
     CompositionRevisionConflict,
     WorkflowCompilationError,
 )
-from ...application.camera_access import CameraSession
 from ...configuration.settings import CameraRole
 from ...domain.models import (
     ActionDefinition,
@@ -46,9 +45,10 @@ from ...domain.models import (
     SubworkflowBlock,
 )
 from ...domain.workflow import WorkflowDocument
-from ...devices import CameraSource, DepthCameraSource, StopMode
+from ...devices import StopMode
 from ...devices.runtime.ids import (
     BODY_AXIS,
+    CAMERA,
     MOBILE_BASE,
     PIPETTE,
     ROBOT_SYSTEM,
@@ -334,6 +334,7 @@ class MainWindow(RoundedMainWindow):
             MOBILE_BASE: (66, "正在连接移动底盘..."),
             BODY_AXIS: (76, "正在初始化身体控制器..."),
             PIPETTE: (88, "正在初始化移液枪..."),
+            CAMERA: (94, "正在检测全部相机..."),
         }
         percent, message = progress.get(device_id, (60, "正在初始化设备..."))
         self.startup_progress_changed.emit(percent, message, "")
@@ -349,6 +350,7 @@ class MainWindow(RoundedMainWindow):
             MOBILE_BASE: 74,
             BODY_AXIS: 86,
             PIPETTE: 94,
+            CAMERA: 96,
         }
         state = "完成" if result.succeeded else "不可用，稍后可在主界面重试"
         self.startup_progress_changed.emit(
@@ -391,6 +393,7 @@ class MainWindow(RoundedMainWindow):
             MOBILE_BASE: "移动底盘",
             BODY_AXIS: "身体控制器",
             PIPETTE: "移液枪",
+            CAMERA: "相机",
         }.get(device_id, device_id)
 
     def init_ui(self) -> None:
@@ -550,6 +553,7 @@ class MainWindow(RoundedMainWindow):
             ("基础控制", "controls"),
             ("运行日志", "logs"),
         ):
+
             def toggle_panel(
                 _checked: bool = False,
                 *,
@@ -578,6 +582,7 @@ class MainWindow(RoundedMainWindow):
             ("view.theme_light", "浅色", ThemeMode.LIGHT),
             ("view.theme_dark", "深色", ThemeMode.DARK),
         ):
+
             def apply_theme(
                 _checked: bool = False,
                 *,
@@ -936,6 +941,7 @@ class MainWindow(RoundedMainWindow):
     def _render_device_state(self) -> None:
         state = self._device_view_model.snapshot()
         self.device_status_view.render_state(state)
+        self.device_status_view.render_cameras(self._services.camera_access.status().cameras)
         self.workbench_view.status_bar.render_device_state(state)
         self.device_control_view.render_state(state)
 
@@ -1111,6 +1117,7 @@ class MainWindow(RoundedMainWindow):
 
         name = name.strip() or default_name
         from uuid import uuid4
+
         action = ActionDefinition(
             id=str(uuid4()),
             name=name,
@@ -1361,7 +1368,7 @@ class MainWindow(RoundedMainWindow):
             if not ok:
                 return None
             return ActionType.WAIT if selected == "等待" else ActionType.MANIPULATE
-        
+
         # 移动类 Tab 需要选择具体类型
         if category is ActionType.MOVE:
             options = [
@@ -1955,8 +1962,7 @@ class MainWindow(RoundedMainWindow):
 
     def test_camera(self) -> None:
         """
-        通过 DeviceRuntime 测试相机（与视觉抓取使用同一实例）。
-        在独立 QThread 中运行，避免阻塞 UI。
+        在后台逐路验证已配置相机，完成后关闭全部采集管线。
         """
         self.action_library_view.set_camera_test_running(True)
 
@@ -1968,101 +1974,33 @@ class MainWindow(RoundedMainWindow):
                 self._services = services
 
             def run(self) -> None:
-                camera_name = (
-                    self._services.settings.vision.camera_name_for_role(
-                        CameraRole.VISION_CAPTURE
-                    )
-                    or None
-                )
-                session: CameraSession[CameraSource] | None = None
-
                 try:
-                    session = self._services.camera_access.open(
-                        "gui-test"
-                    )
-                    mgr = session.camera
-
-                    # 等待至少一路相机上线
-                    deadline = time.time() + 10
-                    online: list[dict[str, Any]] = []
-                    while (
-                        time.time() < deadline
-                        and not self.isInterruptionRequested()
-                    ):
-                        info = mgr.get_cameras_info()
-                        online = [c for c in info if c.get("online")]
-                        if online:
-                            break
-                        time.sleep(0.3)
-                    else:
-                        if self.isInterruptionRequested():
-                            return
-                        all_info = mgr.get_cameras_info()
-                        errors = []
-                        for c in all_info:
-                            if not c.get("online"):
-                                errors.append(f"{c.get('name', '?')}: {c.get('error', '未知')}")
-                        if errors:
-                            self.result.emit(False, f"相机启动失败: {'; '.join(errors)}")
-                        else:
-                            self.result.emit(False, "未检测到在线相机")
-                        return
-
-                    # 尝试取帧
-                    deadline = time.time() + 10
-                    while (
-                        time.time() < deadline
-                        and not self.isInterruptionRequested()
-                    ):
-                        if isinstance(mgr, DepthCameraSource):
-                            frame = mgr.get_latest_depth_frame(camera_name)
-                            if frame is not None:
-                                height, width = frame.color_bgr.shape[:2]
-                                center_depth_units = float(
-                                    frame.depth_uint16[height // 2, width // 2]
-                                )
-                                center_distance_metres = (
-                                    center_depth_units * frame.depth_scale_metres
-                                )
-                                serial_text = (
-                                    f" SN={frame.camera_serial}"
-                                    if frame.camera_serial
-                                    else ""
-                                )
-                                message = (
-                                    f"成功: 彩色={width}x{height}  "
-                                    f"深度(中心)={center_distance_metres:.3f}m  "
-                                    f"(相机={frame.camera_name}{serial_text})"
-                                )
-                                self.result.emit(True, message)
-                                return
-                        else:
-                            # OpenCV / Webcam：取 JPEG 帧
-                            jpegs = mgr.get_latest_jpegs()
-                            if jpegs:
-                                if camera_name:
-                                    matched = [(n, len(b)) for s, n, b in jpegs if n == camera_name]
-                                    if matched:
-                                        self.result.emit(True, f"成功: webcam 已取到帧 (相机={matched[0][0]}, {matched[0][1]} bytes)")
-                                        return
-                                else:
-                                    name = jpegs[0][1]
-                                    self.result.emit(True, f"成功: webcam 已取到帧 (相机={name})")
-                                    return
-                        time.sleep(0.2)
-
-                    if self.isInterruptionRequested():
-                        return
-                    self.result.emit(False, "取帧超时（10 秒内未获得有效帧）")
+                    status = self._services.camera_access.probe_all()
+                    healthy = [
+                        str(camera.get("name", "?"))
+                        for camera in status.cameras
+                        if camera.get("frame_received")
+                    ]
+                    failed = [
+                        f"{camera.get('name', '?')}: {camera.get('error', '未获得帧')}"
+                        for camera in status.cameras
+                        if not camera.get("frame_received")
+                    ]
+                    summary = f"正常 {len(healthy)} 路"
+                    if healthy:
+                        summary += f" ({', '.join(healthy)})"
+                    if failed:
+                        summary += f"；异常 {len(failed)} 路 ({'; '.join(failed)})"
+                    self.result.emit(status.available, summary)
+                    return
 
                 except Exception as e:
                     self.result.emit(False, f"测试异常: {str(e)}")
-                finally:
-                    if session is not None:
-                        session.close()
+                    return
 
         def on_result(success: bool, msg: str) -> None:
             message = f"[相机测试] {msg}"
+            self._render_device_state()
             if success:
                 self._notifications.info(message)
             else:

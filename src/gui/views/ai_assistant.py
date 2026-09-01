@@ -2,6 +2,7 @@
 AI助手 Tab 组件
 提供基于大模型的自然语言动作规划和执行功能
 """
+
 import asyncio
 import logging
 from collections.abc import Callable, Coroutine
@@ -216,6 +217,7 @@ class AIAssistantWidget(QWidget):
     AI助手 Tab 组件
     提供自然语言交互和动作序列预览功能
     """
+
     speech_runtime_startup_finished = Signal(bool)
     welcome_workflow_execution_requested = Signal(str)
     sequence_visualization_requested = Signal(object, bool, int)
@@ -297,7 +299,11 @@ class AIAssistantWidget(QWidget):
         self._voice_timeout_timer.start()
 
     def _camera_capture_session(self) -> AbstractContextManager[object]:
-        return self._services.camera_access.open("gui-voice-capture")
+        camera_name = self._services.settings.vision.camera_name_for_role(CameraRole.VISION_CAPTURE)
+        return self._services.camera_access.open(
+            "gui-voice-capture",
+            camera_names=(camera_name,) if camera_name else (),
+        )
 
     def _init_ui(self) -> None:
         """初始化UI"""

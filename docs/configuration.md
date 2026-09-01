@@ -172,12 +172,16 @@ websocket_allowed_origins = []
 [vision]
 realsense_color_width = 1920
 realsense_color_height = 1080
+camera_probe_timeout_seconds = 2.5
+camera_probe_max_attempts = 2
+camera_idle_timeout_seconds = 10.0
 
 [[vision.cameras]]
 name = "monitor1"
 label = "左臂视觉相机"
 provider = "realsense"
 device_id = "419522071147"
+required = true
 roles = ["vision_capture", "robot_grasp"]
 arms = ["left"]
 capture_rotation_matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0]
@@ -213,6 +217,8 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 - `label`：GUI 下拉列表显示名，留空时回退为 `name`；
 - `provider`：当前支持 `realsense` 或 `opencv`；
 - `device_id`：RealSense 序列号，或 OpenCV 数字设备索引（使用字符串书写）；
+- `required`：是否为启动必需相机。必需相机检测失败会显示醒目警告；可选相机失败只记录
+  离线状态，不阻止应用进入就绪状态；
 - `roles`：可包含 `vision_capture`（通用图像/视觉问答）、`robot_grasp`（带机器人标定的视觉抓取）、`balance`、`relocalization`；相同用途的第一个 profile 是默认相机；
 - `arms`：可包含 `left`、`right`，用于为重定位等用途指定机械臂；
 - `capture_rotation_matrix`、`capture_translation_vector`、`capture_gripper_offset`：
@@ -227,6 +233,13 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 当前统一相机运行时一次装配一个 provider，因此同一部署的所有 profile 必须使用相同
 `provider`。界面列举相机只读取配置快照，不会为了打开下拉列表而连接硬件。
 OpenCV provider 目前只提供彩色帧，不能声明需要深度帧的 `robot_grasp` role；配置加载时会明确拒绝这种组合。
+
+真实设备启动后会在后台按配置顺序逐台执行轻量健康检查。未连接设备不重试；已连接但
+启动或取帧失败时最多按 `camera_probe_max_attempts` 尝试两次，每次等待时间由
+`camera_probe_timeout_seconds` 控制。检查过程只读取单帧，不做深度对齐、JPEG 编码或
+多画面拼接，并在每台检查完成后释放管线。实际视觉任务只启动所需相机，任务结束后短期
+复用，并在 `camera_idle_timeout_seconds` 的空闲期结束后关闭。GUI 中的“重新检测相机”
+执行同一套后台检查并刷新设备状态。
 
 视觉调试图片与运行清单默认保存到 `data/vision/debug`。可通过
 `vision_debug_save_dir` 覆盖该位置；相对路径以项目根目录为基准，运行产物会按视觉操作和

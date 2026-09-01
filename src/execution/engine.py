@@ -1,6 +1,6 @@
 """Synchronous action engine used exclusively by ExecutionManager."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import Any
@@ -25,6 +25,7 @@ from ..domain.execution_plan import (
 )
 from ..devices import DeviceNotRegisteredError, DeviceRuntime
 from ..configuration.settings import (
+    CameraRole,
     DeviceSettings,
     ExecutionSettings,
     VisionSettings,
@@ -70,6 +71,7 @@ from .handlers import (
     WaitActionHandler,
     create_manipulation_handler,
 )
+from .handlers.vision import CameraRuntimeControl
 from .manager import EngineCallbacks
 from .models import EngineResult, ParallelResourceConflictError
 from ..vision.service import VisionService
@@ -95,11 +97,13 @@ class ActionEngine:
         execution_context: ExecutionContext,
         vision_service: VisionService,
         *,
+        camera_runtime: CameraRuntimeControl | None = None,
         robot_profile_id: str = "unscoped",
     ) -> None:
         self._device_runtime = device_runtime
         self.execution_context = execution_context
         self._vision_service = vision_service
+        self._camera_runtime = camera_runtime
         self._robot_profile_id = normalize_robot_profile_id(robot_profile_id)
         self._callbacks: EngineCallbacks | None = None
         self._default_action_timeout_seconds = execution_settings.execution_action_timeout_seconds
@@ -203,6 +207,8 @@ class ActionEngine:
             VisionCaptureActionHandler(
                 self._device_runtime,
                 self._vision_service,
+                self._camera_runtime,
+                self._capture_camera_name,
             ),
             resolve_vision_capture_control_policy,
         )
@@ -211,6 +217,8 @@ class ActionEngine:
             VisionRelocalizationActionHandler(
                 self._device_runtime,
                 self._vision_service,
+                self._camera_runtime,
+                self._relocalization_camera_name,
             ),
             resolve_vision_relocalization_control_policy,
         )
@@ -225,6 +233,21 @@ class ActionEngine:
         registry.validate_complete()
         return registry
 
+    def _capture_camera_name(self, parameters: Mapping[str, Any]) -> str:
+        target = str(parameters.get("目标机械臂", "robot1")).strip().lower()
+        arm = "right" if target in {"robot2", "right", "r2", "2"} else "left"
+        return self._vision_settings.require_camera_for_role(
+            CameraRole.ROBOT_GRASP,
+            arm=arm,
+        ).name
+
+    def _relocalization_camera_name(self, parameters: Mapping[str, Any]) -> str:
+        return self._vision_settings.require_camera_for_role(
+            CameraRole.RELOCALIZATION,
+            arm=str(parameters.get("arm", "left")),
+            camera_name=str(parameters.get("camera_name", "")),
+        ).name
+
     def run(
         self,
         plan: ExecutionPlan,
@@ -235,10 +258,7 @@ class ActionEngine:
         self._require_plan_profile(plan)
         self._callbacks = callbacks
         self.execution_context.clear()
-        identities = {
-            identity.path: identity
-            for identity, _item in iter_execution_steps(plan)
-        }
+        identities = {identity.path: identity for identity, _item in iter_execution_steps(plan)}
         try:
             return self._execute_sequence(
                 plan.root,
@@ -364,10 +384,7 @@ class ActionEngine:
         *,
         path: str,
     ) -> EngineResult:
-        branch_controls = {
-            branch.branch_id: control.child()
-            for branch in node.branches
-        }
+        branch_controls = {branch.branch_id: control.child() for branch in node.branches}
         results: dict[str, EngineResult] = {}
         with ThreadPoolExecutor(
             max_workers=len(node.branches),
@@ -396,8 +413,10 @@ class ActionEngine:
                         error_operation="execution.parallel.branch",
                     )
                 results[branch_id] = result
-                state = "completed" if result.success else (
-                    "cancelled" if result.cancelled else "failed"
+                state = (
+                    "completed"
+                    if result.success
+                    else ("cancelled" if result.cancelled else "failed")
                 )
                 self._on_parallel_branch(
                     node.parallel_id,
@@ -414,8 +433,7 @@ class ActionEngine:
         failures = [
             results[branch.branch_id]
             for branch in node.branches
-            if not results[branch.branch_id].success
-            and not results[branch.branch_id].cancelled
+            if not results[branch.branch_id].success and not results[branch.branch_id].cancelled
         ]
         return failures[0] if failures else EngineResult(success=True)
 
@@ -424,10 +442,14 @@ class ActionEngine:
         node: ExecutionSequence | ExecutionNode,
     ) -> tuple[str, ...]:
         if isinstance(node, ExecutionAction):
-            return tuple(dict.fromkeys(self._handler_registry.control_policy(
-                node.item.definition.type,
-                node.item.definition.parameters,
-            ).device_ids))
+            return tuple(
+                dict.fromkeys(
+                    self._handler_registry.control_policy(
+                        node.item.definition.type,
+                        node.item.definition.parameters,
+                    ).device_ids
+                )
+            )
         if isinstance(node, ExecutionSequence):
             resources: list[str] = []
             for child in node.children:
@@ -439,10 +461,7 @@ class ActionEngine:
             return self._node_resources(node.body)
         if isinstance(node, ExecutionSubworkflow):
             return self._node_resources(node.body)
-        branch_resources = [
-            self._node_resources(branch.body)
-            for branch in node.branches
-        ]
+        branch_resources = [self._node_resources(branch.body) for branch in node.branches]
         for left_index, left in enumerate(branch_resources):
             for right_index in range(left_index + 1, len(branch_resources)):
                 overlap = set(left) & set(branch_resources[right_index])

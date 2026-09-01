@@ -98,6 +98,10 @@ realsense_jpeg_quality = 85
 realsense_align_depth_to_color = true
 # 向网络/视觉消费者编码图像的目标帧率。
 camera_encode_fps = 5
+# 启动健康检查逐台执行：单台取帧超时、最大尝试次数（1 或 2）以及业务结束后的空闲关闭时间。
+camera_probe_timeout_seconds = 2.5
+camera_probe_max_attempts = 2
+camera_idle_timeout_seconds = 10.0
 # 普通摄像头分辨率、帧率和 JPEG 质量（0-100）。
 webcam_width = 640
 webcam_height = 480
@@ -171,6 +175,7 @@ name = "monitor1"
 label = "左臂视觉相机"
 provider = "realsense"
 device_id = "153122077516"
+required = true
 roles = ["vision_capture", "robot_grasp", "relocalization"]
 arms = ["left"]
 capture_rotation_matrix = [0.00215684, 0.97503835, 0.22202606, -0.99995231, -1.19e-05, 0.00976617, 0.00952503, -0.22203654, 0.97499182]
@@ -191,6 +196,7 @@ name = "monitor2"
 label = "右臂视觉相机"
 provider = "realsense"
 device_id = "405622075165"
+required = true
 roles = ["relocalization"]
 arms = ["right"]
 camera_matrix = [1361.8900146484375, 0.0, 930.7236938476562, 0.0, 1361.31640625, 547.1578979492188, 0.0, 0.0, 1.0]
@@ -208,6 +214,7 @@ name = "monitor3"
 label = "头部视觉相机"
 provider = "realsense"
 device_id = "145422072751"
+required = false
 roles = []
 arms = []
 
@@ -216,6 +223,7 @@ name = "monitor4"
 label = "胸部视觉相机"
 provider = "realsense"
 device_id = "145422072193"
+required = false
 roles = []
 arms = []
 

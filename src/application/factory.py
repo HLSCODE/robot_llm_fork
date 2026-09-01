@@ -10,6 +10,7 @@ from ..devices import (
     ArmTelemetryReader,
     DepthCameraSource,
     ResourceArbiter,
+    resolve_camera_provider,
 )
 from ..devices.runtime.factory import create_device_runtime
 from ..execution.engine import ActionEngine
@@ -76,13 +77,39 @@ def create_application_services(
     workflow_editing = WorkflowEditingSession(composition)
     device_runtime = create_device_runtime(settings, simulation=simulation)
     resources = ResourceArbiter()
+    camera_provider = None if simulation else resolve_camera_provider(settings.vision)
     llm = LLMRegistry.from_settings(
         settings.llm,
         settings.secrets,
         settings.llm_providers,
         model_routing=settings.model_routing,
     )
-    camera_access = CameraAccessService(device_runtime, resources)
+    camera_access = CameraAccessService(
+        device_runtime,
+        resources,
+        configured_cameras=tuple(
+            {
+                "serial": profile.device_id,
+                "name": profile.name,
+                "label": profile.display_label,
+                "required": profile.required,
+                "roles": profile.roles,
+            }
+            for profile in settings.vision.cameras
+        ),
+        probe=(
+            None
+            if camera_provider is None
+            else lambda timeout, attempts: camera_provider.probe(
+                settings.vision,
+                timeout,
+                attempts,
+            )
+        ),
+        probe_timeout_seconds=settings.vision.camera_probe_timeout_seconds,
+        probe_max_attempts=settings.vision.camera_probe_max_attempts,
+        idle_timeout_seconds=settings.vision.camera_idle_timeout_seconds,
+    )
     register_balance_reader(
         device_runtime,
         camera_access,
@@ -102,9 +129,7 @@ def create_application_services(
         settings.vision,
         execution_context,
         capture_pipeline=vision_fixture.capture if vision_fixture else None,
-        relocalization_pipeline=(
-            vision_fixture.relocalize if vision_fixture else None
-        ),
+        relocalization_pipeline=(vision_fixture.relocalize if vision_fixture else None),
     )
     engine = ActionEngine(
         device_runtime,
@@ -114,6 +139,7 @@ def create_application_services(
         external_localization.latest,
         execution_context,
         vision,
+        camera_runtime=None if simulation else camera_access,
         robot_profile_id=robot_profile_id,
     )
     manager = ExecutionManager(

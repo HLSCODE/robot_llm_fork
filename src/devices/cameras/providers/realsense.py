@@ -2,15 +2,10 @@
 
 from __future__ import annotations
 
-import logging
-
 from ....configuration.settings import VisionSettings
 from ...runtime.models import DeviceCapability, DeviceInitializationError
 from ..provider import CameraProviderDefinition
-from ..realsense_manager import RealSenseManager
-
-logger = logging.getLogger(__name__)
-
+from ..realsense_manager import RealSenseManager, probe_realsense_cameras
 
 def create_realsense_camera(settings: VisionSettings) -> RealSenseManager:
     profiles = settings.camera_profiles_for_provider("realsense")
@@ -39,24 +34,31 @@ def create_realsense_camera(settings: VisionSettings) -> RealSenseManager:
         align_depth_to_color=settings.realsense_align_depth_to_color,
         encode_fps=settings.camera_encode_fps,
     )
-    result = manager.start()
-    if int(result["started"]) <= 0:
-        manager.stop()
-        raise DeviceInitializationError(
-            "RealSense camera provider could not start any configured camera"
-        )
-    logger.info(
-        "RealSense camera provider started: %d online, %d failed",
-        result["started"],
-        result["failed"],
-    )
     return manager
+
+
+def probe_realsense_provider(
+    settings: VisionSettings,
+    timeout_seconds: float,
+    max_attempts: int,
+) -> tuple[dict[str, object], ...]:
+    profiles = settings.camera_profiles_for_provider("realsense")
+    fps = settings.realsense_fps or (30 if len(profiles) <= 2 else 15)
+    return probe_realsense_cameras(
+        tuple({"serial": profile.device_id, "name": profile.name} for profile in profiles),
+        width=settings.realsense_color_width,
+        height=settings.realsense_color_height,
+        fps=fps,
+        timeout_seconds=timeout_seconds,
+        max_attempts=max_attempts,
+    )
 
 
 REALSENSE_CAMERA_PROVIDER = CameraProviderDefinition(
     name="realsense",
     capabilities=frozenset({DeviceCapability.CAMERA}),
     create=create_realsense_camera,
+    probe=probe_realsense_provider,
 )
 
 __all__ = ["REALSENSE_CAMERA_PROVIDER", "create_realsense_camera"]
