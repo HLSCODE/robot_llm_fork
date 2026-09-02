@@ -11,6 +11,8 @@ from .json_documents import (
     CollectionDocumentSpec,
     JsonDocumentSchemaError,
     load_collection_document,
+    migrate_collection_document,
+    read_json_document,
     write_collection_document,
 )
 
@@ -65,24 +67,57 @@ class VisionStationStorage:
         path = self._stations_file
         if not path.is_file():
             return []
-        loaded = load_collection_document(path, _STATION_DOCUMENT)
-        if loaded.requires_migration:
+        collection, requires_migration = self._load_collection(path)
+        if requires_migration:
             raise JsonDocumentSchemaError(
-                f"{path.name} uses an unversioned legacy vision-station schema"
+                f"{path.name} requires data migration; run 'robot-init migrate-data'"
             )
+        return self._normalize_collection(collection, require_version_fields=True)
+
+    def migrate_legacy_document(self) -> bool:
+        """Upgrade a recognized legacy document during explicit data initialization."""
+        path = self._stations_file
+        if not path.is_file():
+            return False
+        collection, requires_migration = self._load_collection(path)
+        if not requires_migration:
+            return False
+        profiles = self._normalize_collection(collection, require_version_fields=False)
+        migrate_collection_document(path, _STATION_DOCUMENT, profiles)
+        return True
+
+    def _normalize_collection(
+        self,
+        collection: list[Any],
+        *,
+        require_version_fields: bool,
+    ) -> list[dict[str, Any]]:
         profiles: list[dict[str, Any]] = []
-        for index, item in enumerate(loaded.collection):
+        for index, item in enumerate(collection):
             if not isinstance(item, dict):
                 raise JsonDocumentSchemaError(
                     f"vision station profile at index {index} must be an object"
                 )
-            for field in ("profile_version", "model_version", "calibration_version"):
-                if field not in item:
-                    raise JsonDocumentSchemaError(
-                        f"vision station profile at index {index} is missing {field}"
-                    )
+            if require_version_fields:
+                for field in ("profile_version", "model_version", "calibration_version"):
+                    if field not in item:
+                        raise JsonDocumentSchemaError(
+                            f"vision station profile at index {index} is missing {field}"
+                        )
             profiles.append(self._normalize_profile(item))
         return profiles
+
+    @staticmethod
+    def _load_collection(path: Path) -> tuple[list[Any], bool]:
+        try:
+            loaded = load_collection_document(path, _STATION_DOCUMENT)
+        except JsonDocumentSchemaError as error:
+            document = read_json_document(path)
+            legacy = _legacy_station_profiles(document, path.name)
+            if legacy is None:
+                raise error
+            return legacy, True
+        return loaded.collection, loaded.requires_migration
 
     def save_profiles(self, profiles: list[dict[str, Any]]) -> None:
         self.ensure_directories()
@@ -183,3 +218,22 @@ class VisionStationStorage:
             marker["height"] = float(marker["height"])
             normalized["marker"] = marker
         return normalized
+
+
+def _legacy_station_profiles(document: Any, filename: str) -> list[Any] | None:
+    """Recognize the pre-schema station wrapper without accepting arbitrary JSON."""
+    if not isinstance(document, dict) or "schema" in document:
+        return None
+    if not set(document).issubset({"version", "profiles"}) or "profiles" not in document:
+        return None
+    version = document.get("version", 1)
+    if isinstance(version, bool) or version != 1:
+        raise JsonDocumentSchemaError(
+            f"{filename} legacy version {version!r} is unsupported; expected 1"
+        )
+    profiles = document["profiles"]
+    if not isinstance(profiles, list):
+        raise JsonDocumentSchemaError(
+            f"{filename} legacy field 'profiles' must be a JSON array"
+        )
+    return profiles

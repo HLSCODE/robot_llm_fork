@@ -33,6 +33,7 @@ class WizardStage(str, Enum):
 
 _STEP_DESCRIPTIONS = {
     InitializationStep.CONFIGURATION: "从 example 增量创建配置，不覆盖本机修改",
+    InitializationStep.DATA_MIGRATION: "初始化数据目录并显式迁移旧版数据",
     InitializationStep.DEPENDENCIES: "按选择的功能执行 uv sync",
     InitializationStep.ASR_MODELS: "准备 FunASR、VAD 和标点模型",
     InitializationStep.KWS_MODEL: "下载并检查 sherpa-onnx 唤醒词模型",

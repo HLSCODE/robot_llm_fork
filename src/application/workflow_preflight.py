@@ -109,7 +109,7 @@ class WorkflowPreflightService:
                     )
                 )
                 continue
-            if not status.get("ready", False):
+            if not status.get("available", status.get("ready", False)):
                 issues.append(
                     WorkflowPreflightIssue(
                         WorkflowPreflightIssueCode.DEVICE_NOT_READY,

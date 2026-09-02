@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import sys
 import time
@@ -238,6 +239,46 @@ class CameraAccessServiceTests(unittest.TestCase):
         self.assertGreater(status.camera_count, 0)
         self.assertEqual(status.camera_count, len(status.cameras))
         session.close()
+        self.assertFalse(services.devices.shutdown_all())
+
+    def test_successfully_probed_idle_camera_is_available_to_preflight(self):
+        defaults = ApplicationSettings.defaults()
+        services = create_application_services(
+            replace(
+                defaults,
+                vision=replace(defaults.vision, camera_idle_timeout_seconds=0.0),
+            ),
+            simulation=True,
+        )
+
+        session = services.camera_access.open("idle-availability-test")
+        camera_status = services.camera_access.status()
+        session.close()
+        deadline = time.monotonic() + 1.0
+        while (
+            services.devices.status()[CAMERA]["state"] != DeviceState.STOPPED.value
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.01)
+        device_status = services.devices.status()[CAMERA]
+
+        self.assertTrue(camera_status.available)
+        self.assertEqual(DeviceState.STOPPED.value, device_status["state"])
+        self.assertFalse(device_status["ready"])
+        self.assertTrue(device_status["available"])
+        vision_item = SequenceItem.from_definition(
+            ActionDefinition(
+                id="idle-camera-vision",
+                name="idle-camera-vision",
+                type=ActionType.VISION_CAPTURE,
+                parameters={},
+            )
+        )
+        preflight = services.workflow_preflight.check_entries((vision_item,))
+        self.assertFalse(
+            any(issue.resource_id == CAMERA for issue in preflight.issues),
+            preflight.issues,
+        )
         self.assertFalse(services.devices.shutdown_all())
 
     def test_camera_session_only_blocks_sequences_that_need_camera(self):

@@ -21,6 +21,7 @@ from .initialization import (
 
 DEFAULT_STEPS = (
     InitializationStep.CONFIGURATION,
+    InitializationStep.DATA_MIGRATION,
     InitializationStep.DEPENDENCIES,
     InitializationStep.VALIDATION,
 )
@@ -29,7 +30,10 @@ DEFAULT_EXTRAS = ("gui", "server", "ai")
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the complete initializer, using Textual when attached to a terminal."""
-    arguments = _build_parser().parse_args(argv)
+    raw_arguments = list(argv) if argv is not None else sys.argv[1:]
+    if raw_arguments and raw_arguments[0] == "migrate-data":
+        return _run_data_migration_command(raw_arguments[1:])
+    arguments = _build_parser().parse_args(raw_arguments)
     try:
         plan = _plan_from_arguments(arguments)
     except ValueError as exc:
@@ -83,7 +87,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--steps",
         default=",".join(step.value for step in DEFAULT_STEPS),
-        help="逗号分隔的步骤：configuration,dependencies,asr_models,kws_model,validation",
+        help=(
+            "逗号分隔的步骤：configuration,data_migration,dependencies,"
+            "asr_models,kws_model,validation"
+        ),
     )
     parser.add_argument(
         "--extras",
@@ -139,6 +146,23 @@ def _run_plain(plan: InitializationPlan) -> int:
 
     results = InitializationRunner(report).run(plan)
     return 1 if any(result.status is StepStatus.FAILED for result in results) else 0
+
+
+def _run_data_migration_command(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="robot-init migrate-data",
+        description="显式初始化数据目录并迁移受支持的旧版数据。",
+    )
+    parser.add_argument("--project-root", type=Path, default=Path.cwd())
+    parser.add_argument("--dry-run", action="store_true", help="仅展示步骤，不写入数据。")
+    arguments = parser.parse_args(argv)
+    return _run_plain(
+        InitializationPlan(
+            project_root=arguments.project_root.resolve(),
+            steps=(InitializationStep.DATA_MIGRATION,),
+            dry_run=arguments.dry_run,
+        )
+    )
 
 
 def _run_textual(initial_plan: InitializationPlan) -> int:

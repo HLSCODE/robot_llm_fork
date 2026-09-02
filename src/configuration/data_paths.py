@@ -28,10 +28,13 @@ class ApplicationDataPaths:
         cls,
         settings: DataSettings,
         robot_profile_id: str = "unscoped",
+        *,
+        project_root: Path | None = None,
     ) -> ApplicationDataPaths:
+        base = (project_root or PROJECT_ROOT).resolve()
         root = _resolve_path(
             settings.robot_data_dir,
-            base=PROJECT_ROOT,
+            base=base,
         )
         profile_id = normalize_robot_profile_id(robot_profile_id)
         profile_root = root / "profiles" / profile_id
@@ -42,31 +45,36 @@ class ApplicationDataPaths:
             actions_directory=_resolve_override(
                 settings.actions_library_directory,
                 default=profile_root / "actions",
+                base=base,
             ),
             workflows_directory=_resolve_override(
                 settings.workflows_directory,
                 default=profile_root / "workflows",
+                base=base,
             ),
             workflow_drafts_directory=_resolve_override(
                 settings.workflow_drafts_directory,
                 default=profile_root / "drafts",
+                base=base,
             ),
             skills_directory=_resolve_override(
                 settings.skill_library_directory,
                 default=root / "skills",
+                base=base,
             ),
             trajectories_directory=_resolve_override(
                 settings.trajectories_directory,
                 default=profile_root / "trajectories",
+                base=base,
             ),
         )
 
 
-def _resolve_override(value: object, *, default: Path) -> Path:
+def _resolve_override(value: object, *, default: Path, base: Path) -> Path:
     normalized = str(value or "").strip()
     if not normalized:
         return default.resolve()
-    return _resolve_path(normalized, base=PROJECT_ROOT)
+    return _resolve_path(normalized, base=base)
 
 
 def _resolve_path(value: str, *, base: Path) -> Path:

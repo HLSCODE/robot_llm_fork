@@ -336,6 +336,28 @@ class WorkflowCompilerTests(unittest.TestCase):
 
 
 class WorkflowPreflightTests(unittest.TestCase):
+    def test_available_idle_camera_passes_preflight(self) -> None:
+        execution = _ExecutionProbe(
+            state=ExecutionState.IDLE,
+            resources=("camera",),
+        )
+        devices = _DeviceProbe(
+            {
+                "camera": {
+                    "state": "stopped",
+                    "ready": False,
+                    "available": True,
+                }
+            }
+        )
+
+        result = WorkflowPreflightService(execution, devices).check_entries(
+            (_item("vision-item"),)
+        )
+
+        self.assertTrue(result.ready)
+        self.assertEqual((), result.issues)
+
     def test_ad_hoc_entries_use_the_same_device_readiness_check(self) -> None:
         execution = _ExecutionProbe(
             state=ExecutionState.IDLE,

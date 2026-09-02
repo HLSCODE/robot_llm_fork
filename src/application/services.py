@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -157,10 +157,13 @@ class DeviceManagementService:
         runtime: DeviceRuntime,
         resources: ResourceArbiter,
         safety: SafetyService,
+        *,
+        availability_providers: Mapping[str, Callable[[], bool]] | None = None,
     ) -> None:
         self._runtime = runtime
         self._resources = resources
         self._safety = safety
+        self._availability_providers = dict(availability_providers or {})
 
     def initialize(self, device_id: str) -> dict[str, Any]:
         with self._lifecycle_lease("initialize", (device_id,)):
@@ -195,6 +198,7 @@ class DeviceManagementService:
             snapshot.device_id: {
                 "state": snapshot.state.value,
                 "ready": snapshot.ready,
+                "available": self._is_available(snapshot.device_id, snapshot.ready),
                 "capabilities": [
                     capability.value for capability in snapshot.capabilities
                 ],
@@ -242,6 +246,7 @@ class DeviceManagementService:
         return {
             "state": snapshot.state.value,
             "ready": snapshot.ready,
+            "available": self._is_available(device_id, snapshot.ready),
             "capabilities": [
                 capability.value for capability in snapshot.capabilities
             ],
@@ -249,6 +254,10 @@ class DeviceManagementService:
             "error_category": snapshot.error_category,
             "raw_error_code": snapshot.raw_error_code,
         }
+
+    def _is_available(self, device_id: str, runtime_ready: bool) -> bool:
+        provider = self._availability_providers.get(device_id)
+        return runtime_ready if provider is None else provider()
 
 
 class ManualControlService:

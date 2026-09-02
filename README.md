@@ -61,22 +61,25 @@ uv run robot-config-init
 ```
 
 也可以运行统一的 Textual 初始化向导。它使用全屏终端布局并随窗口自动伸缩，按步骤
-依次选择依赖、配置、ASR/KWS 模型和配置校验；执行详情默认收起，使用
+依次选择配置、数据初始化/迁移、依赖、ASR/KWS 模型和配置校验；执行详情默认收起，使用
 `Enter`/`→` 展开、`←` 收起、`C` 复制完整步骤详情，`Ctrl+C` 安全取消：
 
 ```bash
 uv run robot-init
 ```
 
-无交互环境可直接传入计划，只准备语音模型则使用独立入口：
+无交互环境可直接传入计划。数据迁移和语音模型也提供独立入口：
 
 ```bash
-uv run robot-init --non-interactive --steps configuration,dependencies,validation --extras gui,server,ai
+uv run robot-init --non-interactive --steps configuration,data_migration,dependencies,validation --extras gui,server,ai
+uv run robot-init migrate-data
 uv run robot-models-init --asr --kws --check
 ```
 
 该命令同时处理 `.env.example`、`config/config.example.toml` 和
 `config/fragments/*.example.toml`。只创建缺失文件，已存在的本机配置会跳过且不会被修改。
+`migrate-data` 负责创建空的数据目录结构，并显式迁移受支持的旧 Action、Workflow、
+Robot Profile 和视觉工位数据。主程序启动只加载、校验数据，不会隐式迁移或覆盖文件。
 
 按实际环境修改 `config/config.toml`。最常用配置项：
 

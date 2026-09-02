@@ -28,6 +28,7 @@ from ..configuration.settings import VoiceSettings
 
 class InitializationStep(str, Enum):
     CONFIGURATION = "configuration"
+    DATA_MIGRATION = "data_migration"
     DEPENDENCIES = "dependencies"
     ASR_MODELS = "asr_models"
     KWS_MODEL = "kws_model"
@@ -37,6 +38,7 @@ class InitializationStep(str, Enum):
     def label(self) -> str:
         return {
             self.CONFIGURATION: "初始化配置",
+            self.DATA_MIGRATION: "初始化/迁移数据",
             self.DEPENDENCIES: "同步依赖",
             self.ASR_MODELS: "准备 ASR / VAD 模型",
             self.KWS_MODEL: "下载 KWS 模型",
@@ -105,6 +107,7 @@ SUPPORTED_EXTRAS = frozenset(
 )
 STEP_ORDER = (
     InitializationStep.CONFIGURATION,
+    InitializationStep.DATA_MIGRATION,
     InitializationStep.DEPENDENCIES,
     InitializationStep.ASR_MODELS,
     InitializationStep.KWS_MODEL,
@@ -221,6 +224,7 @@ class InitializationRunner:
     ) -> Callable[[InitializationPlan, InitializationStep], None]:
         return {
             InitializationStep.CONFIGURATION: self._initialize_configuration,
+            InitializationStep.DATA_MIGRATION: self._migrate_data,
             InitializationStep.DEPENDENCIES: self._sync_dependencies,
             InitializationStep.ASR_MODELS: self._prepare_asr_models,
             InitializationStep.KWS_MODEL: self._download_kws_model,
@@ -253,6 +257,55 @@ class InitializationRunner:
             command.extend(("--extra", extra))
         self._log(step, f"执行：{' '.join(command)}")
         self._run_subprocess(command, cwd=plan.project_root, step=step)
+
+    def _migrate_data(self, plan: InitializationPlan, step: InitializationStep) -> None:
+        from ..application.builtin_data import BuiltinDataInstaller
+        from ..application.robot_profile_migration import LegacyRobotProfileMigrator
+        from ..configuration.data_paths import ApplicationDataPaths
+        from ..persistence.vision_station_storage import VisionStationStorage
+        from ..vision.models import vision_configuration
+
+        config_path = plan.project_root / "config" / "config.toml"
+        if not config_path.is_file():
+            raise FileNotFoundError(
+                f"配置文件不存在：{config_path}；请先执行 configuration 步骤"
+            )
+        settings = load_application_settings(config_path)
+        paths = ApplicationDataPaths.from_settings(
+            settings.data,
+            settings.robot_profile_id(),
+            project_root=plan.project_root,
+        )
+        profile_result = LegacyRobotProfileMigrator(
+            paths,
+            provider=settings.robot.provider,
+        ).migrate_missing()
+        install_result = BuiltinDataInstaller(paths).install_missing()
+        station_path = _project_path(
+            plan.project_root,
+            settings.vision.vision_relocalization_stations_file,
+        )
+        station_storage = VisionStationStorage(
+            station_path,
+            configuration=vision_configuration(settings.vision),
+        )
+        station_migrated = station_storage.migrate_legacy_document()
+
+        for path in profile_result.migrated_files:
+            self._log(step, f"已迁移 {_display_path(path, plan.project_root)}")
+        for path in install_result.created_files:
+            self._log(step, f"已创建 {_display_path(path, plan.project_root)}")
+        if station_migrated:
+            self._log(step, f"已迁移 {_display_path(station_path, plan.project_root)}")
+        changed_count = (
+            len(profile_result.migrated_files)
+            + len(install_result.created_files)
+            + int(station_migrated)
+        )
+        if changed_count == 0:
+            self._log(step, "数据已是当前格式，无需迁移")
+        else:
+            self._log(step, f"数据初始化完成，共更新 {changed_count} 个文件")
 
     def _prepare_asr_models(self, plan: InitializationPlan, step: InitializationStep) -> None:
         script = plan.project_root / "scripts" / "test_download_asr_model.py"
@@ -357,6 +410,21 @@ class InitializationRunner:
 
 def _has_required_files(directory: Path, required_files: Iterable[str]) -> bool:
     return directory.is_dir() and all((directory / name).is_file() for name in required_files)
+
+
+def _project_path(project_root: Path, configured_path: str) -> Path:
+    path = Path(configured_path).expanduser()
+    if not path.is_absolute():
+        path = project_root / path
+    return path.resolve()
+
+
+def _display_path(path: Path, project_root: Path) -> str:
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(project_root.resolve()))
+    except ValueError:
+        return str(resolved)
 
 
 def _uv_cache_directory(project_root: Path) -> Path | None:

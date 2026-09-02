@@ -45,9 +45,18 @@ uv run robot-init
 
 ```bash
 uv run robot-init --non-interactive \
-  --steps configuration,dependencies,asr_models,kws_model,validation \
+  --steps configuration,data_migration,dependencies,asr_models,kws_model,validation \
   --extras gui,server,ai,voice,kws
 ```
+
+只初始化数据目录并迁移旧格式时执行：
+
+```bash
+uv run robot-init migrate-data
+```
+
+数据迁移只由 `robot-init` 执行，并为支持的原地迁移保留备份。主程序启动阶段只加载和
+校验当前配置及数据；检测到旧格式时会拒绝启动或加载，并提示先运行上述命令，不会隐式写盘。
 
 依赖同步默认使用 `--frozen`；需要主动更新锁文件时可传入 `--no-frozen`。
 `--dry-run` 只验证计划，不产生写入、下载或依赖变更。模型也可单独初始化：

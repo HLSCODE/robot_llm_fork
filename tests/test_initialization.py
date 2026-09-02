@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -49,6 +50,64 @@ class InitializationPlanTests(unittest.TestCase):
 
 
 class InitializationRunnerTests(unittest.TestCase):
+    def test_data_migration_step_owns_all_data_writes(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            config = root / "config" / "config.toml"
+            config.parent.mkdir(parents=True)
+            config.write_text("", encoding="utf-8")
+            settings = SimpleNamespace(
+                data=object(),
+                robot=SimpleNamespace(provider="realman"),
+                vision=SimpleNamespace(
+                    vision_relocalization_stations_file="data/vision_stations/profiles.json"
+                ),
+                robot_profile_id=lambda: "realman-rm75-dual",
+            )
+            paths = SimpleNamespace()
+            profile_result = SimpleNamespace(migrated_files=(root / "data" / "actions.json",))
+            install_result = SimpleNamespace(created_files=(root / "data" / "schema.json",))
+            station_storage = unittest.mock.MagicMock()
+            station_storage.migrate_legacy_document.return_value = True
+            runner = InitializationRunner()
+            plan = InitializationPlan(
+                project_root=root,
+                steps=(InitializationStep.DATA_MIGRATION,),
+            )
+
+            with (
+                patch(
+                    "src.bootstrap.initialization.load_application_settings",
+                    return_value=settings,
+                ),
+                patch(
+                    "src.configuration.data_paths.ApplicationDataPaths.from_settings",
+                    return_value=paths,
+                ) as paths_factory,
+                patch(
+                    "src.application.robot_profile_migration.LegacyRobotProfileMigrator"
+                ) as profile_migrator,
+                patch("src.application.builtin_data.BuiltinDataInstaller") as installer,
+                patch(
+                    "src.persistence.vision_station_storage.VisionStationStorage",
+                    return_value=station_storage,
+                ),
+                patch("src.vision.models.vision_configuration", return_value=object()),
+            ):
+                profile_migrator.return_value.migrate_missing.return_value = profile_result
+                installer.return_value.install_missing.return_value = install_result
+                results = runner.run(plan)
+
+            self.assertEqual(StepStatus.SUCCEEDED, results[0].status)
+            paths_factory.assert_called_once_with(
+                settings.data,
+                "realman-rm75-dual",
+                project_root=root,
+            )
+            profile_migrator.return_value.migrate_missing.assert_called_once_with()
+            installer.return_value.install_missing.assert_called_once_with()
+            station_storage.migrate_legacy_document.assert_called_once_with()
+
     def test_dry_run_publishes_step_events(self) -> None:
         events: list[InitializationEvent] = []
         plan = InitializationPlan(
@@ -182,6 +241,11 @@ class InitializationRunnerTests(unittest.TestCase):
 
 
 class InitializationCliTests(unittest.TestCase):
+    def test_migrate_data_command_runs_as_an_explicit_dry_run(self) -> None:
+        exit_code = main(["migrate-data", "--dry-run"])
+
+        self.assertEqual(0, exit_code)
+
     def test_non_interactive_dry_run_does_not_require_textual(self) -> None:
         exit_code = main(
             [

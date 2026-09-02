@@ -41,9 +41,15 @@ def isolate_default_application_data(
         def resolve(
             settings,
             robot_profile_id: str = "unscoped",
+            *,
+            project_root: Path | None = None,
         ) -> ApplicationDataPaths:
             if settings.robot_data_dir != "data":
-                return original_resolver(settings, robot_profile_id)
+                return original_resolver(
+                    settings,
+                    robot_profile_id,
+                    project_root=project_root,
+                )
             profile_root = root / "profiles" / robot_profile_id
             return ApplicationDataPaths(
                 root=root,

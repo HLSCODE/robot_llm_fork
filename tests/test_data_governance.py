@@ -7,6 +7,7 @@ import unittest
 
 from src.application.builtin_data import BuiltinDataInstaller
 from src.configuration.data_paths import ApplicationDataPaths
+from src.configuration.settings import DataSettings
 from src.domain.models import ActionDefinition, ActionType
 from src.bootstrap.catalog_cli import (
     migrate_catalogs,
@@ -208,6 +209,46 @@ class BuiltinCatalogTests(unittest.TestCase):
         self.assertEqual(0, report.action_count)
         self.assertEqual(0, report.skill_count)
         self.assertEqual([], list(self.paths.skills_directory.rglob("*.skill.json")))
+
+
+class ApplicationDataPathsTests(unittest.TestCase):
+    def test_project_root_applies_to_root_and_relative_overrides(self) -> None:
+        with TemporaryDirectory() as temporary_directory:
+            project_root = Path(temporary_directory)
+            paths = ApplicationDataPaths.from_settings(
+                DataSettings(
+                    robot_data_dir="runtime-data",
+                    actions_library_directory="custom/actions",
+                    workflows_directory="custom/workflows",
+                    workflow_drafts_directory="custom/drafts",
+                    skill_library_directory="custom/skills",
+                    trajectories_directory="custom/trajectories",
+                ),
+                "tianji-tianji-dual",
+                project_root=project_root,
+            )
+
+            self.assertEqual((project_root / "runtime-data").resolve(), paths.root)
+            self.assertEqual(
+                (project_root / "custom/actions").resolve(),
+                paths.actions_directory,
+            )
+            self.assertEqual(
+                (project_root / "custom/workflows").resolve(),
+                paths.workflows_directory,
+            )
+            self.assertEqual(
+                (project_root / "custom/drafts").resolve(),
+                paths.workflow_drafts_directory,
+            )
+            self.assertEqual(
+                (project_root / "custom/skills").resolve(),
+                paths.skills_directory,
+            )
+            self.assertEqual(
+                (project_root / "custom/trajectories").resolve(),
+                paths.trajectories_directory,
+            )
 
 
 class CatalogMigrationTests(unittest.TestCase):

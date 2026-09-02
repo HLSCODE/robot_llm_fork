@@ -340,19 +340,104 @@ class VisionStationStorageTests(unittest.TestCase):
             with self.assertRaisesRegex(JsonDocumentSchemaError, "calibration_version"):
                 mismatched.load_profiles()
 
-    def test_unversioned_station_document_is_rejected_without_compatibility_path(self) -> None:
+    def test_legacy_station_document_is_backed_up_and_migrated(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "stations.json"
-            path.write_text("[]", encoding="utf-8")
+            legacy_document = {
+                "version": 1,
+                "profiles": [
+                    {
+                        "station_id": "legacy-station",
+                        "station_name": "旧工位",
+                        "arm": "left",
+                        "T_B0_M": [[1.0]],
+                    }
+                ],
+            }
+            path.write_text(
+                json.dumps(legacy_document, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            storage = VisionStationStorage(
+                path,
+                configuration=vision_configuration(
+                    VisionSettings(
+                        vision_model_version="model-current",
+                        vision_calibration_version="calibration-current",
+                    )
+                ),
+            )
+
+            with self.assertRaisesRegex(JsonDocumentSchemaError, "robot-init migrate-data"):
+                storage.load_profiles()
+            self.assertEqual(
+                legacy_document,
+                json.loads(path.read_text(encoding="utf-8")),
+            )
+            self.assertFalse(path.with_name("stations.json.v0.bak").exists())
+
+            self.assertTrue(storage.migrate_legacy_document())
+            profiles = storage.load_profiles()
+
+            self.assertEqual("legacy-station", profiles[0]["station_id"])
+            self.assertEqual(1, profiles[0]["profile_version"])
+            self.assertEqual("model-current", profiles[0]["model_version"])
+            self.assertEqual("calibration-current", profiles[0]["calibration_version"])
+            migrated = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual("robot-llm.vision-stations", migrated["schema"])
+            self.assertEqual(1, migrated["schema_version"])
+            backup = path.with_name("stations.json.v0.bak")
+            self.assertEqual(legacy_document, json.loads(backup.read_text(encoding="utf-8")))
+            self.assertFalse(storage.migrate_legacy_document())
+
+    def test_unknown_legacy_station_version_is_rejected_without_rewriting(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "stations.json"
+            original = '{"version": 2, "profiles": []}'
+            path.write_text(original, encoding="utf-8")
             storage = VisionStationStorage(
                 path,
                 configuration=vision_configuration(VisionSettings()),
             )
-            with self.assertRaisesRegex(JsonDocumentSchemaError, "unversioned legacy"):
-                storage.load_profiles()
+
+            with self.assertRaisesRegex(JsonDocumentSchemaError, "legacy version 2"):
+                storage.migrate_legacy_document()
+
+            self.assertEqual(original, path.read_text(encoding="utf-8"))
+            self.assertFalse(path.with_name("stations.json.v0.bak").exists())
 
 
 class VisionSimulationIntegrationTests(unittest.TestCase):
+    def test_application_startup_rejects_legacy_station_document_without_writing(self) -> None:
+        with TemporaryDirectory() as directory:
+            station_path = Path(directory) / "stations.json"
+            legacy_document = {
+                "version": 1,
+                "profiles": [
+                    {
+                        "station_id": "startup-station",
+                        "arm": "left",
+                        "T_B0_M": [[1.0]],
+                    }
+                ],
+            }
+            original = json.dumps(legacy_document)
+            station_path.write_text(original, encoding="utf-8")
+            defaults = ApplicationSettings.defaults()
+            settings = replace(
+                defaults,
+                vision=replace(
+                    defaults.vision,
+                    vision_relocalization_stations_file=str(station_path),
+                ),
+            )
+
+            with self.assertRaisesRegex(JsonDocumentSchemaError, "robot-init migrate-data"):
+                create_application_services(settings, simulation=True)
+
+            self.assertEqual(original, station_path.read_text(encoding="utf-8"))
+            self.assertFalse(station_path.with_name("stations.json.v0.bak").exists())
+
     def test_simulation_fixture_executes_capture_and_relocalization_without_models(self) -> None:
         with TemporaryDirectory() as directory:
             defaults = ApplicationSettings.defaults()

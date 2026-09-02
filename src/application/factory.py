@@ -6,6 +6,7 @@ from ..configuration.data_paths import ApplicationDataPaths
 from ..configuration.settings import ApplicationSettings, DataCollectionSettings
 from ..persistence.storage import JsonCompositionRepository
 from ..persistence.trajectory_storage import TrajectoryStorage
+from ..persistence.vision_station_storage import VisionStationStorage
 from ..devices import (
     ArmTelemetryReader,
     DepthCameraSource,
@@ -13,6 +14,7 @@ from ..devices import (
     resolve_camera_provider,
 )
 from ..devices.runtime.factory import create_device_runtime
+from ..devices.runtime.ids import CAMERA
 from ..execution.engine import ActionEngine
 from ..execution.manager import ExecutionManager
 from ..llm import LLMRegistry
@@ -26,8 +28,7 @@ from .balance import register_balance_reader
 from ..domain.execution_context import ExecutionContext
 from ..vision.service import VisionService
 from ..vision.simulation import VisionPipelineFixture
-from .builtin_data import BuiltinDataInstaller
-from .robot_profile_migration import LegacyRobotProfileMigrator
+from ..vision.models import vision_configuration
 from .command_runtime import CommandRuntime
 from .command_catalog import CommandCatalog
 from .composition import CompositionService
@@ -61,11 +62,11 @@ def create_application_services(
         settings.data,
         robot_profile_id,
     )
-    LegacyRobotProfileMigrator(
-        data_paths,
-        provider=settings.robot.provider,
-    ).migrate_missing()
-    BuiltinDataInstaller(data_paths).install_missing()
+    station_storage = VisionStationStorage(
+        settings.vision.vision_relocalization_stations_file,
+        configuration=vision_configuration(settings.vision),
+    )
+    station_storage.load_profiles()
     composition = CompositionService(
         JsonCompositionRepository(
             robot_profile_id=robot_profile_id,
@@ -130,6 +131,7 @@ def create_application_services(
         execution_context,
         capture_pipeline=vision_fixture.capture if vision_fixture else None,
         relocalization_pipeline=(vision_fixture.relocalize if vision_fixture else None),
+        station_storage=station_storage,
     )
     engine = ActionEngine(
         device_runtime,
@@ -152,7 +154,8 @@ def create_application_services(
         robot_profile_id=robot_profile_id,
     )
     skill_engine = SkillEngine(robot_profile_id=robot_profile_id)
-    skill_engine.load_skills(str(data_paths.skills_directory))
+    if data_paths.skills_directory.is_dir():
+        skill_engine.load_skills(str(data_paths.skills_directory))
     workflow_compiler = WorkflowCompiler(
         expected_robot_profile_id=robot_profile_id,
     )
@@ -189,6 +192,9 @@ def create_application_services(
         device_runtime,
         resources,
         safety,
+        availability_providers={
+            CAMERA: lambda: camera_access.status().available,
+        },
     )
     workflow_preflight = WorkflowPreflightService(execution, devices)
     data_collection = DataCollectionService(
