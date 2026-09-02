@@ -264,6 +264,7 @@ class InitializationRunner:
         from ..configuration.data_paths import ApplicationDataPaths
         from ..persistence.vision_station_storage import VisionStationStorage
         from ..vision.models import vision_configuration
+        from .workflow_cli import migrate_legacy_workflows
 
         config_path = plan.project_root / "config" / "config.toml"
         if not config_path.is_file():
@@ -280,6 +281,12 @@ class InitializationRunner:
             paths,
             provider=settings.robot.provider,
         ).migrate_missing()
+        workflow_result = migrate_legacy_workflows(
+            paths.root,
+            workflows_directory=paths.workflows_directory,
+            drafts_directory=paths.workflow_drafts_directory,
+            robot_profile_id=settings.robot_profile_id(),
+        )
         install_result = BuiltinDataInstaller(paths).install_missing()
         station_path = _project_path(
             plan.project_root,
@@ -293,12 +300,21 @@ class InitializationRunner:
 
         for path in profile_result.migrated_files:
             self._log(step, f"已迁移 {_display_path(path, plan.project_root)}")
+        for path in workflow_result.migrated_files:
+            self._log(step, f"已迁移 {_display_path(path, plan.project_root)}")
+        if workflow_result.migrated_count:
+            self._log(
+                step,
+                "旧工作流备份目录："
+                f"{_display_path(workflow_result.backup_directory, plan.project_root)}",
+            )
         for path in install_result.created_files:
             self._log(step, f"已创建 {_display_path(path, plan.project_root)}")
         if station_migrated:
             self._log(step, f"已迁移 {_display_path(station_path, plan.project_root)}")
         changed_count = (
             len(profile_result.migrated_files)
+            + workflow_result.migrated_count
             + len(install_result.created_files)
             + int(station_migrated)
         )

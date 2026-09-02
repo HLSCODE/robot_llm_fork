@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -12,15 +11,13 @@ from src.bootstrap.workflow_cli import (
     migrate_legacy_workflows,
     normalize_active_workflows,
 )
-from src.bootstrap.launcher import migrate_startup_workflows
-from src.configuration.settings import ApplicationSettings
 from src.domain.models import ActionDefinition, ActionType, LoopBlock, SequenceItem
 from src.domain.workflow import WorkflowDocument
 from src.persistence.json_documents import read_json_document
 
 
 class WorkflowMigrationTests(unittest.TestCase):
-    def test_startup_migration_discovers_tasks_below_data_root(self) -> None:
+    def test_explicit_migration_discovers_tasks_below_data_root(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
             tasks = root / "tasks"
@@ -41,17 +38,13 @@ class WorkflowMigrationTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            defaults = ApplicationSettings.defaults()
-            settings = replace(
-                defaults,
-                data=replace(
-                    defaults.data,
-                    robot_data_dir=str(root),
-                    workflows_directory=str(workflows),
-                    workflow_drafts_directory=str(drafts),
-                ),
+            robot_profile_id = "realman-rm75-dual"
+            result = migrate_legacy_workflows(
+                root,
+                workflows_directory=workflows,
+                drafts_directory=drafts,
+                robot_profile_id=robot_profile_id,
             )
-            result = migrate_startup_workflows(settings)
 
             target = workflows / "legacy.workflow.json"
             self.assertEqual(1, result.migrated_count)
@@ -59,11 +52,11 @@ class WorkflowMigrationTests(unittest.TestCase):
             self.assertTrue(target.samefile(result.migrated_files[0]))
             self.assertTrue(target.is_file())
             migrated = WorkflowDocument.from_dict(read_json_document(target))
-            self.assertEqual(settings.robot_profile_id(), migrated.robot_profile_id)
+            self.assertEqual(robot_profile_id, migrated.robot_profile_id)
             migrated_item = migrated.to_entries()[0]
             assert isinstance(migrated_item, SequenceItem)
             self.assertEqual(
-                settings.robot_profile_id(),
+                robot_profile_id,
                 migrated_item.definition.robot_profile_id,
             )
             self.assertTrue(

@@ -64,8 +64,17 @@ class InitializationRunnerTests(unittest.TestCase):
                 ),
                 robot_profile_id=lambda: "realman-rm75-dual",
             )
-            paths = SimpleNamespace()
+            paths = SimpleNamespace(
+                root=root / "data",
+                workflows_directory=root / "data" / "workflows",
+                workflow_drafts_directory=root / "data" / "drafts",
+            )
             profile_result = SimpleNamespace(migrated_files=(root / "data" / "actions.json",))
+            workflow_result = SimpleNamespace(
+                migrated_files=(root / "data" / "workflows" / "legacy.workflow.json",),
+                migrated_count=1,
+                backup_directory=root / "data" / "migration-backups" / "workflow-v5",
+            )
             install_result = SimpleNamespace(created_files=(root / "data" / "schema.json",))
             station_storage = unittest.mock.MagicMock()
             station_storage.migrate_legacy_document.return_value = True
@@ -87,6 +96,10 @@ class InitializationRunnerTests(unittest.TestCase):
                 patch(
                     "src.application.robot_profile_migration.LegacyRobotProfileMigrator"
                 ) as profile_migrator,
+                patch(
+                    "src.bootstrap.workflow_cli.migrate_legacy_workflows",
+                    return_value=workflow_result,
+                ) as workflow_migrator,
                 patch("src.application.builtin_data.BuiltinDataInstaller") as installer,
                 patch(
                     "src.persistence.vision_station_storage.VisionStationStorage",
@@ -105,6 +118,12 @@ class InitializationRunnerTests(unittest.TestCase):
                 project_root=root,
             )
             profile_migrator.return_value.migrate_missing.assert_called_once_with()
+            workflow_migrator.assert_called_once_with(
+                paths.root,
+                workflows_directory=paths.workflows_directory,
+                drafts_directory=paths.workflow_drafts_directory,
+                robot_profile_id="realman-rm75-dual",
+            )
             installer.return_value.install_missing.assert_called_once_with()
             station_storage.migrate_legacy_document.assert_called_once_with()
 
