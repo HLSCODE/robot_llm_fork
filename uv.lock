@@ -2983,13 +2983,17 @@ resolution-markers = [
 ]
 dependencies = [
     { name = "numpy", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
+    { name = "transitions", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
 ]
 wheels = [
-    { filename = "tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", hash = "sha256:f26edecc4959435cce8e82d9ce3466383cad2eb4c5273cb6523b488be2e76683" },
+    { filename = "tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", hash = "sha256:4592c828b734b39e9cee9cda5b6e25d486085807816cf7d6f35937e4b1353e72" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "numpy", specifier = ">=1.21" }]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.21" },
+    { name = "transitions", specifier = ">=0.9,<1" },
+]
 
 [[package]]
 name = "tj-robot-proj"
@@ -3002,13 +3006,17 @@ resolution-markers = [
 ]
 dependencies = [
     { name = "numpy", marker = "sys_platform == 'win32'" },
+    { name = "transitions", marker = "sys_platform == 'win32'" },
 ]
 wheels = [
-    { filename = "tj_robot_proj-0.2.0-py3-none-win_amd64.whl", hash = "sha256:10bd24acdc2b5242234e8c10a97b44423a6ba6472d5b90b4198ad3b6235568f8" },
+    { filename = "tj_robot_proj-0.2.0-py3-none-win_amd64.whl", hash = "sha256:1cbcefb59403a57630cc56280dbc4737e5b0428d146b11eeb6d7f527d54bccfa" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "numpy", specifier = ">=1.21" }]
+requires-dist = [
+    { name = "numpy", specifier = ">=1.21" },
+    { name = "transitions", specifier = ">=0.9,<1" },
+]
 
 [[package]]
 name = "tokenizers"
@@ -3226,6 +3234,18 @@ dependencies = [
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/ec/e1/720ff7ff666b04279fea5bb7ac3ef8675e98f0ddbc1b8cb8bc9f3889d62e/transformers-5.13.0.tar.gz", hash = "sha256:940c1428e42a4238f9ccf0cd41e63c590701aa63c19fd2ce3d7d602222d68495", size = 9195801, upload-time = "2026-07-03T16:05:39.362Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/a5/3a/d99704c5effe10c6339c98cb236259161103e159bb99a78468b6729572ec/transformers-5.13.0-py3-none-any.whl", hash = "sha256:8adbc1d20bd5463cd6876b2eb7cb31971e1065788e7dc6bc12bab597a7c504b7", size = 11503730, upload-time = "2026-07-03T16:05:35.569Z" },
+]
+
+[[package]]
+name = "transitions"
+version = "0.9.3"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "six", marker = "sys_platform != 'darwin'" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/4f/83/9e90f3494057d73c9e6bd8de8488af7c9fa714666ccc2db30fe07d147818/transitions-0.9.3.tar.gz", hash = "sha256:881fb75bb1654ed55d86060bb067f2c716f8e155f57bb73fd444e53713aafec8", size = 1191029, upload-time = "2025-07-02T10:49:03.153Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/f4/05/fea3020e90aa378941ff10de8860fb3b1288313c27efd10fa0c476498f7e/transitions-0.9.3-py2.py3-none-any.whl", hash = "sha256:02463248f2b668d86f66636b1e3c9e8de84d93e22915247f4e1aa9ee1cae28aa", size = 112792, upload-time = "2025-07-02T10:49:01.415Z" },
 ]
 
 [[package]]

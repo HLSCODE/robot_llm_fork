@@ -450,6 +450,7 @@ class RobotConfiguration:
     common: RobotSettings
     realman: RealManRobotSettings
     tianji: TianjiRobotSettings
+    trajectory_directory: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -1249,10 +1250,17 @@ class ApplicationSettings:
 
     def robot_configuration(self) -> RobotConfiguration:
         """Return the aggregate passed to the selected robot provider."""
+        from .data_paths import ApplicationDataPaths
+
         return RobotConfiguration(
             common=self.robot,
             realman=self.robot_realman,
             tianji=self.robot_tianji,
+            trajectory_directory=str(
+                ApplicationDataPaths.from_settings(
+                    self.data, self.robot_profile_id(),
+                ).trajectories_directory
+            ),
         )
 
     def robot_profile_id(self) -> str:

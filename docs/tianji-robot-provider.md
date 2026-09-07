@@ -71,17 +71,54 @@ subscription_interval_seconds = 0.01
 - 双臂连接、初始化、状态订阅与幂等关闭；
 - 双臂 TCP 位姿和七关节角读取；
 - `move_l` 直线笛卡尔目标运动；
+- `move_to_joints(arm, JointVector, options)` 七关节绝对目标（角度）；
+- `move_joint_increment` 七关节增量，基于反馈计算目标并校验限位；
+- `move_pose_increment` 末端局部坐标系增量，委托 SDK `movel_step`；
+- 快速停止双臂、软件急停；停止调用不等待阻塞运动持有的命令锁；
+- 单臂拖拽模式切换、双臂统一采集、按目录保存 raw/TXT/FMV；
+- 指定 FMV 文件的回放接口 `run_trajectory`；
 - SDK 异常向统一 `RobotOperationError` 的错误码与诊断信息转换。
 
 明确不声明：
 
 - `move_j` 笛卡尔目标运动：SDK 的 `movej` 只接受关节角，没有公开笛卡尔目标
   逆解接口；
-- 快速停止、软件急停：SDK 0.2 的 `RobotClient` 没有公开停止方法；
-- 夹爪、遥操作、拖拽示教、轨迹保存与复现、工具架换装。
+- 夹爪、流式遥操作、工具架换装；
+- 现有 `TrajectoryControl` 完整能力：SDK 没有公开回放完成状态，且其录制是双臂统一
+  采集、按目录生成多个文件，不满足现有单臂保存到指定文件的契约。因此本次提供
+  Tianji 适配器接口，但不启用通用轨迹动作及 GUI 的单臂录制流程。
 
-这些能力不会通过访问 `_session` 等私有属性或空实现伪装支持。若 SDK 后续新增
-公开接口，应先升级 SDK wheel，再扩展本 Provider 的能力声明。
+## 新版 SDK 使用约定
+
+`RobotConfig` 新增的左右臂采集选项已由驱动提供，默认采集两臂全部七个关节的位置。
+默认 SDK 录制目录使用应用配置解析后的当前 Robot Profile 轨迹目录（包括用户配置的
+路径覆盖），不使用 SDK 的 `C:\tj_trajectory_data` 或 `/tmp/tj_trajectory_data` 默认值。
+
+显式录制接口调用顺序为：
+
+```python
+adapter.start_drag_teaching(ArmId.LEFT)
+adapter.start_recording()  # 控制器级双臂采集，一次只能有一个采集任务
+adapter.stop_drag_teaching(ArmId.LEFT)
+adapter.save_recording(output_directory)  # 停止采集并保存多个文件
+```
+
+保存失败和重复启动采集会报错；恢复正常模式与停止采集是两个独立操作。回放必须明确
+指定已有 `.fmv` 文件，不会自动选择 SDK 临时目录中的“最新轨迹”。七关节目标越限会
+在发送前拒绝，避免 SDK 自动截断目标后仍返回成功。
+
+新版 SDK 仍有以下限制，需在 SDK 层继续补齐：
+
+- 阻塞运动及回放内部没有超时，停止机械臂后等待循环也未必退出；不要在 GUI 主线程
+  调用这些阻塞接口。停止接口本身可并发调用，但不等于运动线程已完成取消。
+- `run_trajectory(is_block=False)` 仍会阻塞等待到达轨迹首点，不是完全异步接口。
+- 初始化会自动启动末端按钮监控。按钮释放回调硬编码调用 `stop_and_save_data("data")`，
+  此 SDK 内部路径覆盖无法通过 `traj_data_dir` 改变；需要 SDK 增加按钮开关/回调和目录配置。
+- 暂无公开的错误状态、反馈时间戳、轨迹句柄及取消/完成查询；不能将位置接近终点等同于
+  控制器确认运动完成。
+
+临时源码目录不加入运行依赖，也不通过 SDK 私有成员绕过上述限制。同版本 wheel 更新后，
+应提交 `uv.lock` 中的新哈希及 `transitions` 依赖，再运行 `uv sync --frozen --extra hardware`。
 
 ## 验收
 

@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import unittest
 from collections.abc import Sequence
+from threading import Event, Thread
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
+from dataclasses import replace
 
 from src.configuration.settings import (
+    ApplicationSettings,
     RealManRobotSettings,
     RobotConfiguration,
     RobotSettings,
@@ -18,6 +24,7 @@ from src.devices.runtime.arm_models import (
     CartesianPose,
     MotionMode,
     MotionOptions,
+    JointVector,
     RobotOperationError,
 )
 from src.devices.runtime.models import DeviceCapability, StopMode
@@ -27,6 +34,13 @@ class _FakeSdkRuntime:
     def __init__(self) -> None:
         self.initialize_count = 0
         self.close_count = 0
+        self.stops: list[str] = []
+        self.drag: list[tuple[str, bool]] = []
+        self.collecting = False
+        self.recordings: list[str] = []
+        self.trajectories: list[tuple[str, str, bool]] = []
+        self.joint_moves: list[tuple[str, tuple[float, ...], int, bool]] = []
+        self.pose_increments: list[tuple[str, tuple[float, ...], int, bool]] = []
         self.moves: list[tuple[str, tuple[float, ...], int, bool]] = []
         self.states = {
             "A": {
@@ -56,6 +70,41 @@ class _FakeSdkRuntime:
 
     def read_state(self, arm: str) -> dict[str, object]:
         return self.states[arm]
+
+    def move_joints(
+        self, arm: str, joints: Sequence[float], *, velocity_percent: int, blocking: bool
+    ) -> None:
+        self.joint_moves.append((arm, tuple(joints), velocity_percent, blocking))
+
+    def quick_stop(self, arm: str) -> None:
+        self.stops.append(arm)
+
+    def move_linear_step(
+        self, arm: str, pose: Sequence[float], *, velocity_percent: int, blocking: bool
+    ) -> None:
+        self.pose_increments.append((arm, tuple(pose), velocity_percent, blocking))
+
+    def emergency_stop(self) -> None:
+        self.stops.append("AB")
+
+    def set_drag_mode(self, arm: str, *, enabled: bool) -> None:
+        self.drag.append((arm, enabled))
+
+    def collect_data(self) -> bool:
+        if self.collecting:
+            return False
+        self.collecting = True
+        return True
+
+    def save_recording(self, directory: str) -> bool:
+        if not self.collecting:
+            return False
+        self.recordings.append(directory)
+        self.collecting = False
+        return True
+
+    def run_trajectory(self, arm: str, path: str, *, blocking: bool) -> None:
+        self.trajectories.append((arm, path, blocking))
 
     def close(self) -> None:
         self.close_count += 1
@@ -103,14 +152,70 @@ def _driver(
 
 
 class TianjiProviderTests(unittest.TestCase):
+    def test_recording_directory_follows_configured_robot_profile(self) -> None:
+        with TemporaryDirectory() as directory:
+            defaults = ApplicationSettings.defaults()
+            settings = replace(
+                defaults,
+                robot=replace(defaults.robot, provider="tianji", profile_id="lab-tianji"),
+                data=replace(defaults.data, robot_data_dir=directory),
+            )
+            self.assertEqual(
+                str((Path(directory) / "profiles/lab-tianji/trajectories").resolve()),
+                settings.robot_configuration().trajectory_directory,
+            )
+
+    def test_installed_sdk_configuration_and_public_motion_boundary(self) -> None:
+        try:
+            from tj_robot_proj import Arm
+        except ImportError:
+            self.skipTest("platform Tianji SDK wheel is not installed")
+        from src.devices.robots.tianji.driver import _OfficialTianjiSdkRuntime
+
+        settings = TianjiRobotSettings()
+        client = MagicMock()
+        with (
+            TemporaryDirectory() as directory,
+            patch(
+                "tj_robot_proj.RobotClient",
+                return_value=client,
+            ) as factory,
+        ):
+            runtime = _OfficialTianjiSdkRuntime(
+                controller_ip=settings.controller_ip,
+                subscription_interval_seconds=settings.subscription_interval_seconds,
+                left_base_transform=settings.left_base_transform,
+                right_base_transform=settings.right_base_transform,
+                left_tool_transform=settings.left_tool_transform,
+                right_tool_transform=settings.right_tool_transform,
+                joint_limits_rad=settings.joint_limits_rad,
+                trajectory_directory=directory,
+            )
+            config = factory.call_args.args[0]
+            self.assertEqual(tuple(range(7)), config.left_arm_collection_data_option.data_types)
+            self.assertEqual(Arm.RIGHT, config.right_arm_collection_data_option.arm)
+            self.assertEqual(str(Path(directory).resolve()), config.traj_data_dir)
+            runtime.move_joints("B", [1.0] * 7, velocity_percent=12, blocking=False)
+            client.movej.assert_called_once_with(
+                Arm.RIGHT,
+                joints_deg=[1.0] * 7,
+                vel=12,
+                is_block=False,
+            )
+            runtime.quick_stop("A")
+            client.quick_stop.assert_called_once_with(Arm.LEFT)
+            runtime.emergency_stop()
+            client.soft_emergency_stop.assert_called_once_with()
+            runtime.close()
+
     def test_registry_exposes_only_public_sdk_capabilities(self) -> None:
         provider = resolve_robot_provider(RobotSettings(provider="tianji"))
 
         self.assertEqual("tianji", provider.name)
         self.assertIn(DeviceCapability.ARM_MOTION, provider.capabilities)
         self.assertIn(DeviceCapability.ARM_STATE, provider.capabilities)
-        self.assertNotIn(DeviceCapability.QUICK_STOP, provider.capabilities)
-        self.assertNotIn(DeviceCapability.EMERGENCY_STOP, provider.capabilities)
+        self.assertIn(DeviceCapability.QUICK_STOP, provider.capabilities)
+        self.assertIn(DeviceCapability.EMERGENCY_STOP, provider.capabilities)
         self.assertNotIn(DeviceCapability.GRIPPER, provider.capabilities)
         self.assertNotIn(DeviceCapability.TRAJECTORY, provider.capabilities)
 
@@ -192,8 +297,103 @@ class TianjiDriverTests(unittest.TestCase):
                 CartesianPose(0.1, 0.2, 0.3, 0.0, 0.0, 0.0),
                 MotionMode.JOINT,
             )
-        with self.assertRaisesRegex(ValueError, "does not expose a public stop"):
+        with self.assertRaisesRegex(ValueError, "unsupported robot stop mode"):
+            adapter.stop(StopMode.CONTROLLED)
+
+    def test_joint_targets_are_separate_and_rejected_before_sdk_clipping(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        adapter.move_to_joints(
+            ArmId.RIGHT,
+            JointVector((10.0,) * 7),
+            MotionOptions(blocking=False),
+        )
+        self.assertEqual(("B", (10.0,) * 7, 10, False), runtime.joint_moves[0])
+        for target in ([0.0] * 6, [float("nan")] * 7, [200.0] * 7):
+            with self.subTest(target=target), self.assertRaises((ValueError, RuntimeError)):
+                driver.move_to_joints("A", target, velocity_percent=10, blocking=False)
+        self.assertEqual(1, len(runtime.joint_moves))
+
+    def test_stops_bypass_blocking_motion_lock(self) -> None:
+        entered = Event()
+        release = Event()
+
+        class BlockingRuntime(_FakeSdkRuntime):
+            def move_linear(
+                self, arm: str, pose: Sequence[float], *, velocity_percent: int, blocking: bool
+            ) -> None:
+                entered.set()
+                release.wait(3)
+
+        driver, runtime = _driver(BlockingRuntime())
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        worker = Thread(
+            target=lambda: driver.move_to_pose(
+                "A",
+                [0.0] * 6,
+                linear=True,
+                velocity_percent=10,
+                blocking=True,
+            )
+        )
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(1))
             adapter.stop(StopMode.QUICK)
+            adapter.stop(StopMode.EMERGENCY)
+            self.assertEqual(["A", "B", "AB"], runtime.stops)
+            self.assertTrue(worker.is_alive())
+        finally:
+            release.set()
+            worker.join(4)
+            driver.close()
+
+    def test_joint_increment_uses_feedback_and_pose_increment_uses_sdk_frame(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions(blocking=False))
+        adapter.move_joint_increment(ArmId.RIGHT, JointVector((3.0,) * 7))
+        self.assertEqual(("B", (5.0,) * 7, 10, False), runtime.joint_moves[0])
+        delta = CartesianPose(0.01, 0, 0, 0, 0, 0.1)
+        adapter.move_pose_increment(ArmId.LEFT, delta)
+        self.assertEqual(("A", tuple(delta.to_list()), 10, False), runtime.pose_increments[0])
+
+    def test_quick_stop_attempts_right_arm_even_if_left_fails(self) -> None:
+        class FailingStopRuntime(_FakeSdkRuntime):
+            def quick_stop(self, arm: str) -> None:
+                super().quick_stop(arm)
+                if arm == "A":
+                    raise _NativeSdkFailure()
+
+        driver, runtime = _driver(FailingStopRuntime())
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        with self.assertRaises(ExceptionGroup):
+            adapter.stop(StopMode.QUICK)
+        self.assertEqual(["A", "B"], runtime.stops)
+
+    def test_recording_and_fmv_playback_preserve_sdk_semantics(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        with TemporaryDirectory() as directory:
+            adapter.start_drag_teaching(ArmId.LEFT)
+            adapter.start_recording()
+            with self.assertRaises(RuntimeError):
+                adapter.start_recording()
+            adapter.stop_drag_teaching(ArmId.LEFT)
+            adapter.save_recording(directory)
+            self.assertEqual([("A", True), ("A", False)], runtime.drag)
+            self.assertEqual([str(Path(directory).resolve())], runtime.recordings)
+            with self.assertRaises(RuntimeError):
+                adapter.save_recording(directory)
+            path = Path(directory) / "left.fmv"
+            path.write_text("PoinType=9@1\n", encoding="utf-8")
+            adapter.run_trajectory(ArmId.LEFT, path, blocking=False)
+            self.assertEqual([("A", str(path.resolve()), False)], runtime.trajectories)
+            with self.assertRaises(RobotOperationError):
+                adapter.run_trajectory(ArmId.RIGHT, Path(directory) / "missing.txt")
 
     def test_adapter_preserves_sdk_error_code_and_detail(self) -> None:
         driver, _ = _driver(_FailingMoveRuntime())

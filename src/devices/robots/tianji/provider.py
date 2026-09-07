@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from ipaddress import ip_address
+import logging
 
 from ....configuration.settings import RobotConfiguration
 from ...runtime.arm_models import ArmId, MotionOptions
@@ -11,6 +12,8 @@ from ...runtime.contracts import RobotSystem
 from ...runtime.models import DeviceCapability, DeviceInitializationError
 from ..provider import RobotProviderDefinition
 from .adapter import TianjiRobotAdapter
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,9 +45,7 @@ class TianjiProviderSettings:
         ):
             if len(matrix) != 4 or any(len(row) != 4 for row in matrix):
                 raise ValueError(f"Tianji {name} must be a 4x4 matrix")
-        if len(self.joint_limits_rad) != 7 or any(
-            len(pair) != 2 for pair in self.joint_limits_rad
-        ):
+        if len(self.joint_limits_rad) != 7 or any(len(pair) != 2 for pair in self.joint_limits_rad):
             raise ValueError("Tianji joint limits must contain seven min/max pairs")
 
     @classmethod
@@ -83,32 +84,40 @@ def _create_tianji_robot(settings: RobotConfiguration) -> RobotSystem:
     try:
         driver = TianjiRobotDriver(
             provider_settings.controller_ip,
-            subscription_interval_seconds=(
-                provider_settings.subscription_interval_seconds
-            ),
+            subscription_interval_seconds=(provider_settings.subscription_interval_seconds),
             left_base_transform=provider_settings.left_base_transform,
             right_base_transform=provider_settings.right_base_transform,
             left_tool_transform=provider_settings.left_tool_transform,
             right_tool_transform=provider_settings.right_tool_transform,
             joint_limits_rad=provider_settings.joint_limits_rad,
+            trajectory_directory=settings.trajectory_directory or None,
         )
         adapter = TianjiRobotAdapter(driver, default_motion=provider_settings.motion)
-        adapter.read_arm_state(ArmId.LEFT)
-        adapter.read_arm_state(ArmId.RIGHT)
+        try:
+            adapter.read_arm_state(ArmId.LEFT)
+            adapter.read_arm_state(ArmId.RIGHT)
+        except Exception:
+            try:
+                adapter.close()
+            except Exception:
+                logger.exception("Failed to release Tianji adapter after state validation failure")
+            raise
         return adapter
     except Exception as exc:
-        raise DeviceInitializationError(
-            f"Tianji robot initialization failed: {exc}"
-        ) from exc
+        raise DeviceInitializationError(f"Tianji robot initialization failed: {exc}") from exc
 
 
 TIANJI_PROVIDER = RobotProviderDefinition(
     name="tianji",
-    capabilities=frozenset({
-        DeviceCapability.MOTION,
-        DeviceCapability.ARM_MOTION,
-        DeviceCapability.ARM_STATE,
-    }),
+    capabilities=frozenset(
+        {
+            DeviceCapability.QUICK_STOP,
+            DeviceCapability.EMERGENCY_STOP,
+            DeviceCapability.MOTION,
+            DeviceCapability.ARM_MOTION,
+            DeviceCapability.ARM_STATE,
+        }
+    ),
     create=_create_tianji_robot,
 )
 
