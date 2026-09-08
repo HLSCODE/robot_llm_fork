@@ -23,8 +23,10 @@ from ..devices import (
     ResourceLease,
     RobotTeleoperation,
     StopMode,
-    TrajectoryControl,
-    TrajectorySaveResult,
+    TrajectoryRecorder,
+    TrajectoryRecordingDevice,
+    TrajectoryPlayback,
+    TrajectoryRecordingResult,
 )
 from ..devices.runtime.errors import normalize_device_error
 from ..configuration.settings import ApplicationSettings
@@ -416,6 +418,7 @@ class TrajectoryTeachingService:
         self._storage = storage
         self._lease: ResourceLease | None = None
         self._arm: ArmId | None = None
+        self._recorder: TrajectoryRecorder | None = None
         self._lock = RLock()
 
     @property
@@ -433,19 +436,28 @@ class TrajectoryTeachingService:
                 (ROBOT_SYSTEM,),
             )
             try:
+                device = self._runtime.require(ROBOT_SYSTEM, TrajectoryRecordingDevice)
+                recorder = device.trajectory_recorder
                 _device_operation(
                     ROBOT_SYSTEM,
                     "trajectory.start_drag_teaching",
-                    lambda: self._runtime.require(
-                        ROBOT_SYSTEM,
-                        TrajectoryControl,
-                    ).start_drag_teaching(arm_id),
+                    lambda: recorder.start(arm_id),
                 )
             except Exception:
                 lease.release()
                 raise
             self._lease = lease
             self._arm = arm_id
+            self._recorder = recorder
+
+    @property
+    def scope_description(self) -> str:
+        with self._lock:
+            return self._recorder.scope_description if self._recorder else ""
+
+    @property
+    def supports_playback(self) -> bool:
+        return isinstance(self._runtime.get_if_ready(ROBOT_SYSTEM), TrajectoryPlayback)
 
     def trajectory_directory(self, arm: str | ArmId) -> Path:
         return self._storage.directory_for(_arm_id(arm).value)
@@ -453,61 +465,44 @@ class TrajectoryTeachingService:
     def import_trajectory(self, arm: str | ArmId, source: str | Path) -> Path:
         return self._storage.import_file(_arm_id(arm).value, Path(source))
 
-    def stop_and_save(self) -> TrajectorySaveResult:
+    def stop_and_save(self) -> TrajectoryRecordingResult:
         with self._lock:
             arm, lease = self._required_session_unlocked()
             path = self._storage.next_recording_path(arm.value)
-            trajectory = _device_operation(
-                ROBOT_SYSTEM,
-                "trajectory.resolve",
-                lambda: self._runtime.require(
-                    ROBOT_SYSTEM,
-                    TrajectoryControl,
-                ),
-            )
-            _device_operation(
-                ROBOT_SYSTEM,
-                "trajectory.stop_drag_teaching",
-                lambda: trajectory.stop_drag_teaching(arm),
+            assert self._recorder is not None
+            recorder = self._recorder
+            result = _device_operation(
+                ROBOT_SYSTEM, "trajectory.save",
+                lambda: recorder.finish(arm, path),
             )
             self._arm = None
             self._lease = None
-        try:
-            return _device_operation(
-                ROBOT_SYSTEM,
-                "trajectory.save",
-                lambda: trajectory.save_trajectory(arm, path),
-            )
-        finally:
+            self._recorder = None
             lease.release()
+            return result
 
-    def cancel(self) -> None:
+    def cancel(self, *, restore_mode: bool = True) -> None:
         with self._lock:
             if self._lease is None or self._arm is None:
                 return
             arm = self._arm
             lease = self._lease
+            assert self._recorder is not None
+            recorder = self._recorder
+            from uuid import uuid4
+            recovery = self._storage.root / "recovery" / uuid4().hex
+            _device_operation(
+                ROBOT_SYSTEM, "trajectory.cancel",
+                lambda: recorder.cancel(arm, recovery, restore_mode=restore_mode),
+            )
             self._arm = None
             self._lease = None
-        try:
-            trajectory = self._runtime.get_if_ready(ROBOT_SYSTEM)
-            if isinstance(trajectory, TrajectoryControl):
-                _device_operation(
-                    ROBOT_SYSTEM,
-                    "trajectory.stop_drag_teaching",
-                    lambda: trajectory.stop_drag_teaching(arm),
-                )
-        finally:
+            self._recorder = None
             lease.release()
 
     def release_after_safety_stop(self) -> None:
         """Release ownership after the robot adapter already accepted a stop."""
-        with self._lock:
-            lease = self._lease
-            self._arm = None
-            self._lease = None
-        if lease is not None:
-            lease.release()
+        self.cancel(restore_mode=False)
 
     def _required_session_unlocked(
         self,

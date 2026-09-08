@@ -14,6 +14,19 @@ from src.robot_server.ws_server import RobotWebSocketServer
 
 
 class ActionSchemaTests(unittest.TestCase):
+    def test_joint_motion_requires_seven_finite_angles_without_pose_compensation(self):
+        parameters = {"目标": "机械臂", "臂": "右", "模式": "move_joints", "关节角": [1] * 7}
+        self.assertTrue(validate_action_parameters(ActionType.MOVE, parameters).is_valid)
+        for values in ([1] * 6, [1] * 8, [True] * 7, [float("inf")] * 7):
+            with self.subTest(values=values):
+                self.assertFalse(validate_action_parameters(
+                    ActionType.MOVE, {**parameters, "关节角": values},
+                ).is_valid)
+        for extra in ({"点位": [0] * 6}, {"补偿": {"mode": "none"}}):
+            self.assertFalse(validate_action_parameters(
+                ActionType.MOVE, {**parameters, **extra},
+            ).is_valid)
+
     def test_schema_covers_every_action_type(self):
         self.assertEqual(
             {action_type.value for action_type in ActionType},

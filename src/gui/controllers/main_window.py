@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bridges.execution import ExecutionBridge
-from ..app_dialogs import ask_integer, ask_text, choose_item
+from ..app_dialogs import ask_confirmation, ask_integer, ask_text, choose_item
 from ..application_lifecycle import (
     begin_gui_shutdown,
     install_gui_application_lifecycle,
@@ -67,6 +67,7 @@ from .startup import (
     GuiStartupState,
     HardwareStartupStepResult,
 )
+from .recording_operation import run_recording_operation
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import (
     ActionLibraryView,
@@ -716,23 +717,38 @@ class MainWindow(RoundedMainWindow):
         teaching_started = False
         try:
             self._notifications.info(f"{robot_name.upper()} 开始拖动示教")
-            self._services.trajectory_teaching.start(robot_name)
+            run_recording_operation(
+                self, "开始轨迹录制",
+                lambda: self._services.trajectory_teaching.start(robot_name),
+            )
             teaching_started = True
 
-            self._notifications.info(
-                f"{robot_name.upper()} 正在录制。请手动拖动机械臂，完成后点击确定停止并保存。",
-                title="轨迹录制",
-                modal=True,
+            save_requested = ask_confirmation(
+                self, "轨迹录制",
+                f"{robot_name.upper()} 正在录制。\n"
+                f"{self._services.trajectory_teaching.scope_description}\n"
+                "请手动拖动机械臂，完成后点击确定停止并保存，或点击取消结束录制。",
             )
+            if not save_requested:
+                run_recording_operation(self, "取消轨迹录制", self._services.trajectory_teaching.cancel)
+                teaching_started = False
+                self._notifications.info("轨迹录制已取消")
+                return None
 
-            save_result = self._services.trajectory_teaching.stop_and_save()
+            save_result = run_recording_operation(
+                self, "保存轨迹录制", self._services.trajectory_teaching.stop_and_save,
+            )
+            assert save_result is not None
             teaching_started = False
             self._notifications.info(
                 f"{robot_name.upper()} 轨迹已保存: "
                 f"{save_result.path}, 点数: {save_result.point_count}"
             )
             self._notifications.info(
-                f"保存到:\n{save_result.path}",
+                "保存文件:\n" + "\n".join(
+                    f"{item.arm.value if item.arm else '原始数据'}: {item.path}"
+                    for item in save_result.files
+                ),
                 title="轨迹已保存",
                 modal=True,
             )
@@ -740,7 +756,9 @@ class MainWindow(RoundedMainWindow):
         except Exception as e:
             if teaching_started:
                 try:
-                    self._services.trajectory_teaching.cancel()
+                    run_recording_operation(
+                        self, "停止轨迹录制", self._services.trajectory_teaching.cancel,
+                    )
                 except Exception as stop_error:
                     self._notifications.warning(
                         f"{robot_name.upper()} 停止拖动示教失败: "
@@ -753,6 +771,10 @@ class MainWindow(RoundedMainWindow):
     def run_trajectory(self, robot_name: str) -> None:
         if not self._device_view_model.snapshot().robot_ready:
             self._notifications.warning(f"{robot_name.upper()} 未连接")
+            return
+
+        if not self._services.trajectory_teaching.supports_playback:
+            self._notifications.warning("当前设备支持轨迹录制，但尚未接入通用轨迹回放。")
             return
 
         start_dir = self._trajectory_dir(robot_name)
@@ -866,6 +888,12 @@ class MainWindow(RoundedMainWindow):
                 f"{arm}臂当前位姿不可用，请确认设备已连接并完成初始化"
             )
         return state.pose.to_list()
+
+    def _read_current_arm_joints_for_form(self, arm: str) -> list[float]:
+        state = self._services.robot_query.try_read_state(arm)
+        if state is None or state.joints is None:
+            raise RuntimeError(f"{arm}臂当前关节角不可用，请确认设备已初始化")
+        return state.joints.to_list()
 
     def format_pose_text(self, pose: Sequence[float]) -> str:
         x_mm = pose[0] * 1000
@@ -1043,6 +1071,8 @@ class MainWindow(RoundedMainWindow):
             action_type,
             existing_names=self._collect_action_names(),
             initial_variant=move_target,
+            robot_provider=self.settings.robot.provider,
+            joints_reader=self._read_current_arm_joints_for_form,
             pose_reader=self._read_current_arm_pose_for_form,
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
@@ -1103,6 +1133,10 @@ class MainWindow(RoundedMainWindow):
                 return
 
         if not file_path:
+            return
+
+        if not self._services.trajectory_teaching.supports_playback:
+            self._notifications.info("轨迹文件已保留；当前设备尚未支持通用轨迹回放，不创建回放动作。")
             return
 
         default_name = f"{robot_name.upper()} {Path(file_path).stem}"
@@ -1173,6 +1207,8 @@ class MainWindow(RoundedMainWindow):
             action_data,
             self,
             existing_names=self._collect_action_names(),
+            robot_provider=self.settings.robot.provider,
+            joints_reader=self._read_current_arm_joints_for_form,
             pose_reader=self._read_current_arm_pose_for_form,
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
@@ -1884,6 +1920,8 @@ class MainWindow(RoundedMainWindow):
             action_def.type,
             action_data,
             self,
+            robot_provider=self.settings.robot.provider,
+            joints_reader=self._read_current_arm_joints_for_form,
             pose_reader=self._read_current_arm_pose_for_form,
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,

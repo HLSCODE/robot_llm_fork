@@ -632,6 +632,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self,
     ) -> None:
         with (
+            patch("src.gui.controllers.main_window.ask_confirmation", return_value=True),
             patch.object(self.window._notifications, "info"),
             patch(
                 "src.gui.controllers.main_window.QFileDialog.getSaveFileName"
@@ -648,6 +649,17 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         )
         self.assertTrue(saved_path.is_file())
         save_dialog.assert_not_called()
+
+    def test_cancel_recording_releases_session_without_saving(self) -> None:
+        with (
+            patch("src.gui.controllers.main_window.ask_confirmation", return_value=False),
+            patch.object(self.window._notifications, "info"),
+            patch.object(self.services.trajectory_teaching, "stop_and_save") as save,
+        ):
+            result = self.window.record_trajectory("robot1")
+        self.assertIsNone(result)
+        self.assertFalse(self.services.trajectory_teaching.active)
+        save.assert_not_called()
 
 
 class GuiSpeechStartupSmokeTests(unittest.TestCase):

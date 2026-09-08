@@ -183,6 +183,7 @@ REALMAN_PROVIDER = RobotProviderDefinition(
         DeviceCapability.GRIPPER,
         DeviceCapability.ROBOT_TELEOPERATION,
         DeviceCapability.TRAJECTORY,
+        DeviceCapability.TRAJECTORY_RECORDING,
         DeviceCapability.TOOL_RACK,
     }),
     create=_create_realman_robot,

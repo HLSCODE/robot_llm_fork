@@ -136,6 +136,50 @@ class DeviceAndExecutionViewModelTests(unittest.TestCase):
 
 
 class SchemaActionFormTests(unittest.TestCase):
+    def test_tianji_joint_mode_capture_and_switching_preserve_separate_targets(self) -> None:
+        requested: list[str] = []
+
+        def read_joints(arm: str) -> list[float]:
+            requested.append(arm)
+            return [1, 2, 3, 4, 5, 6, 7]
+
+        form = SchemaActionForm(
+            ActionType.MOVE, {"目标": "机械臂", "臂": "右"},
+            robot_provider="tianji", joints_reader=read_joints,
+        )
+        self.assertIn("关节角", form.field_names)
+        self.assertNotIn("点位", form.field_names)
+        self.assertNotIn("补偿", form.field_names)
+        editor = form.findChild(PoseEditor)
+        assert editor is not None
+        editor.read_button.click()
+        self.assertTrue(_process_events_until(lambda: editor.read_button.isEnabled()))
+        self.assertEqual(["右"], requested)
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7], form.parameters()["关节角"])
+        mode = form._field_widgets["模式"]
+        assert isinstance(mode, QComboBox)
+        self.assertEqual(-1, mode.findData("move_j"))
+        mode.setCurrentIndex(mode.findData("move_l"))
+        self.assertIn("点位", form.field_names)
+        self.assertIn("补偿", form.field_names)
+        mode = form._field_widgets["模式"]
+        assert isinstance(mode, QComboBox)
+        mode.setCurrentIndex(mode.findData("move_joints"))
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7], form.parameters()["关节角"])
+        self.assertNotIn("点位", form.parameters())
+        form.deleteLater()
+
+    def test_realman_keeps_cartesian_move_j_and_legacy_tianji_requires_new_angles(self) -> None:
+        parameters = {"目标": "机械臂", "臂": "左", "模式": "move_j", "点位": [0] * 6}
+        realman = SchemaActionForm(ActionType.MOVE, parameters, robot_provider="realman")
+        self.assertEqual("move_j", realman.parameters()["模式"])
+        self.assertEqual([0] * 6, realman.parameters()["点位"])
+        tianji = SchemaActionForm(ActionType.MOVE, parameters, robot_provider="tianji")
+        self.assertEqual([], tianji.parameters()["关节角"])
+        self.assertNotIn("点位", tianji.parameters())
+        realman.deleteLater()
+        tianji.deleteLater()
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])

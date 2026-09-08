@@ -15,10 +15,15 @@ from .runtime.arm_models import (
     MotionOptions,
     RobotOperationError,
     TrajectorySaveResult,
+    TrajectoryRecordingResult,
 )
 from .runtime.camera_models import DepthCameraFrame
 from .runtime.sensor_models import BalanceReading
 from .runtime.contracts import (
+    TrajectoryRecorder,
+    TrajectoryRecordingDevice,
+    TrajectoryPlayback,
+    ArmJointMotion,
     ArmMotion,
     ArmStateReader,
     ArmTelemetryReader,
@@ -63,6 +68,11 @@ from .runtime.runtime import DeviceRegistration, DeviceRuntime
 from .cameras import resolve_camera_provider
 
 __all__ = [
+    "TrajectoryRecorder",
+    "TrajectoryRecordingDevice",
+    "TrajectoryPlayback",
+    "TrajectoryRecordingResult",
+    "ArmJointMotion",
     "ArmId",
     "ArmMotion",
     "ArmState",

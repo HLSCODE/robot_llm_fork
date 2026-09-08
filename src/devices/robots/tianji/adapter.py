@@ -13,6 +13,7 @@ from ...runtime.arm_models import (
     RobotOperationError,
 )
 from ...runtime.models import StopMode
+from .recording import TianjiTrajectoryRecorder
 
 
 class TianjiDriver(Protocol):
@@ -66,6 +67,11 @@ class TianjiRobotAdapter:
     ) -> None:
         self._driver = driver
         self._default_motion = default_motion
+        self._trajectory_recorder = TianjiTrajectoryRecorder(self)
+
+    @property
+    def trajectory_recorder(self) -> TianjiTrajectoryRecorder:
+        return self._trajectory_recorder
 
     @property
     def supported_stop_modes(self) -> frozenset[StopMode]:

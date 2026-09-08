@@ -173,6 +173,10 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "运动模式",
                         options=[
                             {
+                                "value": "move_joints",
+                                "label": "七关节目标运动 (move_j)",
+                            },
+                            {
                                 "value": "move_j",
                                 "label": "关节运动 (move_j)",
                             },
@@ -1009,7 +1013,17 @@ def get_action_fields(
             field=variant_key,
             message=(f"{action_type.value} 参数 {variant_key} 必须是 {', '.join(variants)} 之一"),
         )
-    return deepcopy(variants[variant_name]["fields"]), None
+    fields = deepcopy(variants[variant_name]["fields"])
+    if (action_type is ActionType.MOVE and variant_name == "机械臂"
+            and parameters.get("模式") == "move_joints"):
+        fields.pop("点位")
+        fields.pop("补偿")
+        fields["关节角"] = _field(
+            "joints", "七关节角", unit="°", required=True,
+            placeholder="[J1, J2, J3, J4, J5, J6, J7]，单位：度",
+            current_pose={"arm_field": "臂", "arm": "left"},
+        )
+    return fields, None
 
 
 def validate_action_parameters(
@@ -1210,6 +1224,12 @@ def _has_finite_numbers(mapping: dict[str, Any], fields: tuple[str, ...]) -> boo
 
 
 def _matches_field_type(value: Any, field_type: str) -> bool:
+    if field_type == "joints":
+        return (
+            isinstance(value, list) and len(value) == 7
+            and all(isinstance(item, (int, float)) and not isinstance(item, bool)
+                    and math.isfinite(item) for item in value)
+        )
     if field_type == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if field_type == "text":

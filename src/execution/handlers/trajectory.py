@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...devices import ArmId, DeviceRuntime, TrajectoryControl
+from ...devices import ArmId, DeviceRuntime, TrajectoryPlayback
 from ...devices.runtime.ids import ROBOT_SYSTEM
 from ..handler_api import (
     ActionCancelledError,
@@ -84,7 +84,7 @@ class TrajectoryActionHandler:
         try:
             trajectory = self._device_runtime.require(
                 ROBOT_SYSTEM,
-                TrajectoryControl,
+                TrajectoryPlayback,
             )
         except Exception as exc:
             message = f"轨迹设备不可用: {exc}"

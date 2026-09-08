@@ -189,6 +189,19 @@ class TrajectorySaveResult:
     point_count: int
 
 
+@dataclass(frozen=True, slots=True)
+class TrajectoryArtifact:
+    path: Path
+    arm: ArmId | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TrajectoryRecordingResult:
+    path: Path
+    point_count: int
+    files: tuple[TrajectoryArtifact, ...]
+
+
 class RobotOperationError(RuntimeError):
     def __init__(
         self,

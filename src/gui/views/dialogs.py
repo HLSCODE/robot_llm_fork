@@ -31,6 +31,7 @@ from ...domain.action_schema import (
     ActionFieldSchema,
     ActionTypeSchema,
     get_action_schema,
+    get_action_fields,
     validate_action_parameters,
 )
 from ...domain.arm_names import normalize_arm_name
@@ -190,10 +191,11 @@ class PoseReadWorker(QObject):
     failed = Signal(str)
     finished = Signal()
 
-    def __init__(self, reader: PoseReader, arm: str) -> None:
+    def __init__(self, reader: PoseReader, arm: str, dimension: int = 6) -> None:
         super().__init__()
         self._reader = reader
         self._arm = arm
+        self._dimension = dimension
 
     @Slot()
     def run(self) -> None:
@@ -204,7 +206,7 @@ class PoseReadWorker(QObject):
                     f"{_arm_display_name(self._arm)}当前位姿不可用，"
                     "请确认设备已连接并完成初始化"
                 )
-            values = _validated_pose_values(pose)
+            values = _validated_pose_values(pose, self._dimension)
         except Exception as exc:
             self.failed.emit(str(exc) or type(exc).__name__)
         else:
@@ -224,12 +226,14 @@ class PoseEditor(QWidget):
         pose_reader: PoseReader | None = None,
         placeholder: str = "",
         field_label: str = "位姿",
+        dimension: int = 6,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("poseEditor")
         self._arm = arm
         self._field_label = field_label
+        self._dimension = dimension
         self._pose_reader = pose_reader
         self._read_thread: QThread | None = None
         self._read_worker: PoseReadWorker | None = None
@@ -280,7 +284,7 @@ class PoseEditor(QWidget):
                 return
         thread = QThread()
         thread.setObjectName(f"PoseReadThread-{arm}")
-        worker = PoseReadWorker(self._pose_reader, arm)
+        worker = PoseReadWorker(self._pose_reader, arm, self._dimension)
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.succeeded.connect(self._apply_pose)
@@ -332,16 +336,17 @@ class PoseEditor(QWidget):
         self._update_button_description()
 
     def _update_button_description(self) -> None:
-        description = f"读取{_arm_display_name(self._arm)}当前位姿"
+        value_name = "七关节角（度）" if self._dimension == 7 else "位姿"
+        description = f"读取{_arm_display_name(self._arm)}当前{value_name}"
         self.read_button.setToolTip(description)
         self.read_button.setAccessibleName(description)
 
 
-def _validated_pose_values(pose: Sequence[float]) -> list[float]:
+def _validated_pose_values(pose: Sequence[float], dimension: int = 6) -> list[float]:
     if isinstance(pose, (str, bytes)):
         raise ValueError("机械臂返回的当前位姿不是数值数组")
-    if len(pose) != 6:
-        raise ValueError("机械臂返回的当前位姿不是 6 维数组")
+    if len(pose) != dimension:
+        raise ValueError(f"机械臂返回的数据不是 {dimension} 维数组")
     if any(isinstance(value, bool) for value in pose):
         raise ValueError("机械臂返回的当前位姿包含无效数值")
     values = [float(value) for value in pose]
@@ -660,6 +665,8 @@ class SchemaActionForm(QWidget):
         parameters: dict[str, Any] | None = None,
         *,
         initial_variant: str | None = None,
+        robot_provider: str = "",
+        joints_reader: PoseReader | None = None,
         pose_reader: PoseReader | None = None,
         localization_reader: LocalizationReader | None = None,
         station_choices_reader: StationChoicesReader | None = None,
@@ -670,6 +677,12 @@ class SchemaActionForm(QWidget):
         self._action_type = action_type
         self._type_schema: ActionTypeSchema = get_action_schema()[action_type.value]
         self._values = dict(parameters or {})
+        self._robot_provider = robot_provider
+        self._joints_reader = joints_reader
+        if (action_type is ActionType.MOVE and robot_provider == "tianji"
+                and self._values.get("模式", "move_j") == "move_j"
+                and self._values.get("目标", initial_variant or "机械臂") == "机械臂"):
+            self._values["模式"] = "move_joints"
         self._field_widgets: dict[str, FieldWidget] = {}
         self._field_schemas: dict[str, ActionFieldSchema] = {}
         self._pose_reader = pose_reader
@@ -696,6 +709,11 @@ class SchemaActionForm(QWidget):
         description = QLabel(description_text)
         description.setWordWrap(True)
         layout.addWidget(description)
+        if (action_type is ActionType.MOVE and robot_provider == "tianji"
+                and parameters and parameters.get("模式") == "move_j"):
+            notice = QLabel("旧 move_j 保存的是六维位姿，请重新获取七关节角，或选择直线运动。")
+            notice.setWordWrap(True)
+            layout.addWidget(notice)
 
         self._variant_combo: QComboBox | None = None
         if variants is not None and self._locked_variant is None:
@@ -820,6 +838,9 @@ class SchemaActionForm(QWidget):
             self._connect_validation_reset(widget)
         self._bind_current_pose_sources()
         self._bind_dynamic_select_sources()
+        mode_widget = self._field_widgets.get("模式")
+        if self._action_type is ActionType.MOVE and isinstance(mode_widget, QComboBox):
+            mode_widget.currentIndexChanged.connect(self._change_motion_mode)
 
         arm_widget = self._field_widgets.get("臂")
         compensation_widget = self._field_widgets.get("补偿")
@@ -873,11 +894,35 @@ class SchemaActionForm(QWidget):
             return str(configured)
         return str(source.get("arm", "left"))
 
+    def _change_motion_mode(self) -> None:
+        for name, widget in self._field_widgets.items():
+            if isinstance(widget, PoseEditor):
+                self._values[name] = widget.text()
+            else:
+                self._values[name] = self._widget_value(widget, self._field_schemas[name])
+        self._render_fields()
+        self.content_size_changed.emit()
+
     def _selected_fields(self) -> dict[str, ActionFieldSchema]:
         variants = self._type_schema.get("variants")
         if variants is None:
             return self._type_schema.get("fields", {})
-        return variants[self._selected_variant_name()]["fields"]
+        selected = self._selected_variant_name()
+        if self._action_type is ActionType.MOVE and selected == "机械臂":
+            fields, _issue = get_action_fields(
+                self._action_type, {**self._values, "目标": selected},
+            )
+            assert fields is not None
+            if self._robot_provider:
+                excluded = "move_j" if self._robot_provider == "tianji" else "move_joints"
+                fields["模式"]["options"] = [
+                    option for option in fields["模式"]["options"]
+                    if not isinstance(option, dict) or option.get("value") != excluded
+                ]
+                if self._robot_provider == "tianji":
+                    fields["模式"]["default"] = "move_joints"
+            return fields
+        return variants[selected]["fields"]
 
     def _selected_variant_name(self) -> str:
         if self._locked_variant is not None:
@@ -924,11 +969,12 @@ class SchemaActionForm(QWidget):
                 localization_reader=self._localization_reader,
                 station_choices_reader=self._station_choices_reader,
             )
-        elif field_type == "pose" or "current_pose" in schema:
+        elif field_type in {"pose", "joints"} or "current_pose" in schema:
             widget = PoseEditor(
                 value,
                 arm=self._current_pose_arm(schema),
-                pose_reader=self._pose_reader,
+                pose_reader=self._joints_reader if field_type == "joints" else self._pose_reader,
+                dimension=7 if field_type == "joints" else 6,
                 placeholder=schema.get("placeholder", ""),
                 field_label=schema.get("label", "位姿"),
             )
@@ -1025,7 +1071,7 @@ class SchemaActionForm(QWidget):
         if isinstance(widget, PoseEditor):
             text = widget.text().strip()
             if not text:
-                if schema["type"] == "pose":
+                if schema["type"] in {"pose", "joints"}:
                     return [] if schema.get("required") else None
                 return "" if schema.get("required") else None
             try:
@@ -1035,12 +1081,13 @@ class SchemaActionForm(QWidget):
                     f"{schema.get('label', '位姿')}必须是合法 JSON 数组"
                 ) from exc
             try:
-                pose = _validated_pose_values(value)
+                dimension = 7 if schema["type"] == "joints" else 6
+                pose = _validated_pose_values(value, dimension)
             except (TypeError, ValueError) as exc:
                 raise ValueError(
-                    f"{schema.get('label', '位姿')}必须包含 6 个有效数值"
+                    f"{schema.get('label', '位姿')}必须包含 {dimension} 个有效数值"
                 ) from exc
-            if schema["type"] == "pose":
+            if schema["type"] in {"pose", "joints"}:
                 return pose
             return json.dumps(pose, ensure_ascii=False)
         if isinstance(widget, QComboBox):
@@ -1120,6 +1167,8 @@ class ActionConfigDialog(AppDialog):
         *,
         existing_names: set[str] | None = None,
         initial_variant: str | None = None,
+        robot_provider: str = "",
+        joints_reader: PoseReader | None = None,
         pose_reader: PoseReader | None = None,
         localization_reader: LocalizationReader | None = None,
         station_choices_reader: StationChoicesReader | None = None,
@@ -1152,6 +1201,8 @@ class ActionConfigDialog(AppDialog):
             action_type,
             self.action_data.get("parameters", {}),
             initial_variant=_normalize_initial_variant(initial_variant),
+            robot_provider=robot_provider,
+            joints_reader=joints_reader,
             pose_reader=pose_reader,
             localization_reader=localization_reader,
             station_choices_reader=station_choices_reader,

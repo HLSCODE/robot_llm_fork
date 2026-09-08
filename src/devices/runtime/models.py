@@ -23,6 +23,7 @@ class DeviceCapability(str, Enum):
     GRIPPER = "gripper"
     ROBOT_TELEOPERATION = "robot_teleoperation"
     TRAJECTORY = "trajectory"
+    TRAJECTORY_RECORDING = "trajectory_recording"
     TOOL_RACK = "tool_rack"
     BODY_AXIS = "body_axis"
     MOBILE_BASE = "mobile_base"

@@ -31,8 +31,9 @@ class TrajectoryStorage:
         existing_numbers = [
             int(match.group(1))
             for path in directory.iterdir()
-            if path.is_file()
-            and (match := _TRAJECTORY_FILE_PATTERN.fullmatch(path.name)) is not None
+            if (match := _TRAJECTORY_FILE_PATTERN.fullmatch(
+                path.name if path.is_file() else path.name + ".txt"
+            )) is not None
         ]
         next_number = max(existing_numbers, default=0) + 1
         return directory / f"trajectory_{next_number:03d}.txt"

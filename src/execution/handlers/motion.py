@@ -7,6 +7,8 @@ from ...domain.execution_context import ExecutionContext
 from ..target_pose import resolve_robot_target_pose
 from ...configuration.settings import VisionSettings
 from ...devices import (
+    ArmJointMotion,
+    JointVector,
     ArmId,
     ArmMotion,
     ArmStateReader,
@@ -113,6 +115,8 @@ class RobotMoveActionHandler:
         target = str(parameters.get("目标", "机械臂"))
         target_pose_text = parameters.get("点位", "")
         mode_name = str(parameters.get("模式", ""))
+        if mode_name == "move_joints":
+            return self._move_joints(parameters, context)
         context.log(
             f"机械臂移动动作: 臂={arm_name}, 模式={mode_name}, "
             f"点位={target_pose_text}",
@@ -210,6 +214,33 @@ class RobotMoveActionHandler:
             device_id=ROBOT_SYSTEM,
             error=last_error,
         )
+
+    def _move_joints(
+        self, parameters: ActionParameters, context: ActionExecutionContext,
+    ) -> ActionHandlerResult:
+        from ...domain.action_schema import validate_action_parameters
+        from ...domain.models import ActionType
+
+        operation = "robot_system.move_to_joints"
+        validation = validate_action_parameters(ActionType.MOVE, dict(parameters))
+        if not validation.is_valid:
+            return context.failure(
+                ActionResultCode.INVALID_PARAMETERS, validation.message,
+                operation=operation, device_id=ROBOT_SYSTEM,
+            )
+        try:
+            arm = ArmId.parse(parameters.get("臂", "左"))
+            joints = JointVector.from_iterable(validation.parameters["关节角"])
+            motion = self._device_runtime.require(ROBOT_SYSTEM, ArmJointMotion)
+            context.invoke(operation, lambda: motion.move_to_joints(arm, joints))
+        except (ActionCancelledError, ActionTimeoutError):
+            raise
+        except Exception as exc:
+            return context.failure(
+                ActionResultCode.DEVICE_OPERATION_FAILED, f"关节运动失败: {exc}",
+                operation=operation, device_id=ROBOT_SYSTEM, error=exc,
+            )
+        return context.success(operation=operation, device_id=ROBOT_SYSTEM)
 
     def _relative_pose(
         self,

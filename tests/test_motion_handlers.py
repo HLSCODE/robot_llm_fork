@@ -10,6 +10,7 @@ from src.devices import (
     ArmId,
     ArmState,
     CartesianPose,
+    JointVector,
     DeviceCapability,
     DeviceRegistration,
     DeviceRuntime,
@@ -156,6 +157,30 @@ def _action_context(
 
 
 class RobotMoveActionHandlerTests(unittest.TestCase):
+    def test_seven_joint_action_calls_joint_protocol_and_rejects_invalid_targets(self):
+        class JointRobot(_RecordingArmMotion):
+            def __init__(self):
+                super().__init__()
+                self.joint_calls = []
+
+            def move_to_joints(self, arm, joints, options=None):
+                self.joint_calls.append((arm, joints))
+
+        robot = JointRobot()
+        runtime = _runtime_with(ROBOT_SYSTEM, DeviceCapability.ARM_MOTION, robot)
+        handler = RobotMoveActionHandler(
+            runtime, ExecutionContext(), MotionHandlerOptions(), VisionSettings(),
+            lambda **_kwargs: self.fail("joint target must not use localization"),
+        )
+        parameters = {"目标": "机械臂", "臂": "右", "模式": "move_joints", "关节角": [10] * 7}
+        context, _ = _action_context()
+        self.assertTrue(handler(parameters, context).successful)
+        self.assertEqual([(ArmId.RIGHT, JointVector((10.0,) * 7))], robot.joint_calls)
+        self.assertEqual([], robot.calls)
+        invalid_context, _ = _action_context()
+        self.assertFalse(handler({**parameters, "关节角": [10] * 6}, invalid_context).successful)
+        self.assertEqual(1, len(robot.joint_calls))
+
     def test_relative_motion_reads_current_pose_and_preserves_orientation(self):
         robot = _RecordingArmMotion()
         runtime = DeviceRuntime()
@@ -431,6 +456,15 @@ class MotionHandlerIntegrationTests(unittest.TestCase):
         services.devices.initialize_many((BODY_AXIS, MOBILE_BASE))
         definitions = (
             ActionDefinition(
+                id="joints",
+                name="seven joint move",
+                type=ActionType.MOVE,
+                parameters={
+                    "目标": "机械臂", "臂": "右", "模式": "move_joints",
+                    "关节角": [1, 2, 3, 4, 5, 6, 7],
+                },
+            ),
+            ActionDefinition(
                 id="arm",
                 name="arm move",
                 type=ActionType.MOVE,
@@ -470,6 +504,9 @@ class MotionHandlerIntegrationTests(unittest.TestCase):
         ).wait(1)
 
         self.assertEqual(ExecutionState.SUCCEEDED, final.state)
+        state = services.robot_query.try_read_state("右")
+        assert state is not None and state.joints is not None
+        self.assertEqual((1, 2, 3, 4, 5, 6, 7), state.joints.positions_deg)
         self.assertFalse(services.devices.shutdown_all())
 
 

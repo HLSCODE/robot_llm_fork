@@ -21,6 +21,7 @@ from ...runtime.arm_models import (
 )
 from ...runtime.models import StopMode
 from .state import realman_state_error_codes
+from .recording import RealManTrajectoryRecorder
 
 _GRAM_FORCE_TO_NEWTONS = 0.00980665
 
@@ -359,6 +360,10 @@ class RealManRobotAdapter:
             blocking=bool(block),
         )
         self._ensure_success("initialize_teleoperation", arm, code)
+
+    @property
+    def trajectory_recorder(self) -> RealManTrajectoryRecorder:
+        return RealManTrajectoryRecorder(self)
 
     def start_drag_teaching(self, arm: ArmId) -> None:
         code = self._controller.set_drag_teaching(

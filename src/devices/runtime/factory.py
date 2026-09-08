@@ -88,6 +88,7 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
                 DeviceCapability.GRIPPER,
                 DeviceCapability.ROBOT_TELEOPERATION,
                 DeviceCapability.TRAJECTORY,
+                DeviceCapability.TRAJECTORY_RECORDING,
                 DeviceCapability.TOOL_RACK,
             },
             SimulatedRobotSystem,

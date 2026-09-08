@@ -18,6 +18,7 @@ from .arm_models import (
 )
 from .camera_models import DepthCameraFrame
 from .models import StopMode
+from .contracts import TrajectoryRecorder
 
 
 class SimulatedRobotSystem:
@@ -57,6 +58,11 @@ class SimulatedRobotSystem:
             pose=pose,
             joints=self.states[arm].joints,
         )
+
+    def move_to_joints(
+        self, arm: ArmId, joints: JointVector, options: MotionOptions | None = None,
+    ) -> None:
+        self.states[arm] = ArmState(arm=arm, pose=self.states[arm].pose, joints=joints)
 
     def read_arm_state(self, arm: ArmId) -> ArmState:
         return self.states[arm]
@@ -128,6 +134,11 @@ class SimulatedRobotSystem:
             follow=False,
             trajectory_mode=0,
         )
+
+    @property
+    def trajectory_recorder(self) -> TrajectoryRecorder:
+        from ..robots.realman.recording import RealManTrajectoryRecorder
+        return RealManTrajectoryRecorder(self)
 
     def start_drag_teaching(self, _arm: ArmId) -> None:
         return None

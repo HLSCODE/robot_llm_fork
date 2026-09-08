@@ -13,6 +13,7 @@ from .arm_models import (
     MotionMode,
     MotionOptions,
     TrajectorySaveResult,
+    TrajectoryRecordingResult,
 )
 from .camera_models import DepthCameraFrame
 from .models import StopMode
@@ -40,6 +41,15 @@ class ArmMotion(Protocol):
         pose: CartesianPose,
         mode: MotionMode,
         options: MotionOptions | None = None,
+    ) -> None: ...
+
+
+@runtime_checkable
+class ArmJointMotion(Protocol):
+    """Explicit joint-angle target, separate from Cartesian interpolation mode."""
+
+    def move_to_joints(
+        self, arm: ArmId, joints: JointVector, options: MotionOptions | None = None,
     ) -> None: ...
 
 
@@ -83,6 +93,30 @@ class RobotTeleoperation(Protocol):
         connect: int = 0,
         block: int = 1,
     ) -> None: ...
+
+
+@runtime_checkable
+class TrajectoryRecorder(Protocol):
+    """Vendor-owned recording lifecycle; target is allocated by the application."""
+
+    @property
+    def scope_description(self) -> str: ...
+
+    def start(self, arm: ArmId) -> None: ...
+    def finish(self, arm: ArmId, target: Path) -> TrajectoryRecordingResult: ...
+    def cancel(self, arm: ArmId, recovery_directory: Path, *, restore_mode: bool = True) -> None: ...
+
+
+@runtime_checkable
+class TrajectoryRecordingDevice(Protocol):
+    @property
+    def trajectory_recorder(self) -> TrajectoryRecorder: ...
+
+
+@runtime_checkable
+class TrajectoryPlayback(Protocol):
+    def send_trajectory(self, arm: ArmId, path: str | Path) -> None: ...
+    def is_trajectory_complete(self, arm: ArmId) -> bool: ...
 
 
 @runtime_checkable
