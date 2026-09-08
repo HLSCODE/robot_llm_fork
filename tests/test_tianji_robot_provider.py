@@ -42,6 +42,7 @@ class _FakeSdkRuntime:
         self.joint_moves: list[tuple[str, tuple[float, ...], int, bool]] = []
         self.pose_increments: list[tuple[str, tuple[float, ...], int, bool]] = []
         self.moves: list[tuple[str, tuple[float, ...], int, bool]] = []
+        self.joint_pose_moves: list[tuple[str, tuple[float, ...], int, bool]] = []
         self.states = {
             "A": {
                 "pose": [0.1, 0.2, 0.3, 0.01, 0.02, 0.03],
@@ -70,6 +71,11 @@ class _FakeSdkRuntime:
 
     def read_state(self, arm: str) -> dict[str, object]:
         return self.states[arm]
+
+    def move_joint_pose(
+        self, arm: str, pose: Sequence[float], *, velocity_percent: int, blocking: bool
+    ) -> None:
+        self.joint_pose_moves.append((arm, tuple(pose), velocity_percent, blocking))
 
     def move_joints(
         self, arm: str, joints: Sequence[float], *, velocity_percent: int, blocking: bool
@@ -202,6 +208,12 @@ class TianjiProviderTests(unittest.TestCase):
                 vel=12,
                 is_block=False,
             )
+            runtime.move_joint_pose("A", [0.1, 0.2, 0.3, 0, 0, 0],
+                                    velocity_percent=14, blocking=False)
+            args, kwargs = client.movej_p.call_args
+            self.assertEqual(Arm.LEFT, args[0])
+            self.assertEqual([0.1, 0.2, 0.3], list(args[1].translation))
+            self.assertEqual({"vel": 14, "is_block": False}, kwargs)
             runtime.quick_stop("A")
             client.quick_stop.assert_called_once_with(Arm.LEFT)
             runtime.emergency_stop()
@@ -291,14 +303,19 @@ class TianjiDriverTests(unittest.TestCase):
         self.addCleanup(driver.close)
         adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
 
-        with self.assertRaisesRegex(RobotOperationError, "only exposes linear"):
-            adapter.move_to_pose(
-                ArmId.LEFT,
-                CartesianPose(0.1, 0.2, 0.3, 0.0, 0.0, 0.0),
-                MotionMode.JOINT,
-            )
         with self.assertRaisesRegex(ValueError, "unsupported robot stop mode"):
             adapter.stop(StopMode.CONTROLLED)
+
+    def test_cartesian_joint_motion_uses_pose_interface(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        pose = CartesianPose(0.1, 0.2, 0.3, 0.0, 0.0, 0.0)
+        adapter.move_to_pose(ArmId.RIGHT, pose, MotionMode.JOINT,
+                             MotionOptions(velocity_percent=15, blocking=False))
+        self.assertEqual([("B", tuple(pose.to_list()), 15, False)], runtime.joint_pose_moves)
+        self.assertEqual([], runtime.moves)
+        self.assertEqual([], runtime.joint_moves)
 
     def test_joint_targets_are_separate_and_rejected_before_sdk_clipping(self) -> None:
         driver, runtime = _driver()

@@ -144,7 +144,7 @@ class SchemaActionFormTests(unittest.TestCase):
             return [1, 2, 3, 4, 5, 6, 7]
 
         form = SchemaActionForm(
-            ActionType.MOVE, {"目标": "机械臂", "臂": "右"},
+            ActionType.MOVE, {"目标": "机械臂", "臂": "右", "模式": "move_joints"},
             robot_provider="tianji", joints_reader=read_joints,
         )
         self.assertIn("关节角", form.field_names)
@@ -158,7 +158,7 @@ class SchemaActionFormTests(unittest.TestCase):
         self.assertEqual([1, 2, 3, 4, 5, 6, 7], form.parameters()["关节角"])
         mode = form._field_widgets["模式"]
         assert isinstance(mode, QComboBox)
-        self.assertEqual(-1, mode.findData("move_j"))
+        self.assertGreaterEqual(mode.findData("move_j"), 0)
         mode.setCurrentIndex(mode.findData("move_l"))
         self.assertIn("点位", form.field_names)
         self.assertIn("补偿", form.field_names)
@@ -169,14 +169,15 @@ class SchemaActionFormTests(unittest.TestCase):
         self.assertNotIn("点位", form.parameters())
         form.deleteLater()
 
-    def test_realman_keeps_cartesian_move_j_and_legacy_tianji_requires_new_angles(self) -> None:
+    def test_both_providers_preserve_cartesian_move_j(self) -> None:
         parameters = {"目标": "机械臂", "臂": "左", "模式": "move_j", "点位": [0] * 6}
         realman = SchemaActionForm(ActionType.MOVE, parameters, robot_provider="realman")
         self.assertEqual("move_j", realman.parameters()["模式"])
         self.assertEqual([0] * 6, realman.parameters()["点位"])
         tianji = SchemaActionForm(ActionType.MOVE, parameters, robot_provider="tianji")
-        self.assertEqual([], tianji.parameters()["关节角"])
-        self.assertNotIn("点位", tianji.parameters())
+        self.assertEqual("move_j", tianji.parameters()["模式"])
+        self.assertEqual([0] * 6, tianji.parameters()["点位"])
+        self.assertNotIn("关节角", tianji.parameters())
         realman.deleteLater()
         tianji.deleteLater()
 

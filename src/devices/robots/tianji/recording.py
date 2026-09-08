@@ -22,7 +22,8 @@ class TianjiTrajectoryRecorder:
     def scope_description(self) -> str:
         return (
             "拖拽所选机械臂，同时采集左右双臂；保存原始数据、TXT 和 FMV。"
-            "请勿同时使用末端按钮录制。取消时数据保留在 recovery 目录。"
+            "末端按钮松开不会结束本次 GUI 采集，请在界面停止并保存。"
+            "取消时数据保留在 recovery 目录。"
         )
 
     def start(self, arm: ArmId) -> None:

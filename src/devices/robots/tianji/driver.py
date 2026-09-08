@@ -26,6 +26,10 @@ class TianjiSdkRuntime(Protocol):
 
     def read_state(self, arm: str) -> dict[str, object]: ...
 
+    def move_joint_pose(
+        self, arm: str, pose: Sequence[float], *, velocity_percent: int, blocking: bool
+    ) -> None: ...
+
     def move_joints(
         self, arm: str, joints: Sequence[float], *, velocity_percent: int, blocking: bool
     ) -> None: ...
@@ -113,15 +117,12 @@ class TianjiRobotDriver:
     ) -> bool:
         sdk_arm = _validate_arm(arm)
         target = _numeric_values(pose, 6, "pose")
-        if not linear:
-            raise NotImplementedError(
-                "Tianji SDK 0.2 does not expose Cartesian-target joint motion"
-            )
         if not 1 <= velocity_percent <= 100:
             raise ValueError("velocity_percent must be in range 1..100")
         with self._lock:
             self._require_open()
-            self._runtime.move_linear(
+            move = self._runtime.move_linear if linear else self._runtime.move_joint_pose
+            move(
                 sdk_arm,
                 target,
                 velocity_percent=velocity_percent,
@@ -354,6 +355,14 @@ class _OfficialTianjiSdkRuntime:
             "button_pressed": state.button_pressed,
             "error_code": 0,
         }
+
+    def move_joint_pose(
+        self, arm: str, pose: Sequence[float], *, velocity_percent: int, blocking: bool
+    ) -> None:
+        self._client.movej_p(
+            self._arm_type[arm], self._pose_factory(pose),
+            vel=velocity_percent, is_block=blocking,
+        )
 
     def move_joints(
         self, arm: str, joints: Sequence[float], *, velocity_percent: int, blocking: bool

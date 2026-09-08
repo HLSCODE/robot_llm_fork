@@ -197,12 +197,6 @@ class TianjiRobotAdapter:
     ) -> None:
         if not isinstance(mode, MotionMode):
             raise TypeError("mode must be a MotionMode")
-        if mode is not MotionMode.LINEAR:
-            raise RobotOperationError(
-                "move_to_pose",
-                arm,
-                detail=("Tianji SDK 0.2 only exposes linear Cartesian-target motion; use move_l"),
-            )
         selected = options or self._default_motion
         if selected.blend_radius != 0 or selected.connected:
             raise RobotOperationError(
@@ -214,7 +208,7 @@ class TianjiRobotAdapter:
             succeeded = self._driver.move_to_pose(
                 self._arm_key(arm),
                 pose.to_list(),
-                linear=True,
+                linear=mode is MotionMode.LINEAR,
                 velocity_percent=selected.velocity_percent,
                 blocking=selected.blocking,
             )

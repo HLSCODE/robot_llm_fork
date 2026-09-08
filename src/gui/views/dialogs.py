@@ -679,10 +679,6 @@ class SchemaActionForm(QWidget):
         self._values = dict(parameters or {})
         self._robot_provider = robot_provider
         self._joints_reader = joints_reader
-        if (action_type is ActionType.MOVE and robot_provider == "tianji"
-                and self._values.get("模式", "move_j") == "move_j"
-                and self._values.get("目标", initial_variant or "机械臂") == "机械臂"):
-            self._values["模式"] = "move_joints"
         self._field_widgets: dict[str, FieldWidget] = {}
         self._field_schemas: dict[str, ActionFieldSchema] = {}
         self._pose_reader = pose_reader
@@ -709,11 +705,6 @@ class SchemaActionForm(QWidget):
         description = QLabel(description_text)
         description.setWordWrap(True)
         layout.addWidget(description)
-        if (action_type is ActionType.MOVE and robot_provider == "tianji"
-                and parameters and parameters.get("模式") == "move_j"):
-            notice = QLabel("旧 move_j 保存的是六维位姿，请重新获取七关节角，或选择直线运动。")
-            notice.setWordWrap(True)
-            layout.addWidget(notice)
 
         self._variant_combo: QComboBox | None = None
         if variants is not None and self._locked_variant is None:
@@ -913,14 +904,12 @@ class SchemaActionForm(QWidget):
                 self._action_type, {**self._values, "目标": selected},
             )
             assert fields is not None
-            if self._robot_provider:
-                excluded = "move_j" if self._robot_provider == "tianji" else "move_joints"
+            if self._robot_provider and self._robot_provider != "tianji":
+                excluded = "move_joints"
                 fields["模式"]["options"] = [
                     option for option in fields["模式"]["options"]
                     if not isinstance(option, dict) or option.get("value") != excluded
                 ]
-                if self._robot_provider == "tianji":
-                    fields["模式"]["default"] = "move_joints"
             return fields
         return variants[selected]["fields"]
 
