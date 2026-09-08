@@ -782,7 +782,7 @@ class MainWindow(RoundedMainWindow):
             self,
             f"选择 {robot_name.upper()} 轨迹",
             str(start_dir),
-            "轨迹文件 (*.txt);;所有文件 (*)"
+            "轨迹文件 (*.fmv *.txt);;所有文件 (*)"
         )
         if not filename:
             return
@@ -1117,7 +1117,7 @@ class MainWindow(RoundedMainWindow):
                 self,
                 "选择轨迹文件",
                 str(self._trajectory_dir(robot_name)),
-                "轨迹文件 (*.txt);;所有文件 (*)"
+                "轨迹文件 (*.fmv *.txt);;所有文件 (*)"
             )
             if not file_path:
                 return

@@ -117,6 +117,7 @@ TIANJI_PROVIDER = RobotProviderDefinition(
             DeviceCapability.ARM_MOTION,
         DeviceCapability.ARM_STATE,
         DeviceCapability.TRAJECTORY_RECORDING,
+        DeviceCapability.TRAJECTORY,
         }
     ),
     create=_create_tianji_robot,

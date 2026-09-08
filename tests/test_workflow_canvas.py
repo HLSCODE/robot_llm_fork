@@ -1045,6 +1045,40 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.assertFalse(self.canvas._editing_enabled)  # noqa: SLF001
         self.canvas.finish_execution()
         self.assertFalse(self.canvas._parallel_branch_states)  # noqa: SLF001
+        rendered = self.canvas.get_entries()[0]
+        assert isinstance(rendered, ParallelBlock)
+        self.assertIs(SequenceItemStatus.PENDING, rendered.branches[0].items[0].status)
+
+    def test_finish_execution_clears_only_running_states_in_nested_entries(self) -> None:
+        running = _item("running")
+        succeeded = _item("succeeded")
+        failed = _item("failed")
+        nested = SubworkflowBlock(
+            uuid="sub", name="Sub", items=[running, succeeded, failed],
+        )
+        loop = LoopBlock(uuid="loop", items=[nested], repeat_count=2)
+        compiled = WorkflowCompiler().compile(WorkflowDocument.from_entries(
+            workflow_id="cancel", name="Cancel", revision=1, entries=(loop,),
+        ))
+        self.canvas.begin_execution(compiled)
+        for index, (item, status) in enumerate((
+            (running, SequenceItemStatus.RUNNING),
+            (succeeded, SequenceItemStatus.SUCCESS),
+            (failed, SequenceItemStatus.FAILED),
+        )):
+            item.status = status
+            self.canvas.update_execution_step(index, item)
+        self.canvas.finish_execution()
+        self.canvas.finish_execution()
+        rendered = self.canvas.get_entries()[0]
+        assert isinstance(rendered, LoopBlock)
+        sub = rendered.items[0]
+        assert isinstance(sub, SubworkflowBlock)
+        self.assertEqual(
+            [SequenceItemStatus.PENDING, SequenceItemStatus.SUCCESS, SequenceItemStatus.FAILED],
+            [item.status for item in sub.items],
+        )
+        self.assertFalse(self.canvas._node_items["loop"].execution_pulse_active)
 
     def test_parallel_node_renders_in_light_dark_and_narrow_viewports(self) -> None:
         original = QApplication.palette()

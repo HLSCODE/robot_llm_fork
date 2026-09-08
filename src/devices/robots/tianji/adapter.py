@@ -11,6 +11,7 @@ from ...runtime.arm_models import (
     MotionMode,
     MotionOptions,
     RobotOperationError,
+    TrajectoryInterruptedError,
 )
 from ...runtime.models import StopMode
 from .recording import TianjiTrajectoryRecorder
@@ -51,7 +52,7 @@ class TianjiDriver(Protocol):
 
     def save_recording(self, directory: str | Path) -> None: ...
 
-    def run_trajectory(self, arm: str, path: str | Path, *, blocking: bool = True) -> None: ...
+    def run_trajectory(self, arm: str, path: str | Path, *, blocking: bool = True) -> int: ...
 
     def close(self) -> None: ...
 
@@ -184,9 +185,16 @@ class TianjiRobotAdapter:
 
     def run_trajectory(self, arm: ArmId, path: str | Path, *, blocking: bool = True) -> None:
         try:
-            self._driver.run_trajectory(self._arm_key(arm), path, blocking=blocking)
+            result = self._driver.run_trajectory(self._arm_key(arm), path, blocking=blocking)
         except Exception as exc:
             raise _operation_error("run_trajectory", arm, exc) from exc
+        if result == 1:
+            raise TrajectoryInterruptedError(f"{arm.value} 臂轨迹回放被末端按钮中断")
+        if type(result) is not int or result != 0:
+            raise RobotOperationError("run_trajectory", arm, detail="未知 SDK 回放结果")
+
+    def execute_trajectory(self, arm: ArmId, path: str | Path) -> None:
+        self.run_trajectory(arm, path, blocking=True)
 
     def move_to_pose(
         self,

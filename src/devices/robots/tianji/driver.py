@@ -44,7 +44,7 @@ class TianjiSdkRuntime(Protocol):
 
     def save_recording(self, directory: str) -> bool: ...
 
-    def run_trajectory(self, arm: str, path: str, *, blocking: bool) -> None: ...
+    def run_trajectory(self, arm: str, path: str, *, blocking: bool) -> int: ...
 
     def move_linear_step(
         self, arm: str, pose: Sequence[float], *, velocity_percent: int, blocking: bool
@@ -217,13 +217,16 @@ class TianjiRobotDriver:
             if not self._runtime.save_recording(str(Path(directory).expanduser().resolve())):
                 raise RuntimeError("Tianji recording was not saved")
 
-    def run_trajectory(self, arm: str, path: str | Path, *, blocking: bool = True) -> None:
+    def run_trajectory(self, arm: str, path: str | Path, *, blocking: bool = True) -> int:
         target = Path(path).expanduser().resolve()
         if target.suffix.lower() != ".fmv" or not target.is_file():
             raise ValueError("Tianji playback requires an existing .fmv file")
         with self._lock:
             self._require_open()
-            self._runtime.run_trajectory(_validate_arm(arm), str(target), blocking=blocking)
+            result = self._runtime.run_trajectory(_validate_arm(arm), str(target), blocking=blocking)
+            if type(result) is not int or result not in (0, 1):
+                raise RuntimeError(f"Tianji SDK returned an unknown playback result: {result!r}")
+            return result
 
     def read_state(self, arm: str) -> dict[str, object]:
         sdk_arm = _validate_arm(arm)
@@ -402,8 +405,8 @@ class _OfficialTianjiSdkRuntime:
     def save_recording(self, directory: str) -> bool:
         return self._client.stop_and_save_data(directory)
 
-    def run_trajectory(self, arm: str, path: str, *, blocking: bool) -> None:
-        self._client.run_trajectory(
+    def run_trajectory(self, arm: str, path: str, *, blocking: bool) -> int:
+        return self._client.run_trajectory(
             self._arm_type[arm],
             fmv_trajectory_path=path,
             is_block=blocking,

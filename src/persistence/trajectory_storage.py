@@ -43,7 +43,7 @@ class TrajectoryStorage:
         if not resolved_source.is_file():
             raise FileNotFoundError(resolved_source)
         directory = self.directory_for(arm_key)
-        if resolved_source.parent == directory:
+        if resolved_source.is_relative_to(directory):
             return resolved_source
 
         destination = self._available_import_path(directory, resolved_source.name)

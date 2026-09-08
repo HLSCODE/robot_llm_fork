@@ -114,6 +114,13 @@ class TrajectoryRecordingDevice(Protocol):
 
 
 @runtime_checkable
+class BlockingTrajectoryPlayback(Protocol):
+    """Return only after completion; interruption and failure must raise."""
+
+    def execute_trajectory(self, arm: ArmId, path: str | Path) -> None: ...
+
+
+@runtime_checkable
 class TrajectoryPlayback(Protocol):
     def send_trajectory(self, arm: ArmId, path: str | Path) -> None: ...
     def is_trajectory_complete(self, arm: ArmId) -> bool: ...

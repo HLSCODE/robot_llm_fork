@@ -202,6 +202,10 @@ class TrajectoryRecordingResult:
     files: tuple[TrajectoryArtifact, ...]
 
 
+class TrajectoryInterruptedError(RuntimeError):
+    """Playback was interrupted rather than completed."""
+
+
 class RobotOperationError(RuntimeError):
     def __init__(
         self,

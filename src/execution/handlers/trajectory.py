@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ...devices import ArmId, DeviceRuntime, TrajectoryPlayback
+from ...devices import (
+    ArmId, DeviceRuntime, TrajectoryPlayback, BlockingTrajectoryPlayback,
+    TrajectoryInterruptedError,
+)
 from ...devices.runtime.ids import ROBOT_SYSTEM
 from ..handler_api import (
     ActionCancelledError,
@@ -82,10 +85,9 @@ class TrajectoryActionHandler:
             )
 
         try:
-            trajectory = self._device_runtime.require(
-                ROBOT_SYSTEM,
-                TrajectoryPlayback,
-            )
+            trajectory = self._device_runtime.require(ROBOT_SYSTEM)
+            if not isinstance(trajectory, (TrajectoryPlayback, BlockingTrajectoryPlayback)):
+                raise TypeError("设备未提供轨迹回放接口")
         except Exception as exc:
             message = f"轨迹设备不可用: {exc}"
             return context.failure(
@@ -97,6 +99,13 @@ class TrajectoryActionHandler:
             )
 
         try:
+            if isinstance(trajectory, BlockingTrajectoryPlayback):
+                context.invoke(
+                    self._SEND_OPERATION,
+                    lambda: trajectory.execute_trajectory(arm, file_path),
+                )
+                context.log("轨迹执行完成", "info")
+                return context.success(operation=self._SEND_OPERATION, device_id=ROBOT_SYSTEM)
             context.invoke(
                 self._SEND_OPERATION,
                 lambda: trajectory.send_trajectory(arm, file_path),
@@ -113,6 +122,9 @@ class TrajectoryActionHandler:
                         device_id=ROBOT_SYSTEM,
                     )
                 context.sleep(self._options.poll_interval_seconds)
+        except TrajectoryInterruptedError as exc:
+            context.log(str(exc), "warning")
+            raise ActionCancelledError(str(exc)) from exc
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:

@@ -109,8 +109,9 @@ class _FakeSdkRuntime:
         self.collecting = False
         return True
 
-    def run_trajectory(self, arm: str, path: str, *, blocking: bool) -> None:
+    def run_trajectory(self, arm: str, path: str, *, blocking: bool) -> int:
         self.trajectories.append((arm, path, blocking))
+        return 0
 
     def close(self) -> None:
         self.close_count += 1
@@ -229,7 +230,7 @@ class TianjiProviderTests(unittest.TestCase):
         self.assertIn(DeviceCapability.QUICK_STOP, provider.capabilities)
         self.assertIn(DeviceCapability.EMERGENCY_STOP, provider.capabilities)
         self.assertNotIn(DeviceCapability.GRIPPER, provider.capabilities)
-        self.assertNotIn(DeviceCapability.TRAJECTORY, provider.capabilities)
+        self.assertIn(DeviceCapability.TRAJECTORY, provider.capabilities)
 
     def test_provider_settings_include_sdk_session_configuration(self) -> None:
         settings = TianjiProviderSettings.from_settings(
@@ -251,6 +252,26 @@ class TianjiProviderTests(unittest.TestCase):
 
 
 class TianjiDriverTests(unittest.TestCase):
+    def test_blocking_playback_requires_explicit_success(self) -> None:
+        from src.devices.runtime.arm_models import TrajectoryInterruptedError
+
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "right.fmv"
+            path.write_text("PoinType=9@1\n", encoding="utf-8")
+            adapter.execute_trajectory(ArmId.RIGHT, path)
+            self.assertEqual([("B", str(path.resolve()), True)], runtime.trajectories)
+            with patch.object(runtime, "run_trajectory", return_value=1):
+                with self.assertRaises(TrajectoryInterruptedError):
+                    adapter.execute_trajectory(ArmId.RIGHT, path)
+            for invalid in (None, True, 2):
+                with self.subTest(result=invalid), patch.object(
+                    runtime, "run_trajectory", return_value=invalid,
+                ), self.assertRaises(RobotOperationError):
+                    adapter.execute_trajectory(ArmId.RIGHT, path)
+
     def test_driver_initializes_and_preserves_public_sdk_units(self) -> None:
         driver, runtime = _driver()
         self.addCleanup(driver.close)

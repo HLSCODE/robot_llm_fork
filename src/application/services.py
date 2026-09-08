@@ -457,7 +457,12 @@ class TrajectoryTeachingService:
 
     @property
     def supports_playback(self) -> bool:
-        return isinstance(self._runtime.get_if_ready(ROBOT_SYSTEM), TrajectoryPlayback)
+        from ..devices import BlockingTrajectoryPlayback
+
+        return isinstance(
+            self._runtime.get_if_ready(ROBOT_SYSTEM),
+            (TrajectoryPlayback, BlockingTrajectoryPlayback),
+        )
 
     def trajectory_directory(self, arm: str | ArmId) -> Path:
         return self._storage.directory_for(_arm_id(arm).value)

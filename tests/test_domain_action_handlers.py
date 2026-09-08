@@ -150,6 +150,35 @@ def _action_context(
 
 
 class TrajectoryActionHandlerTests(unittest.TestCase):
+    def test_blocking_playback_completes_or_propagates_interruption(self):
+        from types import SimpleNamespace
+        from src.devices.runtime.arm_models import TrajectoryInterruptedError
+
+        for interrupted in (False, True):
+            with self.subTest(interrupted=interrupted), TemporaryDirectory() as directory:
+                calls = []
+                path = Path(directory) / "right.fmv"
+                path.write_text("trajectory", encoding="utf-8")
+
+                def execute(arm, file_path):
+                    calls.append((arm, file_path))
+                    if interrupted:
+                        raise TrajectoryInterruptedError("button interrupted")
+
+                runtime = _runtime_with_robot(
+                    SimpleNamespace(execute_trajectory=execute), DeviceCapability.TRAJECTORY,
+                )
+                handler = TrajectoryActionHandler(runtime, TrajectoryHandlerOptions())
+                context, logs = _action_context()
+                if interrupted:
+                    with self.assertRaises(ActionCancelledError):
+                        handler({"robot": "robot2", "file_path": str(path)}, context)
+                    self.assertNotIn(("轨迹执行完成", "info"), logs)
+                else:
+                    result = handler({"robot": "robot2", "file_path": str(path)}, context)
+                    self.assertTrue(result.successful)
+                self.assertEqual([(ArmId.RIGHT, path)], calls)
+
     def test_trajectory_is_sent_and_polled_through_capability(self):
         robot = _TrajectoryRobot([False, True])
         runtime = _runtime_with_robot(

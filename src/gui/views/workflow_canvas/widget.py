@@ -26,6 +26,7 @@ from ....domain.models import (
     ParallelBranch,
     SequenceEntry,
     SequenceItem,
+    SequenceItemStatus,
     SubworkflowBlock,
 )
 from ....domain.workflow import (
@@ -728,6 +729,20 @@ class WorkflowCanvasWidget(QWidget):
         self._rebuild_scene(selected_node_ids=(node_id,))
 
     def finish_execution(self) -> None:
+        # Cancellation has no STEP_COMPLETED/STEP_FAILED event. Clear only
+        # transient running states in our presentation copy, including nested
+        # entries; successful and failed results must remain visible.
+        pending = list(self._root_entries)
+        while pending:
+            entry = pending.pop()
+            if isinstance(entry, SequenceItem):
+                if entry.status is SequenceItemStatus.RUNNING:
+                    entry.status = SequenceItemStatus.PENDING
+            elif isinstance(entry, ParallelBlock):
+                for branch in entry.branches:
+                    pending.extend(branch.items)
+            elif isinstance(entry, (LoopBlock, SubworkflowBlock)):
+                pending.extend(entry.items)
         self._editing_enabled = True
         self._compiled = None
         self._parallel_branch_states.clear()

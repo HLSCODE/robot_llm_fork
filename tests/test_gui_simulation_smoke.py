@@ -628,6 +628,45 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             ],
         )
 
+    def test_button_interruption_finishes_run_and_clears_canvas_running_status(self) -> None:
+        from src.devices import TrajectoryInterruptedError
+        from src.domain.models import SequenceItemStatus
+
+        entered = Event()
+        interrupt = Event()
+        path = self.services.trajectory_teaching.trajectory_directory("robot1") / "interrupt.txt"
+        path.write_text("trajectory", encoding="utf-8")
+        items = [SequenceItem.from_definition(ActionDefinition(
+            id=f"trajectory-{index}", name=f"trajectory-{index}",
+            type=ActionType.TRAJECTORY,
+            parameters={"robot": "robot1", "file_path": str(path)},
+        )) for index in range(2)]
+
+        def playback(*_args):
+            entered.set()
+            if not interrupt.wait(3):
+                raise RuntimeError("test interruption was not signalled")
+            raise TrajectoryInterruptedError("button interrupted")
+
+        with patch("src.devices.runtime.fakes.SimulatedRobotSystem.send_trajectory",
+                   side_effect=playback) as send:
+            self.services.composition.replace_sequence(items, origin="test")
+            self.window.start_execution()
+            try:
+                self.assertTrue(_wait_until(entered.is_set))
+                self.assertTrue(_wait_until(lambda:
+                    self.window.workflow_view.sequence_list.get_entries()[0].status
+                    is SequenceItemStatus.RUNNING))
+            finally:
+                interrupt.set()
+            self.assertTrue(_wait_until(lambda:
+                self.services.execution.snapshot().state is ExecutionState.CANCELLED))
+            self.assertTrue(_wait_until(lambda:
+                not self.window.workflow_view.sequence_list.execution_mapping_active))
+            self.assertEqual(1, send.call_count)
+        self.assertTrue(all(item.status is SequenceItemStatus.PENDING
+                            for item in self.window.workflow_view.sequence_list.get_entries()))
+
     def test_trajectory_recording_uses_configured_storage_without_save_dialog(
         self,
     ) -> None:
@@ -660,6 +699,46 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertFalse(self.services.trajectory_teaching.active)
         save.assert_not_called()
+
+    def test_recorded_fmv_is_named_and_added_to_trajectory_library(self) -> None:
+        directory = self.services.trajectory_teaching.trajectory_directory("robot2")
+        path = directory / "recorded_R.fmv"
+        path.write_text("PoinType=9@1\n", encoding="utf-8")
+        with (
+            patch("src.gui.controllers.main_window.choose_item", return_value=("录制 R2", True)),
+            patch.object(self.window, "record_trajectory", return_value=str(path)),
+            patch("src.gui.controllers.main_window.ask_text", return_value=("右臂测试轨迹", True)) as name,
+            patch.object(self.window._notifications, "info"),
+        ):
+            self.window.create_trajectory_action()
+        name.assert_called_once()
+        actions = self.window.actions[ActionType.TRAJECTORY]
+        matched = [action for action in actions if action.name == "右臂测试轨迹"]
+        self.assertEqual(1, len(matched))
+        self.assertEqual("robot2", matched[0].parameters["robot"])
+        self.assertEqual(str(path), matched[0].parameters["file_path"])
+        self.assertTrue(path.is_file())
+
+    def test_existing_fmv_can_be_named_without_recording_again(self) -> None:
+        directory = self.services.trajectory_teaching.trajectory_directory("robot2") / "recording"
+        directory.mkdir(exist_ok=True)
+        path = directory / "saved_R.fmv"
+        path.write_text("PoinType=9@1\n", encoding="utf-8")
+        with (
+            patch("src.gui.controllers.main_window.choose_item",
+                  side_effect=[("使用已有文件", True), ("R2", True)]),
+            patch("src.gui.controllers.main_window.QFileDialog.getOpenFileName",
+                  return_value=(str(path), "")),
+            patch("src.gui.controllers.main_window.ask_text", return_value=("已有轨迹", True)),
+            patch.object(self.window._notifications, "info"),
+            patch.object(self.window, "record_trajectory") as record,
+        ):
+            self.window.create_trajectory_action()
+        record.assert_not_called()
+        matched = [action for action in self.window.actions[ActionType.TRAJECTORY]
+                   if action.name == "已有轨迹"]
+        self.assertEqual(1, len(matched))
+        self.assertEqual(str(path.resolve()), matched[0].parameters["file_path"])
 
 
 class GuiSpeechStartupSmokeTests(unittest.TestCase):
