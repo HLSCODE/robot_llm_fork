@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+import tempfile
 
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
@@ -18,7 +20,9 @@ from src.gui.app_dialogs import (
     AppMessageDialog,
     MessageDialogKind,
     choose_item,
+    ask_text,
 )
+from src.observability.crash_diagnostics import CrashDiagnostics
 from src.gui.views.action_picker import ActionPickerDialog
 from src.gui.views.dialogs import ActionConfigDialog
 
@@ -27,6 +31,28 @@ class AppDialogTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.application = QApplication.instance() or QApplication([])
+
+    def test_text_accept_logs_checkpoints_without_input_value(self) -> None:
+        parent = AppDialog()
+
+        def accept() -> None:
+            dialog = self.application.activeModalWidget()
+            buttons = dialog.findChild(QDialogButtonBox)
+            buttons.button(QDialogButtonBox.StandardButton.Ok).click()
+
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                with CrashDiagnostics(Path(directory)) as diagnostics:
+                    QTimer.singleShot(0, accept)
+                    self.assertEqual(ask_text(parent, "名称", "名称", text="private-test-name"),
+                                     ("private-test-name", True))
+                events = diagnostics.events_path.read_text(encoding="utf-8")
+                self.assertIn("text_dialog.accept_clicked", events)
+                self.assertIn("text_dialog.read.end", events)
+                self.assertNotIn("private-test-name", events)
+        finally:
+            parent.deleteLater()
+            self.application.processEvents()
 
     def test_message_dialog_uses_shared_frameless_chrome_and_chinese_buttons(
         self,

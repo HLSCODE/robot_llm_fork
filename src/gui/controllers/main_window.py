@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from ...observability.crash_diagnostics import record_failure, record_stage
+from ...observability.logging_config import log_context
+
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QCursor, QIcon
 from PySide6.QtWidgets import (
@@ -1139,6 +1142,15 @@ class MainWindow(RoundedMainWindow):
             self._notifications.info("轨迹文件已保留；当前设备尚未支持通用轨迹回放，不创建回放动作。")
             return
 
+        with log_context(request_id=uuid4().hex, operation="trajectory.create_action"):
+            try:
+                self._name_and_save_trajectory_action(robot_name, file_path)
+            except Exception:
+                record_failure("trajectory.create.failed")
+                raise
+
+    def _name_and_save_trajectory_action(self, robot_name: str, file_path: str) -> None:
+        record_stage("trajectory.name.begin", arm=robot_name)
         default_name = f"{robot_name.upper()} {Path(file_path).stem}"
         name, name_ok = ask_text(
             self,
@@ -1146,6 +1158,7 @@ class MainWindow(RoundedMainWindow):
             "动作名称:",
             text=default_name,
         )
+        record_stage("trajectory.name.end", accepted=name_ok, length=len(name))
         if not name_ok:
             return
 
@@ -1161,10 +1174,12 @@ class MainWindow(RoundedMainWindow):
                 "file_path": file_path
             }
         )
+        record_stage("trajectory.create.begin", action_id=action.id)
         self._services.composition.create_action(
             action,
             origin="gui",
         )
+        record_stage("trajectory.create.end", action_id=action.id)
         self._notifications.info(f"轨迹动作已创建: {name}")
 
     def delete_action(self) -> None:
@@ -1262,6 +1277,7 @@ class MainWindow(RoundedMainWindow):
             action_list.add_action(action)
 
     def load_actions(self) -> None:
+        record_stage("action_list.refresh.begin")
         all_actions = self._services.composition.list_actions()
         for action_type in self.actions:
             self.actions[action_type].clear()
@@ -1271,6 +1287,7 @@ class MainWindow(RoundedMainWindow):
 
         for action_type in self.actions:
             self.refresh_action_list(action_type)
+        record_stage("action_list.refresh.end", count=len(all_actions))
 
     def _on_composition_changed(
         self,

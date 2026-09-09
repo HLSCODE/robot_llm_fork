@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
+from uuid import uuid4
+from shiboken6 import isValid
+
+from ..observability.crash_diagnostics import record_stage
 
 from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QMouseEvent, QShowEvent
@@ -113,6 +117,16 @@ class AppDialog(QDialog):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._diagnostic_id = uuid4().hex
+        record_stage("dialog.created", dialog_id=self._diagnostic_id,
+                     dialog_type=type(self).__name__, parent_id=hex(id(parent)))
+        # Capture immutable IDs only: callbacks must not retain or dereference
+        # a QObject whose C++ destructor is already running.
+        self.destroyed.connect(
+            lambda *_args, diagnostic_id=self._diagnostic_id: record_stage(
+                "dialog.destroyed", dialog_id=diagnostic_id,
+            )
+        )
         self.setObjectName("appDialogWindow")
         self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -164,7 +178,20 @@ class AppDialog(QDialog):
                 self.windowTitle() or type(self).__name__,
             )
             return int(QDialog.DialogCode.Rejected)
-        return super().exec()
+        diagnostic_id = self._diagnostic_id
+        record_stage("dialog.exec.begin", dialog_id=diagnostic_id,
+                     loop_level=self.thread().loopLevel(),
+                     delete_on_close=self.testAttribute(Qt.WidgetAttribute.WA_DeleteOnClose))
+        result = super().exec()
+        record_stage("dialog.exec.end", dialog_id=diagnostic_id,
+                     result=result, object_valid=isValid(self))
+        return result
+
+    def done(self, result: int) -> None:
+        diagnostic_id = self._diagnostic_id
+        record_stage("dialog.done.begin", dialog_id=diagnostic_id, result=result)
+        super().done(result)
+        record_stage("dialog.done.end", dialog_id=diagnostic_id, object_valid=isValid(self))
 
     def show(self) -> None:
         presentation = gui_presentation_status(self.parentWidget())
@@ -336,6 +363,8 @@ def ask_text(
     text: str = "",
 ) -> tuple[str, bool]:
     """Read one text value using the shared dialog shell."""
+    diagnostic_id = uuid4().hex
+    record_stage("text_dialog.construct", dialog_id=diagnostic_id)
     dialog = AppDialog(parent)
     dialog.setWindowTitle(title)
     dialog.setMinimumWidth(380)
@@ -346,11 +375,19 @@ def ask_text(
     dialog.content_layout.addWidget(prompt)
     dialog.content_layout.addWidget(editor)
     buttons = create_dialog_button_box(dialog.content)
-    buttons.accepted.connect(dialog.accept)
+    def accept_text() -> None:
+        record_stage("text_dialog.accept_clicked", dialog_id=diagnostic_id)
+        dialog.accept()
+
+    buttons.accepted.connect(accept_text)
     buttons.rejected.connect(dialog.reject)
     dialog.content_layout.addWidget(buttons)
+    record_stage("text_dialog.exec.begin", dialog_id=diagnostic_id)
     accepted = dialog.exec() == QDialog.DialogCode.Accepted
-    return editor.text(), accepted
+    record_stage("text_dialog.exec.end", dialog_id=diagnostic_id, accepted=accepted)
+    value = editor.text()
+    record_stage("text_dialog.read.end", dialog_id=diagnostic_id, length=len(value))
+    return value, accepted
 
 
 def ask_integer(

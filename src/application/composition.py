@@ -11,6 +11,8 @@ from threading import RLock
 from typing import Protocol
 from uuid import uuid4
 
+from ..observability.crash_diagnostics import record_stage
+
 from ..domain.models import (
     ActionDefinition,
     LoopBlock,
@@ -172,7 +174,9 @@ class CompositionService:
         *,
         origin: str,
     ) -> ActionDefinition:
+        record_stage("action.validate.begin", action_id=action.id)
         stored = _validated_action(action, self._robot_profile_id)
+        record_stage("action.validate.end", action_id=action.id)
         with self._lock:
             if any(
                 existing.id == stored.id
@@ -185,13 +189,17 @@ class CompositionService:
                 *self._actions,
                 stored,
             ]
+            record_stage("action.persist.begin", action_id=stored.id, count=len(updated_actions))
             self._repository.save_actions(updated_actions)
+            record_stage("action.persist.end", action_id=stored.id)
             self._actions = updated_actions
             event = self._next_event_unlocked(
                 CompositionChangeType.ACTIONS,
                 origin,
             )
+        record_stage("action.notify.begin", action_id=stored.id)
         self._notify(event)
+        record_stage("action.notify.end", action_id=stored.id)
         return _clone_action(stored)
 
     def update_action(

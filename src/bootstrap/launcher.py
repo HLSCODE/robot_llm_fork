@@ -478,7 +478,7 @@ def main() -> int:
     options = resolve_startup_options(args, settings)
     args.simulation = options.simulation
     try:
-        configure_logging(settings.logging, level_override=options.log_level)
+        log_file = configure_logging(settings.logging, level_override=options.log_level)
     except (OSError, ValueError) as exc:
         print(f"日志初始化失败: {exc}", file=sys.stderr)
         return 2
@@ -500,7 +500,18 @@ def main() -> int:
             else "enabled"
         ),
     )
-    return run_gui(args, settings)
+    from ..observability.crash_diagnostics import CrashDiagnostics
+
+    try:
+        with CrashDiagnostics(log_file.parent / "crash") as diagnostics:
+            from ..gui.diagnostics import capture_qt_messages
+
+            logger.info("崩溃诊断文件: %s ; %s", diagnostics.events_path, diagnostics.fatal_path)
+            with capture_qt_messages(diagnostics):
+                return run_gui(args, settings)
+    except Exception:
+        logger.exception("GUI 应用异常退出，详细堆栈已写入日志")
+        return 1
 
 
 def _log_configuration_report(report: ConfigurationReport) -> None:
