@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..bridges.execution import ExecutionBridge
-from ..app_dialogs import ask_confirmation, ask_integer, ask_text, choose_item
+from ..app_dialogs import ask_integer, ask_text, choose_item
 from ..application_lifecycle import (
     begin_gui_shutdown,
     install_gui_application_lifecycle,
@@ -70,7 +70,7 @@ from .startup import (
     GuiStartupState,
     HardwareStartupStepResult,
 )
-from .recording_operation import run_recording_operation
+from .trajectory_dialog import TrajectoryRecordingDialog
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import (
     ActionLibraryView,
@@ -111,6 +111,7 @@ class MainWindow(RoundedMainWindow):
             install_gui_application_lifecycle(application)
         super().__init__()
         self._services = services
+        self._recording_dialog: TrajectoryRecordingDialog | None = None
         self._theme_controller = theme_controller
         self._layout_store = layout_store
         self._shortcut_registry = ShortcutRegistry(parent=self)
@@ -712,64 +713,32 @@ class MainWindow(RoundedMainWindow):
         except Exception as e:
             self._notifications.warning(f"Robot1 夹爪{action}异常: {e}")
 
-    def record_trajectory(self, robot_name: str) -> str | None:
+    def record_trajectory(self, robot_name: str, *, create_action: bool = False) -> None:
         if not self._device_view_model.snapshot().robot_ready:
             self._notifications.warning(f"{robot_name.upper()} 未连接")
-            return None
+            return
+        existing = getattr(self, "_recording_dialog", None)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
+        dialog = TrajectoryRecordingDialog(
+            self, self._services.trajectory_teaching, robot_name,
+            self._save_named_trajectory_action if create_action else None,
+        )
+        self._recording_dialog = dialog
+        dialog.finished.connect(self._recording_finished)
+        dialog.start()
 
-        teaching_started = False
-        try:
-            self._notifications.info(f"{robot_name.upper()} 开始拖动示教")
-            run_recording_operation(
-                self, "开始轨迹录制",
-                lambda: self._services.trajectory_teaching.start(robot_name),
-            )
-            teaching_started = True
-
-            save_requested = ask_confirmation(
-                self, "轨迹录制",
-                f"{robot_name.upper()} 正在录制。\n"
-                f"{self._services.trajectory_teaching.scope_description}\n"
-                "请手动拖动机械臂，完成后点击确定停止并保存，或点击取消结束录制。",
-            )
-            if not save_requested:
-                run_recording_operation(self, "取消轨迹录制", self._services.trajectory_teaching.cancel)
-                teaching_started = False
-                self._notifications.info("轨迹录制已取消")
-                return None
-
-            save_result = run_recording_operation(
-                self, "保存轨迹录制", self._services.trajectory_teaching.stop_and_save,
-            )
-            assert save_result is not None
-            teaching_started = False
-            self._notifications.info(
-                f"{robot_name.upper()} 轨迹已保存: "
-                f"{save_result.path}, 点数: {save_result.point_count}"
-            )
-            self._notifications.info(
-                "保存文件:\n" + "\n".join(
-                    f"{item.arm.value if item.arm else '原始数据'}: {item.path}"
-                    for item in save_result.files
-                ),
-                title="轨迹已保存",
-                modal=True,
-            )
-            return str(save_result.path)
-        except Exception as e:
-            if teaching_started:
-                try:
-                    run_recording_operation(
-                        self, "停止轨迹录制", self._services.trajectory_teaching.cancel,
-                    )
-                except Exception as stop_error:
-                    self._notifications.warning(
-                        f"{robot_name.upper()} 停止拖动示教失败: "
-                        f"{stop_error}",
-                        modal=False,
-                    )
-            self._notifications.warning(f"轨迹录制异常: {e}")
-        return None
+    def _recording_finished(self, result: int) -> None:
+        dialog = self._recording_dialog
+        if dialog is None:
+            return
+        dialog.finished.disconnect(self._recording_finished)
+        self._recording_dialog = None
+        if dialog.saved_path:
+            self._notifications.info(f"轨迹文件已保留: {dialog.saved_path}")
+        dialog.deleteLater()
 
     def run_trajectory(self, robot_name: str) -> None:
         if not self._device_view_model.snapshot().robot_ready:
@@ -1101,10 +1070,12 @@ class MainWindow(RoundedMainWindow):
 
         if selected == "录制 R1":
             robot_name = "robot1"
-            file_path = self.record_trajectory(robot_name)
+            self.record_trajectory(robot_name, create_action=True)
+            return
         elif selected == "录制 R2":
             robot_name = "robot2"
-            file_path = self.record_trajectory(robot_name)
+            self.record_trajectory(robot_name, create_action=True)
+            return
         else:
             robot_options = ["R1", "R2"]
             robot_selected, robot_ok = choose_item(
@@ -1163,6 +1134,9 @@ class MainWindow(RoundedMainWindow):
             return
 
         name = name.strip() or default_name
+        self._save_named_trajectory_action(robot_name, file_path, name)
+
+    def _save_named_trajectory_action(self, robot_name: str, file_path: str, name: str) -> None:
         from uuid import uuid4
 
         action = ActionDefinition(
@@ -2067,6 +2041,11 @@ class MainWindow(RoundedMainWindow):
         self._camera_test_thread.start()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        dialog = getattr(self, "_recording_dialog", None)
+        if dialog is not None:
+            dialog.reject()
+            event.ignore()
+            return
         self.prepare_shutdown()
         event.accept()
 

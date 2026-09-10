@@ -118,6 +118,7 @@ class AppDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._diagnostic_id = uuid4().hex
+        self._screen_trace_installed = False
         record_stage("dialog.created", dialog_id=self._diagnostic_id,
                      dialog_type=type(self).__name__, parent_id=hex(id(parent)))
         # Capture immutable IDs only: callbacks must not retain or dereference
@@ -160,6 +161,15 @@ class AppDialog(QDialog):
         self.title_bar.refresh()
         self._center_over_parent()
         super().showEvent(event)
+        handle = self.windowHandle()
+        if handle is not None and isValid(handle) and not self._screen_trace_installed:
+            handle.screenChanged.connect(
+                lambda screen, diagnostic_id=self._diagnostic_id: record_stage(
+                    "dialog.screen_changed", dialog_id=diagnostic_id,
+                    valid=screen is not None and isValid(screen),
+                )
+            )
+            self._screen_trace_installed = True
 
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         super().changeEvent(event)
@@ -204,14 +214,30 @@ class AppDialog(QDialog):
             return
         super().show()
 
+    def open(self) -> None:
+        presentation = gui_presentation_status(self.parentWidget())
+        if not presentation.allowed:
+            record_stage("dialog.open.blocked", dialog_id=self._diagnostic_id,
+                         reason=presentation.reason)
+            self.done(int(QDialog.DialogCode.Rejected))
+            return
+        record_stage("dialog.open", dialog_id=self._diagnostic_id)
+        super().open()
+
     def _center_over_parent(self) -> None:
+        if not gui_presentation_status(self.parentWidget()).allowed:
+            return
+        screens = [screen for screen in QApplication.screens() if isValid(screen)]
+        screen = self.screen()
+        if screen is None or not isValid(screen) or screen not in screens:
+            screen = QApplication.primaryScreen()
+        if screen is None or not isValid(screen) or screen not in screens:
+            record_stage("dialog.center.no_screen", dialog_id=self._diagnostic_id)
+            return
         parent = self.parentWidget()
-        if parent is not None and parent.isVisible():
+        if parent is not None and isValid(parent) and parent.isVisible():
             center = parent.window().frameGeometry().center()
         else:
-            screen = self.screen() or QApplication.primaryScreen()
-            if screen is None:
-                return
             center = screen.availableGeometry().center()
         self.move(center - self.rect().center())
 

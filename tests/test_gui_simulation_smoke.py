@@ -667,53 +667,64 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertTrue(all(item.status is SequenceItemStatus.PENDING
                             for item in self.window.workflow_view.sequence_list.get_entries()))
 
-    def test_trajectory_recording_uses_configured_storage_without_save_dialog(
-        self,
-    ) -> None:
+    def test_trajectory_recording_uses_configured_storage_without_save_dialog(self) -> None:
+        from src.gui.controllers.trajectory_dialog import RecordingPhase
         with (
-            patch("src.gui.controllers.main_window.ask_confirmation", return_value=True),
             patch.object(self.window._notifications, "info"),
-            patch(
-                "src.gui.controllers.main_window.QFileDialog.getSaveFileName"
-            ) as save_dialog,
+            patch("src.gui.controllers.main_window.QFileDialog.getSaveFileName") as save_dialog,
+            patch("src.gui.app_dialogs.AppDialog.exec", side_effect=AssertionError("nested exec")),
         ):
-            result = self.window.record_trajectory("robot1")
-
-        self.assertIsNotNone(result)
-        assert result is not None
-        saved_path = Path(result)
-        self.assertEqual(
-            self.services.trajectory_teaching.trajectory_directory("robot1"),
-            saved_path.parent,
-        )
+            self.window.record_trajectory("robot1")
+            dialog = self.window._recording_dialog
+            self.assertIsNotNone(dialog)
+            self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.RECORDING))
+            dialog.accept()
+            self.assertTrue(_wait_until(lambda: self.window._recording_dialog is None))
+            saved_path = Path(dialog.saved_path)
+        self.assertEqual(self.services.trajectory_teaching.trajectory_directory("robot1"),
+                         saved_path.parent)
         self.assertTrue(saved_path.is_file())
         save_dialog.assert_not_called()
 
     def test_cancel_recording_releases_session_without_saving(self) -> None:
-        with (
-            patch("src.gui.controllers.main_window.ask_confirmation", return_value=False),
-            patch.object(self.window._notifications, "info"),
-            patch.object(self.services.trajectory_teaching, "stop_and_save") as save,
-        ):
-            result = self.window.record_trajectory("robot1")
-        self.assertIsNone(result)
+        from src.gui.controllers.trajectory_dialog import RecordingPhase
+        with patch.object(self.services.trajectory_teaching, "stop_and_save") as save:
+            self.window.record_trajectory("robot1")
+            dialog = self.window._recording_dialog
+            self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.RECORDING))
+            dialog.reject()
+            self.assertTrue(_wait_until(lambda: self.window._recording_dialog is None))
         self.assertFalse(self.services.trajectory_teaching.active)
         save.assert_not_called()
 
     def test_recorded_fmv_is_named_and_added_to_trajectory_library(self) -> None:
+        from src.gui.controllers.trajectory_dialog import RecordingPhase
+        from src.devices.runtime.arm_models import TrajectoryRecordingResult
         directory = self.services.trajectory_teaching.trajectory_directory("robot2")
         path = directory / "recorded_R.fmv"
-        path.write_text("PoinType=9@1\n", encoding="utf-8")
+        path.write_text("PoinType=9@1\\n", encoding="utf-8")
+
+        def save():
+            self.services.trajectory_teaching.cancel()
+            return TrajectoryRecordingResult(path, 1, ())
+
         with (
-            patch("src.gui.controllers.main_window.choose_item", return_value=("录制 R2", True)),
-            patch.object(self.window, "record_trajectory", return_value=str(path)),
-            patch("src.gui.controllers.main_window.ask_text", return_value=("右臂测试轨迹", True)) as name,
+            patch.object(self.services.trajectory_teaching, "stop_and_save", side_effect=save),
             patch.object(self.window._notifications, "info"),
+            patch("src.gui.app_dialogs.AppDialog.exec", side_effect=AssertionError("nested exec")),
         ):
-            self.window.create_trajectory_action()
-        name.assert_called_once()
-        actions = self.window.actions[ActionType.TRAJECTORY]
-        matched = [action for action in actions if action.name == "右臂测试轨迹"]
+            self.window.record_trajectory("robot2", create_action=True)
+            dialog = self.window._recording_dialog
+            self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.RECORDING))
+            self.window.record_trajectory("robot2", create_action=True)
+            self.assertIs(dialog, self.window._recording_dialog)
+            dialog.accept()
+            self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.NAMING))
+            dialog.editor.setText("右臂测试轨迹")
+            dialog.accept()
+            self.assertTrue(_wait_until(lambda: self.window._recording_dialog is None))
+        matched = [action for action in self.window.actions[ActionType.TRAJECTORY]
+                   if action.name == "右臂测试轨迹"]
         self.assertEqual(1, len(matched))
         self.assertEqual("robot2", matched[0].parameters["robot"])
         self.assertEqual(str(path), matched[0].parameters["file_path"])
@@ -739,6 +750,58 @@ class GuiSimulationSmokeTests(unittest.TestCase):
                    if action.name == "已有轨迹"]
         self.assertEqual(1, len(matched))
         self.assertEqual(str(path.resolve()), matched[0].parameters["file_path"])
+
+    def test_close_during_recording_start_waits_then_cancels(self) -> None:
+        from threading import Event
+        entered, release = Event(), Event()
+        original_start = self.services.trajectory_teaching.start
+
+        def slow_start(arm):
+            entered.set()
+            if not release.wait(3):
+                raise RuntimeError("test did not release start")
+            original_start(arm)
+
+        with patch.object(self.services.trajectory_teaching, "start", side_effect=slow_start):
+            self.window.record_trajectory("robot1")
+            dialog = self.window._recording_dialog
+            try:
+                self.assertTrue(_wait_until(entered.is_set))
+                dialog.reject()
+                self.assertIs(dialog, self.window._recording_dialog)
+            finally:
+                release.set()
+            self.assertTrue(_wait_until(lambda: self.window._recording_dialog is None))
+        self.assertFalse(self.services.trajectory_teaching.active)
+
+    def test_cancel_naming_keeps_saved_file_without_action(self) -> None:
+        from src.gui.controllers.trajectory_dialog import RecordingPhase
+        before = len(self.window.actions[ActionType.TRAJECTORY])
+        self.window.record_trajectory("robot1", create_action=True)
+        dialog = self.window._recording_dialog
+        self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.RECORDING))
+        dialog.accept()
+        self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.NAMING))
+        path = Path(dialog.saved_path)
+        dialog.reject()
+        self.assertTrue(_wait_until(lambda: self.window._recording_dialog is None))
+        self.assertTrue(path.is_file())
+        self.assertEqual(before, len(self.window.actions[ActionType.TRAJECTORY]))
+        self.assertFalse(self.services.trajectory_teaching.active)
+
+    def test_save_failure_can_be_cancelled_to_release_session(self) -> None:
+        from src.gui.controllers.trajectory_dialog import RecordingPhase
+        with patch.object(self.services.trajectory_teaching, "stop_and_save",
+                          side_effect=RuntimeError("save probe")):
+            self.window.record_trajectory("robot1")
+            dialog = self.window._recording_dialog
+            self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.RECORDING))
+            dialog.accept()
+            self.assertTrue(_wait_until(lambda: dialog.phase is RecordingPhase.ERROR))
+            self.assertTrue(self.services.trajectory_teaching.active)
+            dialog.reject()
+            self.assertTrue(_wait_until(lambda: self.window._recording_dialog is None))
+        self.assertFalse(self.services.trajectory_teaching.active)
 
 
 class GuiSpeechStartupSmokeTests(unittest.TestCase):

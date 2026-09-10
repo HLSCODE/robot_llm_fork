@@ -144,7 +144,7 @@ class ToolTipService(QObject):
         *,
         owner: QWidget | None = None,
     ) -> None:
-        if self._is_closed:
+        if self._is_closed or not isValid(self._bubble):
             return
         if not gui_presentation_status(owner).allowed:
             self.hide()
@@ -162,7 +162,7 @@ class ToolTipService(QObject):
         _schedule_widget_repaint(owner)
 
     def hide(self) -> None:
-        if self._is_closed:
+        if self._is_closed or not isValid(self._bubble):
             return
         owner = self._owner
         self._owner = None
@@ -180,7 +180,8 @@ class ToolTipService(QObject):
             self._bubble.deleteLater()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if self._is_closed:
+        if (self._is_closed or QApplication.closingDown()
+                or not isValid(self._bubble) or not isValid(watched)):
             return False
         if event.type() is QEvent.Type.ToolTip:
             return self._show_event_tooltip(watched, event)
@@ -214,7 +215,7 @@ class ToolTipService(QObject):
             TOOLTIP_VERTICAL_OFFSET,
         )
         screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
-        if screen is None:
+        if screen is None or not isValid(screen):
             return position
         available = screen.availableGeometry()
         width = self._bubble.width()

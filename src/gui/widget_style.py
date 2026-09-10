@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TypeGuard
+from shiboken6 import isValid
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRectF
 from PySide6.QtGui import QPainterPath, QRegion
@@ -73,6 +74,8 @@ class ComboBoxPopupCoordinator(QObject):
         application.installEventFilter(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if QApplication.closingDown() or not isValid(watched):
+            return False
         if _is_combo_popup(watched):
             if event.type() is QEvent.Type.Show:
                 self._prepare_popup(watched)
@@ -108,6 +111,7 @@ def install_combo_box_popup_coordinator(
 def _is_combo_popup(candidate: QObject) -> TypeGuard[QWidget]:
     return (
         isinstance(candidate, QWidget)
+        and isValid(candidate)
         and candidate.metaObject().className() == "QComboBoxPrivateContainer"
     )
 
@@ -132,6 +136,8 @@ def _position_popup_with_gap(combo: QComboBox, popup: QWidget) -> None:
         target_y = input_top - popup.height() - COMBO_POPUP_GAP
 
     screen = combo.screen()
+    if screen is None or not isValid(screen):
+        return
     available = screen.availableGeometry()
     target_y = max(
         available.top(),

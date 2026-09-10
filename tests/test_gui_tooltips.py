@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from shiboken6 import delete
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF
 from PySide6.QtGui import QHelpEvent, QPalette
@@ -20,6 +21,7 @@ from src.gui.tooltips import (
     TOOLTIP_HORIZONTAL_PADDING,
     TOOLTIP_MAXIMUM_TEXT_WIDTH,
     install_tooltip_service,
+    ToolTipService,
 )
 
 
@@ -40,6 +42,22 @@ class GuiToolTipTests(unittest.TestCase):
             widget.close()
             widget.deleteLater()
         QApplication.processEvents()
+
+    def test_late_events_ignore_deleted_bubble_and_widget(self) -> None:
+        from src.gui.widget_style import _is_combo_popup
+
+        service = ToolTipService(self.application)
+        widget = QWidget()
+        try:
+            delete(service.bubble)
+            service.hide()
+            service.show_text("late tooltip", QPoint(), owner=widget)
+            self.assertFalse(service.eventFilter(widget, QEvent(QEvent.Type.MouseButtonPress)))
+            delete(widget)
+            self.assertFalse(_is_combo_popup(widget))
+        finally:
+            service.close()
+            service.deleteLater()
 
     def test_widget_list_item_and_graphics_item_share_one_bubble(self) -> None:
         button = QPushButton("按钮")

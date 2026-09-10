@@ -12,6 +12,7 @@ from PySide6.QtCore import QCoreApplication, QObject, QThread, Qt, Signal, Slot
 from PySide6.QtGui import QScreen
 from PySide6.QtWidgets import QApplication, QWidget
 from shiboken6 import isValid
+from ..observability.crash_diagnostics import record_stage
 
 
 logger = logging.getLogger(__name__)
@@ -102,6 +103,12 @@ class GuiApplicationLifecycle(QObject):
             self._on_screen_removed,
             Qt.ConnectionType.DirectConnection,
         )
+        application.screenAdded.connect(self._on_screen_added)
+
+    @Slot(QScreen)
+    def _on_screen_added(self, screen: QScreen) -> None:
+        record_stage("screen.added", count=len(self._application.screens()),
+                     valid=isValid(screen))
 
     @property
     def state(self) -> GuiLifecycleState:
@@ -186,6 +193,8 @@ class GuiApplicationLifecycle(QObject):
 
     @Slot(QScreen)
     def _on_screen_removed(self, removed_screen: QScreen) -> None:
+        record_stage("screen.removed", count=len(self._application.screens()),
+                     valid=isValid(removed_screen))
         if self._has_remaining_screen(removed_screen):
             return
         message = (

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import unittest
+from unittest.mock import patch
 
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QPointF, Qt
 from PySide6.QtGui import (
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGraphicsProxyWidget,
     QGraphicsScene,
+    QGraphicsSceneHoverEvent,
     QGraphicsView,
     QStyleOptionGraphicsItem,
 )
@@ -152,6 +154,39 @@ class WorkflowCanvasTests(unittest.TestCase):
             self.assertLess(surface_distance, accent_distance)
         finally:
             self.application.setPalette(original_palette)
+
+    def test_node_hover_paint_never_queries_global_mouse_position(self) -> None:
+        entries = (
+            _item("hover-action"),
+            LoopBlock(uuid="hover-loop", items=[_item("inside")], repeat_count=2),
+            SubworkflowBlock(uuid="hover-sub", name="Task", items=[_item("child")]),
+        )
+        for entry in entries:
+            with self.subTest(entry=type(entry).__name__):
+                node = WorkflowNodeItem("hover-test", entry)
+
+                def render():
+                    image = QImage(round(node.node_width), round(node.node_height),
+                                   QImage.Format.Format_ARGB32_Premultiplied)
+                    image.fill(Qt.GlobalColor.transparent)
+                    painter = QPainter(image)
+                    try:
+                        node.paint(painter, QStyleOptionGraphicsItem())
+                    finally:
+                        painter.end()
+                    return image
+
+                with patch.object(WorkflowNodeItem, "isUnderMouse",
+                                  side_effect=AssertionError("unsafe global mouse query")):
+                    normal = render()
+                    node.hoverEnterEvent(QGraphicsSceneHoverEvent(QEvent.Type.GraphicsSceneHoverEnter))
+                    hovered = render()
+                    self.assertNotEqual(normal, hovered)
+                    node.hoverLeaveEvent(QGraphicsSceneHoverEvent(QEvent.Type.GraphicsSceneHoverLeave))
+                    self.assertEqual(normal, render())
+                    node.setSelected(True)
+                    self.assertNotEqual(normal, render())
+                node.deleteLater()
 
     def test_loop_children_are_connected_by_theme_edge(self) -> None:
         original_palette = self.application.palette()

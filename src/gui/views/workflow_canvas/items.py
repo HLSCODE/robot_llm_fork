@@ -183,6 +183,9 @@ class WorkflowNodeItem(QGraphicsObject):
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
         self.setCacheMode(self.CacheMode.DeviceCoordinateCache)
         self.setAcceptHoverEvents(True)
+        # Never query global mouse coordinates during paint: Qt's high-DPI
+        # mapping can dereference a missing QScreen during window transitions.
+        self._is_hovered = False
         self.setToolTip(self._tooltip())
         self._pressed_loop_insert_index: int | None = None
         self._pressed_parallel_insert: tuple[str, int] | None = None
@@ -327,7 +330,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 painter,
                 colors.text,
                 colors.secondary_text,
-                emphasized=self.isSelected() or self.isUnderMouse(),
+                emphasized=self.isSelected() or self._is_hovered,
             )
             return
         if isinstance(self.entry, ParallelBlock):
@@ -338,7 +341,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 colors.accent,
             )
             return
-        is_emphasized = self.isSelected() or self.isUnderMouse()
+        is_emphasized = self.isSelected() or self._is_hovered
         self._paint_action(
             painter,
             self.entry,
@@ -754,8 +757,8 @@ class WorkflowNodeItem(QGraphicsObject):
             loop_border_width = 2.0
         else:
             loop_border = QColor(control.accent)
-            loop_border.setAlpha(180 if self.isUnderMouse() else 96)
-            loop_border_width = 1.5 if self.isUnderMouse() else 1.0
+            loop_border.setAlpha(180 if self._is_hovered else 96)
+            loop_border_width = 1.5 if self._is_hovered else 1.0
         painter.setPen(QPen(loop_border, loop_border_width))
         painter.drawRoundedRect(header_rect, NODE_RADIUS, NODE_RADIUS)
 
@@ -1459,6 +1462,11 @@ class WorkflowNodeItem(QGraphicsObject):
             child_index = index + 1
         return child_index
 
+    def hoverEnterEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
+
     def hoverMoveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
         insert_target = self._insert_target_at(event.pos())
         self._set_hovered_insert_target(insert_target)
@@ -1469,6 +1477,8 @@ class WorkflowNodeItem(QGraphicsObject):
         super().hoverMoveEvent(event)
 
     def hoverLeaveEvent(self, event: QGraphicsSceneHoverEvent) -> None:  # noqa: N802
+        self._is_hovered = False
+        self.update()
         self._set_hovered_insert_target(None)
         self.setToolTip(self._tooltip())
         super().hoverLeaveEvent(event)
