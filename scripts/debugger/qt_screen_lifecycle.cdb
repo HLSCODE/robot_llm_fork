@@ -1,0 +1,32 @@
+$$ Windows x64 / Qt 6 only. RCX=this, RDX=first explicit pointer argument.
+$$ Keep complete debugger output in -logo, but hide stacks/registers in the console.
+.outmask /d
+.outmask- /l 0x2a1
+.expr /s masm
+$$ A Windows venv launcher creates a child interpreter. Install per-process
+$$ breakpoints at each child's initial breakpoint, not only in the launcher.
+sxe -c "$$<@@COMMAND_PATH@@" ibp
+sxe -c "$$<@@VTABLE_COMMAND_PATH@@; g" ld:Qt6Gui.dll
+.echo QT_SCREEN_TRACE_CONFIGURED: unresolved breakpoints are pending until Qt loads.
+bu Qt6Gui!QScreen::QScreen ".printf \"QT_SCREEN_CTOR pid=%u tid=%u screen=%p platform_screen=%p\n\", @$tpid, @$tid, @rcx, @rdx; .time; k 0n48; gc"
+bu Qt6Gui!QScreen::~QScreen ".printf \"QT_SCREEN_DTOR pid=%u tid=%u screen=%p\n\", @$tpid, @$tid, @rcx; .time; k 0n48; gc"
+bu Qt6Gui!QGuiApplication::screenAdded ".printf \"QT_SCREEN_ADDED pid=%u tid=%u app=%p screen=%p\n\", @$tpid, @$tid, @rcx, @rdx; .time; k 0n48; gc"
+bu Qt6Gui!QGuiApplication::screenRemoved ".printf \"QT_SCREEN_REMOVED pid=%u tid=%u app=%p screen=%p\n\", @$tpid, @$tid, @rcx, @rdx; .time; k 0n48; gc"
+bu Qt6Gui!QWindowSystemInterface::handleScreenRemoved ".printf \"QT_PLATFORM_SCREEN_REMOVED pid=%u tid=%u platform_screen=%p\n\", @$tpid, @$tid, @rcx; .time; k 0n48; gc"
+bu Qt6Gui!QGuiApplication::primaryScreenChanged ".printf \"QT_PRIMARY_SCREEN_CHANGED pid=%u tid=%u app=%p screen=%p\n\", @$tpid, @$tid, @rcx, @rdx; .time; k 0n48; gc"
+bu Qt6Core!QCoreApplication::aboutToQuit ".printf \"QT_APP_ABOUT_TO_QUIT pid=%u tid=%u app=%p\n\", @$tpid, @$tid, @rcx; .time; k 0n48; gc"
+bu Qt6Gui!QGuiApplication::~QGuiApplication ".printf \"QT_GUI_APP_DTOR pid=%u tid=%u app=%p\n\", @$tpid, @$tid, @rcx; .time; k 0n48; gc"
+$$ Second chance only: preserve exception handling, then let the process fail normally.
+$$ The wrapper replaces the validated ASCII dump path before starting CDB.
+sxd -c2 ".echo QT_NATIVE_UNHANDLED; .time; .lastevent; .ecxr; r; ~* k 0n48; lm; .dump /ma /u \"@@DUMP_PATH@@\"; gn" av
+sxd -c2 ".echo QT_NATIVE_UNHANDLED; .time; .lastevent; .ecxr; r; ~* k 0n48; lm; .dump /ma /u \"@@DUMP_PATH@@\"; gn" 0xc000041d
+sxd -c2 ".echo QT_NATIVE_UNHANDLED; .time; .lastevent; .ecxr; r; ~* k 0n48; lm; .dump /ma /u \"@@DUMP_PATH@@\"; gn" 0xc0000409
+sxd -c2 ".echo QT_NATIVE_UNHANDLED; .time; .lastevent; .ecxr; r; ~* k 0n48; lm; .dump /ma /u \"@@DUMP_PATH@@\"; gn" 0xc0000374
+bl
+.time
+$$ Attach mode: Qt may already be loaded, so no future DLL-load event will occur.
+$$ .foreach consumes normal debugger output; enable it while collecting module names.
+.outmask /l 1
+.foreach (qtmodule {lm 1m m Qt6Gui}) { .outmask- /l 1; $$>a< "@@VTABLE_COMMAND_PATH@@" }
+.outmask- /l 1
+g

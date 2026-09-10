@@ -1,0 +1,4 @@
+$$ MSVC x64 QObject ABI: three Q_OBJECT entries followed by the deleting destructor.
+$$ Validate all three entries before treating slot 3 as code. No Qt version offsets.
+r @$t19 = @!"Qt6Gui!QScreen::`vftable'"
+.if ((poi(@$t19) == Qt6Gui!QScreen::metaObject) & (poi(@$t19+8) == Qt6Gui!QScreen::qt_metacast) & (poi(@$t19+0x10) == Qt6Gui!QScreen::qt_metacall)) { bp poi(@$t19+0x18) ".printf \"QT_SCREEN_VIRTUAL_DTOR pid=%u tid=%u screen=%p flags=%x\", @$tpid, @$tid, @rcx, @edx; .echo; .time; k 0n48; gc"; .echo QT_SCREEN_VIRTUAL_DTOR_ARMED; ln poi(@$t19+0x18) } .else { .printf /oe "QT_SCREEN_VTABLE_UNSUPPORTED: virtual destructor tracing is NOT armed.\n" }
