@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .screen_geometry import available_screen_geometry
+
 
 QT_BASE_STYLE_NAME = "Fusion"
 COMBO_POPUP_GAP = 4
@@ -135,10 +137,9 @@ def _position_popup_with_gap(combo: QComboBox, popup: QWidget) -> None:
     else:
         target_y = input_top - popup.height() - COMBO_POPUP_GAP
 
-    screen = combo.screen()
-    if screen is None or not isValid(screen):
+    available = available_screen_geometry(combo.mapToGlobal(combo.rect().center()))
+    if available is None:
         return
-    available = screen.availableGeometry()
     target_y = max(
         available.top(),
         min(target_y, available.bottom() - popup.height() + 1),

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from .icons import IconName
 from .application_lifecycle import gui_presentation_status
+from .screen_geometry import available_screen_geometry
 from .theme import set_theme_role
 from .toolbars import IconToolButton
 
@@ -227,18 +228,15 @@ class AppDialog(QDialog):
     def _center_over_parent(self) -> None:
         if not gui_presentation_status(self.parentWidget()).allowed:
             return
-        screens = [screen for screen in QApplication.screens() if isValid(screen)]
-        screen = self.screen()
-        if screen is None or not isValid(screen) or screen not in screens:
-            screen = QApplication.primaryScreen()
-        if screen is None or not isValid(screen) or screen not in screens:
-            record_stage("dialog.center.no_screen", dialog_id=self._diagnostic_id)
-            return
         parent = self.parentWidget()
         if parent is not None and isValid(parent) and parent.isVisible():
             center = parent.window().frameGeometry().center()
         else:
-            center = screen.availableGeometry().center()
+            available = available_screen_geometry(self.frameGeometry().center())
+            if available is None:
+                record_stage("dialog.center.no_screen", dialog_id=self._diagnostic_id)
+                return
+            center = available.center()
         self.move(center - self.rect().center())
 
 

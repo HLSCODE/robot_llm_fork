@@ -9,6 +9,7 @@ import tempfile
 import threading
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from src.observability.crash_diagnostics import (
     CrashDiagnostics,
@@ -19,6 +20,51 @@ from src.observability.logging_config import log_context
 
 
 class CrashDiagnosticsTests(unittest.TestCase):
+    def test_automatic_fatal_thread_scope_is_platform_specific(self) -> None:
+        for platform_name, all_threads in (("win32", False), ("linux", True)):
+            with self.subTest(platform=platform_name), tempfile.TemporaryDirectory() as directory:
+                with (
+                    patch("src.observability.crash_diagnostics.sys.platform", platform_name),
+                    patch("faulthandler.is_enabled", return_value=False),
+                    patch("faulthandler.enable") as enable,
+                    patch("faulthandler.disable") as disable,
+                ):
+                    with CrashDiagnostics(Path(directory)) as diagnostics:
+                        enable.assert_called_once()
+                        self.assertIs(enable.call_args.kwargs["all_threads"], all_threads)
+                        self.assertEqual(
+                            Path(enable.call_args.kwargs["file"].name), diagnostics.fatal_path,
+                        )
+                    disable.assert_called_once_with()
+                events = diagnostics.events_path.read_text(encoding="utf-8")
+                scope = "all" if all_threads else "current"
+                self.assertIn(f"fatal_threads={scope}", events)
+
+    def test_external_fatal_handler_is_neither_replaced_nor_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch("faulthandler.is_enabled", return_value=True),
+                patch("faulthandler.enable") as enable,
+                patch("faulthandler.disable") as disable,
+            ):
+                with CrashDiagnostics(Path(directory)) as diagnostics:
+                    enable.assert_not_called()
+                disable.assert_not_called()
+            self.assertIn("fatal_threads=external",
+                          diagnostics.events_path.read_text(encoding="utf-8"))
+
+    def test_explicit_dump_preserves_all_threads_and_file_only_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch("faulthandler.is_enabled", return_value=True),
+                patch("faulthandler.dump_traceback") as dump,
+            ):
+                with CrashDiagnostics(Path(directory)) as diagnostics:
+                    diagnostics.dump_threads()
+                    dump.assert_called_once()
+                    self.assertIs(dump.call_args.kwargs["all_threads"], True)
+                    self.assertEqual(Path(dump.call_args.kwargs["file"].name), diagnostics.fatal_path)
+
     def test_exceptions_and_stages_are_file_only_and_hooks_are_restored(self) -> None:
         previous = (sys.excepthook, threading.excepthook, sys.unraisablehook)
         console = io.StringIO()

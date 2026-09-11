@@ -7,7 +7,6 @@ import logging
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QIcon, QShowEvent
 from PySide6.QtWidgets import (
-    QApplication,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
@@ -19,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..theme import ThemeMode, application_icon_for_mode
+from ..screen_geometry import available_screen_geometry
 from ..branding import APPLICATION_NAME
 from ..application_lifecycle import (
     GuiPresentationStatus,
@@ -218,10 +218,9 @@ class StartupProgressCard(QWidget):
         self._center_on_screen()
 
     def _center_on_screen(self) -> None:
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is None:
+        available = available_screen_geometry(self.frameGeometry().center())
+        if available is None:
             return
-        available = screen.availableGeometry()
         self.move(available.center() - self.rect().center())
 
     def _fit_to_content(self) -> None:

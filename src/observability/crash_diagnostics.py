@@ -68,10 +68,14 @@ class CrashDiagnostics:
         self._previous_thread = threading.excepthook
         self._previous_unraisable = sys.unraisablehook
         self._fatal_was_enabled = faulthandler.is_enabled()
+        # Windows VEH also observes recoverable COM first-chance exceptions.
+        # Traversing other Python threads there can itself fault (observed on
+        # CPython 3.12). Native debuggers still capture every native thread.
+        fatal_all_threads = sys.platform != "win32"
         # Do not replace another owner's fatal descriptor (e.g. pytest/debugger).
         if not self._fatal_was_enabled:
             try:
-                faulthandler.enable(file=self._fatal, all_threads=True)
+                faulthandler.enable(file=self._fatal, all_threads=fatal_all_threads)
             except Exception:
                 self._handler.close()
                 self._fatal.close()
@@ -82,7 +86,11 @@ class CrashDiagnostics:
         self._installed = True
         _stages.addHandler(self._handler)
         self._fatal.write(f"pid={os.getpid()} python={sys.version} platform={sys.platform}\n")
-        self.logger.info("diagnostics.started fatal_owned=%s", not self._fatal_was_enabled)
+        fatal_threads = "external" if self._fatal_was_enabled else (
+            "all" if fatal_all_threads else "current"
+        )
+        self.logger.info("diagnostics.started fatal_owned=%s fatal_threads=%s",
+                         not self._fatal_was_enabled, fatal_threads)
         self.logger.info("runtime executable=%s python=%s platform=%s", sys.executable,
                          sys.version, sys.platform)
         for package in ("PySide6", "shiboken6", "tj-robot-proj"):
@@ -115,6 +123,7 @@ class CrashDiagnostics:
         )
 
     def dump_threads(self) -> None:
+        """Explicit Python/GIL-held snapshot, separate from native fault callbacks."""
         faulthandler.dump_traceback(file=self._fatal, all_threads=True)
 
     def __exit__(self, kind: Any, value: Any, traceback: Any) -> None:

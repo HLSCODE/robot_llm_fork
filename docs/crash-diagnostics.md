@@ -1,5 +1,47 @@
 # GUI 闪退诊断
 
+## 已修复的屏幕生命周期问题
+
+在 Windows / PySide6 6.11.1 环境中，原生跟踪确认共享 `QScreen` 曾经先进入
+Shiboken 包装对象回收路径，随后 Qt 的窗口坐标换算调用 `QScreen::geometry()`
+访问空指针。独立 offscreen 测试也能在没有机器人 SDK 的情况下复现。
+
+弹框、启动卡片和下拉菜单不再调用 `QWidget.screen()`，也不改用同样存在所有权
+关联风险的 `QWindow.screen()`。统一通过 `screen_geometry.available_screen_geometry()`
+使用应用级 `screenAt()` / `primaryScreen()` 查询，只向调用方返回 `QRect` 副本。
+按全局逻辑坐标选择屏幕，位置不在可用屏幕上时回退到主屏幕；无屏幕、退出期间或
+非 GUI 线程返回 `None`。不手动修改 QScreen 的父对象或所有权，也不全局禁用 GC。
+
+回归覆盖整数/文本弹框接受和取消、启动卡片及下拉菜单的反复关闭和垃圾回收，
+验证屏幕在应用运行期间仍有效，并在 QApplication 正常退出时释放。原生对象失效会
+污染后续 GUI 测试，因此每种回收场景都在独立 offscreen 子进程运行，不连接设备：
+
+```powershell
+uv run --frozen --group dev --extra gui python -m pytest -q tests/test_gui_screen_geometry.py tests/test_gui_screen_lifetime.py tests/test_crash_diagnostics.py
+```
+
+此修复针对已确认的所有权问题，不代表排除了所有可能的原生故障。实际多屏、显示器
+热插拔及长时间实机运行仍需受控验证；GUI 闪退不等于机械臂已经安全停止。
+
+## Python 故障记录的线程范围
+
+普通 Python 异常仍把完整异常堆栈写入日志文件，不输出到终端。
+
+Windows 上由本项目安装的 `faulthandler` 自动故障处理只输出当前 Python 线程。
+这是因为 Windows 的异常回调也可能观察到可恢复的 COM first-chance 异常，
+CPython 3.12 在此回调中遍历其他线程的 Python 栈曾发生二次访问违规。
+Linux 保留自动全线程记录；显式调用 `CrashDiagnostics.dump_threads()` 仍在
+Python/GIL 上下文中生成全线程快照。CDB / ProcDump 的完整原生线程转储不受影响。
+自动故障回调与显式调用的线程状态处理可参考
+[CPython 3.12.12 实现](https://github.com/python/cpython/blob/v3.12.12/Modules/faulthandler.c#L152-L237)。
+
+启动诊断中的 `fatal_threads=current/all/external` 分别表示当前线程、全部线程、
+由外部组件管理。如果 pytest、`PYTHONFAULTHANDLER` 或 `-X faulthandler` 已先启用
+故障处理器，本项目不会替换其文件或策略；外部策略需要由其启用方调整。
+
+`fatal-*.log` 中出现 COM 异常不一定代表进程退出，应结合后续应用日志、退出状态及
+未处理异常转储判断。正常启动命令、日志路径和设备配置均无需改变。
+
 ## 录制窗口的应用侧缓解
 
 录制启动后复用同一个 `open()` 弹框，异步切换准备、录制、保存和命名状态；录制过程不再调用 `exec()` 或在 GUI 线程等待 SDK。创建方式选择及已有文件导入仍使用原有选择框。
