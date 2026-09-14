@@ -17,7 +17,7 @@ Shiboken 包装对象回收路径，随后 Qt 的窗口坐标换算调用 `QScre
 污染后续 GUI 测试，因此每种回收场景都在独立 offscreen 子进程运行，不连接设备：
 
 ```powershell
-uv run --frozen --group dev --extra gui python -m pytest -q tests/test_gui_screen_geometry.py tests/test_gui_screen_lifetime.py tests/test_crash_diagnostics.py
+uv run --frozen --group dev --extra gui python -m pytest -q -p no:cacheprovider tests/test_gui_screen_geometry.py tests/test_gui_screen_lifetime.py tests/test_crash_diagnostics.py
 ```
 
 此修复针对已确认的所有权问题，不代表排除了所有可能的原生故障。实际多屏、显示器
