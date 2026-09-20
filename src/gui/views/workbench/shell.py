@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QScrollBar,
+    QSizePolicy,
     QSplitter,
     QSplitterHandle,
     QStackedWidget,
@@ -46,8 +47,8 @@ from ...workbench_layout import (
 )
 
 
-ACTIVITY_BAR_WIDTH = 52
-ACTIVITY_BUTTON_SIZE = 44
+ACTIVITY_BAR_WIDTH = 80
+ACTIVITY_BUTTON_SIZE = 64
 ACTIVITY_ICON_SIZE = 20
 STATUS_BUTTON_SIZE = 28
 STATUS_ICON_SIZE = 16
@@ -153,7 +154,8 @@ class _ActivityBar(QFrame):
     ) -> None:
         super().__init__(parent)
         self.setObjectName("workbenchActivityBar")
-        self.setFixedWidth(ACTIVITY_BAR_WIDTH)
+        self.setMinimumWidth(ACTIVITY_BAR_WIDTH)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 6, 4, 6)
         layout.setSpacing(4)
@@ -161,11 +163,13 @@ class _ActivityBar(QFrame):
         for page in pages:
             button = QToolButton()
             button.setObjectName("activityButton")
+            button.setText(page.title)
+            button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setAccessibleName(page.title)
             button.setAccessibleDescription(f"显示或收起{page.title}资源页")
             button.setToolTip(page.title)
             button.setCheckable(True)
-            button.setFixedSize(ACTIVITY_BUTTON_SIZE, ACTIVITY_BUTTON_SIZE)
+            button.setMinimumSize(ACTIVITY_BUTTON_SIZE, ACTIVITY_BUTTON_SIZE)
             button.setIconSize(QSize(ACTIVITY_ICON_SIZE, ACTIVITY_ICON_SIZE))
             button.clicked.connect(
                 lambda _checked=False, key=page.key: self.page_requested.emit(key)

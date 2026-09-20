@@ -73,7 +73,10 @@ class WorkbenchViewTests(unittest.TestCase):
         button = self.workbench.activity_bar.buttons["resources"]
 
         self.assertTrue(button.isChecked())
-        self.assertEqual("", button.text())
+        self.assertEqual("资源", button.text())
+        self.assertEqual(
+            Qt.ToolButtonStyle.ToolButtonTextUnderIcon, button.toolButtonStyle()
+        )
         self.assertFalse(button.icon().isNull())
         self.assertEqual("资源", button.accessibleName())
         self.assertTrue(button.accessibleDescription())
