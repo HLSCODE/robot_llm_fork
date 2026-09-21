@@ -28,6 +28,30 @@ ACTION_TYPE_LABELS = {
 }
 
 
+def action_library_icon(widget: QWidget, action: ActionDefinition) -> QIcon:
+    return themed_icon(
+        widget, action_icon(action), size=20,
+        color=ACTION_COLORS.get(action.type, QColor("#64748b")),
+    )
+
+
+def start_action_drag(widget: QWidget, action: ActionDefinition, canvas_scale: float) -> None:
+    mime = QMimeData()
+    mime.setData("application/x-action", json.dumps(action.to_dict()).encode("utf-8"))
+    drag = QDrag(widget)
+    drag.setMimeData(mime)
+    preview = create_drag_card_preview(
+        widget, title=action.name,
+        subtitle=ACTION_TYPE_LABELS.get(action.type, action.type.value),
+        icon=action_library_icon(widget, action),
+        accent=ACTION_COLORS.get(action.type, QColor("#64748b")),
+        canvas_scale=canvas_scale,
+    )
+    drag.setPixmap(preview.pixmap)
+    drag.setHotSpot(preview.hotspot)
+    drag.exec(Qt.DropAction.CopyAction)
+
+
 class ActionListWidget(QListWidget):
     action_selected = Signal(ActionDefinition)
 
@@ -71,24 +95,7 @@ class ActionListWidget(QListWidget):
         action = current_item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(action, ActionDefinition):
             return
-        mime = QMimeData()
-        mime.setData(
-            "application/x-action",
-            json.dumps(action.to_dict()).encode("utf-8"),
-        )
-        drag = QDrag(self)
-        drag.setMimeData(mime)
-        preview = create_drag_card_preview(
-            self,
-            title=action.name,
-            subtitle=ACTION_TYPE_LABELS.get(action.type, action.type.value),
-            icon=self._get_icon_for_action(action),
-            accent=ACTION_COLORS.get(action.type, QColor("#64748b")),
-            canvas_scale=self._canvas_scale_provider(),
-        )
-        drag.setPixmap(preview.pixmap)
-        drag.setHotSpot(preview.hotspot)
-        drag.exec(Qt.DropAction.CopyAction)
+        start_action_drag(self, action, self._canvas_scale_provider())
 
     def add_action(self, action: ActionDefinition) -> None:
         item = QListWidgetItem(action.name)
@@ -115,13 +122,4 @@ class ActionListWidget(QListWidget):
         return action if isinstance(action, ActionDefinition) else None
 
     def _get_icon_for_action(self, action: ActionDefinition) -> QIcon:
-        color = ACTION_COLORS.get(
-            action.type,
-            QColor("#64748b"),
-        )
-        return themed_icon(
-            self,
-            action_icon(action),
-            size=20,
-            color=color,
-        )
+        return action_library_icon(self, action)

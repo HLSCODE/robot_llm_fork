@@ -58,7 +58,6 @@ from ...devices.runtime.ids import (
 )
 from ..views.log_widget import LogFilter, LogWidget
 from ..views.ai_assistant import AIAssistantWidget
-from ..views.action_list import ActionListWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceHealthView, DevicePoseView
 from ..views.dialogs import ActionConfigDialog
@@ -1030,6 +1029,8 @@ class MainWindow(RoundedMainWindow):
 
     def create_action(self) -> None:
         category = self.action_library_view.current_category_type()
+        if category is None:
+            return
         resolved = self._resolve_action_type_for_current_category(category)
         if resolved is None:
             return
@@ -1056,6 +1057,7 @@ class MainWindow(RoundedMainWindow):
                 action,
                 origin="gui",
             )
+            self.action_library_view.reveal_action(action.id)
 
     def create_trajectory_action(self) -> None:
         options = ["录制 R1", "录制 R2", "使用已有文件"]
@@ -1154,16 +1156,15 @@ class MainWindow(RoundedMainWindow):
             origin="gui",
         )
         record_stage("trajectory.create.end", action_id=action.id)
+        self.action_library_view.reveal_action(action.id)
         self._notifications.info(f"轨迹动作已创建: {name}")
 
     def delete_action(self) -> None:
-        action_list = self.action_library_view.current_action_list()
-        current_item = action_list.currentItem()
-        if current_item is None:
+        action = self.action_library_view.selected_action()
+        if action is None:
             self._notifications.warning("请先选择一个要删除的动作")
             return
 
-        action = current_item.data(Qt.ItemDataRole.UserRole)
         if action and action in self.actions[action.type]:
             self._services.composition.delete_action(
                 action.id,
@@ -1171,18 +1172,9 @@ class MainWindow(RoundedMainWindow):
             )
 
     def edit_action(self) -> None:
-        action_list = self._get_current_action_list_widget()
-        if action_list is None:
-            return
-
-        current_item = action_list.currentItem()
-        if current_item is None:
-            self._notifications.warning("请先选择要修改的动作")
-            return
-
-        action = current_item.data(Qt.ItemDataRole.UserRole)
+        action = self.action_library_view.selected_action()
         if action is None:
-            self._notifications.warning("无法读取选中的动作")
+            self._notifications.warning("请先选择要修改的动作")
             return
 
         action_data = {
@@ -1216,39 +1208,7 @@ class MainWindow(RoundedMainWindow):
         except KeyError:
             self._notifications.warning("未找到目标动作")
             return
-
-    def refresh_action_list(self, action_type: ActionType) -> None:
-        if action_type in {ActionType.MANIPULATE, ActionType.WAIT}:
-            self._refresh_execute_merged_list()
-            return
-
-        # 移动类的所有子类型都显示在 move_list 中
-        if action_type in {ActionType.MOVE, ActionType.BASE_MOVE}:
-            self.action_library_view.action_list(ActionType.MOVE).clear()
-            for action in self.actions[ActionType.MOVE]:
-                self.action_library_view.action_list(ActionType.MOVE).add_action(action)
-            for action in self.actions[ActionType.BASE_MOVE]:
-                self.action_library_view.action_list(ActionType.MOVE).add_action(action)
-            return
-
-        if action_type in {ActionType.VISION_CAPTURE, ActionType.VISION_RELOCALIZE}:
-            self.action_library_view.action_list(ActionType.VISION_CAPTURE).clear()
-            for action in self.actions[ActionType.VISION_CAPTURE]:
-                self.action_library_view.action_list(ActionType.VISION_CAPTURE).add_action(action)
-            for action in self.actions[ActionType.VISION_RELOCALIZE]:
-                self.action_library_view.action_list(ActionType.VISION_CAPTURE).add_action(action)
-            return
-
-        list_map = {
-            ActionType.INSPECT: self.action_library_view.action_list(ActionType.INSPECT),
-            ActionType.CHANGE_GUN: self.action_library_view.action_list(ActionType.CHANGE_GUN),
-            ActionType.TRAJECTORY: self.action_library_view.action_list(ActionType.TRAJECTORY)
-        }
-        action_list = list_map[action_type]
-        action_list.clear()
-
-        for action in self.actions[action_type]:
-            action_list.add_action(action)
+        self.action_library_view.reveal_action(updated_action.id)
 
     def load_actions(self) -> None:
         record_stage("action_list.refresh.begin")
@@ -1259,8 +1219,7 @@ class MainWindow(RoundedMainWindow):
         for action in all_actions:
             self.actions[action.type].append(action)
 
-        for action_type in self.actions:
-            self.refresh_action_list(action_type)
+        self.action_library_view.render_actions(all_actions)
         record_stage("action_list.refresh.end", count=len(all_actions))
 
     def _on_composition_changed(
@@ -1368,12 +1327,6 @@ class MainWindow(RoundedMainWindow):
             parent=self,
         )
 
-    def _refresh_execute_merged_list(self) -> None:
-        self.action_library_view.action_list(ActionType.MANIPULATE).clear()
-        for action in self.actions[ActionType.MANIPULATE]:
-            self.action_library_view.action_list(ActionType.MANIPULATE).add_action(action)
-        for action in self.actions[ActionType.WAIT]:
-            self.action_library_view.action_list(ActionType.MANIPULATE).add_action(action)
 
     def _resolve_action_type_for_current_category(
         self,
@@ -1396,7 +1349,7 @@ class MainWindow(RoundedMainWindow):
                 return None
             return ActionType.WAIT if selected == "等待" else ActionType.MANIPULATE
 
-        # 移动类 Tab 需要选择具体类型
+        # 移动类需要选择具体类型。
         if category is ActionType.MOVE:
             options = [
                 "机械臂移动",
@@ -1431,8 +1384,6 @@ class MainWindow(RoundedMainWindow):
 
         return action_type_map.get(category)
 
-    def _get_current_action_list_widget(self) -> ActionListWidget | None:
-        return self.action_library_view.current_action_list()
 
     def refresh_task_library(self) -> None:
         self.task_library_view.task_library_list.clear()

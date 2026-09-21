@@ -149,9 +149,10 @@ class WorkbenchViewTests(unittest.TestCase):
         workbench.resize(720, 480)
         workbench.show()
         QApplication.processEvents()
-        available_width = action_library.category_selector.width()
+        QApplication.sendEvent(workbench.side_stack, QEvent(QEvent.Type.Leave))
+        QApplication.processEvents()
         stable_header_height = action_library.header.height()
-        stable_content_y = action_library.action_stack.mapTo(
+        stable_content_y = action_library.action_tree.mapTo(
             action_library,
             QPoint(0, 0),
         ).y()
@@ -162,20 +163,19 @@ class WorkbenchViewTests(unittest.TestCase):
         QApplication.processEvents()
         self.assertTrue(command.isVisible())
         self.assertFalse(command.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents))
-        self.assertLess(action_library.category_selector.width(), available_width)
+        self.assertEqual("基础动作", action_library.header.title_label.text())
         self.assertEqual(stable_header_height, action_library.header.height())
         self.assertEqual(
             stable_content_y,
-            action_library.action_stack.mapTo(action_library, QPoint(0, 0)).y(),
+            action_library.action_tree.mapTo(action_library, QPoint(0, 0)).y(),
         )
         QApplication.sendEvent(workbench.side_stack, QEvent(QEvent.Type.Leave))
         QApplication.processEvents()
         self.assertTrue(command.isHidden())
-        self.assertEqual(available_width, action_library.category_selector.width())
         self.assertEqual(stable_header_height, action_library.header.height())
         self.assertEqual(
             stable_content_y,
-            action_library.action_stack.mapTo(action_library, QPoint(0, 0)).y(),
+            action_library.action_tree.mapTo(action_library, QPoint(0, 0)).y(),
         )
 
         workbench.close()

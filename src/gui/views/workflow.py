@@ -1,36 +1,25 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from PySide6.QtCore import QEvent, QMimeData, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QDrag
+from PySide6.QtGui import QAction, QDrag
 from PySide6.QtWidgets import (
     QApplication,
     QListWidget,
     QMenu,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ...domain.models import ActionDefinition, ActionType
 from ...devices import StopMode
-from .action_list import ActionListWidget
+from .action_tree import ACTION_LIBRARY_CATEGORIES, ActionCategoryTree
 from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
 from ..icons import IconName, themed_icon
 from ..drag_preview import create_drag_card_preview
-from ..toolbars import ElidingComboBox, PaneHeader
-
-
-ACTION_LIBRARY_CATEGORIES: tuple[tuple[ActionType, str], ...] = (
-    (ActionType.MOVE, "移动类"),
-    (ActionType.MANIPULATE, "执行类"),
-    (ActionType.INSPECT, "检测类"),
-    (ActionType.CHANGE_GUN, "换枪类"),
-    (ActionType.VISION_CAPTURE, "视觉类"),
-    (ActionType.TRAJECTORY, "轨迹类"),
-)
+from ..toolbars import PaneHeader
 
 
 class TaskLibraryListWidget(QListWidget):
@@ -95,85 +84,86 @@ class ActionLibraryView(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._pending_reveal_id: str | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
-
-        self.category_selector = ElidingComboBox()
-        self.category_selector.setObjectName("paneHeaderSelector")
-        self.category_selector.setAccessibleName("基础动作分类")
-        self.category_selector.setToolTip("选择基础动作分类")
-        self.category_selector.setMinimumContentsLength(8)
-
-        self.header = PaneHeader("")
-        self.header.replace_title_with(self.category_selector)
+        self.header = PaneHeader("基础动作")
         self.create_button = self.header.add_action(
-            IconName.ADD,
-            "新建动作",
-            self.create_requested.emit,
+            IconName.ADD, "新建动作", self._request_create,
         )
         self.edit_button = self.header.add_action(
-            IconName.EDIT,
-            "修改选中动作",
-            self.edit_requested.emit,
+            IconName.EDIT, "修改选中动作", self.edit_requested.emit,
         )
         self.delete_button = self.header.add_action(
-            IconName.DELETE,
-            "删除选中动作",
-            self.delete_requested.emit,
+            IconName.DELETE, "删除选中动作", self.delete_requested.emit,
         )
         self.camera_test_button = self.header.add_action(
-            IconName.CAMERA,
-            "重新检测相机",
-            self.camera_test_requested.emit,
+            IconName.CAMERA, "重新检测相机", self.camera_test_requested.emit,
+        )
+        self.collapse_button = self.header.add_action(
+            IconName.COLLAPSE_ALL, "全部折叠", self._collapse_all,
         )
         layout.addWidget(self.header)
-
-        self.action_stack = QStackedWidget()
-        self.action_lists = {
-            ActionType.MOVE: ActionListWidget(),
-            ActionType.MANIPULATE: ActionListWidget(),
-            ActionType.INSPECT: ActionListWidget(),
-            ActionType.CHANGE_GUN: ActionListWidget(),
-            ActionType.VISION_CAPTURE: ActionListWidget(),
-            ActionType.TRAJECTORY: ActionListWidget(),
-        }
-        for action_list in self.action_lists.values():
-            action_list.action_selected.connect(
-                self.action_insert_requested.emit
-            )
-            action_list.setContextMenuPolicy(
-                Qt.ContextMenuPolicy.CustomContextMenu
-            )
-            action_list.customContextMenuRequested.connect(
-                lambda position, target=action_list: self._show_action_context_menu(
-                    target,
-                    position,
-                )
-            )
+        self.action_tree = ActionCategoryTree()
+        self.action_tree.action_selected.connect(self.action_insert_requested.emit)
+        self.action_tree.create_requested.connect(self.create_requested.emit)
+        self.action_tree.itemSelectionChanged.connect(self._update_commands)
+        self.action_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.action_tree.customContextMenuRequested.connect(self._show_action_context_menu)
+        self.category_menu = QMenu(self)
         for action_type, title in ACTION_LIBRARY_CATEGORIES:
-            self.category_selector.addItem(title, action_type)
-            self.action_stack.addWidget(self.action_lists[action_type])
-        self.category_selector.currentIndexChanged.connect(
-            self.action_stack.setCurrentIndex
+            command = QAction(title, self.category_menu)
+            self.category_menu.addAction(command)
+            command.triggered.connect(
+                lambda _checked=False, category=action_type: self._create_in_category(category)
+            )
+        layout.addWidget(self.action_tree, stretch=1)
+        self._update_commands()
+
+    def _request_create(self) -> None:
+        if self.current_category_type() is None:
+            self.category_menu.popup(
+                self.create_button.mapToGlobal(QPoint(0, self.create_button.height()))
+            )
+            return
+        self.create_requested.emit()
+
+    def _create_in_category(self, category: ActionType) -> None:
+        self.action_tree.select_category(category)
+        self.create_requested.emit()
+
+    def current_category_type(self) -> ActionType | None:
+        return self.action_tree.current_category()
+
+    def selected_action(self) -> ActionDefinition | None:
+        return self.action_tree.selected_action()
+
+    def render_actions(self, actions: Sequence[ActionDefinition]) -> None:
+        self.action_tree.render_actions(actions)
+        if self._pending_reveal_id is not None:
+            self.reveal_action(self._pending_reveal_id)
+
+    def reveal_action(self, action_id: str) -> None:
+        self._pending_reveal_id = (
+            None if self.action_tree.reveal_action(action_id) else action_id
         )
-        layout.addWidget(self.action_stack, stretch=1)
 
-    def action_list(self, action_type: ActionType) -> ActionListWidget:
-        return self.action_lists[action_type]
+    def _collapse_all(self) -> None:
+        self.action_tree.collapseAll()
 
-    def current_category_type(self) -> ActionType:
-        action_type = self.category_selector.currentData()
-        if not isinstance(action_type, ActionType):
-            raise RuntimeError("基础动作分类未初始化")
-        return action_type
-
-    def current_action_list(self) -> ActionListWidget:
-        return self.action_lists[self.current_category_type()]
+    def _update_commands(self) -> None:
+        selected = self.selected_action() is not None
+        self.edit_button.setEnabled(selected)
+        self.delete_button.setEnabled(selected)
+        category = self.current_category_type()
+        title = dict(ACTION_LIBRARY_CATEGORIES).get(category) if category is not None else None
+        label = f"新建{title}动作" if title else "新建动作（选择分类）"
+        self.create_button.setToolTip(label)
+        self.create_button.setAccessibleName(label)
 
     def set_canvas_scale_provider(self, provider: Callable[[], float]) -> None:
-        for action_list in self.action_lists.values():
-            action_list.set_canvas_scale_provider(provider)
+        self.action_tree.set_canvas_scale_provider(provider)
 
     def set_camera_test_running(self, running: bool) -> None:
         self.camera_test_button.setEnabled(not running)
@@ -181,47 +171,30 @@ class ActionLibraryView(QWidget):
         self.camera_test_button.setToolTip(label)
         self.camera_test_button.setAccessibleName(label)
 
-    def _show_action_context_menu(
-        self,
-        action_list: ActionListWidget,
-        position: QPoint,
-    ) -> None:
-        item = action_list.itemAt(position)
+    def _show_action_context_menu(self, position: QPoint) -> None:
+        item = self.action_tree.itemAt(position)
         if item is None:
             return
-        action = item.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(action, ActionDefinition):
+        self.action_tree.setCurrentItem(item)
+        action = self.selected_action()
+        if action is None:
             return
-        action_list.setCurrentItem(item)
-        menu = self._create_action_context_menu(action_list, action)
-        menu.exec(action_list.viewport().mapToGlobal(position))
+        menu = self._create_action_context_menu(action)
+        menu.exec(self.action_tree.viewport().mapToGlobal(position))
 
-    def _create_action_context_menu(
-        self,
-        action_list: ActionListWidget,
-        action: ActionDefinition,
-    ) -> QMenu:
+    def _create_action_context_menu(self, action: ActionDefinition) -> QMenu:
         menu = QMenu(self)
         insert = menu.addAction(
-            themed_icon(action_list, IconName.INSERT, size=16),
-            "插入到画布",
+            themed_icon(self, IconName.INSERT, size=16), "插入到画布",
         )
         insert.triggered.connect(
             lambda _checked=False: self.action_insert_requested.emit(action)
         )
-        edit = menu.addAction(
-            themed_icon(action_list, IconName.EDIT, size=16),
-            "修改动作",
-        )
+        edit = menu.addAction(themed_icon(self, IconName.EDIT, size=16), "修改动作")
         edit.triggered.connect(lambda _checked=False: self.edit_requested.emit())
         menu.addSeparator()
-        delete = menu.addAction(
-            themed_icon(action_list, IconName.DELETE, size=16),
-            "删除动作",
-        )
-        delete.triggered.connect(
-            lambda _checked=False: self.delete_requested.emit()
-        )
+        delete = menu.addAction(themed_icon(self, IconName.DELETE, size=16), "删除动作")
+        delete.triggered.connect(lambda _checked=False: self.delete_requested.emit())
         return menu
 
 

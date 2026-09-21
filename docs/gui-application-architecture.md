@@ -62,6 +62,11 @@ GuiNotificationCenter: operational message -> history/log/status/modal
   不从文件系统动态查找资源。所有 icon-only 命令都有 Tooltip 和可访问名称。
 - `TaskLibraryView` 只展示 `CompositionService` 的已保存任务投影，并发出打开或作为
   Subworkflow 插入当前文档的意图；`ActionLibraryView` 只展示按类型分类的基础动作并发出增删改、插入和相机测试意图。
+- 基础动作使用 `ActionCategoryTree` 展示六个固定分类和动作数量，首次全部折叠，允许同时展开多个分类。
+  顶部标题固定为“基础动作”，提供全部折叠；分类行悬停显示快捷新增按钮。
+  新建类型取决于选中的分类或动作所属分类，没有选中项时先选择分类；鼠标悬停和工具栏焦点不改变目标。
+  仅选中具体动作时允许编辑、删除。刷新保留展开、选择和滚动状态，新建或修改成功后展开并定位动作。
+  分类不参与拖拽，具体动作沿用双击插入、拖入画布和右键操作。
 - `AIAssistantWidget` 是独立资源页，继续复用唯一 LLM/CommandRuntime，不嵌入动作库，
   也不反向持有 MainWindow。
 - `WorkflowEditorView` 只负责动作序列画布及其控制区；执行按钮状态通过单一

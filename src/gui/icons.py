@@ -50,6 +50,7 @@ class IconName(str, Enum):
     SAVE = "save"
     INSERT = "insert"
     ADD = "add"
+    COLLAPSE_ALL = "collapse-all"
     EDIT = "edit"
     DELETE = "delete"
     CLEAR = "clear"

@@ -333,7 +333,7 @@ Profile 默认由 provider 和 model 派生，例如 `realman-rm75-dual`、`tian
 | `views/workbench/shell.py` | VS Code 风格工作台：活动栏、资源侧栏、编辑区、状态栏和详情浮层 |
 | `views/workflow.py` | 工作流编辑器与顶部命令栏 |
 | `views/workflow_canvas/` | 基于 Graphics View 的节点、连线、循环/并行容器、选择、拖放和插入预览 |
-| `views/action_list.py`、`action_picker.py` | 基础动作库、类型筛选、新增/编辑/插入交互 |
+| `views/action_tree.py`、`action_list.py`、`action_picker.py` | 固定分类折叠树、动作选择列表及插入选择器；共享动作图标与拖拽预览 |
 | `views/dialogs.py` | schema 驱动的动作配置弹框、必填校验、实时位姿获取等通用表单能力 |
 | `views/ai_assistant.py` | AI 聊天、技能预览、确认执行与语音交互视图 |
 | `bridges/` | 将执行、组合和通知事件安全转为 Qt signal |

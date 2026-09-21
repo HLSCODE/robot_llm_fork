@@ -401,6 +401,7 @@ def build_stylesheet(colors: ThemeColors) -> str:
         else ":/icons/chevron-up-on-light.svg"
     )
     spin_arrow_down = combo_arrow
+    tree_arrow_right = combo_arrow.replace("chevron-down", "chevron-right")
     return f"""
 QWidget {{ color: {colors.text}; }}
 QMainWindow {{ background: transparent; }}
@@ -572,6 +573,14 @@ QAbstractItemView::item:selected {{
     background: {colors.selection}; color: {colors.text}; border: none; outline: none;
 }}
 QListWidget::item:focus, QAbstractItemView::item:focus {{ outline: none; border: none; }}
+QTreeWidget#actionCategoryTree {{ background: transparent; color: {colors.text}; border: none; outline: 0; }}
+QTreeWidget#actionCategoryTree::item {{ padding: 4px 2px; border: none; border-radius: 4px; }}
+QTreeWidget#actionCategoryTree::item:hover {{ background: {colors.surface_subtle}; }}
+QTreeWidget#actionCategoryTree::item:selected {{ background: {colors.selection}; color: {colors.text}; }}
+QTreeWidget#actionCategoryTree::branch {{ background: transparent; border-image: none; }}
+QTreeWidget#actionCategoryTree::branch:selected {{ background: {colors.selection}; }}
+QTreeWidget#actionCategoryTree::branch:closed:has-children {{ image: url({tree_arrow_right}); }}
+QTreeWidget#actionCategoryTree::branch:open:has-children {{ image: url({combo_arrow}); }}
 QFrame[frameShape="6"] {{ border: none; background: {colors.surface}; }}
 QCheckBox {{ spacing: 6px; color: {colors.text}; }}
 QScrollBar:vertical {{ width: 8px; background: transparent; }}

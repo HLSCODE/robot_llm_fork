@@ -5,6 +5,9 @@
     <file alias="app-icon-light.png">assets/app/app-icon-light.png</file>
   </qresource>
   <qresource prefix="/icons">
+    <file alias="chevron-right-on-light.svg">assets/icons/chevron-right-on-light.svg</file>
+    <file alias="chevron-right-on-dark.svg">assets/icons/chevron-right-on-dark.svg</file>
+    <file alias="collapse-all.svg">assets/icons/collapse-all.svg</file>
     <file alias="tasks.svg">assets/icons/tasks.svg</file>
     <file alias="actions.svg">assets/icons/actions.svg</file>
     <file alias="action-move.svg">assets/icons/action-move.svg</file>

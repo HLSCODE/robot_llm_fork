@@ -4,7 +4,7 @@ import unittest
 from typing import ClassVar
 
 from PySide6.QtGui import QColor, QPalette
-from PySide6.QtWidgets import QApplication, QStyle, QStyleOptionComboBox, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from src.domain.models import ActionDefinition, ActionType
 from src.gui.icons import ACTION_TYPE_ICONS, IconName, themed_icon
@@ -61,26 +61,14 @@ class GuiToolbarTests(unittest.TestCase):
     def test_action_library_commands_are_icon_only_and_camera_state_is_visible(self) -> None:
         view = ActionLibraryView()
 
-        self.assertEqual(6, view.category_selector.count())
-        self.assertEqual("移动类", view.category_selector.currentText())
-        self.assertIs(view.current_action_list(), view.action_list(view.current_category_type()))
-        self.assertIs(view.header, view.category_selector.parentWidget())
-        self.assertTrue(view.header.title_label.isHidden())
-        self.assertEqual("", view.header.title_label.text())
-        self.assertEqual("paneHeaderSelector", view.category_selector.objectName())
-        long_category_label = "机械臂移动与升降平台移动"
-        view.category_selector.setItemText(0, long_category_label)
-        view.category_selector.resize(64, view.category_selector.sizeHint().height())
-        self.assertEqual(long_category_label, view.category_selector.currentText())
-        self.assertNotEqual(long_category_label, view.category_selector.visible_text())
-        self.assertTrue(view.category_selector.visible_text().endswith("…"))
+        self.assertEqual(6, view.action_tree.topLevelItemCount())
+        self.assertIsNone(view.current_category_type())
+        self.assertEqual("基础动作", view.header.title_label.text())
+        self.assertFalse(view.edit_button.isEnabled())
+        self.assertFalse(view.delete_button.isEnabled())
         view.resize(360, 640)
         view.show()
         QApplication.processEvents()
-        self.assertEqual(
-            view.category_selector.mapTo(view, view.category_selector.rect().center()).y(),
-            view.create_button.mapTo(view, view.create_button.rect().center()).y(),
-        )
 
         for button in (
             view.create_button,
@@ -105,9 +93,8 @@ class GuiToolbarTests(unittest.TestCase):
             type=ActionType.MOVE,
             parameters={},
         )
-        action_list = view.current_action_list()
-        action_list.add_action(action)
-        action_list.setCurrentRow(0)
+        view.render_actions([action])
+        view.reveal_action(action.id)
         inserted: list[ActionDefinition] = []
         edited: list[bool] = []
         deleted: list[bool] = []
@@ -115,7 +102,7 @@ class GuiToolbarTests(unittest.TestCase):
         view.edit_requested.connect(lambda: edited.append(True))
         view.delete_requested.connect(lambda: deleted.append(True))
 
-        menu = view._create_action_context_menu(action_list, action)
+        menu = view._create_action_context_menu(action)
         actions = [entry for entry in menu.actions() if not entry.isSeparator()]
 
         self.assertEqual(
@@ -129,40 +116,6 @@ class GuiToolbarTests(unittest.TestCase):
         self.assertEqual([True], edited)
         self.assertEqual([True], deleted)
 
-    def test_action_category_selector_places_its_chevron_before_elided_text(self) -> None:
-        original_palette = QApplication.palette()
-        original_stylesheet = self.application.styleSheet()
-        try:
-            ThemeController(self.application, ThemeMode.LIGHT)
-            view = ActionLibraryView()
-            view.resize(360, 640)
-            view.show()
-            QApplication.processEvents()
-            selector = view.category_selector
-            option = QStyleOptionComboBox()
-            selector.initStyleOption(option)
-            drop_down = selector.style().subControlRect(
-                QStyle.ComplexControl.CC_ComboBox,
-                option,
-                QStyle.SubControl.SC_ComboBoxArrow,
-                selector,
-            )
-            text_area = selector.style().subControlRect(
-                QStyle.ComplexControl.CC_ComboBox,
-                option,
-                QStyle.SubControl.SC_ComboBoxEditField,
-                selector,
-            )
-
-            self.assertLess(drop_down.center().x(), text_area.left())
-            chevron_text_gap = text_area.left() - (drop_down.right() + 1)
-            self.assertGreaterEqual(chevron_text_gap, 2)
-            self.assertLessEqual(chevron_text_gap, 8)
-            view.close()
-        finally:
-            QApplication.setPalette(original_palette)
-            self.application.setStyleSheet(original_stylesheet)
-            QApplication.processEvents()
 
     def test_workflow_commands_are_above_canvas_and_keep_semantic_actions(self) -> None:
         view = WorkflowEditorView()

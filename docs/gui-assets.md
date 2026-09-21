@@ -15,6 +15,10 @@
 - 后续增加 SVG、PNG、字体或第三方图标库时，必须在本文件记录来源、版本、
   许可证、修改情况和打包路径，再允许进入发布包。
 
-当前 8 个 SVG 为本项目原创资产，不含第三方图形，使用 CC0 1.0；完整声明位于
+分类列表新增 `collapse-all.svg`（全部折叠）及 `chevron-right-on-light.svg`、
+`chevron-right-on-dark.svg`（分类收起箭头），2026-09-21 新增，均为项目自制 SVG，
+通过上述 `.qrc` 和编译资源模块打包，遵循同一 CC0 1.0 声明。
+
+当前 SVG 为本项目原创资产，不含第三方图形，使用 CC0 1.0；完整声明位于
 `src/gui/assets/icons/LICENSE.txt`。wheel 必须包含 SVG 源文件、许可证、`.qrc`
 和编译后的资源模块。
