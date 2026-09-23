@@ -31,8 +31,7 @@ class ShortcutDefinition:
 
 
 DEFAULT_SHORTCUTS: tuple[ShortcutDefinition, ...] = (
-    ShortcutDefinition("file.save", "保存当前任务", "Ctrl+S"),
-    ShortcutDefinition("file.save_as", "另存为任务", "Ctrl+Shift+S"),
+    ShortcutDefinition("file.save", "另存为流程", "Ctrl+S"),
     ShortcutDefinition("file.open", "加载任务", "Ctrl+O"),
     ShortcutDefinition("file.exit", "退出", "Ctrl+Q"),
     ShortcutDefinition("edit.undo", "撤销", "Ctrl+Z"),

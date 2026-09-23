@@ -524,8 +524,7 @@ class MainWindow(RoundedMainWindow):
         self.application_menu_bar = menubar
 
         file_menu = menubar.addMenu("文件")
-        self._add_menu_action(file_menu, "file.save", "保存当前任务", self.save_task)
-        self._add_menu_action(file_menu, "file.save_as", "另存为任务", self.save_task_as)
+        self._add_menu_action(file_menu, "file.save", "另存为流程", self.save_task)
         self._add_menu_action(file_menu, "file.open", "加载任务", self.load_task)
 
         file_menu.addSeparator()
@@ -1409,34 +1408,43 @@ class MainWindow(RoundedMainWindow):
         )
 
     def save_task(self) -> None:
-        self._save_task(force_new_name=False)
-
-    def save_task_as(self) -> None:
-        self._save_task(force_new_name=True)
-
-    def _save_task(self, *, force_new_name: bool) -> None:
         state = self._services.workflow_editing.snapshot()
-        if not state.document.to_entries():
+        canvas = self.workflow_view.sequence_list
+        entries = canvas.current_scope_entries()
+        if not entries:
             self._notifications.warning("序列为空，无需保存")
             return
+        scope_name = canvas.current_scope_name
+        default_name = (
+            scope_name
+            or state.workflow_name.removesuffix(".workflow.json")
+            or "未命名任务"
+        )
+        name, accepted = ask_text(
+            self,
+            "另存为流程",
+            "流程名称（同名将覆盖）：",
+            text=default_name,
+        )
+        if not accepted:
+            return
+        workflow_name = name.strip().removesuffix(".workflow.json")
+        if not workflow_name:
+            self._notifications.warning("流程名称不能为空")
+            return
         try:
-            if state.workflow_name and not force_new_name:
-                stored_name, _ = self._services.workflow_editing.save()
-            else:
-                filename, _ = QFileDialog.getSaveFileName(
-                    self,
-                    "保存任务序列",
-                    "",
-                    "工作流文件 (*.workflow.json)",
-                )
-                if not filename:
-                    return
-                stored_name, _ = self._services.workflow_editing.save_as(
-                    Path(filename).name
-                )
+            stored_name, saved_state = self._services.workflow_editing.save_as(
+                workflow_name,
+                entries=entries if scope_name is not None else None,
+            )
         except CompositionRevisionConflict:
             self._notifications.warning("保存失败：该任务已被其他入口修改")
             return
+        except ValueError as error:
+            self._notifications.warning(f"保存失败：{error}")
+            return
+        if scope_name is not None:
+            self._render_sequence(saved_state.document.to_entries())
         self._notifications.info(f"任务已保存: {stored_name}")
 
     def open_selected_task(self) -> None:

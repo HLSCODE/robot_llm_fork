@@ -174,6 +174,80 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.services.external_localization.close()
         self.assertEqual({}, self.services.devices.shutdown_all())
 
+    def test_save_task_always_asks_for_target_and_overwrites_same_name(self) -> None:
+        opened = self.services.workflow_editing.open("startup-visible")
+        self.window._render_sequence(opened.document.to_entries())
+        with patch(
+            "src.gui.controllers.main_window.ask_text",
+            return_value=("save-as-smoke", True),
+        ) as name_dialog:
+            self.window.save_task()
+            self.window.save_task()
+
+        self.assertEqual(2, name_dialog.call_count)
+        self.assertEqual("startup-visible", name_dialog.call_args_list[0].kwargs["text"])
+        self.assertEqual("save-as-smoke", name_dialog.call_args_list[1].kwargs["text"])
+        self.assertEqual("save-as-smoke.workflow.json", self.services.workflow_editing.snapshot().workflow_name)
+        self.assertEqual(2, self.services.composition.load_workflow("save-as-smoke").revision)
+        self.assertEqual(1, self.services.composition.load_workflow("startup-visible").revision)
+
+    def test_save_task_rejects_empty_name(self) -> None:
+        opened = self.services.workflow_editing.open("startup-visible")
+        self.window._render_sequence(opened.document.to_entries())
+        with (
+            patch(
+                "src.gui.controllers.main_window.ask_text",
+                return_value=("   ", True),
+            ),
+            patch.object(self.window._notifications, "warning") as warning,
+        ):
+            self.window.save_task()
+
+        self.assertEqual(1, self.services.composition.load_workflow("startup-visible").revision)
+        warning.assert_called_once_with("流程名称不能为空")
+
+    def test_cancel_save_task_does_not_modify_workflow(self) -> None:
+        opened = self.services.workflow_editing.open("startup-visible")
+        self.window._render_sequence(opened.document.to_entries())
+        with patch(
+            "src.gui.controllers.main_window.ask_text",
+            return_value=("ignored", False),
+        ):
+            self.window.save_task()
+
+        self.assertEqual(1, self.services.composition.load_workflow("startup-visible").revision)
+        self.assertEqual("startup-visible", self.services.workflow_editing.snapshot().workflow_name)
+
+    def test_repeated_save_as_inside_subworkflow_does_not_add_nesting(self) -> None:
+        original_action = self.services.composition.load_workflow("startup-visible").to_entries()[0]
+        self.services.composition.save_task(
+            "flat-source",
+            (
+                SequenceItem.from_definition(original_action.definition),
+                SequenceItem.from_definition(original_action.definition),
+            ),
+            origin="test",
+        )
+        source_name = "flat-source"
+        for target_name in ("flat-copy", "flat-copy", "flat-copy-2"):
+            subworkflow = self.services.workflow_editing.instantiate(source_name)
+            canvas = self.window.workflow_view.sequence_list
+            canvas.render_entries((subworkflow,))
+            self.window._publish_current_sequence()
+            self.assertTrue(canvas.enter_subworkflow(subworkflow.uuid))
+            with patch(
+                "src.gui.controllers.main_window.ask_text",
+                return_value=(target_name, True),
+            ):
+                self.window.save_task()
+
+            saved_entries = self.services.composition.load_workflow(target_name).to_entries()
+            self.assertEqual(2, len(saved_entries))
+            self.assertTrue(all(isinstance(entry, SequenceItem) for entry in saved_entries))
+            self.assertEqual(2, len(canvas.get_entries()))
+            self.assertTrue(all(isinstance(entry, SequenceItem) for entry in canvas.get_entries()))
+            source_name = target_name
+
     def test_window_starts_with_shared_simulation_services(self) -> None:
         self.assertTrue(self.window.isVisible())
         self.assertTrue(self.services.simulation)

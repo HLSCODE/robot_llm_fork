@@ -193,6 +193,16 @@ class WorkflowCanvasWidget(QWidget):
     def get_entries(self) -> list[SequenceEntry]:
         return list(_clone_entries(self._root_entries))
 
+    def current_scope_entries(self) -> list[SequenceEntry]:
+        """Return the entries the user is currently editing on the canvas."""
+        return list(_clone_entries(self._entries))
+
+    @property
+    def current_scope_name(self) -> str | None:
+        if not self._scope_path:
+            return None
+        return _scope_label(self._root_entries, self._scope_path)
+
     def document(
         self,
         *,

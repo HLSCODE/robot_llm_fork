@@ -24,6 +24,7 @@ from src.application import (
 )
 from src.domain.action_schema import get_action_schema
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
+from src.domain.workflow import WorkflowDocument
 from src.persistence.storage import JsonCompositionRepository
 from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
 from src.execution import ExecutionEvent, ExecutionEventType, ExecutionState
@@ -101,6 +102,58 @@ class WorkflowEditingSessionTests(unittest.TestCase):
     def test_missing_workflow_is_rejected(self) -> None:
         with self.assertRaises(FileNotFoundError):
             self.session.instantiate("missing")
+
+    def test_save_as_same_name_overwrites_and_preserves_workflow_identity(self) -> None:
+        original = self.composition.load_workflow("task-a")
+        self.session.open("task-a")
+        self.session.replace_document(
+            WorkflowDocument.from_entries(
+                workflow_id=original.workflow_id,
+                name=original.name,
+                revision=original.revision,
+                entries=(SequenceItem.from_definition(_action("replacement")),),
+            )
+        )
+
+        stored_name, state = self.session.save_as("task-a.workflow.json")
+
+        stored = self.composition.load_workflow("task-a")
+        self.assertEqual("task-a.workflow.json", stored_name)
+        self.assertEqual(original.workflow_id, stored.workflow_id)
+        self.assertEqual(original.revision + 1, stored.revision)
+        self.assertEqual("replacement", stored.to_entries()[0].definition.id)
+        self.assertEqual(stored_name, state.workflow_name)
+        self.assertFalse(state.dirty)
+
+    def test_save_as_new_name_keeps_original_and_rebinds_editor(self) -> None:
+        original = self.composition.load_workflow("task-a")
+        self.session.open("task-a")
+
+        stored_name, state = self.session.save_as("task-b.workflow.json")
+
+        saved = self.composition.load_workflow("task-b")
+        self.assertEqual("task-b.workflow.json", stored_name)
+        self.assertNotEqual(original.workflow_id, saved.workflow_id)
+        self.assertEqual(original.to_dict(), self.composition.load_workflow("task-a").to_dict())
+        self.assertEqual(stored_name, state.workflow_name)
+
+    def test_save_as_existing_other_name_overwrites_that_target_only(self) -> None:
+        self.composition.save_task(
+            "task-b",
+            (SequenceItem.from_definition(_action("old-b")),),
+            origin="test",
+        )
+        target_before = self.composition.load_workflow("task-b")
+        source_before = self.composition.load_workflow("task-a")
+        self.session.open("task-a")
+
+        _, state = self.session.save_as("task-b.workflow.json")
+
+        target_after = self.composition.load_workflow("task-b")
+        self.assertEqual(target_before.workflow_id, target_after.workflow_id)
+        self.assertEqual("task-step", target_after.to_entries()[0].definition.id)
+        self.assertEqual(source_before.to_dict(), self.composition.load_workflow("task-a").to_dict())
+        self.assertEqual("task-b.workflow.json", state.workflow_name)
 
 
 class DeviceAndExecutionViewModelTests(unittest.TestCase):

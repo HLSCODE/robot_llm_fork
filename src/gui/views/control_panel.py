@@ -49,7 +49,7 @@ class ControlPanel(QWidget):
 
         self.save_btn = self._button(
             IconName.SAVE,
-            "将当前流程保存为任务 (Ctrl+S)",
+            "另存为流程 (Ctrl+S)",
             self.save_clicked.emit,
         )
         self.undo_btn = self._button(IconName.UNDO, "撤销", self.undo_clicked.emit)

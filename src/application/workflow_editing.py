@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Sequence
 from threading import RLock
 from uuid import uuid4
 
-from ..domain.models import SubworkflowBlock
+from ..domain.models import SequenceEntry, SubworkflowBlock
 from ..domain.workflow import WorkflowDocument, instantiate_subworkflow
 from .composition import CompositionService
 
@@ -72,42 +73,31 @@ class WorkflowEditingSession:
             self._composition.load_workflow(workflow_name)
         )
 
-    def save(self) -> tuple[str, WorkflowEditingState]:
-        with self._lock:
-            state = self._state
-        if not state.workflow_name:
-            raise ValueError("workflow has no storage name")
-        stored_name, stored = self._composition.save_workflow(
-            state.workflow_name,
-            state.document,
-            origin="gui",
-            expected_revision=state.document.revision,
-        )
-        return stored_name, self._set_state(
-            stored,
-            workflow_name=stored_name,
-            dirty=False,
-        )
-
     def save_as(
         self,
         workflow_name: str,
+        *,
+        entries: Sequence[SequenceEntry] | None = None,
     ) -> tuple[str, WorkflowEditingState]:
         with self._lock:
             document = self._state.document
+        try:
+            existing = self._composition.load_workflow(workflow_name)
+        except FileNotFoundError:
+            existing = None
         new_document = WorkflowDocument.from_entries(
-            workflow_id=str(uuid4()),
+            workflow_id=existing.workflow_id if existing else str(uuid4()),
             name=workflow_name.removesuffix(".workflow.json"),
-            revision=0,
-            entries=document.to_entries(),
+            revision=existing.revision if existing else 0,
+            entries=document.to_entries() if entries is None else entries,
             robot_profile_id=self._composition.robot_profile_id,
-            positions=document.position_map(),
+            positions=document.position_map() if entries is None else {},
         )
         stored_name, stored = self._composition.save_workflow(
             workflow_name,
             new_document,
             origin="gui",
-            expected_revision=0,
+            expected_revision=existing.revision if existing else 0,
         )
         return stored_name, self._set_state(
             stored,
