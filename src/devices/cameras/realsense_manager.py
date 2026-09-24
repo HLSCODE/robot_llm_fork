@@ -254,6 +254,10 @@ class RealSenseManager:
                 pipeline, cfg = _build_config()
                 try:
                     pipeline.start(cfg)
+                    # RealSense 彩色传感器在某些光源下会保留上一次的白平衡，
+                    # 造成整幅图偏蓝，进而影响蓝色标记的分割。每次启动都
+                    # 显式恢复自动白平衡/曝光；不同型号不支持的 option 忽略。
+                    self._configure_color_sensor(pipeline, serial)
                     self._pipelines.append((serial, name, pipeline))
                     logger.info(
                         "RealSense 相机已启动: name=%s serial=%s (attempt %d)",
@@ -320,6 +324,31 @@ class RealSenseManager:
             logger.warning("所有配置相机均无法启动 (%d 路失败)", len(self._failed_cameras))
 
         return {"started": len(self._pipelines), "failed": len(self._failed_cameras)}
+
+    @staticmethod
+    def _configure_color_sensor(pipeline: "rs.pipeline", serial: str) -> None:
+        try:
+            profile = pipeline.get_active_profile()
+            device = profile.get_device()
+            for sensor in device.query_sensors():
+                try:
+                    is_color = sensor.is_color_sensor()
+                except Exception:
+                    is_color = "color" in sensor.get_info(rs.camera_info.name).lower()
+                if not is_color:
+                    continue
+                for option_name in ("enable_auto_white_balance", "enable_auto_exposure"):
+                    option = getattr(rs.option, option_name, None)
+                    if option is None or not sensor.supports(option):
+                        continue
+                    try:
+                        sensor.set_option(option, 1.0)
+                    except Exception as exc:
+                        logger.debug("相机 %s 无法设置 %s: %s", serial, option_name, exc)
+                logger.info("相机 %s 已启用彩色自动白平衡/曝光", serial)
+                break
+        except Exception as exc:
+            logger.debug("相机 %s 彩色传感器参数配置跳过: %s", serial, exc)
 
     def stop(self) -> None:
         self._running = False

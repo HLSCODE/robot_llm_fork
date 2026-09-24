@@ -100,6 +100,12 @@ class OpenCVCameraManager:
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, self._width)
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self._height)
             capture.set(cv2.CAP_PROP_FPS, self._fps)
+            # 尽量交给驱动做自动白平衡/曝光，避免不同摄像头沿用错误的
+            # 色温导致画面偏蓝。驱动不支持这些属性时 OpenCV 会安全忽略。
+            for prop_name in ("CAP_PROP_AUTO_WB", "CAP_PROP_AUTO_EXPOSURE"):
+                prop = getattr(cv2, prop_name, None)
+                if prop is not None:
+                    capture.set(prop, 1)
 
             if not capture.isOpened():
                 self._failed_cameras.append(

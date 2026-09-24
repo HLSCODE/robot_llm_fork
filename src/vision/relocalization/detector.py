@@ -29,10 +29,14 @@ class Marker(TypedDict, total=False):
 def build_blue_mask(img: NDArray[np.generic]) -> NDArray[np.uint8]:
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     b, g, r = cv2.split(img)
-    hsv_mask = cv2.inRange(hsv, np.array([90, 30, 35]), np.array([135, 255, 255]))
+    # 色温漂移会让蓝色标记的色相偏移十几度、饱和度下降。放宽色相和
+    # 饱和度后，再用通道相对差异约束，仍能排除大部分灰色背景。
+    # 背景在偏蓝画面中通常只有低饱和度；标记本身仍保持高饱和度。
+    # 设为 150 可避免整幅背景连成一个蓝色轮廓，误选设备上的其它物体。
+    hsv_mask = cv2.inRange(hsv, np.array([80, 150, 30]), np.array([150, 255, 255]))
     blue_dominance = (
-        (b.astype(np.int16) - r.astype(np.int16) > 15)
-        & (b.astype(np.int16) - g.astype(np.int16) > 8)
+        (b.astype(np.int16) - r.astype(np.int16) > 10)
+        & (b.astype(np.int16) - g.astype(np.int16) > 5)
         & (b > 45)
     ).astype(np.uint8) * 255
     blue_mask = cv2.bitwise_and(hsv_mask, blue_dominance)
@@ -208,7 +212,7 @@ def find_l_inner_corners(
         else:
             pos = "Bottom-Right"
 
-        margin = 10
+        margin = 16
         rx1 = max(0, int(inner[0]) - margin)
         ry1 = max(0, int(inner[1]) - margin)
         rx2 = min(w, int(inner[0]) + margin)
@@ -225,9 +229,20 @@ def find_l_inner_corners(
             (-1, -1),
             (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.001),
         )
+        refined_x = float(refined[0, 0, 0] + rx1)
+        refined_y = float(refined[0, 0, 1] + ry1)
+        # cornerSubPix 在低纹理/过曝区域可能返回 ROI 边界外的点；此时
+        # 保留凸缺陷点比输出一个明显漂移的定位点更可靠。
+        if not (
+            np.isfinite(refined_x)
+            and np.isfinite(refined_y)
+            and rx1 <= refined_x < rx2
+            and ry1 <= refined_y < ry2
+        ):
+            refined_x, refined_y = float(inner[0]), float(inner[1])
         marker["inner_corner_refined"] = (
-            float(refined[0, 0, 0] + rx1),
-            float(refined[0, 0, 1] + ry1),
+            refined_x,
+            refined_y,
         )
 
         if verbose:
