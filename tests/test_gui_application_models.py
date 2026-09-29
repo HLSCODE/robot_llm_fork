@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from PySide6.QtCore import QThread, QTimer, Qt
+from PySide6.QtCore import QEvent, QThread, QTimer, Qt
+from PySide6.QtTest import QTest
+from shiboken6 import isValid
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -189,6 +191,40 @@ class DeviceAndExecutionViewModelTests(unittest.TestCase):
 
 
 class SchemaActionFormTests(unittest.TestCase):
+    def test_motion_mode_popup_keeps_sender_alive_until_event_returns(self) -> None:
+        form = SchemaActionForm(
+            ActionType.MOVE,
+            {"目标": "机械臂", "臂": "左", "模式": "move_j", "点位": [0] * 6},
+            robot_provider="tianji",
+        )
+        form.show()
+        QApplication.processEvents()
+        try:
+            for selected_mode in ("move_joints", "move_l", "move_joints"):
+                mode = form._field_widgets["模式"]
+                self.assertIsInstance(mode, QComboBox)
+                signal_observations = []
+                mode.currentIndexChanged.connect(
+                    lambda _index, sender=mode: signal_observations.append(isValid(sender))
+                )
+                mode.showPopup()
+                QApplication.processEvents()
+                index = mode.model().index(mode.findData(selected_mode), 0)
+                view = mode.view()
+                QTest.mouseClick(
+                    view.viewport(),
+                    Qt.MouseButton.LeftButton,
+                    pos=view.visualRect(index).center(),
+                )
+                self.assertEqual([True], signal_observations)
+                self.assertEqual(selected_mode, form._field_widgets["模式"].currentData())
+                self.assertEqual(selected_mode == "move_joints", "关节角" in form.field_names)
+                QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+                self.assertFalse(isValid(mode))
+        finally:
+            form.close()
+            form.deleteLater()
+
     def test_tianji_joint_mode_capture_and_switching_preserve_separate_targets(self) -> None:
         requested: list[str] = []
 

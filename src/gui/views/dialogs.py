@@ -803,8 +803,23 @@ class SchemaActionForm(QWidget):
         self.content_size_changed.emit()
 
     def _render_fields(self) -> None:
-        while self._fields_layout.rowCount():
-            self._fields_layout.removeRow(0)
+        # A field (notably the motion-mode combo) can trigger this rebuild
+        # from its own signal. Keep its native object alive until Qt has
+        # finished dispatching the popup/input event that emitted the signal.
+        old_fields = self._fields_widget
+        layout = self.layout()
+        assert isinstance(layout, QVBoxLayout)
+        index = layout.indexOf(old_fields)
+        layout.removeWidget(old_fields)
+        old_fields.hide()
+        old_fields.deleteLater()
+        self._fields_widget = QWidget(self)
+        self._fields_widget.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._fields_layout = QFormLayout(self._fields_widget)
+        layout.insertWidget(index, self._fields_widget)
         self._field_widgets.clear()
         self._field_schemas.clear()
 
