@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QPoint, QRectF, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QCursor, QDrag, QDragMoveEvent, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from shiboken6 import isValid
 
 from .drag_preview_style import (
     DRAG_CARD_MAX_SCALE,
@@ -27,6 +28,80 @@ _REFERENCE_HOTSPOT_GAP = 10.0
 class DragCardPreview:
     pixmap: QPixmap
     hotspot: QPoint
+
+
+class LibraryDragOverlay(QLabel):
+    """Paint drag feedback inside the source window without a native drag window."""
+
+    def __init__(self, source: QWidget, preview: DragCardPreview) -> None:
+        super().__init__(source.window())
+        application = QApplication.instance()
+        assert application is not None
+        self._application = application
+        self._host = source.window()
+        self._hotspot = preview.hotspot
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setPixmap(preview.pixmap)
+        self.setFixedSize(preview.pixmap.deviceIndependentSize().toSize())
+        self._timer = QTimer(self)
+        self._timer.setInterval(16)
+        self._timer.timeout.connect(self._follow_cursor)
+
+    def start(self) -> None:
+        self._application.installEventFilter(self)
+        self._follow_cursor()
+        # X11 native dragging can consume mouse events before widget delivery.
+        # Wayland positions instead come from the receiving widget's drag events.
+        if QApplication.platformName() == "xcb":
+            self._timer.start()
+
+    def finish(self) -> None:
+        if not isValid(self):
+            return
+        self._timer.stop()
+        self._application.removeEventFilter(self)
+        self.hide()
+        self.deleteLater()
+
+    def _follow_cursor(self) -> None:
+        self._move_to(self._host.mapFromGlobal(QCursor.pos()))
+
+    def _move_to(self, position: QPoint) -> None:
+        if not self._host.rect().contains(position):
+            self.hide()
+            return
+        self.move(position - self._hotspot)
+        self.show()
+        self.raise_()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if isinstance(watched, QWidget) and watched.window() is self._host:
+            if isinstance(event, QDragMoveEvent):
+                self._move_to(watched.mapTo(self._host, event.position().toPoint()))
+            elif event.type() in {QEvent.Type.DragLeave, QEvent.Type.Drop}:
+                self.hide()
+        return False
+
+
+def execute_library_drag(drag: QDrag, source: QWidget, preview: DragCardPreview) -> None:
+    """Use application-owned feedback on Linux display backends."""
+    backend = QApplication.platformName()
+    if backend != "xcb" and not backend.startswith("wayland"):
+        drag.setPixmap(preview.pixmap)
+        drag.setHotSpot(preview.hotspot)
+        drag.exec(Qt.DropAction.CopyAction)
+        return
+    transparent = QPixmap(1, 1)
+    transparent.fill(Qt.GlobalColor.transparent)
+    drag.setPixmap(transparent)
+    drag.setHotSpot(QPoint())
+    overlay = LibraryDragOverlay(source, preview)
+    try:
+        overlay.start()
+        drag.exec(Qt.DropAction.CopyAction)
+    finally:
+        overlay.finish()
 
 
 def create_drag_card_preview(

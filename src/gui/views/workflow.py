@@ -18,7 +18,7 @@ from .action_tree import ACTION_LIBRARY_CATEGORIES, ActionCategoryTree
 from .control_panel import ControlPanel
 from .workflow_canvas import WorkflowCanvasWidget
 from ..icons import IconName, themed_icon
-from ..drag_preview import create_drag_card_preview
+from ..drag_preview import create_drag_card_preview, execute_library_drag
 from ..toolbars import PaneHeader
 
 
@@ -70,9 +70,7 @@ class TaskLibraryListWidget(QListWidget):
             accent=accent,
             canvas_scale=self._canvas_scale_provider(),
         )
-        drag.setPixmap(preview.pixmap)
-        drag.setHotSpot(preview.hotspot)
-        drag.exec(Qt.DropAction.CopyAction)
+        execute_library_drag(drag, self, preview)
 
 
 class ActionLibraryView(QWidget):

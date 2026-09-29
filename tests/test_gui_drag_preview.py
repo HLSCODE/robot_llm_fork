@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from PySide6.QtGui import QColor, QIcon
+from unittest.mock import Mock, patch
+
+import pytest
+from PySide6.QtCore import QPoint, QMimeData, Qt
+from PySide6.QtGui import QColor, QDrag, QDragMoveEvent, QIcon
 from PySide6.QtWidgets import QApplication, QWidget
 
-from src.gui.drag_preview import create_drag_card_preview
+from src.gui.drag_preview import LibraryDragOverlay, create_drag_card_preview, execute_library_drag
 from src.gui.theme import DARK_COLORS, LIGHT_COLORS, build_palette
 from src.gui.drag_preview_style import (
     DRAG_CARD_MAX_SCALE,
@@ -14,6 +18,56 @@ from src.gui.drag_preview_style import (
     DRAG_PREVIEW_MAX_WIDTH,
     bounded_drag_preview_scale,
 )
+
+
+@pytest.mark.parametrize("backend", ["xcb", "wayland"])
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_linux_drag_overlay_tracks_widget_position_and_is_cleaned_up(backend, cancelled) -> None:
+    application = QApplication.instance() or QApplication([])
+    host = QWidget()
+    host.resize(600, 400)
+    source = QWidget(host)
+    source.move(20, 30)
+    host.show()
+    application.processEvents()
+    preview = create_drag_card_preview(
+        source, title="任务", subtitle="拖入画布", icon=QIcon(),
+        accent=QColor("#6366f1"), canvas_scale=1.0,
+    )
+    drag = Mock(spec=QDrag)
+    overlays = []
+
+    def execute(_action):
+        overlay = host.findChild(LibraryDragOverlay)
+        assert overlay is not None
+        overlays.append(overlay)
+        mime = QMimeData()
+        event = QDragMoveEvent(
+            QPoint(150, 140), Qt.DropAction.CopyAction, mime,
+            Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+        )
+        assert not overlay.eventFilter(source, event)
+        assert overlay.isVisible()
+        assert overlay.pos() == QPoint(170, 170) - preview.hotspot
+        assert overlay.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        if cancelled:
+            raise RuntimeError("drag aborted")
+        return Qt.DropAction.CopyAction
+
+    drag.exec.side_effect = execute
+    try:
+        with patch.object(QApplication, "platformName", return_value=backend):
+            if cancelled:
+                with pytest.raises(RuntimeError, match="drag aborted"):
+                    execute_library_drag(drag, source, preview)
+            else:
+                execute_library_drag(drag, source, preview)
+        assert len(overlays) == 1
+        assert not overlays[0].isVisible()
+        assert not overlays[0]._timer.isActive()
+    finally:
+        host.close()
+        host.deleteLater()
 
 
 def test_drag_card_preview_tracks_canvas_scale_with_bounded_size() -> None:

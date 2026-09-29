@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QWidget
 
 from ...domain.models import ActionDefinition, ActionType
 from ..icons import action_icon, themed_icon
-from ..drag_preview import create_drag_card_preview
+from ..drag_preview import create_drag_card_preview, execute_library_drag
 from .workflow_canvas.tokens import ACTION_COLORS
 
 
@@ -47,9 +47,7 @@ def start_action_drag(widget: QWidget, action: ActionDefinition, canvas_scale: f
         accent=ACTION_COLORS.get(action.type, QColor("#64748b")),
         canvas_scale=canvas_scale,
     )
-    drag.setPixmap(preview.pixmap)
-    drag.setHotSpot(preview.hotspot)
-    drag.exec(Qt.DropAction.CopyAction)
+    execute_library_drag(drag, widget, preview)
 
 
 class ActionListWidget(QListWidget):
