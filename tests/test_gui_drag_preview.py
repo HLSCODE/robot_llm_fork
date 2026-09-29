@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from PySide6.QtCore import QPoint, QMimeData, Qt
-from PySide6.QtGui import QColor, QDrag, QDragMoveEvent, QIcon
+from PySide6.QtGui import QColor, QDrag, QDragEnterEvent, QDragMoveEvent, QIcon
 from PySide6.QtWidgets import QApplication, QWidget
 
 from src.gui.drag_preview import LibraryDragOverlay, create_drag_card_preview, execute_library_drag
@@ -66,6 +66,45 @@ def test_linux_drag_overlay_tracks_widget_position_and_is_cleaned_up(backend, ca
         assert not overlays[0].isVisible()
         assert not overlays[0]._timer.isActive()
     finally:
+        host.close()
+        host.deleteLater()
+
+
+def test_wayland_preview_follows_window_events_over_non_drop_sidebar() -> None:
+    application = QApplication.instance() or QApplication([])
+    host = QWidget()
+    host.resize(600, 400)
+    source = QWidget(host)
+    source.setGeometry(0, 0, 200, 400)
+    host.show()
+    application.processEvents()
+    preview = create_drag_card_preview(
+        source, title="动作", subtitle="拖入画布", icon=QIcon(),
+        accent=QColor("#6366f1"), canvas_scale=1.0,
+    )
+    overlay = LibraryDragOverlay(source, preview)
+    mime = QMimeData()
+    mime.setData("application/x-action", b"{}")
+    try:
+        with patch.object(QApplication, "platformName", return_value="wayland"):
+            overlay.start()
+        assert not source.acceptDrops()
+        assert not overlay._timer.isActive()
+        for event_type, position in (
+            (QDragEnterEvent, QPoint(50, 100)),
+            (QDragMoveEvent, QPoint(80, 170)),
+            (QDragMoveEvent, QPoint(120, 240)),
+        ):
+            event = event_type(
+                position, Qt.DropAction.CopyAction, mime,
+                Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+            )
+            QApplication.sendEvent(host.windowHandle(), event)
+            assert overlay.isVisible()
+            assert overlay.pos() == position - preview.hotspot
+        assert not source.acceptDrops()
+    finally:
+        overlay.finish()
         host.close()
         host.deleteLater()
 

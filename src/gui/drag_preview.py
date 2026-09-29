@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QCursor, QDrag, QDragMoveEvent, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QCursor, QDrag, QDragMoveEvent, QIcon, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QLabel, QWidget
 from shiboken6 import isValid
 
@@ -76,7 +76,15 @@ class LibraryDragOverlay(QLabel):
         self.raise_()
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
-        if isinstance(watched, QWidget) and watched.window() is self._host:
+        # The native window receives drag positions before Qt routes them to
+        # accepting widgets. Libraries intentionally do not accept drops, so
+        # listening only to QWidget events freezes feedback over the sidebar.
+        if watched is self._host.windowHandle():
+            if isinstance(event, (QDragMoveEvent, QMouseEvent)):
+                self._move_to(event.position().toPoint())
+            elif event.type() in {QEvent.Type.DragLeave, QEvent.Type.Drop}:
+                self.hide()
+        elif isinstance(watched, QWidget) and watched.window() is self._host:
             if isinstance(event, QDragMoveEvent):
                 self._move_to(watched.mapTo(self._host, event.position().toPoint()))
             elif event.type() in {QEvent.Type.DragLeave, QEvent.Type.Drop}:
