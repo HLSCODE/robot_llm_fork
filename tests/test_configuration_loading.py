@@ -193,6 +193,11 @@ class ConfigurationLoadingTests(unittest.TestCase):
                 model = "tianji-lab"
                 controller_ip = "192.0.2.20"
                 subscription_interval_seconds = 0.02
+                movej_tolerance = 0.003
+                movej_p_tolerance = 0.004
+                movel_tolerance = 0.005
+                movel_step_tolerance = 0.006
+                run_trajectory_tolerance = 0.007
 
                 [mobile_base]
                 host = "192.0.2.30"
@@ -208,6 +213,11 @@ class ConfigurationLoadingTests(unittest.TestCase):
         self.assertEqual(25, settings.robot.move_velocity)
         self.assertEqual("tianji-lab", settings.robot_tianji.model)
         self.assertEqual("192.0.2.20", settings.robot_tianji.controller_ip)
+        self.assertEqual(0.003, settings.robot_tianji.movej_tolerance)
+        self.assertEqual(0.004, settings.robot_tianji.movej_p_tolerance)
+        self.assertEqual(0.005, settings.robot_tianji.movel_tolerance)
+        self.assertEqual(0.006, settings.robot_tianji.movel_step_tolerance)
+        self.assertEqual(0.007, settings.robot_tianji.run_trajectory_tolerance)
         self.assertEqual("192.0.2.30", settings.mobile_base.host)
         self.assertEqual("192.168.3.18", settings.robot_realman.left_controller_ip)
 

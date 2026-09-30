@@ -347,12 +347,22 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `robot_providers.tianji.kind` / `.model` | `tianji` / `tianji-dual` | 天机适配器类型和型号，决定七轴能力与默认 Profile。 |
 | `controller_ip` | `192.168.1.190` | 天机控制系统地址。 |
 | `subscription_interval_seconds` | `0.01` 秒 | SDK 状态订阅周期；过小会增加通信与 CPU 压力。 |
+| `movej_tolerance` | `0.01` rad | 七关节目标运动的每关节到位误差阈值；项目的关节增量运动也使用它。 |
+| `movej_p_tolerance` | `0.01` rad | 笛卡尔目标 `move_j` 经 SDK 转为关节目标后，使用的每关节到位误差阈值。 |
+| `movel_tolerance` | `0.02` | 直线运动的位姿误差各分量阈值；旋转分量单位 rad、平移分量单位 m，共用一个数值。 |
+| `movel_step_tolerance` | `0.02` | SDK 末端相对直线运动的位姿误差阈值，单位与 `movel_tolerance` 相同。 |
+| `run_trajectory_tolerance` | `0.01` rad | 轨迹回放终点的每关节误差阈值；当前 SDK 到达轨迹起点时使用该值的 0.2 倍。 |
 | `left_base_transform` / `right_base_transform` | 内置 4×4 矩阵 | 左右机械臂基座相对世界坐标系的齐次变换。 |
 | `left_tool_transform` / `right_tool_transform` | 内置 4×4 矩阵 | 左右工具相对末端坐标系的齐次变换。 |
 | `joint_limits_rad` | 内置 7 组范围 | 七个关节的弧度上下限；必须与机械臂控制器和实际安全范围一致。 |
 
 `left/right_initial_pose`、工具架位姿和天机变换矩阵均属于安全相关标定值。不要从其他设备、
 其他 Profile 或未验证的录制文件直接复制。
+
+上述天机容差用于 SDK 阻塞调用的到位判断，必须为大于零的有限数；省略时沿用表中默认值。
+配置读取后会显式传给对应 SDK 方法，修改后重启应用生效。注意 `movel_tolerance = 0.02`
+对平移误差表示 0.02 米，不能按 0.02 毫米理解。项目目前的关节增量通过计算目标关节角后调用
+`movej`，未直接调用 SDK 的 `movej_step`，因此没有单独的 `movej_step_tolerance`。
 
 ### `[mobile_base]` 与 `[devices]`
 

@@ -68,6 +68,11 @@ class TianjiRobotDriver:
         joint_limits_rad: Sequence[Sequence[float]],
         trajectory_directory: str | Path | None = None,
         sdk_runtime: TianjiSdkRuntime | None = None,
+        movej_tolerance: float = 0.01,
+        movej_p_tolerance: float = 0.01,
+        movel_tolerance: float = 0.02,
+        movel_step_tolerance: float = 0.02,
+        run_trajectory_tolerance: float = 0.01,
     ) -> None:
         if not controller_ip.strip():
             raise ValueError("Tianji controller IP must not be empty")
@@ -93,6 +98,11 @@ class TianjiRobotDriver:
             right_tool_transform=right_tool_transform,
             joint_limits_rad=joint_limits_rad,
             trajectory_directory=trajectory_directory,
+            movej_tolerance=movej_tolerance,
+            movej_p_tolerance=movej_p_tolerance,
+            movel_tolerance=movel_tolerance,
+            movel_step_tolerance=movel_step_tolerance,
+            run_trajectory_tolerance=run_trajectory_tolerance,
         )
         try:
             self._runtime.initialize()
@@ -266,7 +276,17 @@ class _OfficialTianjiSdkRuntime:
         right_tool_transform: Sequence[Sequence[float]],
         joint_limits_rad: Sequence[Sequence[float]],
         trajectory_directory: str | Path | None,
+        movej_tolerance: float = 0.01,
+        movej_p_tolerance: float = 0.01,
+        movel_tolerance: float = 0.02,
+        movel_step_tolerance: float = 0.02,
+        run_trajectory_tolerance: float = 0.01,
     ) -> None:
+        self._movej_tolerance = movej_tolerance
+        self._movej_p_tolerance = movej_p_tolerance
+        self._movel_tolerance = movel_tolerance
+        self._movel_step_tolerance = movel_step_tolerance
+        self._run_trajectory_tolerance = run_trajectory_tolerance
         try:
             from tj_robot_proj import (
                 Arm,
@@ -343,6 +363,7 @@ class _OfficialTianjiSdkRuntime:
             self._pose_factory(pose),
             vel=velocity_percent,
             is_block=blocking,
+            tolerance=self._movel_tolerance,
         )
 
     def read_state(self, arm: str) -> dict[str, object]:
@@ -365,6 +386,7 @@ class _OfficialTianjiSdkRuntime:
         self._client.movej_p(
             self._arm_type[arm], self._pose_factory(pose),
             vel=velocity_percent, is_block=blocking,
+            tolerance=self._movej_p_tolerance,
         )
 
     def move_joints(
@@ -375,6 +397,7 @@ class _OfficialTianjiSdkRuntime:
             joints_deg=joints,
             vel=velocity_percent,
             is_block=blocking,
+            tolerance=self._movej_tolerance,
         )
 
     def move_linear_step(
@@ -385,6 +408,7 @@ class _OfficialTianjiSdkRuntime:
             self._pose_factory(pose),
             vel=velocity_percent,
             is_block=blocking,
+            tolerance=self._movel_step_tolerance,
         )
 
     def set_drag_mode(self, arm: str, *, enabled: bool) -> None:
@@ -410,6 +434,7 @@ class _OfficialTianjiSdkRuntime:
             self._arm_type[arm],
             fmv_trajectory_path=path,
             is_block=blocking,
+            tolerance=self._run_trajectory_tolerance,
         )
 
     def close(self) -> None:

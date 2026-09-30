@@ -27,6 +27,11 @@ class TianjiProviderSettings:
     left_tool_transform: tuple[tuple[float, ...], ...]
     right_tool_transform: tuple[tuple[float, ...], ...]
     joint_limits_rad: tuple[tuple[float, ...], ...]
+    movej_tolerance: float = 0.01
+    movej_p_tolerance: float = 0.01
+    movel_tolerance: float = 0.02
+    movel_step_tolerance: float = 0.02
+    run_trajectory_tolerance: float = 0.01
 
     def __post_init__(self) -> None:
         if not self.model.strip():
@@ -68,6 +73,11 @@ class TianjiProviderSettings:
                 left_tool_transform=provider.left_tool_transform,
                 right_tool_transform=provider.right_tool_transform,
                 joint_limits_rad=provider.joint_limits_rad,
+                movej_tolerance=provider.movej_tolerance,
+                movej_p_tolerance=provider.movej_p_tolerance,
+                movel_tolerance=provider.movel_tolerance,
+                movel_step_tolerance=provider.movel_step_tolerance,
+                run_trajectory_tolerance=provider.run_trajectory_tolerance,
             )
         except (AttributeError, TypeError, ValueError) as exc:
             raise DeviceInitializationError(
@@ -91,6 +101,11 @@ def _create_tianji_robot(settings: RobotConfiguration) -> RobotSystem:
             right_tool_transform=provider_settings.right_tool_transform,
             joint_limits_rad=provider_settings.joint_limits_rad,
             trajectory_directory=settings.trajectory_directory or None,
+            movej_tolerance=provider_settings.movej_tolerance,
+            movej_p_tolerance=provider_settings.movej_p_tolerance,
+            movel_tolerance=provider_settings.movel_tolerance,
+            movel_step_tolerance=provider_settings.movel_step_tolerance,
+            run_trajectory_tolerance=provider_settings.run_trajectory_tolerance,
         )
         adapter = TianjiRobotAdapter(driver, default_motion=provider_settings.motion)
         try:

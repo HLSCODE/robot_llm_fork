@@ -56,6 +56,11 @@ _FIELD_ENV_NAMES: dict[tuple[str, str], str] = {
     ("robot_realman", "right_initial_pose"): "REALMAN_RIGHT_INITIAL_POSE",
     ("robot_tianji", "model"): "TIANJI_MODEL",
     ("robot_tianji", "controller_ip"): "TIANJI_CONTROLLER_IP",
+    ("robot_tianji", "movej_tolerance"): "TIANJI_MOVEJ_TOLERANCE",
+    ("robot_tianji", "movej_p_tolerance"): "TIANJI_MOVEJ_P_TOLERANCE",
+    ("robot_tianji", "movel_tolerance"): "TIANJI_MOVEL_TOLERANCE",
+    ("robot_tianji", "movel_step_tolerance"): "TIANJI_MOVEL_STEP_TOLERANCE",
+    ("robot_tianji", "run_trajectory_tolerance"): "TIANJI_RUN_TRAJECTORY_TOLERANCE",
     ("robot_tianji", "subscription_interval_seconds"): (
         "TIANJI_SUBSCRIPTION_INTERVAL_SECONDS"
     ),

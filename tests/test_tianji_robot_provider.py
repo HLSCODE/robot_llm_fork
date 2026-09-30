@@ -159,6 +159,42 @@ def _driver(
 
 
 class TianjiProviderTests(unittest.TestCase):
+    def test_invalid_motion_tolerances_are_rejected(self) -> None:
+        for name in (
+            "movej_tolerance", "movej_p_tolerance", "movel_tolerance",
+            "movel_step_tolerance", "run_trajectory_tolerance",
+        ):
+            for value in (0, -0.01, float("nan"), float("inf"), True):
+                with self.subTest(field=name, value=value):
+                    with self.assertRaisesRegex(ValueError, name):
+                        replace(TianjiRobotSettings(), **{name: value})
+
+    def test_provider_passes_all_tolerances_to_sdk_runtime(self) -> None:
+        from src.devices.robots.tianji.provider import _create_tianji_robot
+
+        tolerances = {
+            "movej_tolerance": 0.003,
+            "movej_p_tolerance": 0.004,
+            "movel_tolerance": 0.005,
+            "movel_step_tolerance": 0.006,
+            "run_trajectory_tolerance": 0.007,
+        }
+        configuration = RobotConfiguration(
+            common=RobotSettings(provider="tianji"),
+            realman=RealManRobotSettings(),
+            tianji=replace(TianjiRobotSettings(), **tolerances),
+        )
+        with patch(
+            "src.devices.robots.tianji.driver._OfficialTianjiSdkRuntime",
+            return_value=_FakeSdkRuntime(),
+        ) as factory:
+            robot = _create_tianji_robot(configuration)
+            try:
+                for name, expected in tolerances.items():
+                    self.assertEqual(expected, factory.call_args.kwargs[name])
+            finally:
+                robot.close()
+
     def test_recording_directory_follows_configured_robot_profile(self) -> None:
         with TemporaryDirectory() as directory:
             defaults = ApplicationSettings.defaults()
@@ -197,6 +233,11 @@ class TianjiProviderTests(unittest.TestCase):
                 right_tool_transform=settings.right_tool_transform,
                 joint_limits_rad=settings.joint_limits_rad,
                 trajectory_directory=directory,
+                movej_tolerance=0.003,
+                movej_p_tolerance=0.004,
+                movel_tolerance=0.005,
+                movel_step_tolerance=0.006,
+                run_trajectory_tolerance=0.007,
             )
             config = factory.call_args.args[0]
             self.assertEqual(tuple(range(7)), config.left_arm_collection_data_option.data_types)
@@ -208,13 +249,20 @@ class TianjiProviderTests(unittest.TestCase):
                 joints_deg=[1.0] * 7,
                 vel=12,
                 is_block=False,
+                tolerance=0.003,
             )
             runtime.move_joint_pose("A", [0.1, 0.2, 0.3, 0, 0, 0],
                                     velocity_percent=14, blocking=False)
             args, kwargs = client.movej_p.call_args
             self.assertEqual(Arm.LEFT, args[0])
             self.assertEqual([0.1, 0.2, 0.3], list(args[1].translation))
-            self.assertEqual({"vel": 14, "is_block": False}, kwargs)
+            self.assertEqual({"vel": 14, "is_block": False, "tolerance": 0.004}, kwargs)
+            runtime.move_linear("A", [0] * 6, velocity_percent=15, blocking=True)
+            self.assertEqual(0.005, client.movel.call_args.kwargs["tolerance"])
+            runtime.move_linear_step("B", [0] * 6, velocity_percent=16, blocking=True)
+            self.assertEqual(0.006, client.movel_step.call_args.kwargs["tolerance"])
+            runtime.run_trajectory("A", "recording.fmv", blocking=True)
+            self.assertEqual(0.007, client.run_trajectory.call_args.kwargs["tolerance"])
             runtime.quick_stop("A")
             client.quick_stop.assert_called_once_with(Arm.LEFT)
             runtime.emergency_stop()

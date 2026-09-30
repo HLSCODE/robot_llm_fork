@@ -4,6 +4,16 @@ model = "tianji-dual"
 controller_ip = "192.168.1.190"
 subscription_interval_seconds = 0.01
 
+# 各 SDK 方法阻塞等待时的到位判断容差，必须为大于零的有限数。
+# movej / movej_p：每个关节的误差阈值，单位 rad（即使目标输入为角度）。
+movej_tolerance = 0.01
+movej_p_tolerance = 0.01
+# movel / movel_step：位姿误差各分量共用阈值，旋转单位 rad、平移单位 m。
+movel_tolerance = 0.02
+movel_step_tolerance = 0.02
+# 轨迹终点关节误差，单位 rad；SDK 到达轨迹起点时使用该值的 0.2 倍。
+run_trajectory_tolerance = 0.01
+
 # 两臂基座相对世界坐标系、工具相对末端坐标系的 4x4 齐次变换。
 left_base_transform = [
   [1.0, 0.0, 0.0, 0.0],

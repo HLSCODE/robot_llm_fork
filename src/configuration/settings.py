@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import MISSING, dataclass, field, fields
 from enum import Enum
+import math
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypedDict, TypeVar, cast
@@ -382,6 +383,11 @@ class TianjiRobotSettings:
     model: str = "tianji-dual"
     controller_ip: str = "192.168.1.190"
     subscription_interval_seconds: float = 0.01
+    movej_tolerance: float = 0.01
+    movej_p_tolerance: float = 0.01
+    movel_tolerance: float = 0.02
+    movel_step_tolerance: float = 0.02
+    run_trajectory_tolerance: float = 0.01
     left_base_transform: tuple[tuple[float, ...], ...] = (
         (1.0, 0.0, 0.0, 0.0),
         (0.0, 0.0, 1.0, 0.1),
@@ -419,6 +425,13 @@ class TianjiRobotSettings:
     def __post_init__(self) -> None:
         if self.subscription_interval_seconds <= 0:
             raise ValueError("subscription_interval_seconds must be positive")
+        for name in (
+            "movej_tolerance", "movej_p_tolerance", "movel_tolerance",
+            "movel_step_tolerance", "run_trajectory_tolerance",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+                raise ValueError(f"{name} must be a positive finite number")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1355,6 +1368,11 @@ _TIANJI_SOURCE_NAMES = {
     "model": "TIANJI_MODEL",
     "controller_ip": "TIANJI_CONTROLLER_IP",
     "subscription_interval_seconds": "TIANJI_SUBSCRIPTION_INTERVAL_SECONDS",
+    "movej_tolerance": "TIANJI_MOVEJ_TOLERANCE",
+    "movej_p_tolerance": "TIANJI_MOVEJ_P_TOLERANCE",
+    "movel_tolerance": "TIANJI_MOVEL_TOLERANCE",
+    "movel_step_tolerance": "TIANJI_MOVEL_STEP_TOLERANCE",
+    "run_trajectory_tolerance": "TIANJI_RUN_TRAJECTORY_TOLERANCE",
 }
 
 _MOBILE_BASE_SOURCE_NAMES = {
