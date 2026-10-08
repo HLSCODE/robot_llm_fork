@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import logging
+
 from ...transports import (
     FixedLengthStrategy,
-    ReadSomeStrategy,
+    ReadUntilStrategy,
     Transport,
+    ModbusRTUProtocol,
+    CRCError,
+    ProtocolError,
+    TransportError,
+    TransportErrorCategory,
 )
 
+
+logger = logging.getLogger(__name__)
 
 _EJECT_TIP_COMMAND = bytes(
     (0x01, 0x06, 0x01, 0x07, 0x00, 0x01, 0xF8, 0x37)
@@ -52,14 +61,52 @@ class ADP:
         function_code: str,
         value: int | None = None,
     ) -> bool:
-        self._transport.transact_with_strategy(
-            ReadSomeStrategy(
-                self._create_command(function_code, value),
+        """Validate the serial reply without interpreting undocumented data fields."""
+        payload = self._create_command(function_code, value)
+        response = self._transport.transact_with_strategy(
+            ReadUntilStrategy(
+                payload,
+                terminator=b"\r\n",
                 max_size=20,
-                min_size=1,
             )
         )
+        if not response:
+            raise TransportError(
+                f"ADP command {function_code}: no reply received",
+                category=TransportErrorCategory.TIMEOUT,
+                operation="read",
+            )
+        logger.info(
+            "ADP ASCII exchange: command=%s, request_hex=%s, response_hex=%s",
+            function_code,
+            payload.hex(),
+            response.hex(),
+        )
+        self._parse_ascii_reply(function_code, response)
         return True
+
+    def _parse_ascii_reply(self, function_code: str, response: bytes) -> bytes:
+        if not response.endswith(b"\r\n"):
+            raise ProtocolError("ADP reply is incomplete: missing CRLF terminator")
+        frame = response[:-2]
+        if len(frame) < 8:
+            raise ProtocolError("ADP reply is too short")
+        body, checksum = frame[:-4], frame[-4:]
+        try:
+            body.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ProtocolError("ADP reply body is not ASCII") from exc
+        if any(byte not in b"0123456789abcdefABCDEF" for byte in checksum):
+            raise ProtocolError("ADP reply CRC is not four hexadecimal digits")
+        if self._cal_crc(body) != int(checksum, 16):
+            raise CRCError(f"ADP reply CRC mismatch: {response.hex()}")
+        expected_header = f">01{function_code}".encode("ascii")
+        if not body.startswith(expected_header):
+            raise ProtocolError(
+                f"ADP reply address/function mismatch: expected {expected_header!r}, "
+                f"got {body[:4]!r}"
+            )
+        return body[len(expected_header):]
 
     def initialize(self) -> bool:
         return self._send_ascii("G")
@@ -85,11 +132,9 @@ class ADP:
         response = self._transport.transact_with_strategy(
             FixedLengthStrategy(_EJECT_TIP_COMMAND, 8)
         )
-        if response[:2] != b"\x01\x06":
-            raise RuntimeError(
-                f"unexpected pipette eject response: {response.hex()}"
-            )
-        return True
+        return ModbusRTUProtocol().parse_write_register(
+            response, address=1, register=0x0107, value=1,
+        )
 
     def close(self) -> None:
         self._transport.close()

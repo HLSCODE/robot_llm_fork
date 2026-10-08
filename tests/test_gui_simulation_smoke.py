@@ -17,7 +17,8 @@ from src.application import create_application_services
 from src.application.camera_access import CameraStatus
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.configuration.settings import ApplicationSettings
-from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
+from src.devices.runtime.ids import BODY_AXIS, CAMERA, RELAY_BANK, ROBOT_SYSTEM
+from src.devices.runtime.fakes import SimulatedPipette
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.branding import APPLICATION_NAME
@@ -107,6 +108,36 @@ class GuiStartupLifecycleTests(unittest.TestCase):
         status = worker._probe_cameras()
 
         self.assertIs(status, camera_access.probe_all.return_value)
+
+    def test_relay_failure_is_reported_and_camera_probe_still_runs(self) -> None:
+        services = unittest.mock.MagicMock()
+        services.simulation = False
+        services.manual_control.initialize_pipette.return_value = True
+        services.camera_access.probe_all.return_value = CameraStatus(
+            available=True,
+            camera_count=0,
+            cameras=(),
+        )
+
+        def initialize(device_id: str) -> None:
+            if device_id == RELAY_BANK:
+                raise RuntimeError("relay serial open failed")
+
+        services.devices.initialize.side_effect = initialize
+        worker = GuiHardwareStartupWorker(services, initialize_mobile_base=False)
+        completed: list[tuple] = []
+        worker.completed.connect(completed.append)
+
+        with self.assertLogs("src.gui.controllers.startup", level="ERROR") as captured:
+            worker.run()
+
+        relay_result = next(result for result in completed[0] if result.device_id == RELAY_BANK)
+        self.assertFalse(relay_result.succeeded)
+        self.assertEqual("relay serial open failed", relay_result.error)
+        self.assertIn("device_id=relay-bank", "\n".join(captured.output))
+        self.assertEqual(CAMERA, completed[0][-1].device_id)
+        self.assertTrue(completed[0][-1].succeeded)
+        services.camera_access.probe_all.assert_called_once()
 
     def test_required_camera_failure_fails_startup_probe(self) -> None:
         camera_access = unittest.mock.MagicMock()
@@ -248,6 +279,22 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             self.assertTrue(all(isinstance(entry, SequenceItem) for entry in canvas.get_entries()))
             source_name = target_name
 
+    def test_pipette_initialize_button_reports_failure_and_can_recover(self) -> None:
+        controls = self.window.device_control_view
+        with (
+            patch.object(SimulatedPipette, "initialize", side_effect=TimeoutError("no G reply")),
+            patch.object(self.window._notifications, "warning") as warning,
+        ):
+            controls._pipette_initialize_button.click()
+        self.assertFalse(self.window._device_view_model.snapshot().pipette_ready)
+        self.assertFalse(controls._pipette_button.isEnabled())
+        self.assertTrue(controls._pipette_initialize_button.isEnabled())
+        warning.assert_called_once()
+
+        controls._pipette_initialize_button.click()
+        self.assertTrue(self.window._device_view_model.snapshot().pipette_ready)
+        self.assertTrue(controls._pipette_button.isEnabled())
+
     def test_window_starts_with_shared_simulation_services(self) -> None:
         self.assertTrue(self.window.isVisible())
         self.assertTrue(self.services.simulation)
@@ -256,14 +303,20 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         self.assertTrue(device_state.robot_ready)
         self.assertTrue(device_state.body_ready)
         self.assertTrue(device_state.pipette_ready)
+        self.assertTrue(device_state.relay_ready)
         self.assertTrue(self.services.devices.is_ready(ROBOT_SYSTEM))
         self.assertTrue(self.services.devices.is_ready(BODY_AXIS))
+        self.assertTrue(self.services.devices.is_ready(RELAY_BANK))
+        self.assertTrue(all(
+            button.isEnabled() for button in self.window.device_control_view._relay_buttons
+        ))
         self.assertTrue(
             self.window.ai_assistant_view.simulation_checkbox.isChecked()
         )
         self.assertFalse(
             self.window.ai_assistant_view.simulation_checkbox.isEnabled()
         )
+
         assistant = self.window.ai_assistant_view
         self.assertIs(assistant._ai_controller._llm_registry, self.services.llm)
         self.assertIs(assistant._voice_controller.llm_registry, self.services.llm)

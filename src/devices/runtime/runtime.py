@@ -41,6 +41,7 @@ class DeviceRegistration(Generic[T]):
     factory: Callable[[], T]
     close: Callable[[T], None]
     enter_safe_state: Callable[[T], None] | None = None
+    initialize: Callable[[T], None] | None = None
 
 
 @dataclass(slots=True)
@@ -93,13 +94,21 @@ class DeviceRuntime:
             record.error = ""
             record.error_category = ""
             record.raw_error_code = ""
+            instance = None
             try:
                 instance = record.registration.factory()
                 if instance is None:
                     raise DeviceInitializationError(
                         f"device '{device_id}' factory returned None"
                     )
+                if record.registration.initialize is not None:
+                    record.registration.initialize(instance)
             except Exception as exc:
+                if instance is not None:
+                    try:
+                        record.registration.close(instance)
+                    except Exception:
+                        logger.exception("Device cleanup after initialization failed: %s", device_id)
                 normalized = normalize_device_error(
                     exc,
                     device_id=device_id,
@@ -222,12 +231,17 @@ class DeviceRuntime:
             for device_id in reversed(motion_device_ids)
         )
 
-    def enter_safe_states(self) -> tuple[DeviceSafeStateResult, ...]:
+    def enter_safe_states(
+        self,
+        *,
+        exclude_device_ids: tuple[str, ...] = (),
+    ) -> tuple[DeviceSafeStateResult, ...]:
         """Apply every ready device's explicitly registered safe-state policy."""
         device_ids = self.find_by_capability(DeviceCapability.SAFE_STATE)
         return tuple(
             self._enter_safe_state(device_id)
             for device_id in reversed(device_ids)
+            if device_id not in exclude_device_ids
         )
 
     def shutdown(self, device_id: str) -> None:

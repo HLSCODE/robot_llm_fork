@@ -54,6 +54,7 @@ from ...devices.runtime.ids import (
     CAMERA,
     MOBILE_BASE,
     PIPETTE,
+    RELAY_BANK,
     ROBOT_SYSTEM,
 )
 from ..views.log_widget import LogFilter, LogWidget
@@ -338,6 +339,7 @@ class MainWindow(RoundedMainWindow):
             MOBILE_BASE: (66, "正在连接移动底盘..."),
             BODY_AXIS: (76, "正在初始化身体控制器..."),
             PIPETTE: (88, "正在初始化移液枪..."),
+            RELAY_BANK: (90, "正在连接继电器..."),
             CAMERA: (94, "正在检测全部相机..."),
         }
         percent, message = progress.get(device_id, (60, "正在初始化设备..."))
@@ -353,7 +355,8 @@ class MainWindow(RoundedMainWindow):
             ROBOT_SYSTEM: 64,
             MOBILE_BASE: 74,
             BODY_AXIS: 86,
-            PIPETTE: 94,
+            PIPETTE: 90,
+            RELAY_BANK: 94,
             CAMERA: 96,
         }
         state = "完成" if result.succeeded else "不可用，稍后可在主界面重试"
@@ -397,6 +400,7 @@ class MainWindow(RoundedMainWindow):
             MOBILE_BASE: "移动底盘",
             BODY_AXIS: "身体控制器",
             PIPETTE: "移液枪",
+            RELAY_BANK: "继电器",
             CAMERA: "相机",
         }.get(device_id, device_id)
 
@@ -515,6 +519,7 @@ class MainWindow(RoundedMainWindow):
         controls.gripper_requested.connect(self._set_gripper_state)
         controls.relay_requested.connect(self._set_relay_state)
         controls.pipette_eject_requested.connect(self.eject_pipette_tip)
+        controls.pipette_initialize_requested.connect(self.initialize_pipette)
 
     def create_menu(self) -> None:
         title_bar = ApplicationTitleBar(self)
@@ -951,7 +956,7 @@ class MainWindow(RoundedMainWindow):
             success = self._services.manual_control.initialize_pipette()
             self._render_device_state()
             if success:
-                self._notifications.info("移液枪初始化成功")
+                self._notifications.info("移液枪已连接，初始化命令已收到回复")
             else:
                 self._notifications.warning(
                     "移液枪初始化失败，请检查串口或设备"
@@ -969,7 +974,7 @@ class MainWindow(RoundedMainWindow):
             success = self._services.manual_control.initialize_pipette()
             self._render_device_state()
             if success:
-                self._notifications.info("移液枪初始化成功")
+                self._notifications.info("移液枪已连接，初始化命令已收到回复")
             else:
                 self._notifications.warning("移液枪初始化失败", modal=False)
         except Exception as e:

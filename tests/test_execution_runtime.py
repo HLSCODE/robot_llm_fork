@@ -27,7 +27,7 @@ from src.devices import (
     ResourceBusyError,
     StopMode,
 )
-from src.devices.runtime.ids import BODY_AXIS, ROBOT_SYSTEM
+from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM, TOOL_CHANGER
 from src.execution import (
     EngineCallbacks,
     EngineResult,
@@ -605,6 +605,22 @@ class ExecutionManagerTests(unittest.TestCase):
 
 
 class ApplicationServiceTests(unittest.TestCase):
+    def test_shutdown_skips_pipette_reset_and_applies_other_device_safe_states(self):
+        services = create_application_services(
+            ApplicationSettings.defaults(), simulation=True,
+        )
+        runtime = services.manual_control._runtime
+        pipette = runtime.initialize(PIPETTE)
+        relay = runtime.initialize(RELAY_BANK)
+        tool = runtime.initialize(TOOL_CHANGER)
+        relay.set_channel(1, True)
+
+        self.assertEqual({}, services.devices.shutdown_all())
+
+        self.assertFalse(pipette.safe)
+        self.assertFalse(relay.channels[1])
+        self.assertTrue(tool.locked)
+
     def test_parallel_run_pause_resume_and_cancel_reaches_one_terminal_state(self):
         services = create_application_services(
             ApplicationSettings.defaults(),

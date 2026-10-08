@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from src.devices.transports import ModbusRTUProtocol, ProtocolError
+from src.devices.transports import (
+    CRCError, ModbusRTUProtocol, ProtocolError, TransportError, TransportErrorCategory,
+    append_crc,
+)
 from src.devices.transports.testing import FakeTransport
 from src.devices.tools.pipette.driver import ADP
 from src.devices.tools.powder_dispenser.electric_gripper import (
@@ -79,8 +82,8 @@ class SerialDeviceDriverTests(unittest.TestCase):
     def test_pipette_preserves_existing_ascii_frames_and_eject_protocol(self):
         transport = FakeTransport(
             (
-                b"OK",
-                b"OK",
+                b">01G6158\r\n",
+                bytes.fromhex("3e3031703032333344450d0a"),
                 b"\x01\x06\x01\x07\x00\x01\xf8\x37",
             )
         )
@@ -107,6 +110,63 @@ class SerialDeviceDriverTests(unittest.TestCase):
         self.assertEqual(1800, neck.current_pwm[ServoAxis.HORIZONTAL])
         neck.close()
         self.assertTrue(transport.closed)
+
+    def test_pipette_eject_rejects_corrupt_crc_and_wrong_register_echo(self):
+        corrupt = b"\x01\x06\x01\x07\x00\x01\x00\x00"
+        with self.assertRaises(CRCError):
+            ADP(FakeTransport((corrupt,))).eject_tip()
+
+        wrong_echo = append_crc(b"\x01\x06\x01\x08\x00\x01")
+        with self.assertRaisesRegex(ProtocolError, "echo mismatch"):
+            ADP(FakeTransport((wrong_echo,))).eject_tip()
+
+    def test_pipette_unframed_reply_is_logged_and_rejected(self):
+        pipette = ADP(FakeTransport((b"vendor-reply",)))
+        with self.assertLogs("src.devices.tools.pipette.driver", level="INFO") as captured:
+            with self.assertRaises(ProtocolError):
+                pipette.initialize()
+        message = "\n".join(captured.output)
+        self.assertIn("command=G", message)
+        self.assertIn(b"vendor-reply".hex(), message)
+        self.assertIn("request_hex=", message)
+
+    def test_pipette_observed_speed_ack_has_valid_crc_and_uses_crlf_read(self):
+        transport = FakeTransport((bytes.fromhex("3e303142363239380d0a"),))
+        self.assertTrue(ADP(transport).set_dispense_speed(800))
+        self.assertEqual("ReadUntilStrategy", transport.calls[0].strategy_name)
+
+    def test_pipette_valid_motion_reply_data_does_not_block_communication_success(self):
+        for command in ("n", "p"):
+            for reply_data in (b"02", b"00", b""):
+                with self.subTest(command=command, reply_data=reply_data):
+                    body = b">01" + command.encode("ascii") + reply_data
+                    response = body + f"{ADP._cal_crc(body):04X}".encode("ascii") + b"\r\n"
+                    pipette = ADP(FakeTransport((response,)))
+                    if command == "n":
+                        self.assertTrue(pipette.absorb(200))
+                    else:
+                        self.assertTrue(pipette.dispense(200))
+
+    def test_pipette_ascii_reply_rejects_crc_address_function_and_partial_frames(self):
+        def frame(body: bytes) -> bytes:
+            return body + f"{ADP._cal_crc(body):04X}".encode("ascii") + b"\r\n"
+
+        replies = (
+            b">01B0000\r\n",
+            frame(b">02B"),
+            frame(b">01G"),
+            b">01B6298",
+            b">01BZZZZ\r\n",
+            b"OK\r\n",
+        )
+        for response in replies:
+            with self.subTest(response=response), self.assertRaises(ProtocolError):
+                ADP(FakeTransport((response,))).set_dispense_speed(800)
+
+    def test_pipette_empty_ascii_reply_is_a_timeout(self):
+        with self.assertRaises(TransportError) as raised:
+            ADP(FakeTransport((b"",))).initialize()
+        self.assertEqual(TransportErrorCategory.TIMEOUT, raised.exception.category)
 
     def test_neck_rejects_out_of_range_values_instead_of_clamping(self):
         transport = FakeTransport((b"",))

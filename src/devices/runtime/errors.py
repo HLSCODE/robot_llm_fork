@@ -66,6 +66,7 @@ def normalize_device_error(
         raw_error_code = error.category.value
     elif isinstance(error, ProtocolError):
         category = DeviceErrorCategory.PROTOCOL
+        raw_error_code = error.raw_error_code
     elif isinstance(error, RobotOperationError):
         category = DeviceErrorCategory.REJECTED
         raw_error_code = "" if error.code is None else str(error.code)

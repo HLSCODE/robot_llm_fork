@@ -45,6 +45,10 @@ class UnsupportedMotionModeError(StepperSDKError):
 class ProtocolError(DeviceControlSDKError):
     """Protocol parse/build error."""
 
+    def __init__(self, message: str = "", *, raw_error_code: str = "") -> None:
+        super().__init__(message)
+        self.raw_error_code = raw_error_code
+
 
 class TransientReadingError(DeviceControlSDKError):
     """Temporary device reading error."""
@@ -56,4 +60,3 @@ class CRCError(ProtocolError):
 
 class ModbusException(ProtocolError):
     """Modbus exception response."""
-

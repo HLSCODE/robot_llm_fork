@@ -230,6 +230,7 @@ class DeviceControlView(QFrame):
     gripper_requested = Signal(bool)
     relay_requested = Signal(int, bool)
     pipette_eject_requested = Signal()
+    pipette_initialize_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -249,7 +250,15 @@ class DeviceControlView(QFrame):
             self._button("🔒 夹爪关闭", lambda: self.gripper_requested.emit(False)),
         ]
         self._pipette_button = self._button("💉 退枪头", self.pipette_eject_requested.emit)
-        for button in (*self._gripper_buttons, self._pipette_button):
+        self._pipette_initialize_button = self._button(
+            "初始化移液枪", self.pipette_initialize_requested.emit,
+        )
+        self._pipette_ready = False
+        self._pipette_actions_enabled = True
+        self.set_pipette_action_enabled(True)
+        for button in (
+            *self._gripper_buttons, self._pipette_initialize_button, self._pipette_button,
+        ):
             row.addWidget(button)
         layout.addLayout(row)
 
@@ -276,10 +285,14 @@ class DeviceControlView(QFrame):
         return button
 
     def render_state(self, state: DeviceViewState) -> None:
+        self._pipette_ready = state.pipette_ready
+        self.set_pipette_action_enabled(self._pipette_actions_enabled)
         for button in self._gripper_buttons:
             button.setEnabled(state.robot_ready)
         for button in self._relay_buttons:
             button.setEnabled(state.relay_ready)
 
     def set_pipette_action_enabled(self, enabled: bool) -> None:
-        self._pipette_button.setEnabled(enabled)
+        self._pipette_actions_enabled = enabled
+        self._pipette_initialize_button.setEnabled(enabled)
+        self._pipette_button.setEnabled(enabled and self._pipette_ready)

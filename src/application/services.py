@@ -216,9 +216,11 @@ class DeviceManagementService:
         return self._runtime.snapshot(device_id).ready
 
     def shutdown_all(self, timeout: float = 10.0) -> dict[str, str]:
+        """Stop execution and close devices without resetting the pipette on exit."""
         report = self._safety.stop(
             StopMode.CONTROLLED,
             wait_timeout_seconds=timeout,
+            exclude_safe_state_devices=(PIPETTE,),
         )
         if report.execution_after.active:
             raise TimeoutError(
@@ -315,14 +317,17 @@ class ManualControlService:
             )
 
     def initialize_pipette(self) -> bool:
+        def initialize() -> bool:
+            # Explicit reconnect clears cached failures and reruns the device handshake.
+            self._runtime.shutdown(PIPETTE)
+            self._runtime.initialize(PIPETTE)
+            return True
+
         with self._lease(PIPETTE, "pipette-initialize"):
             return _device_operation(
                 PIPETTE,
                 "pipette.initialize",
-                lambda: self._runtime.require(
-                    PIPETTE,
-                    Pipette,
-                ).initialize(),
+                initialize,
             )
 
     def eject_pipette_tip(self) -> bool:

@@ -133,6 +133,7 @@ class SafetyService:
         mode: StopMode,
         *,
         wait_timeout_seconds: float | None = None,
+        exclude_safe_state_devices: tuple[str, ...] = (),
     ) -> SafetyStopReport:
         if not isinstance(mode, StopMode):
             raise TypeError("mode must be a StopMode")
@@ -155,7 +156,9 @@ class SafetyService:
             else:
                 devices = self._runtime.stop_all(mode)
                 self._release_sessions_after_device_stop(devices, errors)
-            safe_devices = self._runtime.enter_safe_states()
+            safe_devices = self._runtime.enter_safe_states(
+                exclude_device_ids=exclude_safe_state_devices,
+            )
 
             after = self._wait_for_execution(before, timeout, errors)
             return SafetyStopReport(

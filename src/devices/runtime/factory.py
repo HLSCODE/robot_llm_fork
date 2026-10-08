@@ -64,6 +64,7 @@ def _registration(
     factory: Callable[[], Any],
     close: Callable[[Any], None] | None = None,
     enter_safe_state: Callable[[Any], None] | None = None,
+    initialize: Callable[[Any], None] | None = None,
 ) -> DeviceRegistration[Any]:
     return DeviceRegistration(
         device_id=device_id,
@@ -71,6 +72,7 @@ def _registration(
         factory=factory,
         close=close or (lambda device: device.close()),
         enter_safe_state=enter_safe_state,
+        initialize=initialize,
     )
 
 
@@ -125,6 +127,7 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
             {DeviceCapability.PIPETTE, DeviceCapability.SAFE_STATE},
             SimulatedPipette,
             enter_safe_state=lambda device: device.enter_safe_state(),
+            initialize=_initialize_pipette,
         ),
         _registration(
             POWDER_DISPENSER,
@@ -212,6 +215,7 @@ def _register_real_devices(
             {DeviceCapability.PIPETTE, DeviceCapability.SAFE_STATE},
             lambda: _pipette_factory(settings.devices),
             enter_safe_state=lambda device: device.enter_safe_state(),
+            initialize=_initialize_pipette,
         )
     )
     runtime.register(
@@ -313,6 +317,11 @@ def _tool_changer_factory(settings: DeviceSettings) -> ToolChangerAdapter:
             )
         )
     )
+
+
+def _initialize_pipette(device: Any) -> None:
+    if device.initialize() is not True:
+        raise DeviceInitializationError("pipette initialization was not confirmed")
 
 
 def _pipette_factory(settings: DeviceSettings) -> PipetteAdapter:

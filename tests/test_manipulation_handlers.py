@@ -23,6 +23,9 @@ from src.devices.runtime.ids import (
     ROBOT_SYSTEM,
     TOOL_CHANGER,
 )
+from src.devices.tools.pipette.driver import ADP
+from src.devices.tools.pipette.adapter import PipetteAdapter
+from src.devices.transports.testing import FakeTransport
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -351,6 +354,27 @@ class GripperActionHandlerTests(unittest.TestCase):
 
 
 class PipetteActionHandlerTests(unittest.TestCase):
+    def test_observed_dispense_reply_02_does_not_block_action(self):
+        transport = FakeTransport((
+            bytes.fromhex("3e303142363239380d0a"),
+            bytes.fromhex("3e3031703032333344450d0a"),
+        ))
+        runtime = _runtime_with(
+            PIPETTE, DeviceCapability.PIPETTE, PipetteAdapter(ADP(transport)),
+        )
+        context, logs = _context()
+
+        result = PipetteActionHandler(runtime)(
+            {"操作": "吐", "容量": 200, "吐液速度": 800, "全吐": False},
+            context,
+        )
+
+        self.assertTrue(result.successful)
+        self.assertEqual("", result.error_category)
+        self.assertEqual("", result.raw_error_code)
+        self.assertEqual(2, len(transport.calls))
+        self.assertEqual("info", logs[-1][1])
+
     def test_pipette_normalizes_speed_volume_and_false_string(self):
         pipette = _Pipette()
         runtime = _runtime_with(
