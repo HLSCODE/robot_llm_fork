@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import partial
 
 from ..configuration.data_paths import ApplicationDataPaths
+from ..configuration.runtime_paths import application_root
 from ..configuration.settings import ApplicationSettings, DataCollectionSettings
 from ..persistence.storage import JsonCompositionRepository
 from ..persistence.trajectory_storage import TrajectoryStorage
@@ -63,7 +64,7 @@ def create_application_services(
         robot_profile_id,
     )
     station_storage = VisionStationStorage(
-        settings.vision.vision_relocalization_stations_file,
+        application_root() / settings.vision.vision_relocalization_stations_file,
         configuration=vision_configuration(settings.vision),
     )
     station_storage.load_profiles()

@@ -24,6 +24,7 @@ from ..configuration.config_validation import (
     validate_startup_configuration,
 )
 from ..configuration.settings import VoiceSettings
+from ..configuration.runtime_paths import is_portable
 
 
 class InitializationStep(str, Enum):
@@ -242,6 +243,9 @@ class InitializationRunner:
         self._log(step, f"创建 {len(result.created)} 个文件，保留 {len(result.skipped)} 个文件")
 
     def _sync_dependencies(self, plan: InitializationPlan, step: InitializationStep) -> None:
+        if is_portable():
+            self._log(step, "便携版已内置依赖，无需执行 uv sync")
+            return
         command = ["uv", "sync"]
         if plan.frozen:
             command.append("--frozen")
@@ -324,6 +328,13 @@ class InitializationRunner:
             self._log(step, f"数据初始化完成，共更新 {changed_count} 个文件")
 
     def _prepare_asr_models(self, plan: InitializationPlan, step: InitializationStep) -> None:
+        if is_portable():
+            self._run_subprocess(
+                [sys.executable, "--prepare-asr-worker", "--project-root", str(plan.project_root)],
+                cwd=plan.project_root,
+                step=step,
+            )
+            return
         script = plan.project_root / "scripts" / "test_download_asr_model.py"
         if not script.is_file():
             raise RuntimeError(f"ASR 模型初始化脚本不存在：{script}")

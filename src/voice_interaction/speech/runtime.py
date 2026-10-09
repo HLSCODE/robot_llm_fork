@@ -14,6 +14,7 @@ from typing import Any, Optional
 import numpy as np
 
 from .asr import ASREngine, FunASRConfig, FunASRRecognizer
+from ...configuration.runtime_paths import application_root
 from .audio import AudioCapture, VoiceAudioConfig, duration_ms
 from .output_gate import AudioOutputGate
 from ..core.controller import VoiceInteractionController
@@ -407,7 +408,7 @@ def _resolve_project_path(value: object) -> Path | None:
     path = Path(text)
     if path.is_absolute():
         return path
-    return Path(__file__).resolve().parents[3] / path
+    return application_root() / path
 
 
 def _optional_str(value: object) -> str | None:

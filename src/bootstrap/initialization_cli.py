@@ -7,6 +7,8 @@ from collections.abc import Sequence
 from pathlib import Path
 import sys
 
+from ..configuration.runtime_paths import is_portable
+
 from .initialization import (
     EventKind,
     InitializationEvent,
@@ -86,7 +88,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--steps",
-        default=",".join(step.value for step in DEFAULT_STEPS),
+        default=",".join(
+            step.value for step in DEFAULT_STEPS
+            if not (is_portable() and step is InitializationStep.DEPENDENCIES)
+        ),
         help=(
             "逗号分隔的步骤：configuration,data_migration,dependencies,"
             "asr_models,kws_model,validation"

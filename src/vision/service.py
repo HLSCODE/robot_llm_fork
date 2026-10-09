@@ -7,6 +7,7 @@ from typing import Protocol
 
 from ..domain.execution_context import ExecutionContext
 from ..configuration.settings import CameraRole, VisionSettings
+from ..configuration.runtime_paths import application_root
 from ..persistence.vision_station_storage import VisionStationStorage
 from ..devices import (
     CameraSource,
@@ -78,7 +79,7 @@ class VisionService:
             configuration=configuration,
         )
         self._station_storage = station_storage or VisionStationStorage(
-            settings.vision_relocalization_stations_file,
+            application_root() / settings.vision_relocalization_stations_file,
             configuration=configuration,
         )
         self._capture_pipeline = capture_pipeline

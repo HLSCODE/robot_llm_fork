@@ -34,6 +34,9 @@
 
 ## 快速开始
 
+Windows 免安装版构建：`./scripts/build_windows_portable.ps1`。
+目录结构、初始化与升级说明见 [Windows 便携打包](docs/windows-portable.md)。
+
 ### 1. 安装依赖
 
 常用 GUI + WebSocket + AI 开发环境：

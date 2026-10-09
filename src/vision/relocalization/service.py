@@ -13,6 +13,7 @@ from ...domain.arm_names import normalize_arm_name
 from ...domain.execution_context import ExecutionContext, VisionRelocalizationState
 from ...geometry.pose_compensation import parse_pose
 from ...configuration.settings import VisionSettings
+from ...configuration.runtime_paths import application_root
 from ...persistence.vision_station_storage import (
     VisionStationStorage,
     arm_display_name,
@@ -34,7 +35,7 @@ from .geometry import (
 
 
 LogFn = Callable[[str], None]
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+_PROJECT_ROOT = application_root()
 
 
 def _project_path(path: str | Path) -> Path:
@@ -448,7 +449,7 @@ def compensate_pose_with_context(
 ) -> list[float]:
     arm_key = normalize_arm_name(arm)
     storage = VisionStationStorage(
-        settings.vision_relocalization_stations_file,
+        _project_path(settings.vision_relocalization_stations_file),
         configuration=vision_configuration(settings),
     )
     profile = storage.get_profile(station_id, arm_key)

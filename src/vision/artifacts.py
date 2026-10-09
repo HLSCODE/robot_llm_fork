@@ -10,9 +10,10 @@ from uuid import uuid4
 from types import TracebackType
 
 from ..persistence.json_documents import write_json_atomic
+from ..configuration.runtime_paths import application_root
 from .models import VisionArtifact, VisionConfigurationVersion, VisionOperation
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_PROJECT_ROOT = application_root()
 _MANIFEST_NAME = "manifest.json"
 
 

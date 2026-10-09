@@ -7,9 +7,10 @@ from pathlib import Path
 
 from .settings import DataSettings
 from .robot_profile import normalize_robot_profile_id
+from .runtime_paths import application_root
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = application_root()
 
 
 @dataclass(frozen=True, slots=True)

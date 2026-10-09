@@ -12,6 +12,7 @@ from textual.containers import Vertical, VerticalScroll
 from textual.message import Message
 from textual.widgets import Label, OptionList, RichLog, Static
 from textual.widgets.option_list import Option
+from ..configuration.runtime_paths import is_portable
 
 from .initialization import (
     EventKind,
@@ -431,6 +432,7 @@ class InitializationApp(App[int]):
                     tuple(
                         (step.value, step.label, _STEP_DESCRIPTIONS[step])
                         for step in InitializationStep
+                        if not (is_portable() and step is InitializationStep.DEPENDENCIES)
                     ),
                     selected_ids=tuple(step.value for step in self._initial_plan.steps),
                     multiple=True,

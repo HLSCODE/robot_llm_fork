@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
+from ...configuration.runtime_paths import application_root
 from typing import Any
 
 from ...configuration.settings import (
@@ -161,7 +161,7 @@ def _register_real_devices(
     camera_provider = resolve_camera_provider(settings.vision)
     display_settings = ExpressionDisplaySettings.from_mapping(
         settings.devices.expression_display_mapping(
-            Path(__file__).resolve().parents[3]
+            application_root()
         )
     )
     resolve_expression_display_provider(display_settings.provider)
