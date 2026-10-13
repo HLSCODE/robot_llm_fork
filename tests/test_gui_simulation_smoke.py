@@ -484,7 +484,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
     def test_workbench_keeps_canvas_and_safety_commands_available(self) -> None:
         workbench = self.window.workbench_view
         self.assertEqual(
-            {"tasks", "actions", "assistant"},
+            {"tasks", "actions", "assistant", "teaching"},
             set(workbench.activity_bar.buttons),
         )
         resource_button = workbench.activity_bar.buttons["tasks"]

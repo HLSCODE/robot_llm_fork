@@ -71,6 +71,8 @@ from .startup import (
     HardwareStartupStepResult,
 )
 from .trajectory_dialog import TrajectoryRecordingDialog
+from .teaching import TeachingController
+from ..views.teaching import TeachingView
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import (
     ActionLibraryView,
@@ -154,6 +156,9 @@ class MainWindow(RoundedMainWindow):
             self,
             log_sink=self.log_widget.append_notification,
             toast_sink=self.workbench_view.show_notification,
+        )
+        self._teaching_controller.problem.connect(
+            lambda message: self._notifications.warning(message, modal=False)
         )
         if self.workbench_view.layout_recovery_reason is not None:
             self._notifications.warning(
@@ -415,6 +420,9 @@ class MainWindow(RoundedMainWindow):
         self.action_library_view = ActionLibraryView()
         self.ai_assistant_view = AIAssistantWidget(self._services)
         self.workflow_view = WorkflowEditorView()
+        self.teaching_view = TeachingView()
+        self._teaching_controller = TeachingController(self.teaching_view, self._services, self)
+        self._teaching_controller.session_changed.connect(self._on_teaching_session_changed)
         canvas_scale_provider = self.workflow_view.sequence_list.display_scale
         self.task_library_view.set_canvas_scale_provider(canvas_scale_provider)
         self.action_library_view.set_canvas_scale_provider(canvas_scale_provider)
@@ -441,6 +449,10 @@ class MainWindow(RoundedMainWindow):
                     title="AI 助手",
                     icon=IconName.ASSISTANT,
                     widget=self.ai_assistant_view,
+                ),
+                WorkbenchPage(
+                    "teaching", "示教", IconName.ACTION_ARM_MOVE,
+                    self.teaching_view, full_workspace=True,
                 ),
             ),
             editor=self.workflow_view,
@@ -807,11 +819,21 @@ class MainWindow(RoundedMainWindow):
         if self.pose_timer is not None and self.pose_timer.isActive():
             self.pose_timer.stop()
 
+    def _on_teaching_session_changed(self, active: bool) -> None:
+        if active:
+            self._pause_pose_refresh()
+        elif self.startup_state is not GuiStartupState.CLOSED:
+            self._resume_pose_refresh()
+
     def _resume_pose_refresh(self) -> None:
+        if self._services.manual_control.teaching.active:
+            return
         if self.pose_timer is not None and not self.pose_timer.isActive():
             self.pose_timer.start()
 
     def refresh_arm_poses(self) -> None:
+        if self._services.manual_control.teaching.active:
+            return
         self._refresh_single_robot_pose("robot1")
         self._refresh_single_robot_pose("robot2")
         self.refresh_external_localization()
@@ -2022,6 +2044,7 @@ class MainWindow(RoundedMainWindow):
         self._notifications.begin_shutdown()
         self._notifications.info("应用正在关闭，后台资源将按顺序释放...")
         self._startup_begin_timer.stop()
+        self._teaching_controller.prepare_shutdown()
         execution_state = self._execution_view_model.snapshot()
         if execution_state.active:
             self._execution_view_model.cancel()
@@ -2039,6 +2062,7 @@ class MainWindow(RoundedMainWindow):
 
     def shutdown_after_event_loop(self) -> None:
         """Join GUI workers before their Qt owners and services are destroyed."""
+        self._teaching_controller.shutdown()
         hardware_thread = self._hardware_startup_thread
         if hardware_thread is not None and hardware_thread.isRunning():
             if self._hardware_startup_worker is not None:
