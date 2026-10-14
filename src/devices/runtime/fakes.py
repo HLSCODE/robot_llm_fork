@@ -21,6 +21,21 @@ from .models import StopMode
 from .contracts import TrajectoryRecorder
 
 
+class SimulatedPercentGrippers:
+    def __init__(self) -> None:
+        self.positions = {1: 0.0, 2: 0.0}
+
+    def move_percent(self, station: int, percent: float) -> None:
+        if isinstance(station, bool) or station not in (1, 2):
+            raise ValueError("知行夹爪站号必须为 1 或 2")
+        if isinstance(percent, bool) or not 0 <= percent <= 100:
+            raise ValueError("知行夹爪开合度必须在 0..100 之间")
+        self.positions[station] = float(percent)
+
+    def close(self) -> None:
+        pass
+
+
 class SimulatedRobotSystem:
     def __init__(self) -> None:
         self.closed = False

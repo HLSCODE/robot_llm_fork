@@ -73,6 +73,13 @@ class GripperControl(Protocol):
 
 
 @runtime_checkable
+class PercentGripperControl(Protocol):
+    """Independent bus grippers: 0 = open, 100 = closed."""
+
+    def move_percent(self, station: int, percent: float) -> None: ...
+
+
+@runtime_checkable
 class RobotTeleoperation(Protocol):
     def follow_joints(
         self,

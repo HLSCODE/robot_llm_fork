@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+import math
 from typing import Any
 
 from ..workflows import execute_right_arm_circle_dispense
@@ -18,6 +19,7 @@ from ...devices import (
     DigitalOutputs,
     ExpressionDisplay,
     GripperControl,
+    PercentGripperControl,
     NeckMotion,
     Pipette,
     PowderDispenser,
@@ -30,6 +32,7 @@ from ...devices.runtime.ids import (
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
+    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
     TOOL_CHANGER,
 )
@@ -311,6 +314,53 @@ class RelayActionHandler:
             operation=self._OPERATION,
             device_id=RELAY_BANK,
         )
+
+
+class ZhixingGripperActionHandler:
+    _OPERATION = "zhixing_gripper.move_percent"
+
+    def __init__(self, device_runtime: DeviceRuntime) -> None:
+        self._device_runtime = device_runtime
+
+    def __call__(
+        self, parameters: ActionParameters, context: ActionExecutionContext,
+    ) -> ActionHandlerResult:
+        try:
+            raw_station = parameters.get("编号", 1)
+            station = int(raw_station)
+            if isinstance(raw_station, bool) or station not in (1, 2) or float(raw_station) != station:
+                raise ValueError("站号必须为 1（左）或 2（右）")
+            raw_percent = parameters["开合度"]
+            percent = float(raw_percent)
+            if isinstance(raw_percent, bool) or not math.isfinite(percent) or not 0 <= percent <= 100:
+                raise ValueError("开合度必须在 0..100 之间")
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            return _failed_result(
+                context, ActionResultCode.INVALID_PARAMETERS,
+                f"知行夹爪参数无效: {exc}", operation=self._OPERATION,
+                device_id=ZHIXING_GRIPPERS, error=exc,
+            )
+        try:
+            grippers = self._device_runtime.require(ZHIXING_GRIPPERS, PercentGripperControl)
+        except Exception as exc:
+            return _failed_result(
+                context, ActionResultCode.DEVICE_UNAVAILABLE,
+                f"知行夹爪设备不可用: {exc}", operation=self._OPERATION,
+                device_id=ZHIXING_GRIPPERS, error=exc,
+            )
+        try:
+            context.invoke(self._OPERATION, lambda: grippers.move_percent(station, percent))
+        except (ActionCancelledError, ActionTimeoutError):
+            raise
+        except Exception as exc:
+            return _failed_result(
+                context, ActionResultCode.DEVICE_OPERATION_FAILED,
+                f"知行夹爪站号 {station} 执行失败: {exc}", operation=self._OPERATION,
+                device_id=ZHIXING_GRIPPERS, error=exc,
+            )
+        side = "左" if station == 1 else "右"
+        context.log(f"知行夹爪{side}开合度 {percent:g}% 执行完成", "info")
+        return context.success(operation=self._OPERATION, device_id=ZHIXING_GRIPPERS)
 
 
 class GripperActionHandler:
@@ -1081,6 +1131,7 @@ def create_manipulation_handler(
         "快换手": ToolChangerActionHandler(device_runtime),
         "继电器": RelayActionHandler(device_runtime),
         "夹爪": GripperActionHandler(device_runtime, options),
+        "知行夹爪": ZhixingGripperActionHandler(device_runtime),
         "吸液枪": PipetteActionHandler(device_runtime),
         "颈部": NeckActionHandler(device_runtime),
         "表情屏": expression_handler,

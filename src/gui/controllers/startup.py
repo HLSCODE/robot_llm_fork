@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from ...devices.runtime.ids import BODY_AXIS, CAMERA, MOBILE_BASE, PIPETTE, RELAY_BANK, ROBOT_SYSTEM
+from ...devices.runtime.ids import BODY_AXIS, CAMERA, MOBILE_BASE, PIPETTE, RELAY_BANK, ROBOT_SYSTEM, ZHIXING_GRIPPERS
 
 
 if TYPE_CHECKING:
@@ -142,6 +142,10 @@ class GuiHardwareStartupWorker(QObject):
                 (
                     RELAY_BANK,
                     lambda: self._services.devices.initialize(RELAY_BANK),
+                ),
+                (
+                    ZHIXING_GRIPPERS,
+                    lambda: self._services.devices.initialize(ZHIXING_GRIPPERS),
                 ),
             )
         )

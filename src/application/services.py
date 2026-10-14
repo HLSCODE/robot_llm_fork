@@ -17,6 +17,7 @@ from ..devices import (
     DeviceRuntime,
     DigitalOutputs,
     GripperControl,
+    PercentGripperControl,
     JointVector,
     Pipette,
     ResourceArbiter,
@@ -30,7 +31,7 @@ from ..devices import (
 )
 from ..devices.runtime.errors import normalize_device_error
 from ..configuration.settings import ApplicationSettings
-from ..devices.runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM
+from ..devices.runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM, ZHIXING_GRIPPERS
 from ..execution import (
     ExecutionHandle,
     ExecutionListener,
@@ -303,6 +304,16 @@ class ManualControlService:
                 ROBOT_SYSTEM,
                 "gripper.set",
                 operate_gripper,
+            )
+
+    def set_zhixing_gripper(self, station: int, percent: float) -> None:
+        with self._lease(ZHIXING_GRIPPERS, "zhixing-gripper"):
+            _device_operation(
+                ZHIXING_GRIPPERS,
+                "zhixing_gripper.move_percent",
+                lambda: self._runtime.require(
+                    ZHIXING_GRIPPERS, PercentGripperControl,
+                ).move_percent(station, percent),
             )
 
     def set_relay(self, channel: int, enabled: bool) -> None:

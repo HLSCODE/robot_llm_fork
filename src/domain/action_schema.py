@@ -401,6 +401,21 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                     ),
                 },
             ),
+            "知行夹爪": _variant(
+                "控制知行夹爪开合度，左站号1、右站号2；0为全开，100为全闭",
+                {
+                    "执行器": _field(
+                        "select", "执行器", options=["知行夹爪"], default="知行夹爪",
+                    ),
+                    "编号": _field(
+                        "select", "站号（1=左，2=右）", options=[1, 2], default=1,
+                    ),
+                    "开合度": _field(
+                        "number", "开合度（0=开，100=关）", default=0.0,
+                        minimum=0, maximum=100, unit="%",
+                    ),
+                },
+            ),
             "吸液枪": _variant(
                 "控制吸液枪吸液/吐液",
                 {

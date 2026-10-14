@@ -17,6 +17,7 @@ from ..devices.runtime.ids import (
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
+    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
     TOOL_CHANGER,
 )
@@ -328,6 +329,7 @@ MANIPULATE_CONTROL_POLICIES: Mapping[
         ),
         "继电器": _blocking_policy("relay.set_channel", RELAY_BANK),
         "夹爪": _blocking_policy("gripper.execute", ROBOT_SYSTEM),
+        "知行夹爪": _blocking_policy("zhixing_gripper.move_percent", ZHIXING_GRIPPERS),
         "吸液枪": _blocking_policy("pipette.execute", PIPETTE),
         "颈部": _blocking_policy("neck.move", NECK),
         "表情屏": _EXPRESSION_CONTROL_POLICY,

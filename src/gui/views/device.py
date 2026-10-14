@@ -24,6 +24,7 @@ _DEVICE_STATUS_TITLES = {
     "body": "身体轴",
     "pipette": "移液器",
     "relay": "继电器",
+    "zhixing_gripper": "知行夹爪",
 }
 
 
@@ -92,6 +93,7 @@ class DeviceHealthView(QWidget):
             "body": state.body_ready,
             "pipette": state.pipette_ready,
             "relay": state.relay_ready,
+            "zhixing_gripper": state.zhixing_gripper_ready,
         }
         for key, ready in readiness.items():
             indicator, label = self._statuses[key]
@@ -228,6 +230,7 @@ class DevicePoseView(QWidget):
 
 class DeviceControlView(QFrame):
     gripper_requested = Signal(bool)
+    zhixing_gripper_requested = Signal(int, float)
     relay_requested = Signal(int, bool)
     pipette_eject_requested = Signal()
     pipette_initialize_requested = Signal()
@@ -262,6 +265,24 @@ class DeviceControlView(QFrame):
             row.addWidget(button)
         layout.addLayout(row)
 
+        gripper_grid = QGridLayout()
+        gripper_grid.setSpacing(6)
+        self._zhixing_gripper_buttons: list[QPushButton] = []
+        self._zhixing_gripper_ready = False
+        self._zhixing_gripper_actions_enabled = True
+        for row_index, (station, side) in enumerate(((1, "左"), (2, "右"))):
+            for column, (label, percent) in enumerate((("开", 0.0), ("关", 100.0))):
+                button = self._button(
+                    f"知行夹爪{side} {label}",
+                    partial(self.zhixing_gripper_requested.emit, station, percent),
+                )
+                button.setObjectName(f"zhixingGripper{station}{'Open' if column == 0 else 'Close'}")
+                button.setToolTip(f"站号 {station}，开合度 {percent:g}%（0=全开，100=全闭）")
+                self._zhixing_gripper_buttons.append(button)
+                gripper_grid.addWidget(button, row_index, column)
+        self.set_zhixing_gripper_action_enabled(True)
+        layout.addLayout(gripper_grid)
+
         group = QGroupBox("继电器控制")
         relay_row = QHBoxLayout(group)
         relay_row.setContentsMargins(8, 6, 8, 6)
@@ -285,12 +306,19 @@ class DeviceControlView(QFrame):
         return button
 
     def render_state(self, state: DeviceViewState) -> None:
+        self._zhixing_gripper_ready = state.zhixing_gripper_ready
+        self.set_zhixing_gripper_action_enabled(self._zhixing_gripper_actions_enabled)
         self._pipette_ready = state.pipette_ready
         self.set_pipette_action_enabled(self._pipette_actions_enabled)
         for button in self._gripper_buttons:
             button.setEnabled(state.robot_ready)
         for button in self._relay_buttons:
             button.setEnabled(state.relay_ready)
+
+    def set_zhixing_gripper_action_enabled(self, enabled: bool) -> None:
+        self._zhixing_gripper_actions_enabled = enabled
+        for button in self._zhixing_gripper_buttons:
+            button.setEnabled(enabled and self._zhixing_gripper_ready)
 
     def set_pipette_action_enabled(self, enabled: bool) -> None:
         self._pipette_actions_enabled = enabled

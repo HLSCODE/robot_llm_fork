@@ -24,6 +24,7 @@ from .fakes import (
     SimulatedMobileBase,
     SimulatedNeck,
     SimulatedPipette,
+    SimulatedPercentGrippers,
     SimulatedPowderDispenser,
     SimulatedRobotSystem,
     SimulatedToolChanger,
@@ -37,6 +38,7 @@ from .ids import (
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
+    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
     TOOL_CHANGER,
 )
@@ -78,6 +80,11 @@ def _registration(
 
 def _register_simulated_devices(runtime: DeviceRuntime) -> None:
     registrations = (
+        _registration(
+            ZHIXING_GRIPPERS,
+            {DeviceCapability.PERCENT_GRIPPER},
+            SimulatedPercentGrippers,
+        ),
         _registration(
             ROBOT_SYSTEM,
             {
@@ -157,6 +164,14 @@ def _register_real_devices(
     runtime: DeviceRuntime,
     settings: ApplicationSettings,
 ) -> None:
+    runtime.register(
+        _registration(
+            ZHIXING_GRIPPERS,
+            {DeviceCapability.PERCENT_GRIPPER},
+            lambda: _zhixing_gripper_factory(settings.devices),
+            initialize=lambda device: device.initialize(),
+        )
+    )
     robot_provider = resolve_robot_provider(settings.robot)
     camera_provider = resolve_camera_provider(settings.vision)
     display_settings = ExpressionDisplaySettings.from_mapping(
@@ -347,3 +362,27 @@ def _powder_dispenser_factory(settings: DeviceSettings) -> Any:
     from ..tools.powder_dispenser.driver import TappingController
 
     return TappingController.from_settings(settings)
+
+
+def _zhixing_gripper_factory(settings: DeviceSettings) -> Any:
+    from ..tools.zhixing_gripper import ZhixingGripperController
+
+    transport = SerialTransport(SerialSettings(
+        port=settings.zhixing_gripper_serial_port,
+        baudrate=settings.zhixing_gripper_baudrate,
+        timeout_seconds=settings.zhixing_gripper_timeout,
+    ))
+    try:
+        return ZhixingGripperController(
+            transport,
+            speed=settings.zhixing_gripper_speed,
+            torque=settings.zhixing_gripper_torque,
+            acceleration=settings.zhixing_gripper_acceleration,
+            deceleration=settings.zhixing_gripper_deceleration,
+            wait_timeout=settings.zhixing_gripper_wait_timeout,
+            left_range=(settings.zhixing_gripper_left_pos_min, settings.zhixing_gripper_left_pos_max),
+            right_range=(settings.zhixing_gripper_right_pos_min, settings.zhixing_gripper_right_pos_max),
+        )
+    except Exception:
+        transport.close()
+        raise

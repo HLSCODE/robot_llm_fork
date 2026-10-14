@@ -102,6 +102,7 @@ MANIPULATOR_ICONS: dict[str, IconName] = {
     "快换手": IconName.ACTION_TOOL_CHANGER,
     "继电器": IconName.ACTION_RELAY,
     "夹爪": IconName.ACTION_GRIPPER,
+    "知行夹爪": IconName.ACTION_GRIPPER,
     "吸液枪": IconName.ACTION_PIPETTE,
     "颈部": IconName.ACTION_NECK,
     "右臂转圈注液": IconName.ACTION_CIRCLE_DISPENSE,

@@ -55,6 +55,7 @@ from ...devices.runtime.ids import (
     MOBILE_BASE,
     PIPETTE,
     RELAY_BANK,
+    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
 )
 from ..views.log_widget import LogFilter, LogWidget
@@ -71,6 +72,7 @@ from .startup import (
     HardwareStartupStepResult,
 )
 from .trajectory_dialog import TrajectoryRecordingDialog
+from .gripper_control import ZhixingGripperWorker
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
 from ..views.workflow import (
     ActionLibraryView,
@@ -140,6 +142,7 @@ class MainWindow(RoundedMainWindow):
         self._startup_lifecycle = GuiStartupLifecycle()
         self._speech_startup_wait_timer: QTimer | None = None
         self._hardware_startup_thread: QThread | None = None
+        self._zhixing_gripper_worker: ZhixingGripperWorker | None = None
         self._hardware_startup_worker: GuiHardwareStartupWorker | None = None
         self._camera_test_thread: QThread | None = None
         self._startup_begin_timer = QTimer(self)
@@ -340,6 +343,7 @@ class MainWindow(RoundedMainWindow):
             BODY_AXIS: (76, "正在初始化身体控制器..."),
             PIPETTE: (88, "正在初始化移液枪..."),
             RELAY_BANK: (90, "正在连接继电器..."),
+            ZHIXING_GRIPPERS: (92, "正在连接知行夹爪..."),
             CAMERA: (94, "正在检测全部相机..."),
         }
         percent, message = progress.get(device_id, (60, "正在初始化设备..."))
@@ -356,7 +360,8 @@ class MainWindow(RoundedMainWindow):
             MOBILE_BASE: 74,
             BODY_AXIS: 86,
             PIPETTE: 90,
-            RELAY_BANK: 94,
+            RELAY_BANK: 92,
+            ZHIXING_GRIPPERS: 94,
             CAMERA: 96,
         }
         state = "完成" if result.succeeded else "不可用，稍后可在主界面重试"
@@ -401,6 +406,7 @@ class MainWindow(RoundedMainWindow):
             BODY_AXIS: "身体控制器",
             PIPETTE: "移液枪",
             RELAY_BANK: "继电器",
+            ZHIXING_GRIPPERS: "知行夹爪",
             CAMERA: "相机",
         }.get(device_id, device_id)
 
@@ -517,6 +523,7 @@ class MainWindow(RoundedMainWindow):
         self.device_pose_view.copy_pose_requested.connect(self.copy_robot_pose)
         controls = self.device_control_view
         controls.gripper_requested.connect(self._set_gripper_state)
+        controls.zhixing_gripper_requested.connect(self._set_zhixing_gripper_state)
         controls.relay_requested.connect(self._set_relay_state)
         controls.pipette_eject_requested.connect(self.eject_pipette_tip)
         controls.pipette_initialize_requested.connect(self.initialize_pipette)
@@ -697,6 +704,33 @@ class MainWindow(RoundedMainWindow):
             self._notifications.warning(
                 f"继电器 Y{channel} {action_text}失败:\n{e}"
             )
+
+    def _set_zhixing_gripper_state(self, station: int, percent: float) -> None:
+        if self._zhixing_gripper_worker is not None:
+            return
+        if not self._device_view_model.snapshot().zhixing_gripper_ready:
+            self._notifications.warning("知行夹爪未连接")
+            return
+        worker = ZhixingGripperWorker(
+            self._services.manual_control, station, percent, self,
+        )
+        self._zhixing_gripper_worker = worker
+        self.device_control_view.set_zhixing_gripper_action_enabled(False)
+        worker.finished.connect(self._on_zhixing_gripper_finished)
+        worker.start()
+
+    def _on_zhixing_gripper_finished(self) -> None:
+        worker = self._zhixing_gripper_worker
+        if worker is None:
+            return
+        self._zhixing_gripper_worker = None
+        side = "左" if worker.station == 1 else "右"
+        if worker.error:
+            self._notifications.warning(f"知行夹爪{side}操作失败: {worker.error}")
+        else:
+            self._notifications.info(f"知行夹爪{side}开合度已设为 {worker.percent:g}%")
+        worker.deleteLater()
+        self.device_control_view.set_zhixing_gripper_action_enabled(True)
 
     def _set_gripper_state(self, opened: bool) -> None:
         if not self._device_view_model.snapshot().robot_ready:
@@ -2039,6 +2073,9 @@ class MainWindow(RoundedMainWindow):
 
     def shutdown_after_event_loop(self) -> None:
         """Join GUI workers before their Qt owners and services are destroyed."""
+        gripper_worker = self._zhixing_gripper_worker
+        if gripper_worker is not None and gripper_worker.isRunning():
+            gripper_worker.wait()
         hardware_thread = self._hardware_startup_thread
         if hardware_thread is not None and hardware_thread.isRunning():
             if self._hardware_startup_worker is not None:

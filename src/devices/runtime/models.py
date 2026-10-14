@@ -21,6 +21,7 @@ class DeviceCapability(str, Enum):
     ARM_STATE = "arm_state"
     ARM_TELEMETRY = "arm_telemetry"
     GRIPPER = "gripper"
+    PERCENT_GRIPPER = "percent_gripper"
     ROBOT_TELEOPERATION = "robot_teleoperation"
     TRAJECTORY = "trajectory"
     TRAJECTORY_RECORDING = "trajectory_recording"
