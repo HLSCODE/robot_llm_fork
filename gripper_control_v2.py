@@ -21,7 +21,7 @@ from pymodbus.client import ModbusSerialClient
 # ============================================================
 # 串口配置
 # ============================================================
-PORT      = "COM9"
+PORT      = "COM4"
 BAUDRATE  = 115200
 SLAVE_ID  = 1
 
