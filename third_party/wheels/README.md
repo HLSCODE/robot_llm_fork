@@ -5,10 +5,14 @@
 
 ## 天机机械臂
 
-- Windows x86-64 / CPython 3.12：
-  `windows-x86_64/tj_robot_proj-0.1.0-cp312-cp312-win_amd64.whl`
-- Linux x86-64：尚未提供。获得 wheel 后应新增平台目录，并在
-  `pyproject.toml` 中按平台选择对应 artifact。
+- Windows x86-64：
+  `windows-x86_64/tj_robot_proj-0.2.0-py3-none-win_amd64.whl`
+- Linux x86-64：
+  `linux-x86_64/tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl`
+
+替换同版本 wheel 后，运行 `uv lock --refresh-package tj-robot-proj` 更新
+`uv.lock` 中两个平台的哈希，再用 `uv sync --frozen --link-mode=copy --extra hardware`
+验证安装。仅运行 `uv lock` 不会刷新同版本 wheel 的哈希。
 
 天机 SDK 为专有软件，更新 wheel 前需核对版本、目标 Python ABI、平台架构、
 内置 native library 与运动学配置文件，并重新运行 provider 契约测试和真实硬件验收。

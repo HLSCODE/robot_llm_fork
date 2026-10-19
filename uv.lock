@@ -2986,7 +2986,7 @@ dependencies = [
     { name = "transitions", marker = "sys_platform != 'darwin' and sys_platform != 'win32'" },
 ]
 wheels = [
-    { filename = "tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", hash = "sha256:df49bb56b94f3372fe216fa67c5a01b3109aea790ba2b968fe6942b209627eda" },
+    { filename = "tj_robot_proj-0.2.0-py3-none-linux_x86_64.whl", hash = "sha256:a6554141c6cec63f261d9a0858cbc98ceac3e69cc889c7111a33f9ba93666859" },
 ]
 
 [package.metadata]
@@ -3009,7 +3009,7 @@ dependencies = [
     { name = "transitions", marker = "sys_platform == 'win32'" },
 ]
 wheels = [
-    { filename = "tj_robot_proj-0.2.0-py3-none-win_amd64.whl", hash = "sha256:416bd99e6f0c1241b91818952404376a433557af8bd9cd7f6db514946e6c1438" },
+    { filename = "tj_robot_proj-0.2.0-py3-none-win_amd64.whl", hash = "sha256:64ff180b985233704aad6e3eb4051a5eba26ef9c751d73e11a1d467a89cb737d" },
 ]
 
 [package.metadata]
