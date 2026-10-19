@@ -76,6 +76,7 @@ class WorkbenchPage:
     title: str
     icon: IconName
     widget: QWidget
+    full_workspace: bool = False
 
 
 class _ThinLineSplitterHandle(QSplitterHandle):
@@ -166,7 +167,9 @@ class _ActivityBar(QFrame):
             button.setText(page.title)
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             button.setAccessibleName(page.title)
-            button.setAccessibleDescription(f"显示或收起{page.title}资源页")
+            button.setAccessibleDescription(
+                f"打开{page.title}工作区" if page.full_workspace else f"显示或收起{page.title}资源页"
+            )
             button.setToolTip(page.title)
             button.setCheckable(True)
             button.setMinimumSize(ACTIVITY_BUTTON_SIZE, ACTIVITY_BUTTON_SIZE)
@@ -695,7 +698,8 @@ class WorkbenchView(QWidget):
         self.side_stack.setMinimumWidth(SIDE_BAR_MINIMUM_WIDTH)
         self.side_stack.setMaximumWidth(SIDE_BAR_MAXIMUM_WIDTH)
         for page in side_pages:
-            self.side_stack.addWidget(page.widget)
+            if not page.full_workspace:
+                self.side_stack.addWidget(page.widget)
 
         self.side_splitter = _ThinLineSplitter(Qt.Orientation.Horizontal)
         self.side_splitter.setObjectName("workbenchSideSplitter")
@@ -707,7 +711,12 @@ class WorkbenchView(QWidget):
         self.side_splitter.setStretchFactor(1, 1)
         self.side_splitter.setSizes((SIDE_BAR_DEFAULT_WIDTH, 640))
         self.side_splitter.splitterMoved.connect(self._remember_side_width)
-        content_layout.addWidget(self.side_splitter)
+        self.workspace_stack = QStackedWidget()
+        self.workspace_stack.addWidget(self.side_splitter)
+        for page in side_pages:
+            if page.full_workspace:
+                self.workspace_stack.addWidget(page.widget)
+        content_layout.addWidget(self.workspace_stack)
         body_layout.addWidget(self.content_area, stretch=1)
         self._scrollbar_cards = (self.side_stack, editor)
         for card in self._scrollbar_cards:
@@ -743,6 +752,9 @@ class WorkbenchView(QWidget):
 
     def toggle_side_page(self, page_key: str) -> None:
         self._require_page(page_key, self._side_pages, "side")
+        if self._side_pages[page_key].full_workspace:
+            self._show_side_page(page_key)
+            return
         if self._active_side_page == page_key and self.side_stack.isVisible():
             self._last_side_width = max(
                 SIDE_BAR_MINIMUM_WIDTH,
@@ -822,6 +834,14 @@ class WorkbenchView(QWidget):
 
     def _show_side_page(self, page_key: str) -> None:
         page = self._side_pages[page_key]
+        if page.full_workspace:
+            self.workspace_stack.setCurrentWidget(page.widget)
+            self._selected_side_page = page_key
+            self._active_side_page = page_key
+            self.activity_bar.render_active_page(page_key)
+            self._schedule_layout_save()
+            return
+        self.workspace_stack.setCurrentWidget(self.side_splitter)
         self.side_stack.setCurrentWidget(page.widget)
         self.side_stack.show()
         available = max(1, sum(self.side_splitter.sizes()))
@@ -878,7 +898,7 @@ class WorkbenchView(QWidget):
             max(state.side_width, SIDE_BAR_MINIMUM_WIDTH),
             SIDE_BAR_MAXIMUM_WIDTH,
         )
-        if state.side_visible:
+        if state.side_visible or self._side_pages[state.side_page].full_workspace:
             self._show_side_page(state.side_page)
         else:
             self.side_stack.setCurrentWidget(self._side_pages[state.side_page].widget)

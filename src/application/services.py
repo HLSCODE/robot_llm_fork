@@ -53,6 +53,7 @@ from .teleoperation import TeleoperationService
 from .workflow_editing import WorkflowEditingSession
 from .workflow_compiler import WorkflowCompiler
 from .workflow_preflight import WorkflowPreflightService
+from .teaching import TeachingService
 
 if TYPE_CHECKING:
     from .data_collection import DataCollectionService
@@ -275,6 +276,7 @@ class ManualControlService:
     ) -> None:
         self._runtime = runtime
         self._resources = resources
+        self.teaching = TeachingService(runtime, resources)
 
     def set_gripper(
         self,

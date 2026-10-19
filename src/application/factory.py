@@ -209,6 +209,10 @@ def create_application_services(
         ),
     )
     safety.register_control_session(
+        "manual teaching",
+        manual_control.teaching.close,
+    )
+    safety.register_control_session(
         "data collection",
         data_collection.close,
     )
