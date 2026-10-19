@@ -142,7 +142,7 @@ def test_axis_labels_are_centered_between_equal_arrow_columns(application, width
     view.close()
 
 
-def test_busy_keeps_panel_enabled_but_rejects_repeat_clicks(application):
+def test_busy_disables_motion_and_save_but_keeps_stop_available(application):
     view = TeachingView()
     requests = []
     view.step_requested.connect(lambda *args: requests.append(args))
@@ -152,10 +152,18 @@ def test_busy_keeps_panel_enabled_but_rejects_repeat_clicks(application):
     view.set_session(active=True, ready=True, busy=True)
     assert view.motion_controls.isEnabled()
     assert view.mode.isEnabled()
-    assert view.axis_rows[0][2].isEnabled()
+    assert all(not button.isEnabled() for row in view.axis_rows for button in row[1:])
+    assert not view.save_button.isEnabled()
     assert view.stop_button.isEnabled()
     view.axis_rows[0][2].click()
     assert len(requests) == 1
+    view.render_state(SimulatedRobotSystem().states[ArmId.LEFT], joints_supported=True)
+    view.mode.setCurrentIndex(1)
+    assert all(not button.isEnabled() for row in view.axis_rows for button in row[1:])
+    assert not view.save_button.isEnabled()
+    view.set_session(active=True, ready=True, busy=False)
+    assert view.axis_rows[0][2].isEnabled()
+    assert view.save_button.isEnabled()
     view.set_session(active=True, ready=False, busy=True)
     assert not view.motion_controls.isEnabled()
     assert view.stop_button.isEnabled()

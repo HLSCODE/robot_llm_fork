@@ -26,6 +26,7 @@ class TeachingView(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._busy = False
         self.setProperty("workbenchCard", True)
         root = QHBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -191,13 +192,19 @@ class TeachingView(QWidget):
                 row[0].setText(names[index])
                 for button, sign in zip(row[1:], ("−", "+"), strict=True):
                     button.setAccessibleName(f"{names[index]} {sign}")
-                    button.setEnabled(not joint or self.joints_supported)
         self.distance.setEnabled(not joint)
+        self._update_command_availability()
+        self._update_axis_hints()
+
+    def _update_command_availability(self) -> None:
+        joint = bool(self.mode.currentData())
+        for _, minus, plus in self.axis_rows:
+            for button in (minus, plus):
+                button.setEnabled(not self._busy and (not joint or self.joints_supported))
         # Persisted joint actions currently have a seven-joint schema.
         self.save_button.setEnabled(
-            not joint or (self.joints_supported and self.joint_count == 7)
+            not self._busy and (not joint or (self.joints_supported and self.joint_count == 7))
         )
-        self._update_axis_hints()
 
     def _update_axis_hints(self) -> None:
         joint = bool(self.mode.currentData())
@@ -239,9 +246,8 @@ class TeachingView(QWidget):
         self._busy = busy
         self.arm.setEnabled(not active and not busy)
         self.enter_button.setEnabled(not active and not busy)
-        # A brief command must not grey out the entire panel or steal focus.
-        # Repeated commands are rejected here and by the controller/service.
         self.motion_controls.setEnabled(active and ready)
+        self._update_command_availability()
         self.stop_button.setEnabled(active)
 
     def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
