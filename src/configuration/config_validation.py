@@ -195,6 +195,11 @@ def validate_startup_configuration(
         "EXECUTION_ACTION_TIMEOUT_SECONDS",
     )
     _positive_value(
+        settings.devices.adp_command_interval_seconds,
+        issues,
+        "ADP_COMMAND_INTERVAL_SECONDS",
+    )
+    _positive_value(
         settings.execution.safety_stop_wait_timeout_seconds,
         issues,
         "SAFETY_STOP_WAIT_TIMEOUT_SECONDS",

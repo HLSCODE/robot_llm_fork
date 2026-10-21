@@ -15,6 +15,8 @@ adp_serial_port = "/dev/hand"
 adp_baudrate = 115200
 adp_timeout = 5
 adp_max_retries = 3
+# ASCII 命令完成交换后到下一条发送的最小间隔（秒），用于现场验证应答时序。
+adp_command_interval_seconds = 0.2
 # 知行夹爪共用一个串口：左站号 1，右站号 2，8N1。
 # 开合度 0=全开，100=全闭；优先读取每个站号的设备行程映射。
 zhixing_gripper_serial_port = "COM4"

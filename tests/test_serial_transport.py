@@ -5,6 +5,7 @@ import unittest
 from src.devices.transports import (
     SerialSettings,
     SerialTransport,
+    ReadUntilStrategy,
     TransportError,
     TransportErrorCategory,
 )
@@ -47,6 +48,25 @@ class _FakeSerial:
 
 
 class SerialTransportTests(unittest.TestCase):
+    def test_short_write_is_reported_before_attempting_to_read_a_reply(self):
+        class ShortWriteSerial(_FakeSerial):
+            def write(self, payload):
+                return len(payload) - 1
+
+            def read_until(self, terminator, size):
+                raise AssertionError("must not read after an incomplete write")
+
+        transport = SerialTransport(
+            "test-short-write", serial_factory=lambda **options: ShortWriteSerial(port="test"),
+        )
+        try:
+            with self.assertRaisesRegex(TransportError, "write incomplete") as raised:
+                transport.transact_with_strategy(ReadUntilStrategy(b">01p01F402DA"))
+            self.assertEqual(TransportErrorCategory.IO, raised.exception.category)
+            self.assertEqual("write", raised.exception.operation)
+        finally:
+            transport.close()
+
     def test_open_retry_is_bounded_and_close_is_idempotent(self) -> None:
         attempts = 0
         serial_port = _FakeSerial(port="COM9")

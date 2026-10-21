@@ -6,7 +6,9 @@ import pytest
 
 from src.devices.tools.pipette import driver
 from src.devices.tools.pipette.driver import ADP
-from src.devices.transports import CRCError, ProtocolError, TransportError, TransportErrorCategory
+from src.devices.transports import (
+    CRCError, ProtocolError, SerialTransport, TransportError, TransportErrorCategory,
+)
 from src.devices.transports.testing import FakeTransport
 
 
@@ -19,10 +21,14 @@ def motion_clock(monkeypatch):
     class Clock:
         elapsed = 0.0
 
+        def __init__(self):
+            self.sleeps = []
+
         def monotonic(self):
             return self.elapsed
 
         def sleep(self, seconds):
+            self.sleeps.append(seconds)
             self.elapsed += seconds
 
     clock = Clock()
@@ -36,7 +42,7 @@ def motion_clock(monkeypatch):
     ("dispense_all", b"p", 0),
 ])
 def test_liquid_motion_waits_for_target_and_never_repeats_command(
-    operation, function, value, monkeypatch,
+    operation, function, value, motion_clock,
 ):
     transport = FakeTransport((
         _frame(b">01" + function + b"01"),
@@ -44,16 +50,12 @@ def test_liquid_motion_waits_for_target_and_never_repeats_command(
         _frame(b">01d00"),
         _frame(b">01d01"),
     ))
-    sleeps = []
-    monkeypatch.setattr(driver, "time", SimpleNamespace(
-        monotonic=lambda: 0.0, sleep=sleeps.append,
-    ))
     pipette = ADP(transport)
 
     result = getattr(pipette, operation)(*(() if operation == "dispense_all" else (value,)))
 
     assert result is True
-    assert sleeps == [0.1, 0.1, 0.1]
+    assert motion_clock.elapsed == pytest.approx(0.6)
     assert [call.payload for call in transport.calls] == [
         pipette._create_command(function.decode("ascii"), value),
         b">01dB819", b">01dB819", b">01dB819",
@@ -111,10 +113,10 @@ def test_running_pump_times_out_without_replaying_motion(monkeypatch):
         _frame(b">01n01"), _frame(b">01d00"), _frame(b">01d00"),
     ))
     with pytest.raises(TransportError, match="completion timed out") as raised:
-        ADP(transport, motion_timeout_seconds=0.25).absorb(10)
+        ADP(transport, motion_timeout_seconds=0.55).absorb(10)
     assert raised.value.category is TransportErrorCategory.TIMEOUT
     assert raised.value.operation == "wait_for_completion"
-    assert elapsed[0] == pytest.approx(0.25)
+    assert elapsed[0] == pytest.approx(0.55)
     assert len(transport.calls) == 3
 
 
@@ -160,7 +162,7 @@ def test_completion_read_timeout_recovers_by_querying_status_only(
         pipette._create_command(function.decode("ascii"), 0 if operation == "dispense_all" else 500),
         b">01dB819", b">01dB819", b">01dB819",
     ]
-    assert motion_clock.elapsed == pytest.approx(5.3)
+    assert motion_clock.elapsed == pytest.approx(5.6)
     assert "retrying status query only" in caplog.text
 
 
@@ -179,7 +181,7 @@ def test_continuous_completion_read_timeouts_are_bounded_by_motion_deadline(moti
         ADP(transport, motion_timeout_seconds=10.0).absorb(500)
     assert raised.value.category is TransportErrorCategory.TIMEOUT
     assert raised.value.operation == "wait_for_completion"
-    assert motion_clock.elapsed == pytest.approx(10.2)
+    assert motion_clock.elapsed == pytest.approx(10.4)
     assert len(transport.calls) == 3
 
 
@@ -233,15 +235,90 @@ def test_first_completion_query_is_delayed_after_motion_ack(motion_clock):
     class TimedTransport(FakeTransport):
         def transact_with_strategy(self, strategy):
             if strategy.payload == b">01dB819":
-                assert motion_clock.elapsed == pytest.approx(0.1)
+                assert motion_clock.elapsed == pytest.approx(0.2)
             return super().transact_with_strategy(strategy)
 
     transport = TimedTransport((_frame(b">01n01"), _frame(b">01d01")))
     assert ADP(transport).absorb(500)
 
 
-@pytest.mark.parametrize("parameter", ["motion_timeout_seconds", "poll_interval_seconds"])
+@pytest.mark.parametrize("parameter", [
+    "motion_timeout_seconds", "poll_interval_seconds", "command_interval_seconds",
+])
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan")])
 def test_motion_wait_configuration_must_be_finite_and_positive(parameter, value):
     with pytest.raises(ValueError):
         ADP(FakeTransport(), **{parameter: value})
+
+
+@pytest.mark.parametrize("interval", [0.2, 0.5])
+def test_speed_setting_is_followed_by_command_gap_before_dispense(motion_clock, interval):
+    """Exercise the real transport and write/read strategy, not just fake replies."""
+    class BusySerial:
+        is_open = True
+
+        def __init__(self):
+            self.writes = []
+            self.last_speed_ack_at = None
+            self.reply = b""
+
+        def reset_input_buffer(self):
+            self.reply = b""
+
+        def reset_output_buffer(self):
+            pass
+
+        def write(self, payload):
+            self.writes.append((payload, motion_clock.elapsed))
+            if payload.startswith(b">01B"):
+                self.reply = _frame(b">01B")
+            elif payload.startswith(b">01p"):
+                # Model a controller which ignores commands sent during the
+                # setting transition, as a hypothesis for the field log.
+                if motion_clock.elapsed - self.last_speed_ack_at >= 0.15:
+                    self.reply = _frame(b">01p01")
+            elif payload.startswith(b">01d"):
+                self.reply = _frame(b">01d01")
+            return len(payload)
+
+        def flush(self):
+            pass
+
+        def read_until(self, terminator, size):
+            reply, self.reply = self.reply, b""
+            if self.writes[-1][0].startswith(b">01B"):
+                self.last_speed_ack_at = motion_clock.elapsed
+            return reply
+
+        def close(self):
+            self.is_open = False
+
+    serial = BusySerial()
+    transport = SerialTransport("test-adp", serial_factory=lambda **kwargs: serial)
+    pipette = ADP(transport, command_interval_seconds=interval)
+    assert pipette.set_dispense_speed(800)
+    assert pipette.dispense(500)
+    assert [payload for payload, _ in serial.writes] == [
+        b">01B0320C564", b">01p01F402DA", b">01dB819",
+    ]
+    assert [timestamp for _, timestamp in serial.writes] == pytest.approx([0.0, interval, interval * 2])
+    pipette.close()
+
+
+def test_elapsed_time_between_actions_is_not_delayed_again(motion_clock):
+    transport = FakeTransport((_frame(b">01B"), _frame(b">01p01"), _frame(b">01d01")))
+    pipette = ADP(transport)
+    assert pipette.set_dispense_speed(800)
+    motion_clock.elapsed += 1.0
+    assert pipette.dispense(500)
+    assert motion_clock.elapsed == pytest.approx(1.2)
+
+
+def test_speed_then_motion_gap_does_not_exceed_motion_deadline(motion_clock):
+    transport = FakeTransport((_frame(b">01B"),))
+    pipette = ADP(transport, motion_timeout_seconds=0.1)
+    assert pipette.set_dispense_speed(800)
+    with pytest.raises(TransportError, match="motion completion timed out"):
+        pipette.dispense(500)
+    assert len(transport.calls) == 1
+    assert motion_clock.elapsed == pytest.approx(0.1)

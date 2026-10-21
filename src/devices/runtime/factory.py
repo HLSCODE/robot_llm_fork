@@ -353,7 +353,8 @@ def _pipette_factory(settings: DeviceSettings) -> PipetteAdapter:
                     open_attempts=settings.adp_max_retries,
                     open_retry_delay_seconds=1.0,
                 )
-            )
+            ),
+            command_interval_seconds=settings.adp_command_interval_seconds,
         ),
     )
 

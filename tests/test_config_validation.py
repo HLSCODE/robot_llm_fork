@@ -62,6 +62,18 @@ def _options(**overrides) -> StartupOptions:
 
 
 class ConfigurationValidationTests(unittest.TestCase):
+    def test_invalid_adp_command_interval_is_rejected_before_device_open(self):
+        with TemporaryDirectory() as temporary_directory:
+            for value in (0, -0.1, float("inf"), float("nan")):
+                with self.subTest(value=value):
+                    report = validate_startup_configuration(
+                        _config(Path(temporary_directory), ADP_COMMAND_INTERVAL_SECONDS=value),
+                        _options(),
+                    )
+                    self.assertIn("ADP_COMMAND_INTERVAL_SECONDS", {
+                        issue.field for issue in report.errors
+                    })
+
     def test_valid_simulation_configuration_passes(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             report = validate_startup_configuration(

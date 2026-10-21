@@ -32,14 +32,19 @@ class ADP:
         *,
         motion_timeout_seconds: float = 60.0,
         poll_interval_seconds: float = 0.1,
+        command_interval_seconds: float = 0.2,
     ) -> None:
         if not math.isfinite(motion_timeout_seconds) or motion_timeout_seconds <= 0:
             raise ValueError("ADP motion timeout must be finite and positive")
         if not math.isfinite(poll_interval_seconds) or poll_interval_seconds <= 0:
             raise ValueError("ADP poll interval must be finite and positive")
+        if not math.isfinite(command_interval_seconds) or command_interval_seconds <= 0:
+            raise ValueError("ADP command interval must be finite and positive")
         self._transport = transport
         self._motion_timeout_seconds = motion_timeout_seconds
         self._poll_interval_seconds = poll_interval_seconds
+        self._command_interval_seconds = command_interval_seconds
+        self._last_exchange_finished: float | None = None
 
     @staticmethod
     def _cal_crc(payload: bytes) -> int:
@@ -82,9 +87,20 @@ class ADP:
         self,
         function_code: str,
         value: int | None = None,
+        *,
+        deadline: float | None = None,
     ) -> bytes:
         """Return reply data after validating framing, CRC, address and function."""
         payload = self._create_command(function_code, value)
+        if self._last_exchange_finished is not None:
+            delay = self._last_exchange_finished + self._command_interval_seconds - time.monotonic()
+            if delay > 0:
+                if deadline is not None:
+                    delay = min(delay, max(0.0, deadline - time.monotonic()))
+                logger.info("ADP command gap: command=%s, delay_seconds=%.3f", function_code, delay)
+                time.sleep(delay)
+        if deadline is not None:
+            self._check_motion_deadline(function_code, deadline)
         logger.info(
             "ADP ASCII request: command=%s, request_hex=%s",
             function_code,
@@ -109,6 +125,8 @@ class ADP:
                 exc,
             )
             raise
+        finally:
+            self._last_exchange_finished = time.monotonic()
         if not response:
             raise TransportError(
                 f"ADP command {function_code}: no reply received",
@@ -166,9 +184,9 @@ class ADP:
     def dispense_all(self) -> bool:
         return self._execute_liquid_motion("p", 0)
 
-    def query_pump_status(self) -> str:
+    def query_pump_status(self, *, deadline: float | None = None) -> str:
         """Read the two-character pump state using the supplied ADP protocol."""
-        data = self._exchange_ascii("d")
+        data = self._exchange_ascii("d", deadline=deadline)
         if len(data) != 2 or any(byte not in b"0123456789abcdefABCDEF" for byte in data):
             raise ProtocolError(f"ADP pump status must be two hexadecimal digits: {data!r}")
         return data.decode("ascii").upper()
@@ -180,7 +198,21 @@ class ADP:
         the same volume twice if an acknowledgement or completion query is lost.
         """
         deadline = time.monotonic() + self._motion_timeout_seconds
-        reply = self._exchange_ascii(function_code, volume_ul)
+        try:
+            reply = self._exchange_ascii(function_code, volume_ul, deadline=deadline)
+        except TransportError as exc:
+            if (
+                exc.category is TransportErrorCategory.TIMEOUT
+                and exc.operation in ("read", "read_until")
+            ):
+                raise TransportError(
+                    f"ADP command {function_code} acknowledgement timed out; "
+                    f"execution state is unknown; command was not resent: {exc}",
+                    category=exc.category,
+                    port=exc.port,
+                    operation="motion_acknowledgement",
+                ) from exc
+            raise
         if reply != b"01":
             code = reply.decode("ascii")
             reason = {
@@ -200,7 +232,7 @@ class ADP:
             time.sleep(min(self._poll_interval_seconds, max(0.0, deadline - time.monotonic())))
             self._check_motion_deadline(function_code, deadline)
             try:
-                status = self.query_pump_status()
+                status = self.query_pump_status(deadline=deadline)
             except TransportError as exc:
                 if (
                     exc.category is not TransportErrorCategory.TIMEOUT

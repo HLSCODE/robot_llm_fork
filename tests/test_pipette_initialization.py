@@ -187,7 +187,7 @@ def test_sequence_waits_for_pump_completion_before_starting_next_liquid_action(l
         with patch("src.devices.runtime.factory.SerialTransport", return_value=transport):
             handle = manager.submit(plan, origin="test")
             try:
-                assert waiting.wait(1), "pump completion query was never reached"
+                assert waiting.wait(2), "pump completion query was never reached"
                 assert handle.snapshot().state is ExecutionState.RUNNING
                 assert resources.owner_of(PIPETTE) is not None
                 assert [call.payload for call in transport.calls] == [
