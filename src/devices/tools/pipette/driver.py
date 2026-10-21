@@ -85,13 +85,30 @@ class ADP:
     ) -> bytes:
         """Return reply data after validating framing, CRC, address and function."""
         payload = self._create_command(function_code, value)
-        response = self._transport.transact_with_strategy(
-            ReadUntilStrategy(
-                payload,
-                terminator=b"\r\n",
-                max_size=20,
-            )
+        logger.info(
+            "ADP ASCII request: command=%s, request_hex=%s",
+            function_code,
+            payload.hex(),
         )
+        try:
+            response = self._transport.transact_with_strategy(
+                ReadUntilStrategy(
+                    payload,
+                    terminator=b"\r\n",
+                    max_size=20,
+                )
+            )
+        except TransportError as exc:
+            logger.warning(
+                "ADP ASCII exchange failed: command=%s, request_hex=%s, "
+                "category=%s, operation=%s, error=%s",
+                function_code,
+                payload.hex(),
+                exc.category.value,
+                exc.operation,
+                exc,
+            )
+            raise
         if not response:
             raise TransportError(
                 f"ADP command {function_code}: no reply received",
@@ -178,7 +195,26 @@ class ADP:
         logger.info("ADP command %s accepted; waiting for pump completion", function_code)
         while True:
             self._check_motion_deadline(function_code, deadline)
-            status = self.query_pump_status()
+            # Leave a gap after the motion acknowledgement as well as between
+            # queries; a controller may still be transitioning into motion.
+            time.sleep(min(self._poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+            self._check_motion_deadline(function_code, deadline)
+            try:
+                status = self.query_pump_status()
+            except TransportError as exc:
+                if (
+                    exc.category is not TransportErrorCategory.TIMEOUT
+                    or exc.operation not in ("read", "read_until")
+                ):
+                    raise
+                self._check_motion_deadline(function_code, deadline)
+                logger.warning(
+                    "ADP command %s completion query timed out; retrying status query only; "
+                    "remaining_seconds=%.3f",
+                    function_code,
+                    max(0.0, deadline - time.monotonic()),
+                )
+                continue
             self._check_motion_deadline(function_code, deadline)
             if status == "01":
                 logger.info("ADP command %s completed: pump reached target", function_code)
@@ -197,7 +233,6 @@ class ADP:
                     f"ADP command {function_code} failed: {reason} (status={status})",
                     raw_error_code=status,
                 )
-            time.sleep(min(self._poll_interval_seconds, max(0.0, deadline - time.monotonic())))
 
     def _check_motion_deadline(self, function_code: str, deadline: float) -> None:
         if time.monotonic() >= deadline:

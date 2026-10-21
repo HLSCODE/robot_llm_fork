@@ -374,7 +374,7 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `body_serial_port` / `body_baudrate` / `body_slave_id` / `body_timeout` | `/dev/ttyUSB1` / `115200` / `1` / `1` 秒 | 身体升降轴 Modbus 串口、波特率、从站地址与响应超时。 |
 | `body_di_pan` | `false` | 是否使用身体轴 DI 输入判断到位。 |
 | `kuaihuanshou_*` | `/dev/ttyUSB2`、`115200`、`3` 秒 | 快换手串口、波特率和超时。 |
-| `adp_*` / `adp_max_retries` | `/dev/ttyUSB2`、`115200`、`5` 秒、`3` | ADP 移液设备连接与失败重试参数。 |
+| `adp_*` / `adp_max_retries` | `/dev/ttyUSB2`、`115200`、`5` 秒、`3` | ADP 连接参数；`adp_timeout` 是单次串口读写超时，`adp_max_retries` 是打开串口的尝试次数。动作完成等待及状态查询重试见日志文档的移液枪协议诊断。 |
 | `relay_*` | `/dev/ttyUSB0`、`38400`、`1` 秒 | 继电器串口、波特率和超时。 |
 | `pwm_neck_serial_port` / `pwm_neck_baudrate` | `/dev/neck` / `9600` | 颈部 PWM 控制板连接参数。 |
 | `pwm_neck_[h|v]_servo_id` | `0` / `1` | 水平、垂直舵机通道 ID。 |

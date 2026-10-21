@@ -139,7 +139,8 @@ def test_reply_02_fails_sequence_without_retry_or_starting_next_action():
     runtime.shutdown(PIPETTE)
 
 
-def test_sequence_waits_for_pump_completion_before_starting_next_liquid_action():
+@pytest.mark.parametrize("lose_first_query", [False, True])
+def test_sequence_waits_for_pump_completion_before_starting_next_liquid_action(lose_first_query):
     waiting = Event()
     finish_motion = Event()
 
@@ -150,17 +151,19 @@ def test_sequence_waits_for_pump_completion_before_starting_next_liquid_action()
         queries = 0
 
         def transact_with_strategy(self, strategy):
-            response = super().transact_with_strategy(strategy)
             if strategy.payload == b">01dB819":
                 self.queries += 1
-                if self.queries == 2:
+                if self.queries == (3 if lose_first_query else 2):
                     waiting.set()
                     assert finish_motion.wait(2), "test did not release pump completion"
-            return response
+            return super().transact_with_strategy(strategy)
 
+    timeout_replies = (TransportError(
+        "serial timeout", category=TransportErrorCategory.TIMEOUT, operation="read_until",
+    ),) if lose_first_query else ()
     transport = GatedTransport((
         b">01G6158\r\n",
-        frame(b">01n01"), frame(b">01d00"), frame(b">01d01"),
+        frame(b">01n01"), *timeout_replies, frame(b">01d00"), frame(b">01d01"),
         frame(b">01p01"), frame(b">01d01"),
     ))
     runtime = _runtime()
@@ -189,13 +192,12 @@ def test_sequence_waits_for_pump_completion_before_starting_next_liquid_action()
                 assert resources.owner_of(PIPETTE) is not None
                 assert [call.payload for call in transport.calls] == [
                     b">01G6158", ADP(transport)._create_command("n", 10),
-                    b">01dB819", b">01dB819",
-                ]
+                ] + [b">01dB819"] * (2 if lose_first_query else 1)
             finally:
                 finish_motion.set()
                 result = handle.wait(2)
         assert result.state is ExecutionState.SUCCEEDED
-        assert [call.payload for call in transport.calls][4:] == [
+        assert [call.payload for call in transport.calls][5 if lose_first_query else 4:] == [
             ADP(transport)._create_command("p", 10), b">01dB819",
         ]
         assert resources.owner_of(PIPETTE) is None
