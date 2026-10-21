@@ -720,6 +720,38 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         entries = self.services.workflow_editing.snapshot().document.to_entries()
         self.assertEqual("ai-signal-item", entries[0].definition.id)
 
+    def test_execution_from_selection_confirms_and_only_runs_suffix(self) -> None:
+        from src.domain.models import SequenceItemStatus
+
+        items = [SequenceItem(f"start-{index}", ActionDefinition(
+            id=f"wait-{index}", name=f"Wait {index}", type=ActionType.WAIT,
+            parameters={"wait_seconds": 10 if index == 0 else .1},
+        )) for index in range(3)]
+        self.services.composition.replace_sequence(items, origin="start-test")
+        before = self.services.workflow_editing.snapshot().document.to_dict()
+        canvas = self.window.workflow_view.sequence_list
+        command = self.window._menu_actions["execution.start_selected"]
+        self.assertFalse(command.isEnabled())
+        canvas.set_current_entry_row(1)
+        self.assertTrue(command.isEnabled())
+        with patch.object(self.window._notifications, "confirm", return_value=False) as confirm:
+            command.trigger()
+        self.assertIn("Wait 1", confirm.call_args.args[0])
+        self.assertIn("跳过前面 1", confirm.call_args.args[0])
+        self.assertFalse(self.services.execution.snapshot().active)
+        self.assertFalse(canvas.execution_mapping_active)
+        with patch.object(self.window._notifications, "confirm", return_value=True):
+            canvas.request_execution_from_selection()
+        self.assertFalse(command.isEnabled())
+        self.assertTrue(_wait_until(lambda:
+            self.services.execution.snapshot().state is ExecutionState.SUCCEEDED))
+        self.assertTrue(_wait_until(lambda: not canvas.execution_mapping_active))
+        rendered = canvas.get_entries()
+        self.assertEqual(SequenceItemStatus.PENDING, rendered[0].status)
+        self.assertTrue(canvas._node_items[items[0].uuid].execution_skipped)
+        self.assertTrue(all(entry.status is SequenceItemStatus.SUCCESS for entry in rendered[1:]))
+        self.assertEqual(before, self.services.workflow_editing.snapshot().document.to_dict())
+
     def test_close_requests_execution_cancel_without_blocking_visible_gui(self) -> None:
         item = SequenceItem.from_definition(
             ActionDefinition(

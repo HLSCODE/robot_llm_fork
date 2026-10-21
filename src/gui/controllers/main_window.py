@@ -31,6 +31,7 @@ from ..about import show_about_dialog
 from ..branding import APPLICATION_NAME
 from ...application import (
     ApplicationServices,
+    CompiledWorkflow,
     CompositionChangeType,
     CompositionEvent,
     CompositionRevisionConflict,
@@ -505,6 +506,10 @@ class MainWindow(RoundedMainWindow):
         workflow.save_requested.connect(self.save_task)
         workflow.clear_requested.connect(self.clear_sequence)
         workflow.start_requested.connect(self.start_execution)
+        workflow.start_from_selected_requested.connect(self.start_execution_from_selection)
+        workflow.sequence_list.execution_start_available_changed.connect(
+            lambda _available: self._sync_start_from_selection_action()
+        )
         workflow.pause_requested.connect(self.toggle_pause)
         workflow.stop_requested.connect(self.stop_execution)
         workflow.safety_stop_requested.connect(self.request_safety_stop)
@@ -650,6 +655,7 @@ class MainWindow(RoundedMainWindow):
         execution_menu = menubar.addMenu("执行")
         for command_id, label, callback in (
             ("execution.start", "开始执行", self.start_execution),
+            ("execution.start_selected", "从选中节点执行…", self.start_execution_from_selection),
             ("execution.pause", "暂停/恢复", self.toggle_pause),
             ("execution.stop", "停止任务", self.stop_execution),
             ("execution.quick_stop", "快速停止", lambda: self.request_safety_stop(StopMode.QUICK)),
@@ -1601,6 +1607,56 @@ class MainWindow(RoundedMainWindow):
             label="动作编排序列",
         )
 
+    def start_execution_from_selection(self) -> None:
+        canvas = self.workflow_view.sequence_list
+        node_id = canvas.selected_execution_start_node_id()
+        if node_id is None:
+            self._notifications.warning(
+                "请在当前任务根画布单选一个顶层节点；循环、子流程和并行分支内部暂不支持作为起点",
+                modal=False,
+            )
+            return
+        entries = self._services.workflow_editing.snapshot().document.to_entries()
+        self._start_sequence_execution(
+            entries, display_list=canvas, label="选定节点及后续流程", start_node_id=node_id,
+        )
+
+    def _sync_start_from_selection_action(self) -> None:
+        action = self._menu_actions.get("execution.start_selected")
+        if action is not None:
+            action.setEnabled(
+                not self._execution_view_model.snapshot().active
+                and self.workflow_view.sequence_list.selected_execution_start_node_id() is not None
+            )
+
+    def _confirm_execution_start(self, compiled: CompiledWorkflow) -> bool:
+        entry = compiled.entries[0]
+        if isinstance(entry, SequenceItem):
+            name = entry.definition.name
+        elif isinstance(entry, LoopBlock):
+            name = f"循环（{entry.repeat_count} 次）"
+        elif isinstance(entry, ParallelBlock):
+            name = "并行块（全部分支）"
+        else:
+            name = entry.name
+        confirmed = self._notifications.confirm(
+            f"起点：{name}\n"
+            f"执行范围：起点及后续 {len(compiled.entries) - 1} 个顶层节点"
+            f"，共 {len(compiled.steps)} 个动作步骤。\n"
+            f"跳过前面 {len(compiled.skipped_entries)} 个顶层节点。"
+            "循环从第 1 轮开始，子流程和并行块完整执行。\n\n"
+            "这是一次新的执行，不恢复前置动作或上次运行结果。"
+            "请确认机械臂位置、工具和物料状态已满足起点要求。",
+            title="从选中节点执行",
+        )
+        if confirmed:
+            self._notifications.info(
+                f"指定节点执行：起点={name}（{compiled.start_node_id}），"
+                f"跳过 {len(compiled.skipped_entries)} 个顶层节点，"
+                f"执行 {len(compiled.steps)} 个动作步骤"
+            )
+        return confirmed
+
     def execute_wake_welcome_workflow(self, workflow_name: str) -> None:
         """Execute the configured wake workflow without replacing the editor document."""
         if self._execution_view_model.snapshot().active:
@@ -1628,6 +1684,8 @@ class MainWindow(RoundedMainWindow):
         sequence: Sequence[SequenceEntry],
         display_list: WorkflowCanvasWidget | None = None,
         label: str = "序列",
+        *,
+        start_node_id: str | None = None,
     ) -> None:
         if self._execution_view_model.snapshot().active:
             self._notifications.warning("当前已有序列正在执行")
@@ -1643,8 +1701,8 @@ class MainWindow(RoundedMainWindow):
                     entries=sequence,
                     robot_profile_id=state.document.robot_profile_id,
                 )
-                compiled = self._services.workflow_compiler.compile(document)
-            except WorkflowCompilationError as exc:
+                compiled = self._services.workflow_compiler.compile(document, start_node_id=start_node_id)
+            except (WorkflowCompilationError, ValueError) as exc:
                 self._notifications.warning(
                     f"工作流校验失败：{exc}",
                     modal=False,
@@ -1657,6 +1715,8 @@ class MainWindow(RoundedMainWindow):
                     + "\n".join(issue.message for issue in preflight.issues),
                     modal=False,
                 )
+                return
+            if start_node_id is not None and not self._confirm_execution_start(compiled):
                 return
             display_list.begin_execution(compiled)
             plan = compiled.plan
@@ -1738,6 +1798,7 @@ class MainWindow(RoundedMainWindow):
             state.can_pause or state.can_resume,
             state.can_cancel,
         )
+        self._sync_start_from_selection_action()
 
     def on_step_started(self, index: int, item: SequenceItem) -> None:
         display_list = self._execution_display_list

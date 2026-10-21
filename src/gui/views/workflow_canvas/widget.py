@@ -89,6 +89,8 @@ class WorkflowCanvasWidget(QWidget):
     wrap_selection_requested = Signal()
     can_undo_changed = Signal(bool)
     can_redo_changed = Signal(bool)
+    start_from_selected_requested = Signal()
+    execution_start_available_changed = Signal(bool)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -106,6 +108,7 @@ class WorkflowCanvasWidget(QWidget):
         self._pending_loop_child_drop: tuple[str, str, str, int] | None = None
         self._current_item_uuid = ""
         self._compiled: CompiledWorkflow | None = None
+        self._skipped_node_ids: set[str] = set()
         self._parallel_branch_states: dict[tuple[str, str], str] = {}
         self._editing_enabled = True
         self._layout_center_x = LOOP_NODE_WIDTH / 2.0
@@ -185,6 +188,7 @@ class WorkflowCanvasWidget(QWidget):
         self._entries = self._root_entries
         self.root_scope_button.setVisible(False)
         self._compiled = None
+        self._skipped_node_ids.clear()
         self._parallel_branch_states.clear()
         if clear_history:
             self._undo_stack.clear()
@@ -634,6 +638,20 @@ class WorkflowCanvasWidget(QWidget):
         }
         return [index for index, entry in enumerate(self._entries) if entry.uuid in selected_ids]
 
+    def selected_execution_start_node_id(self) -> str | None:
+        """Only an exact, single root-node selection can start a new run."""
+        if not self._editing_enabled or self._scope_path:
+            return None
+        rows = self.selected_entry_rows()
+        if len(rows) != 1:
+            return None
+        entry = self._entries[rows[0]]
+        return entry.uuid if self._current_item_uuid == entry.uuid else None
+
+    def request_execution_from_selection(self) -> None:
+        if self.selected_execution_start_node_id() is not None:
+            self.start_from_selected_requested.emit()
+
     def set_current_entry_row(self, index: int) -> None:
         if not 0 <= index < self.entry_count():
             return
@@ -666,7 +684,8 @@ class WorkflowCanvasWidget(QWidget):
         self._compiled = compiled
         self._parallel_branch_states.clear()
         self._editing_enabled = False
-        self._root_entries = _clone_entries(compiled.entries)
+        self._root_entries = _clone_entries((*compiled.skipped_entries, *compiled.entries))
+        self._skipped_node_ids = {entry.uuid for entry in compiled.skipped_entries}
         self._scope_path = ()
         self._entries = self._root_entries
         self.root_scope_button.setVisible(False)
@@ -691,12 +710,11 @@ class WorkflowCanvasWidget(QWidget):
             return
         updated = list(_clone_entries(self._entries))
         for entry in updated:
-            if entry.uuid != node_id:
-                continue
             rendered_item = _find_sequence_item(entry, item.uuid)
             if rendered_item is not None:
                 rendered_item.status = item.status
-            break
+                node_id = entry.uuid
+                break
         self._root_entries = tuple(updated)
         self._entries = self._root_entries
         self._rebuild_scene(selected_node_ids=(node_id,))
@@ -795,6 +813,7 @@ class WorkflowCanvasWidget(QWidget):
             self.root_scope_button.setVisible(False)
         self._entries = _scope_entries(self._root_entries, self._scope_path)
         self._compiled = None
+        self._skipped_node_ids.clear()
         self._rebuild_scene(selected_node_ids=selected_node_ids)
         if publish:
             self.sequence_changed.emit()
@@ -837,6 +856,7 @@ class WorkflowCanvasWidget(QWidget):
                 entry.uuid,
                 _clone_canvas_entry(entry),
                 editing_enabled=self._editing_enabled,
+                execution_skipped=entry.uuid in self._skipped_node_ids,
                 parallel_branch_states={
                     branch_id: state
                     for (parallel_id, branch_id), state in self._parallel_branch_states.items()
@@ -1382,6 +1402,9 @@ class WorkflowCanvasWidget(QWidget):
                 pointed_item.setSelected(True)
             local_position = pointed_item.mapFromScene(self.view.mapToScene(view_position))
             self._current_item_uuid = pointed_item.item_uuid_at(local_position)
+            self.execution_start_available_changed.emit(
+                self.selected_execution_start_node_id() is not None
+            )
         menu = self._create_context_menu()
         if menu is None:
             return
@@ -1392,6 +1415,12 @@ class WorkflowCanvasWidget(QWidget):
         if not selected_rows:
             return None
         menu = QMenu(self.view)
+        start_action = QAction("从此节点执行", menu)
+        menu.addAction(start_action)
+        start_action.setEnabled(self.selected_execution_start_node_id() is not None)
+        start_action.setToolTip("仅支持单个顶层节点；内部节点请先选择外层循环、子流程或并行块")
+        start_action.triggered.connect(self.request_execution_from_selection)
+        menu.addSeparator()
         if len(selected_rows) == 1:
             entry = self._entries[selected_rows[0]]
             if self.current_sequence_item() is not None:
@@ -1496,10 +1525,13 @@ class WorkflowCanvasWidget(QWidget):
                 (item for item in selected if isinstance(item, WorkflowNodeItem)),
                 None,
             )
-            if node is not None and self.current_entry() is None:
+            if node is not None and not _entry_contains_uuid(node.entry, self._current_item_uuid):
                 self._current_item_uuid = node.entry.uuid
         else:
             self._current_item_uuid = ""
+        self.execution_start_available_changed.emit(
+            self.selected_execution_start_node_id() is not None
+        )
 
     def _current_parallel_child(self) -> tuple[str, str, str] | None:
         for entry in self._entries:

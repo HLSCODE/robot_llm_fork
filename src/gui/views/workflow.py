@@ -246,6 +246,7 @@ class WorkflowEditorView(QWidget):
     save_requested = Signal()
     clear_requested = Signal()
     start_requested = Signal()
+    start_from_selected_requested = Signal()
     pause_requested = Signal()
     stop_requested = Signal()
     safety_stop_requested = Signal(object)
@@ -273,6 +274,7 @@ class WorkflowEditorView(QWidget):
         layout.addWidget(self.control_panel)
         layout.addWidget(self.sequence_list, stretch=1)
         self.sequence_list.edit_requested.connect(self.edit_requested)
+        self.sequence_list.start_from_selected_requested.connect(self.start_from_selected_requested)
         self.sequence_list.insert_action_requested.connect(
             self.insert_action_at_requested.emit
         )

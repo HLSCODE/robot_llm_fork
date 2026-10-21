@@ -171,12 +171,14 @@ class WorkflowNodeItem(QGraphicsObject):
         entry: SequenceEntry,
         *,
         editing_enabled: bool = True,
+        execution_skipped: bool = False,
         parallel_branch_states: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__()
         self.node_id = node_id
         self.entry = entry
         self._editing_enabled = editing_enabled
+        self.execution_skipped = execution_skipped
         self._parallel_branch_states = dict(parallel_branch_states or {})
         self.setFlag(self.GraphicsItemFlag.ItemIsSelectable, True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
@@ -186,7 +188,7 @@ class WorkflowNodeItem(QGraphicsObject):
         # Never query global mouse coordinates during paint: Qt's high-DPI
         # mapping can dereference a missing QScreen during window transitions.
         self._is_hovered = False
-        self.setToolTip(self._tooltip())
+        self.setToolTip(("本次执行已跳过\n" if execution_skipped else "") + self._tooltip())
         self._pressed_loop_insert_index: int | None = None
         self._pressed_parallel_insert: tuple[str, int] | None = None
         self._press_scene_y: float | None = None
@@ -663,7 +665,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawText(
             QRectF(46.0, 29.0, NODE_WIDTH - 58.0, 21.0),
             Qt.AlignmentFlag.AlignVCenter,
-            f"{len(subworkflow.items)} 个节点",
+            "已跳过" if self.execution_skipped else f"{len(subworkflow.items)} 个节点",
         )
 
     def _paint_action_card(
@@ -708,7 +710,7 @@ class WorkflowNodeItem(QGraphicsObject):
                 int(action_name_rect.width()),
             ),
         )
-        status_color = STATUS_COLORS[item.status]
+        status_color = STATUS_COLORS[SequenceItemStatus.PENDING if self.execution_skipped else item.status]
         painter.setBrush(status_color)
         painter.setPen(Qt.PenStyle.NoPen)
         status_rect = QRectF(
@@ -726,7 +728,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawText(
             status_rect,
             Qt.AlignmentFlag.AlignCenter,
-            STATUS_LABELS[item.status],
+            "已跳过" if self.execution_skipped else STATUS_LABELS[item.status],
         )
 
     def _paint_loop(
@@ -791,7 +793,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawText(
             QRectF(card_left + 48.0, 31.0, NODE_WIDTH - 64.0, 22.0),
             Qt.AlignmentFlag.AlignVCenter,
-            f"{loop.repeat_count} 次 · {len(loop.items)} 个节点{progress}",
+            "已跳过" if self.execution_skipped else f"{loop.repeat_count} 次 · {len(loop.items)} 个节点{progress}",
         )
 
         body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
@@ -968,7 +970,7 @@ class WorkflowNodeItem(QGraphicsObject):
         painter.drawText(
             QRectF(46.0, 36.0, self.node_width - 64.0, 24.0),
             Qt.AlignmentFlag.AlignVCenter,
-            f"{len(parallel.branches)} 个分支 · 全部分支完成后汇合",
+            "已跳过" if self.execution_skipped else f"{len(parallel.branches)} 个分支 · 全部分支完成后汇合",
         )
 
         branch_top = PARALLEL_HEADER_HEIGHT + PARALLEL_SECTION_GAP

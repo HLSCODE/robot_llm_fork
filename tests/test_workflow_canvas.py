@@ -105,6 +105,53 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.canvas.show()
         QApplication.processEvents()
 
+    def test_execution_start_requires_exact_single_root_selection(self) -> None:
+        loop = LoopBlock("loop", [_item("inside")], 2)
+        subworkflow = SubworkflowBlock("sub", "Sub", [_item("child")])
+        self.canvas.render_entries([_item("first"), loop, subworkflow])
+        requests = []
+        self.canvas.start_from_selected_requested.connect(lambda: requests.append(True))
+        self.canvas.set_current_entry_row(1)
+        self.assertEqual("loop", self.canvas.selected_execution_start_node_id())
+        self.canvas._on_node_focused("loop", "inside", False)
+        self.assertIsNone(self.canvas.selected_execution_start_node_id())
+        menu = self.canvas._create_context_menu()
+        self.assertIsNotNone(menu)
+        self.assertFalse(menu.actions()[0].isEnabled())
+        self.canvas.set_current_entry_row(0)
+        menu = self.canvas._create_context_menu()
+        menu.actions()[0].trigger()
+        self.assertEqual([True], requests)
+        self.canvas.set_selected_entry_rows([0, 1])
+        self.assertIsNone(self.canvas.selected_execution_start_node_id())
+        self.canvas.enter_subworkflow("sub")
+        self.canvas.set_current_entry_row(0)
+        self.assertIsNone(self.canvas.selected_execution_start_node_id())
+
+    def test_partial_execution_keeps_skipped_nodes_and_subworkflow_progress(self) -> None:
+        entries = [_item("skip"), SubworkflowBlock("sub", "Sub", [_item("inside")]), _item("last")]
+        document = WorkflowDocument.from_entries(workflow_id="partial", name="Partial", revision=0, entries=entries)
+        compiler = WorkflowCompiler()
+        compiled = compiler.compile(document, start_node_id="sub")
+        self.canvas.render_entries(entries)
+        self.canvas.begin_execution(compiled)
+        self.assertEqual([entry.uuid for entry in entries], [entry.uuid for entry in self.canvas.get_entries()])
+        self.assertTrue(self.canvas._node_items["skip"].execution_skipped)
+        self.assertIsNone(self.canvas.selected_execution_start_node_id())
+        running = _item("inside")
+        running.status = SequenceItemStatus.RUNNING
+        self.canvas.update_execution_step(0, running)
+        self.assertTrue(self.canvas._node_items["sub"].execution_pulse_active)
+        running.status = SequenceItemStatus.SUCCESS
+        self.canvas.update_execution_step(0, running)
+        self.canvas.finish_execution()
+        self.assertTrue(self.canvas._node_items["skip"].execution_skipped)
+        self.assertEqual(SequenceItemStatus.SUCCESS, self.canvas.get_entries()[1].items[0].status)
+        self.assertNotIn("已跳过", str(document.to_dict()))
+        self.canvas.begin_execution(compiler.compile(document))
+        self.assertFalse(self.canvas._node_items["skip"].execution_skipped)
+        self.canvas.finish_execution()
+
     def tearDown(self) -> None:
         self.canvas.close()
         self.canvas.deleteLater()

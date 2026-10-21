@@ -50,6 +50,7 @@ DEFAULT_SHORTCUTS: tuple[ShortcutDefinition, ...] = (
     ShortcutDefinition("view.reset_layout", "恢复默认布局", "Ctrl+Alt+R"),
     ShortcutDefinition("view.shortcuts", "快捷键设置", "Ctrl+Alt+K"),
     ShortcutDefinition("execution.start", "开始执行", "Ctrl+Return"),
+    ShortcutDefinition("execution.start_selected", "从选中节点执行", "Ctrl+Shift+Return"),
     ShortcutDefinition("execution.pause", "暂停或恢复", "Ctrl+Space"),
     ShortcutDefinition("execution.stop", "停止任务", "Ctrl+Shift+X"),
     ShortcutDefinition("execution.quick_stop", "快速停止", "Ctrl+Alt+X"),

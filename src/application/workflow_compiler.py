@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..domain.action_schema import validate_action_parameters
 from ..domain.execution_plan import (
@@ -36,6 +36,7 @@ from ..domain.workflow import (
     WorkflowSubworkflowNode,
 )
 from .workflow_validation import WorkflowValidationResult, WorkflowValidator
+from .workflow_start_dependencies import validate_start_dependencies
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +74,8 @@ class CompiledWorkflow:
     steps: tuple[CompiledStep, ...]
     loops: tuple[LoopNodeMapping, ...]
     parallels: tuple[ParallelNodeMapping, ...]
+    skipped_entries: tuple[SequenceEntry, ...] = ()
+    start_node_id: str = ""
 
     def node_id_for_step(self, runtime_index: int) -> str | None:
         if isinstance(runtime_index, bool) or not isinstance(runtime_index, int):
@@ -118,12 +121,35 @@ class WorkflowCompiler:
             expected_robot_profile_id=expected_robot_profile_id
         )
 
-    def compile(self, document: WorkflowDocument) -> CompiledWorkflow:
+    def compile(
+        self, document: WorkflowDocument, *, start_node_id: str | None = None,
+    ) -> CompiledWorkflow:
+        """Compile a fresh run, optionally starting at an exact root node.
+
+        The source document is never changed. Container nodes remain intact;
+        starting within a loop, subworkflow or parallel branch is unsupported.
+        """
+        skipped_entries: tuple[SequenceEntry, ...] = ()
+        if start_node_id is not None:
+            matches = [
+                index for index, node in enumerate(document.root.children)
+                if node.node_id == start_node_id
+            ]
+            if len(matches) != 1:
+                raise ValueError("执行起点必须是当前流程中唯一的顶层节点")
+            index = matches[0]
+            skipped_entries = document.to_entries()[:index]
+            document = replace(
+                document,
+                root=WorkflowSequence(document.root.children[index:]),
+            )
         validation = self._validator.validate(document)
         if not validation.valid:
             raise WorkflowCompilationError(validation)
         plan_root, entries = self._compile_sequence(document.root, "root")
         plan = ExecutionPlan(plan_root)
+        if start_node_id is not None:
+            validate_start_dependencies(plan)
         steps = tuple(
             CompiledStep(
                 identity.runtime_index,
@@ -149,6 +175,8 @@ class WorkflowCompiler:
             steps=steps,
             loops=tuple(loops),
             parallels=tuple(parallels),
+            skipped_entries=skipped_entries,
+            start_node_id=start_node_id or "",
         )
 
     def _compile_sequence(
