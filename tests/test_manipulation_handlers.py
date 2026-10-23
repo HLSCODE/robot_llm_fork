@@ -354,7 +354,7 @@ class GripperActionHandlerTests(unittest.TestCase):
 
 
 class PipetteActionHandlerTests(unittest.TestCase):
-    def test_observed_dispense_reply_02_does_not_block_action(self):
+    def test_dispense_reply_02_fails_action_without_retry(self):
         transport = FakeTransport((
             bytes.fromhex("3e303142363239380d0a"),
             bytes.fromhex("3e3031703032333344450d0a"),
@@ -369,11 +369,11 @@ class PipetteActionHandlerTests(unittest.TestCase):
             context,
         )
 
-        self.assertTrue(result.successful)
-        self.assertEqual("", result.error_category)
-        self.assertEqual("", result.raw_error_code)
+        self.assertFalse(result.successful)
+        self.assertEqual("protocol", result.error_category)
+        self.assertEqual("02", result.raw_error_code)
         self.assertEqual(2, len(transport.calls))
-        self.assertEqual("info", logs[-1][1])
+        self.assertEqual("error", logs[-1][1])
 
     def test_pipette_normalizes_speed_volume_and_false_string(self):
         pipette = _Pipette()

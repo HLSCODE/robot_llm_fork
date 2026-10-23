@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import math
+import time
 
 from ...transports import (
     FixedLengthStrategy,
@@ -24,8 +26,25 @@ _EJECT_TIP_COMMAND = bytes(
 
 
 class ADP:
-    def __init__(self, transport: Transport) -> None:
+    def __init__(
+        self,
+        transport: Transport,
+        *,
+        motion_timeout_seconds: float = 60.0,
+        poll_interval_seconds: float = 0.1,
+        command_interval_seconds: float = 0.2,
+    ) -> None:
+        if not math.isfinite(motion_timeout_seconds) or motion_timeout_seconds <= 0:
+            raise ValueError("ADP motion timeout must be finite and positive")
+        if not math.isfinite(poll_interval_seconds) or poll_interval_seconds <= 0:
+            raise ValueError("ADP poll interval must be finite and positive")
+        if not math.isfinite(command_interval_seconds) or command_interval_seconds <= 0:
+            raise ValueError("ADP command interval must be finite and positive")
         self._transport = transport
+        self._motion_timeout_seconds = motion_timeout_seconds
+        self._poll_interval_seconds = poll_interval_seconds
+        self._command_interval_seconds = command_interval_seconds
+        self._last_exchange_finished: float | None = None
 
     @staticmethod
     def _cal_crc(payload: bytes) -> int:
@@ -61,15 +80,53 @@ class ADP:
         function_code: str,
         value: int | None = None,
     ) -> bool:
-        """Validate the serial reply without interpreting undocumented data fields."""
+        self._exchange_ascii(function_code, value)
+        return True
+
+    def _exchange_ascii(
+        self,
+        function_code: str,
+        value: int | None = None,
+        *,
+        deadline: float | None = None,
+    ) -> bytes:
+        """Return reply data after validating framing, CRC, address and function."""
         payload = self._create_command(function_code, value)
-        response = self._transport.transact_with_strategy(
-            ReadUntilStrategy(
-                payload,
-                terminator=b"\r\n",
-                max_size=20,
-            )
+        if self._last_exchange_finished is not None:
+            delay = self._last_exchange_finished + self._command_interval_seconds - time.monotonic()
+            if delay > 0:
+                if deadline is not None:
+                    delay = min(delay, max(0.0, deadline - time.monotonic()))
+                logger.info("ADP command gap: command=%s, delay_seconds=%.3f", function_code, delay)
+                time.sleep(delay)
+        if deadline is not None:
+            self._check_motion_deadline(function_code, deadline)
+        logger.info(
+            "ADP ASCII request: command=%s, request_hex=%s",
+            function_code,
+            payload.hex(),
         )
+        try:
+            response = self._transport.transact_with_strategy(
+                ReadUntilStrategy(
+                    payload,
+                    terminator=b"\r\n",
+                    max_size=20,
+                )
+            )
+        except TransportError as exc:
+            logger.warning(
+                "ADP ASCII exchange failed: command=%s, request_hex=%s, "
+                "category=%s, operation=%s, error=%s",
+                function_code,
+                payload.hex(),
+                exc.category.value,
+                exc.operation,
+                exc,
+            )
+            raise
+        finally:
+            self._last_exchange_finished = time.monotonic()
         if not response:
             raise TransportError(
                 f"ADP command {function_code}: no reply received",
@@ -82,8 +139,7 @@ class ADP:
             payload.hex(),
             response.hex(),
         )
-        self._parse_ascii_reply(function_code, response)
-        return True
+        return self._parse_ascii_reply(function_code, response)
 
     def _parse_ascii_reply(self, function_code: str, response: bytes) -> bytes:
         if not response.endswith(b"\r\n"):
@@ -120,13 +176,104 @@ class ADP:
         return True if speed is None else self._send_ascii("B", speed)
 
     def absorb(self, volume_ul: int) -> bool:
-        return self._send_ascii("n", volume_ul)
+        return self._execute_liquid_motion("n", volume_ul)
 
     def dispense(self, volume_ul: int) -> bool:
-        return self._send_ascii("p", volume_ul)
+        return self._execute_liquid_motion("p", volume_ul)
 
     def dispense_all(self) -> bool:
-        return self._send_ascii("p", 0)
+        return self._execute_liquid_motion("p", 0)
+
+    def query_pump_status(self, *, deadline: float | None = None) -> str:
+        """Read the two-character pump state using the supplied ADP protocol."""
+        data = self._exchange_ascii("d", deadline=deadline)
+        if len(data) != 2 or any(byte not in b"0123456789abcdefABCDEF" for byte in data):
+            raise ProtocolError(f"ADP pump status must be two hexadecimal digits: {data!r}")
+        return data.decode("ascii").upper()
+
+    def _execute_liquid_motion(self, function_code: str, volume_ul: int) -> bool:
+        """Accept a motion only on 01, then wait until the pump reaches its target.
+
+        Only status queries are repeated: replaying a liquid command could move
+        the same volume twice if an acknowledgement or completion query is lost.
+        """
+        deadline = time.monotonic() + self._motion_timeout_seconds
+        try:
+            reply = self._exchange_ascii(function_code, volume_ul, deadline=deadline)
+        except TransportError as exc:
+            if (
+                exc.category is TransportErrorCategory.TIMEOUT
+                and exc.operation in ("read", "read_until")
+            ):
+                raise TransportError(
+                    f"ADP command {function_code} acknowledgement timed out; "
+                    f"execution state is unknown; command was not resent: {exc}",
+                    category=exc.category,
+                    port=exc.port,
+                    operation="motion_acknowledgement",
+                ) from exc
+            raise
+        if reply != b"01":
+            code = reply.decode("ascii")
+            reason = {
+                "00": "pump is busy; command was not executed",
+                "02": "volume limit exceeded; command was not executed",
+            }.get(code, "missing or unknown motion acknowledgement")
+            raise ProtocolError(
+                f"ADP command {function_code} rejected: {reason} (code={code!r})",
+                raw_error_code=code,
+            )
+
+        logger.info("ADP command %s accepted; waiting for pump completion", function_code)
+        while True:
+            self._check_motion_deadline(function_code, deadline)
+            # Leave a gap after the motion acknowledgement as well as between
+            # queries; a controller may still be transitioning into motion.
+            time.sleep(min(self._poll_interval_seconds, max(0.0, deadline - time.monotonic())))
+            self._check_motion_deadline(function_code, deadline)
+            try:
+                status = self.query_pump_status(deadline=deadline)
+            except TransportError as exc:
+                if (
+                    exc.category is not TransportErrorCategory.TIMEOUT
+                    or exc.operation not in ("read", "read_until")
+                ):
+                    raise
+                self._check_motion_deadline(function_code, deadline)
+                logger.warning(
+                    "ADP command %s completion query timed out; retrying status query only; "
+                    "remaining_seconds=%.3f",
+                    function_code,
+                    max(0.0, deadline - time.monotonic()),
+                )
+                continue
+            self._check_motion_deadline(function_code, deadline)
+            if status == "01":
+                logger.info("ADP command %s completed: pump reached target", function_code)
+                return True
+            if status != "00":
+                reason = {
+                    "02": "abnormal collision",
+                    "03": "liquid level detected before target was reached",
+                    "05": "motion limit exceeded",
+                    "06": "aspiration blockage",
+                    "07": "dispensing blockage",
+                    "09": "air aspiration alarm at start",
+                    "0A": "air aspiration alarm at end",
+                }.get(status, "unknown pump status")
+                raise ProtocolError(
+                    f"ADP command {function_code} failed: {reason} (status={status})",
+                    raw_error_code=status,
+                )
+
+    def _check_motion_deadline(self, function_code: str, deadline: float) -> None:
+        if time.monotonic() >= deadline:
+            raise TransportError(
+                f"ADP command {function_code}: motion completion timed out after "
+                f"{self._motion_timeout_seconds:g}s",
+                category=TransportErrorCategory.TIMEOUT,
+                operation="wait_for_completion",
+            )
 
     def eject_tip(self) -> bool:
         response = self._transport.transact_with_strategy(

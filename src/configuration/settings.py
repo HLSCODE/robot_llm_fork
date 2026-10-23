@@ -480,6 +480,7 @@ class DeviceSettings:
     adp_baudrate: int = 115200
     adp_timeout: int = 5
     adp_max_retries: int = 3
+    adp_command_interval_seconds: float = 0.2
     zhixing_gripper_serial_port: str = "COM4"
     zhixing_gripper_baudrate: int = 115200
     zhixing_gripper_timeout: float = 1.0

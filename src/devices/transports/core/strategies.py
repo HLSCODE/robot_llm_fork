@@ -28,7 +28,13 @@ class SerialExchangeStrategy(Protocol):
 
 
 def _write_all(serial_port: SerialPort, payload: bytes) -> None:
-    serial_port.write(payload)
+    written = serial_port.write(payload)
+    if written is not None and written != len(payload):
+        raise TransportError(
+            f"serial write incomplete: expected {len(payload)} bytes, wrote {written}",
+            category=TransportErrorCategory.IO,
+            operation="write",
+        )
     serial_port.flush()
 
 

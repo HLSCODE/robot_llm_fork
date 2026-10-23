@@ -83,7 +83,8 @@ class SerialDeviceDriverTests(unittest.TestCase):
         transport = FakeTransport(
             (
                 b">01G6158\r\n",
-                bytes.fromhex("3e3031703032333344450d0a"),
+                b">01p01329E\r\n",
+                b">01d0136DE\r\n",
                 b"\x01\x06\x01\x07\x00\x01\xf8\x37",
             )
         )
@@ -97,7 +98,7 @@ class SerialDeviceDriverTests(unittest.TestCase):
         self.assertEqual(b">01p000061AC", transport.calls[1].payload)
         self.assertEqual(
             b"\x01\x06\x01\x07\x00\x01\xf8\x37",
-            transport.calls[2].payload,
+            transport.calls[3].payload,
         )
 
     def test_neck_writes_through_transport_and_tracks_position(self):
@@ -135,17 +136,21 @@ class SerialDeviceDriverTests(unittest.TestCase):
         self.assertTrue(ADP(transport).set_dispense_speed(800))
         self.assertEqual("ReadUntilStrategy", transport.calls[0].strategy_name)
 
-    def test_pipette_valid_motion_reply_data_does_not_block_communication_success(self):
+    def test_pipette_rejects_unsuccessful_or_missing_motion_acknowledgement(self):
         for command in ("n", "p"):
             for reply_data in (b"02", b"00", b""):
                 with self.subTest(command=command, reply_data=reply_data):
                     body = b">01" + command.encode("ascii") + reply_data
                     response = body + f"{ADP._cal_crc(body):04X}".encode("ascii") + b"\r\n"
-                    pipette = ADP(FakeTransport((response,)))
-                    if command == "n":
-                        self.assertTrue(pipette.absorb(200))
-                    else:
-                        self.assertTrue(pipette.dispense(200))
+                    transport = FakeTransport((response,))
+                    pipette = ADP(transport)
+                    with self.assertRaises(ProtocolError) as raised:
+                        if command == "n":
+                            pipette.absorb(200)
+                        else:
+                            pipette.dispense(200)
+                    self.assertEqual(reply_data.decode("ascii"), raised.exception.raw_error_code)
+                    self.assertEqual(1, len(transport.calls))
 
     def test_pipette_ascii_reply_rejects_crc_address_function_and_partial_frames(self):
         def frame(body: bytes) -> bytes:

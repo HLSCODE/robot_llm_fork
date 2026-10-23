@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from threading import Event
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +15,7 @@ from src.devices.runtime.factory import create_device_runtime
 from src.devices.runtime.ids import PIPETTE
 from src.devices.runtime.models import DeviceState
 from src.devices.tools.pipette.adapter import PipetteAdapter
+from src.devices.tools.pipette.driver import ADP
 from src.devices.transports import TransportError, TransportErrorCategory
 from src.devices.transports.testing import FakeTransport
 from src.gui.view_models.models import DeviceViewState
@@ -105,7 +107,7 @@ def test_failed_reinitialization_removes_previous_ready_state():
     assert not runtime.snapshot(PIPETTE).ready
 
 
-def test_observed_reply_02_finishes_sequence_as_succeeded_without_retry():
+def test_reply_02_fails_sequence_without_retry_or_starting_next_action():
     runtime = _runtime()
     settings = ApplicationSettings.defaults()
     engine = ActionEngine(
@@ -119,7 +121,10 @@ def test_observed_reply_02_finishes_sequence_as_succeeded_without_retry():
             "执行器": "吸液枪", "操作": "吐", "容量": 200,
             "吐液速度": 800, "吐液容量模式": "指定容量", "全吐": False,
         },
-    )),))
+    )), SequenceItem.from_definition(ActionDefinition(
+        id="next-absorb", name="next-absorb", type=ActionType.MANIPULATE,
+        parameters={"执行器": "吸液枪", "操作": "吸", "容量": 10},
+    ))))
     transport = FakeTransport((
         b">01G6158\r\n",
         bytes.fromhex("3e303142363239380d0a"),
@@ -127,11 +132,77 @@ def test_observed_reply_02_finishes_sequence_as_succeeded_without_retry():
     ))
     with patch("src.devices.runtime.factory.SerialTransport", return_value=transport):
         result = manager.submit(plan, origin="test").wait(1)
-    assert result.state is ExecutionState.SUCCEEDED
-    assert result.error_category == ""
-    assert result.raw_error_code == ""
+    assert result.state is ExecutionState.FAILED
+    assert result.error_category == "protocol"
+    assert result.raw_error_code == "02"
     assert len(transport.calls) == 3
     runtime.shutdown(PIPETTE)
+
+
+@pytest.mark.parametrize("lose_first_query", [False, True])
+def test_sequence_waits_for_pump_completion_before_starting_next_liquid_action(lose_first_query):
+    waiting = Event()
+    finish_motion = Event()
+
+    def frame(body: bytes) -> bytes:
+        return body + f"{ADP._cal_crc(body):04X}".encode("ascii") + b"\r\n"
+
+    class GatedTransport(FakeTransport):
+        queries = 0
+
+        def transact_with_strategy(self, strategy):
+            if strategy.payload == b">01dB819":
+                self.queries += 1
+                if self.queries == (3 if lose_first_query else 2):
+                    waiting.set()
+                    assert finish_motion.wait(2), "test did not release pump completion"
+            return super().transact_with_strategy(strategy)
+
+    timeout_replies = (TransportError(
+        "serial timeout", category=TransportErrorCategory.TIMEOUT, operation="read_until",
+    ),) if lose_first_query else ()
+    transport = GatedTransport((
+        b">01G6158\r\n",
+        frame(b">01n01"), *timeout_replies, frame(b">01d00"), frame(b">01d01"),
+        frame(b">01p01"), frame(b">01d01"),
+    ))
+    runtime = _runtime()
+    settings = ApplicationSettings.defaults()
+    engine = ActionEngine(
+        runtime, settings.execution, settings.devices, settings.vision,
+        lambda: None, ExecutionContext(), MagicMock(),
+    )
+    resources = ResourceArbiter()
+    manager = ExecutionManager(engine, resources, engine.required_resources)
+    plan = ExecutionPlan.from_entries(tuple(
+        SequenceItem.from_definition(ActionDefinition(
+            id=f"liquid-{index}", name=f"liquid-{index}", type=ActionType.MANIPULATE,
+            parameters={
+                "执行器": "吸液枪", "操作": operation, "容量": 10, "全吐": False,
+            },
+        ))
+        for index, operation in enumerate(("吸", "吐"))
+    ))
+    try:
+        with patch("src.devices.runtime.factory.SerialTransport", return_value=transport):
+            handle = manager.submit(plan, origin="test")
+            try:
+                assert waiting.wait(2), "pump completion query was never reached"
+                assert handle.snapshot().state is ExecutionState.RUNNING
+                assert resources.owner_of(PIPETTE) is not None
+                assert [call.payload for call in transport.calls] == [
+                    b">01G6158", ADP(transport)._create_command("n", 10),
+                ] + [b">01dB819"] * (2 if lose_first_query else 1)
+            finally:
+                finish_motion.set()
+                result = handle.wait(2)
+        assert result.state is ExecutionState.SUCCEEDED
+        assert [call.payload for call in transport.calls][5 if lose_first_query else 4:] == [
+            ADP(transport)._create_command("p", 10), b">01dB819",
+        ]
+        assert resources.owner_of(PIPETTE) is None
+    finally:
+        runtime.shutdown(PIPETTE)
 
 
 def test_application_shutdown_closes_pipette_without_reset_or_eject_commands():

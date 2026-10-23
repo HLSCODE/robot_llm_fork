@@ -523,7 +523,7 @@ class PipetteActionHandler:
         level = "info" if success else "error"
         context.log(
             (
-                f"吸液枪{command.operation}命令已发送并收到回复"
+                f"吸液枪{command.operation}执行完成"
                 if success else f"吸液枪{command.operation}执行失败"
             ),
             level,
