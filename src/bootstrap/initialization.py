@@ -68,6 +68,7 @@ class InitializationPlan:
     kws_model: str = "zh-en"
     frozen: bool = True
     dry_run: bool = False
+    migration_target_map: Path | None = None
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -197,7 +198,7 @@ class InitializationRunner:
         )
         started_at = time.perf_counter()
         try:
-            if plan.dry_run:
+            if plan.dry_run and step is not InitializationStep.DATA_MIGRATION:
                 self._log(step, "演练模式：未执行任何写入、下载或依赖变更")
             else:
                 self._step_handler(step)(plan, step)
@@ -263,12 +264,13 @@ class InitializationRunner:
         self._run_subprocess(command, cwd=plan.project_root, step=step)
 
     def _migrate_data(self, plan: InitializationPlan, step: InitializationStep) -> None:
+        from ..application.data_migration import DataMigrator, TargetMappings, DataMigrationPlan, MigrationChange
         from ..application.builtin_data import BuiltinDataInstaller
-        from ..application.robot_profile_migration import LegacyRobotProfileMigrator
         from ..configuration.data_paths import ApplicationDataPaths
         from ..persistence.vision_station_storage import VisionStationStorage
         from ..vision.models import vision_configuration
-        from .workflow_cli import migrate_legacy_workflows
+        from .workflow_cli import _task_document, _workflow_v1_document
+        from ..persistence.json_documents import read_json_document
 
         config_path = plan.project_root / "config" / "config.toml"
         if not config_path.is_file():
@@ -281,46 +283,48 @@ class InitializationRunner:
             settings.robot_profile_id(),
             project_root=plan.project_root,
         )
-        profile_result = LegacyRobotProfileMigrator(
-            paths,
-            provider=settings.robot.provider,
-        ).migrate_missing()
-        workflow_result = migrate_legacy_workflows(
-            paths.root,
-            workflows_directory=paths.workflows_directory,
-            drafts_directory=paths.workflow_drafts_directory,
-            robot_profile_id=settings.robot_profile_id(),
-        )
-        install_result = BuiltinDataInstaller(paths).install_missing()
-        station_path = _project_path(
-            plan.project_root,
-            settings.vision.vision_relocalization_stations_file,
-        )
-        station_storage = VisionStationStorage(
-            station_path,
-            configuration=vision_configuration(settings.vision),
-        )
-        station_migrated = station_storage.migrate_legacy_document()
+        def legacy_reader(path: Path) -> dict:
+            if path.suffix == ".task":
+                return _task_document(path, path.stem, paths.robot_profile_id).to_dict()
+            return _workflow_v1_document(path, paths.robot_profile_id).to_dict()
 
-        for path in profile_result.migrated_files:
-            self._log(step, f"已迁移 {_display_path(path, plan.project_root)}")
-        for path in workflow_result.migrated_files:
-            self._log(step, f"已迁移 {_display_path(path, plan.project_root)}")
-        if workflow_result.migrated_count:
-            self._log(
-                step,
-                "旧工作流备份目录："
-                f"{_display_path(workflow_result.backup_directory, plan.project_root)}",
-            )
+        migration = DataMigrator(
+            paths, TargetMappings.load(plan.migration_target_map), legacy_reader,
+        ).plan()
+        # Stage vision-station conversion too: a failure must precede all writes.
+        station_path = _project_path(plan.project_root, settings.vision.vision_relocalization_stations_file)
+        if station_path.is_file():
+            with tempfile.TemporaryDirectory(prefix="robot-station-migration-") as temporary:
+                staged = Path(temporary) / station_path.name
+                original = station_path.read_bytes()
+                shutil.copy2(station_path, staged)
+                storage = VisionStationStorage(staged, configuration=vision_configuration(settings.vision))
+                if storage.migrate_legacy_document():
+                    migration = DataMigrationPlan(
+                        (*migration.changes, MigrationChange(station_path, original, read_json_document(staged), (0, 1))),
+                        migration.issues,
+                    )
+        for change in migration.changes:
+            versions = " → ".join(f"v{version}" for version in change.versions) or "复制缺失轨迹"
+            self._log(step, f"待迁移 {change.path}：{versions}")
+            if change.pending_actions:
+                self._log(step, "迁移后需在界面补全目标：" + "、".join(change.pending_actions))
+        for issue in migration.issues:
+            self._log(step, f"待处理：{issue}")
+        if migration.issues:
+            raise ValueError("数据迁移存在格式或版本问题，未写入任何数据；请查看详情")
+        if plan.dry_run:
+            self._log(step, f"预览完成：{len(migration.changes)} 个文件待升级，未修改数据")
+            return
+        backup = migration.apply(paths.root / "migration-backups" / "versioned-data")
+        if backup is not None:
+            self._log(step, f"数据备份及恢复清单：{backup}")
+        install_result = BuiltinDataInstaller(paths).install_missing()
         for path in install_result.created_files:
             self._log(step, f"已创建 {_display_path(path, plan.project_root)}")
-        if station_migrated:
-            self._log(step, f"已迁移 {_display_path(station_path, plan.project_root)}")
         changed_count = (
-            len(profile_result.migrated_files)
-            + workflow_result.migrated_count
+            len(migration.changes)
             + len(install_result.created_files)
-            + int(station_migrated)
         )
         if changed_count == 0:
             self._log(step, "数据已是当前格式，无需迁移")

@@ -85,6 +85,7 @@ class InitializationRunnerTests(unittest.TestCase):
             )
 
             with (
+                patch("src.application.data_migration.DataMigrator") as data_migrator,
                 patch(
                     "src.bootstrap.initialization.load_application_settings",
                     return_value=settings,
@@ -107,6 +108,9 @@ class InitializationRunnerTests(unittest.TestCase):
                 ),
                 patch("src.vision.models.vision_configuration", return_value=object()),
             ):
+                data_migrator.return_value.plan.return_value.changes = ()
+                data_migrator.return_value.plan.return_value.issues = ()
+                data_migrator.return_value.plan.return_value.apply.return_value = None
                 profile_migrator.return_value.migrate_missing.return_value = profile_result
                 installer.return_value.install_missing.return_value = install_result
                 results = runner.run(plan)
@@ -117,15 +121,12 @@ class InitializationRunnerTests(unittest.TestCase):
                 "realman-rm75-dual",
                 project_root=root,
             )
-            profile_migrator.return_value.migrate_missing.assert_called_once_with()
-            workflow_migrator.assert_called_once_with(
-                paths.root,
-                workflows_directory=paths.workflows_directory,
-                drafts_directory=paths.workflow_drafts_directory,
-                robot_profile_id="realman-rm75-dual",
-            )
+            data_migrator.return_value.plan.assert_called_once_with()
+            data_migrator.return_value.plan.return_value.apply.assert_called_once()
+            profile_migrator.return_value.migrate_missing.assert_not_called()
+            workflow_migrator.assert_not_called()
             installer.return_value.install_missing.assert_called_once_with()
-            station_storage.migrate_legacy_document.assert_called_once_with()
+            station_storage.migrate_legacy_document.assert_not_called()
 
     def test_dry_run_publishes_step_events(self) -> None:
         events: list[InitializationEvent] = []

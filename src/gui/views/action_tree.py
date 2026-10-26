@@ -8,6 +8,7 @@ from PySide6.QtCore import QEvent, QSignalBlocker, QSize, Qt, Signal
 from PySide6.QtWidgets import QHBoxLayout, QHeaderView, QTreeWidget, QTreeWidgetItem, QWidget
 
 from ...domain.models import ActionDefinition, ActionType
+from ...domain.action_schema import pending_target_fields
 from ..icons import IconName
 from ..toolbars import IconToolButton
 from .action_list import action_library_icon, start_action_drag
@@ -120,7 +121,8 @@ class ActionCategoryTree(QTreeWidget):
                 item.takeChildren()
             for action in actions:
                 parent = self.category_items[_CATEGORY_ALIASES.get(action.type, action.type)]
-                item = QTreeWidgetItem(parent, [action.name])
+                pending = pending_target_fields(action.parameters)
+                item = QTreeWidgetItem(parent, [f"⚠ {action.name}（待配置）" if pending else action.name])
                 item.setData(0, _DATA_ROLE, action)
                 item.setFlags(
                     Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
@@ -130,6 +132,8 @@ class ActionCategoryTree(QTreeWidget):
                 item.setSizeHint(0, QSize(0, 36))
                 item.setIcon(0, action_library_icon(self, action))
                 item.setToolTip(0, f"{action.name}\n类型：{action.type.value}\n双击插入，拖入画布")
+                if pending:
+                    item.setToolTip(0, f"{action.name}\n目标待配置：{', '.join(pending)}\n请编辑动作后再执行；工作流中的副本需分别补全")
                 self._action_items[action.id] = item
             for key, title in ACTION_LIBRARY_CATEGORIES:
                 parent = self.category_items[key]

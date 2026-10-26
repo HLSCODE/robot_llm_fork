@@ -216,7 +216,8 @@
             "type": "CHANGE_GUN",
             "parameters": {
               "Gun_Position": 1,
-              "Operation": "取"
+              "Operation": "取",
+              "arm": "right"
             }
           },
           {
@@ -229,7 +230,9 @@
               "吸液速度": 1200,
               "吐液速度": 800,
               "吐液容量模式": "指定容量",
-              "全吐": false
+              "全吐": false,
+              "arm": "right",
+              "tool_id": "pipette_1"
             }
           }
         ]

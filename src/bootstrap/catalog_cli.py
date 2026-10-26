@@ -239,7 +239,7 @@ def normalize_action_catalog(actions_directory: Path) -> int:
     path = actions_directory / "library.json"
     document = load_collection_document(path, ACTION_LIBRARY_DOCUMENT)
     if document.requires_migration:
-        raise JsonDocumentSchemaError(f"{path.name} is not an action schema v3 document")
+        raise JsonDocumentSchemaError(f"{path.name} is not a current versioned action document")
     actions = [
         ActionDefinition.from_dict(raw_action)
         for raw_action in document.collection
@@ -272,7 +272,7 @@ def _with_robot_profile(
 
 
 def normalize_skill_catalog(skills_directory: Path) -> int:
-    """Rewrite textual poses stored inside v2 SkillStep snapshots."""
+    """Rewrite textual poses stored inside current SkillStep snapshots."""
     changed = 0
     for path in sorted(skills_directory.rglob("*.skill.json")):
         document = read_json_document(path)
@@ -329,7 +329,7 @@ def _publish_catalogs(
     if (actions_directory / "library.json").exists():
         raise FileExistsError(actions_directory / "library.json")
     if any(skills_directory.rglob("*.skill.json")):
-        raise FileExistsError("target skill directory already contains v2 skill files")
+        raise FileExistsError("target skill directory already contains versioned skill files")
     written: list[str] = []
     for source, destination in (
         (staged_actions / "library.json", actions_directory / "library.json"),

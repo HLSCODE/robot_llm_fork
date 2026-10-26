@@ -172,7 +172,7 @@ class DeviceAndExecutionViewModelTests(unittest.TestCase):
 
         self.assertTrue(state.robot_ready)
         self.assertFalse(state.body_ready)
-        self.assertTrue(state.pipette_ready)
+        self.assertFalse(hasattr(state, 'pipette_ready'))
         self.assertTrue(state.relay_ready)
 
     def test_execution_controls_follow_runtime_state_machine(self) -> None:

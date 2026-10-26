@@ -6,32 +6,8 @@ body_slave_id = 1
 body_timeout = 1
 # 是否使用身体轴 DI 输入作为到位判断。
 body_di_pan = false
-# 快换手设备串口参数。
-kuaihuanshou_serial_port = "/dev/hand"
-kuaihuanshou_baudrate = 115200
-kuaihuanshou_timeout = 3
-# ADP 设备串口参数和最大重试次数。
-adp_serial_port = "/dev/hand"
-adp_baudrate = 115200
-adp_timeout = 5
-adp_max_retries = 3
-# ASCII 命令完成交换后到下一条发送的最小间隔（秒），用于现场验证应答时序。
-adp_command_interval_seconds = 0.2
-# 知行夹爪共用一个串口：左站号 1，右站号 2，8N1。
-# 开合度 0=全开，100=全闭；优先读取每个站号的设备行程映射。
-zhixing_gripper_serial_port = "COM4"
-zhixing_gripper_baudrate = 115200
-zhixing_gripper_timeout = 1.0
-zhixing_gripper_wait_timeout = 8.0
-zhixing_gripper_speed = 100
-zhixing_gripper_torque = 60
-zhixing_gripper_acceleration = 2000
-zhixing_gripper_deceleration = 2000
-# 设备映射不可用时，分别使用以下标定值（单位 0.01 mm）。
-zhixing_gripper_left_pos_min = 0
-zhixing_gripper_left_pos_max = 4000
-zhixing_gripper_right_pos_min = 0
-zhixing_gripper_right_pos_max = 4000
+# 夹爪、移液枪和快换手统一配置在 end-effectors.toml 的 [end_effectors] 中。
+# 本节不再接受 kuaihuanshou_*、adp_*、zhixing_gripper_* 旧字段，也不自动迁移。
 
 # 继电器设备串口参数。
 relay_serial_port = "/dev/power"

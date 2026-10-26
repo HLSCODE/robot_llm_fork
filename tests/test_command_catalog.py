@@ -65,7 +65,7 @@ class CommandCatalogTests(unittest.TestCase):
         self.assertEqual(CommandResolutionStatus.AMBIGUOUS, result.status)
         self.assertFalse(result.should_fallback_to_llm)
 
-    def test_right_gripper_command_is_typed(self):
+    def test_zhixing_gripper_1_command_is_typed(self):
         result = self.catalog.resolve("关闭右夹爪")
 
         self.assertEqual(CommandResolutionStatus.MATCHED, result.status)

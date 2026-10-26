@@ -4,7 +4,10 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 import logging
 from threading import RLock
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeVar, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..end_effectors.runtime import EndEffectorRuntime
 
 from .contracts import StoppableDevice
 from .errors import normalize_device_error
@@ -62,6 +65,7 @@ class DeviceRuntime:
         self._records: dict[str, _DeviceRecord] = {}
         self._registration_order: list[str] = []
         self._lock = RLock()
+        self.end_effectors: EndEffectorRuntime | None = None
 
     def register(self, registration: DeviceRegistration[Any]) -> None:
         device_id = registration.device_id.strip()

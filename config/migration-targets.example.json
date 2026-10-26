@@ -1,0 +1,9 @@
+{
+  "actions": {
+    "替换为动作ID或动作名称": {
+      "arm": "right",
+      "tool_id": "pipette_1"
+    }
+  },
+  "defaults": {}
+}

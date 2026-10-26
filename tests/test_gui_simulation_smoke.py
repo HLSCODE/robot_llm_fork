@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Event
 from time import monotonic, sleep
 import unittest
+from tool_support import tool_settings
 from unittest.mock import patch
 
 from PySide6.QtCore import Qt, QTimer
@@ -18,7 +19,6 @@ from src.application.camera_access import CameraStatus
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.configuration.settings import ApplicationSettings
 from src.devices.runtime.ids import BODY_AXIS, CAMERA, RELAY_BANK, ROBOT_SYSTEM
-from src.devices.runtime.fakes import SimulatedPipette
 from src.execution import ExecutionState
 from src.gui import GuiStartupState, MainWindow
 from src.gui.branding import APPLICATION_NAME
@@ -168,7 +168,7 @@ class GuiSimulationSmokeTests(unittest.TestCase):
 
     def setUp(self) -> None:
         self.services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         startup_action = ActionDefinition(
@@ -279,21 +279,10 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             self.assertTrue(all(isinstance(entry, SequenceItem) for entry in canvas.get_entries()))
             source_name = target_name
 
-    def test_pipette_initialize_button_reports_failure_and_can_recover(self) -> None:
-        controls = self.window.device_control_view
-        with (
-            patch.object(SimulatedPipette, "initialize", side_effect=TimeoutError("no G reply")),
-            patch.object(self.window._notifications, "warning") as warning,
-        ):
-            controls._pipette_initialize_button.click()
-        self.assertFalse(self.window._device_view_model.snapshot().pipette_ready)
-        self.assertFalse(controls._pipette_button.isEnabled())
-        self.assertTrue(controls._pipette_initialize_button.isEnabled())
-        warning.assert_called_once()
-
-        controls._pipette_initialize_button.click()
-        self.assertTrue(self.window._device_view_model.snapshot().pipette_ready)
-        self.assertTrue(controls._pipette_button.isEnabled())
+    def test_old_global_pipette_buttons_are_not_available(self) -> None:
+        self.assertFalse(hasattr(self.window.device_control_view, "_pipette_button"))
+        self.assertNotIn("pipette", self.services.devices.status())
+        self.assertIsNotNone(self.window._end_effector_controls)
 
     def test_window_starts_with_shared_simulation_services(self) -> None:
         self.assertTrue(self.window.isVisible())
@@ -302,7 +291,6 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         device_state = self.window._device_view_model.snapshot()
         self.assertTrue(device_state.robot_ready)
         self.assertTrue(device_state.body_ready)
-        self.assertTrue(device_state.pipette_ready)
         self.assertTrue(device_state.relay_ready)
         self.assertTrue(self.services.devices.is_ready(ROBOT_SYSTEM))
         self.assertTrue(self.services.devices.is_ready(BODY_AXIS))

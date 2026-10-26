@@ -503,7 +503,6 @@ class WorkbenchViewTests(unittest.TestCase):
             DeviceViewState(
                 robot_ready=True,
                 body_ready=True,
-                pipette_ready=False,
                 relay_ready=False,
             )
         )
@@ -514,7 +513,7 @@ class WorkbenchViewTests(unittest.TestCase):
             "statusDanger",
             device_button.property("themeRole"),
         )
-        self.assertIn("2/4", device_button.toolTip())
+        self.assertIn("2/3", device_button.toolTip())
 
     def test_restores_and_persists_versioned_layout_state(self) -> None:
         store = _MemoryLayoutStore(

@@ -73,7 +73,8 @@ def load_collection_document(
         raise JsonDocumentSchemaError(f"{path.name} schema_version must be an integer")
     if version != spec.current_version:
         raise UnsupportedJsonDocumentVersion(
-            f"{path.name} schema version {version} is unsupported; expected {spec.current_version}"
+            f"{path.name} schema version {version} is unsupported; expected {spec.current_version}; "
+            "run 'robot-init migrate-data --dry-run' to inspect supported upgrades"
         )
     collection = raw_document.get(spec.collection_key)
     if not isinstance(collection, list):

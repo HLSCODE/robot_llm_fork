@@ -192,7 +192,7 @@ output_modes = ["text"]
 首次联调不要直接使用 `100mg`，建议按以下顺序：
 
 ```text
-1. 使用 test_devices.py 确认升降、旋转、夹爪方向和地址正确。
+1. 使用 `examples/hardware/test_devices.py` 确认升降、旋转、夹爪方向和地址正确（在项目根目录执行 `python -m examples.hardware.test_devices -i`）。
 2. 在 `[[vision.cameras]]` 中为电子秤相机声明 `roles = ["balance"]`，再通过 GUI 相机测试确认画面稳定，并用定向测试验证读数 Provider。
 3. 将智能加粉目标设为 10mg，观察每轮日志和实际加粉效果。
 4. 根据粉末流速调整 POWDER_DISPENSE_*_STEP。

@@ -122,7 +122,12 @@ class GuiWindowShutdownTests(unittest.TestCase):
         hardware_thread = _TimeoutThread()
         worker = _StopRecorder()
         assistant = _ShutdownRecorder()
+        teaching = _ShutdownRecorder()
+        tool_status = _ShutdownRecorder()
         window = SimpleNamespace(
+            _zhixing_gripper_worker=None,
+            _teaching_controller=teaching,
+            _end_effector_status=tool_status,
             _hardware_startup_thread=hardware_thread,
             _hardware_startup_worker=worker,
             _camera_test_thread=None,
@@ -139,6 +144,8 @@ class GuiWindowShutdownTests(unittest.TestCase):
         self.assertTrue(hardware_thread.quit_requested)
         self.assertEqual([10_000, None], hardware_thread.wait_calls)
         self.assertTrue(assistant.shutdown_requested)
+        self.assertTrue(teaching.shutdown_requested)
+        self.assertTrue(tool_status.shutdown_requested)
         self.assertIn("设备初始化线程未在 10 秒内退出", captured.output[0])
 
     def test_registered_worker_is_joined_before_qapplication_teardown(self) -> None:

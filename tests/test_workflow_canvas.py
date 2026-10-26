@@ -380,12 +380,16 @@ class WorkflowCanvasTests(unittest.TestCase):
         self.canvas.resize(620, 700)
         self.canvas.render_entries((_item("first"),))
         self.canvas.show()
+        self.canvas.activateWindow()
         QApplication.processEvents()
         insertion = self.canvas._insertion_items[0]  # noqa: SLF001
         target = self.canvas.view.mapFromScene(
             insertion.scenePos() + QPointF(22.0, 22.0)
         )
 
+        # Start outside the target even if a previous GUI test left the native
+        # cursor at this exact position; otherwise Qt may omit the hover move.
+        QTest.mouseMove(self.canvas.view.viewport(), QPoint(2, 2), delay=20)
         QTest.mouseMove(self.canvas.view.viewport(), target, delay=20)
         QTest.qWait(INSERT_HOVER_TRANSITION_MS + 30)
 

@@ -44,10 +44,14 @@ class Kuaihuanshou:
         response = self._transport.transact_with_strategy(
             FixedLengthStrategy(payload, len(payload))
         )
-        if len(response) < 5:
+        if len(response) != len(payload):
             raise ProtocolError(
                 f"tool changer response is too short: {len(response)}"
             )
+        if response[:4] != payload[:4]:
+            raise ProtocolError("tool changer response header/command mismatch")
+        if _append_crc(response[:-2]) != response:
+            raise ProtocolError("tool changer response CRC mismatch")
         if command is ToolChangerCommand.TEMPERATURE:
             return int(response[4])
         if command in {
@@ -56,6 +60,8 @@ class Kuaihuanshou:
             ToolChangerCommand.POWER_ON,
             ToolChangerCommand.POWER_OFF,
         }:
+            if response[4] != payload[4]:
+                raise ProtocolError("tool changer rejected command or returned an invalid acknowledgement")
             return True
         if command is ToolChangerCommand.STATUS:
             return {1: "locked", 2: "unlocked"}.get(

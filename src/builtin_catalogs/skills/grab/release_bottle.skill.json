@@ -1,7 +1,7 @@
 {
   "$schema": "../../schemas/skill.schema.json",
   "schema": "robot_llm.skill",
-  "schema_version": 2,
+  "schema_version": 3,
   "skill": {
     "id": "release_bottle",
     "name": "释放瓶子",
@@ -16,8 +16,9 @@
         "action_type": "MANIPULATE",
         "parameters": {
           "执行器": "夹爪",
-          "编号": 1,
-          "操作": "开"
+          "操作": "开",
+          "arm": "left",
+          "tool_id": "robot_gripper_1"
         },
         "parameter_bindings": {},
         "description": "打开夹爪释放瓶子",

@@ -16,10 +16,7 @@ from ..devices import (
     DeviceOperationError,
     DeviceRuntime,
     DigitalOutputs,
-    GripperControl,
-    PercentGripperControl,
     JointVector,
-    Pipette,
     ResourceArbiter,
     ResourceLease,
     RobotTeleoperation,
@@ -31,7 +28,7 @@ from ..devices import (
 )
 from ..devices.runtime.errors import normalize_device_error
 from ..configuration.settings import ApplicationSettings
-from ..devices.runtime.ids import PIPETTE, RELAY_BANK, ROBOT_SYSTEM, ZHIXING_GRIPPERS
+from ..devices.runtime.ids import RELAY_BANK, ROBOT_SYSTEM
 from ..execution import (
     ExecutionHandle,
     ExecutionListener,
@@ -222,7 +219,6 @@ class DeviceManagementService:
         report = self._safety.stop(
             StopMode.CONTROLLED,
             wait_timeout_seconds=timeout,
-            exclude_safe_state_devices=(PIPETTE,),
         )
         if report.execution_after.active:
             raise TimeoutError(
@@ -276,6 +272,8 @@ class ManualControlService:
     ) -> None:
         self._runtime = runtime
         self._resources = resources
+        from .end_effectors import EndEffectorService
+        self.end_effectors = EndEffectorService(runtime, resources)
         self.teaching = TeachingService(runtime, resources)
 
     def set_gripper(
@@ -284,39 +282,13 @@ class ManualControlService:
         *,
         opened: bool | None = None,
         position: int | None = None,
+        tool_id: str = "",
+        closure_percent: float | None = None,
     ) -> bool:
-        if opened is None and position is None:
+        if opened is None and position is None and closure_percent is None:
             raise ValueError("opened or position is required")
-        arm_id = ArmId.parse(arm)
-        with self._lease(ROBOT_SYSTEM, "gripper"):
-            def operate_gripper() -> bool:
-                gripper = self._runtime.require(
-                    ROBOT_SYSTEM,
-                    GripperControl,
-                )
-                if position is not None:
-                    gripper.move_gripper(arm_id, int(position))
-                elif opened:
-                    gripper.open_gripper(arm_id)
-                else:
-                    gripper.close_gripper(arm_id)
-                return True
-
-            return _device_operation(
-                ROBOT_SYSTEM,
-                "gripper.set",
-                operate_gripper,
-            )
-
-    def set_zhixing_gripper(self, station: int, percent: float) -> None:
-        with self._lease(ZHIXING_GRIPPERS, "zhixing-gripper"):
-            _device_operation(
-                ZHIXING_GRIPPERS,
-                "zhixing_gripper.move_percent",
-                lambda: self._runtime.require(
-                    ZHIXING_GRIPPERS, PercentGripperControl,
-                ).move_percent(station, percent),
-            )
+        self.end_effectors.set_gripper(arm, tool_id=tool_id, opened=opened, position=position, closure_percent=closure_percent)
+        return True
 
     def set_relay(self, channel: int, enabled: bool) -> None:
         with self._lease(RELAY_BANK, "relay"):
@@ -329,30 +301,15 @@ class ManualControlService:
                 ).set_channel(channel, enabled),
             )
 
-    def initialize_pipette(self) -> bool:
-        def initialize() -> bool:
-            # Explicit reconnect clears cached failures and reruns the device handshake.
-            self._runtime.shutdown(PIPETTE)
-            self._runtime.initialize(PIPETTE)
-            return True
+    def initialize_pipette(self, *, arm: str | None = None, tool_id: str = "") -> bool:
+        routing = self.end_effectors.routing
+        target = routing.resolve("pipette", arm=arm, tool_id=tool_id)
+        return self.end_effectors.operate(target, "pipette.initialize", lambda: routing.initialize_pipette(target))
 
-        with self._lease(PIPETTE, "pipette-initialize"):
-            return _device_operation(
-                PIPETTE,
-                "pipette.initialize",
-                initialize,
-            )
-
-    def eject_pipette_tip(self) -> bool:
-        with self._lease(PIPETTE, "pipette-eject"):
-            return _device_operation(
-                PIPETTE,
-                "pipette.eject_tip",
-                lambda: self._runtime.require(
-                    PIPETTE,
-                    Pipette,
-                ).eject_tip(),
-            )
+    def eject_pipette_tip(self, *, arm: str | None = None, tool_id: str = "") -> bool:
+        routing = self.end_effectors.routing
+        target = routing.resolve("pipette", arm=arm, tool_id=tool_id)
+        return self.end_effectors.operate(target, "pipette.eject_tip", lambda: routing.device(target).eject_tip())
 
     def initialize_teleoperation(
         self,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import unittest
+from tool_support import tool_settings
 from dataclasses import replace
 from pathlib import Path
 from threading import RLock
@@ -721,7 +722,7 @@ class RobotProviderContractTests(unittest.TestCase):
 class RobotApplicationServiceTests(unittest.TestCase):
     def test_manual_control_and_query_use_normalized_robot_contract(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         services.manual_control.set_gripper("left", position=350)
@@ -735,7 +736,7 @@ class RobotApplicationServiceTests(unittest.TestCase):
 
     def test_drag_teaching_owns_robot_until_trajectory_is_saved(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         item = SequenceItem.from_definition(

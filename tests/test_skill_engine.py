@@ -62,7 +62,8 @@ def _skill_with_action_types(*action_types: object) -> Skill:
             ActionType.BASE_MOVE: {"move_mode": "position"},
             ActionType.MANIPULATE: {
                 "执行器": "夹爪",
-                "编号": 1,
+                "arm": "left",
+                "tool_id": "robot_gripper_1",
                 "操作": "开",
             },
             ActionType.INSPECT: {"Sensor_ID": "2"},

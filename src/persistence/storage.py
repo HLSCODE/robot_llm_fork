@@ -23,7 +23,7 @@ ACTION_LIBRARY_DOCUMENT = CollectionDocumentSpec(
     schema="robot_llm.actions",
     collection_key="actions",
     legacy_kind="list",
-    current_version=3,
+    current_version=4,
     schema_reference="../../../schemas/action-library.schema.json",
 )
 ACTION_LIBRARY_FILE_NAME = "library.json"
@@ -262,6 +262,7 @@ class JsonCompositionRepository:
             validation = validate_action_parameters(
                 action.type,
                 action.parameters,
+                allow_pending_targets=True,
             )
             if not validation.is_valid:
                 raise JsonDocumentSchemaError(

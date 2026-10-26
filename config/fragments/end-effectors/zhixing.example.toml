@@ -1,0 +1,19 @@
+# 外接知行夹爪，与机械臂厂商无关；站号不隐含左右臂。
+# zhixing_gripper_1 是可自定义的实例 ID，不绑定左右臂；实际归属由 mounts 决定。
+# 双夹爪时复制本工具表及全部所需参数，ID 改为 zhixing_gripper_2。
+# 同总线：connection 相同、硬件 station 不同（例如1/2）。
+# 独立串口：connection 不同（例如 tool_bus_1/2）、station 可相同。
+[end_effectors.tools.zhixing_gripper_1]
+display_name = "知行夹爪" # 界面别名，动作仍保存上面的实例 ID
+kind = "gripper"
+provider = "zhixing"
+connection = "tool_bus_1"
+station = 1
+response_timeout_seconds = 1.0
+motion_timeout_seconds = 8.0
+speed = 100
+torque = 60
+acceleration = 2000
+deceleration = 2000
+position_min = 0
+position_max = 4000

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..devices.end_effectors import end_effectors
+
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from threading import RLock
@@ -11,7 +13,6 @@ from ..devices import (
     ArmId,
     DeviceOperationError,
     DeviceRuntime,
-    GripperControl,
     JointVector,
     ResourceArbiter,
     ResourceLease,
@@ -126,6 +127,7 @@ class _ArmSession:
     command_count: int = 0
     last_command_at: float | None = None
     last_gripper_position: int | None = None
+    last_gripper_tool_id: str = ""
 
 
 @dataclass(slots=True)
@@ -153,6 +155,14 @@ class TeleoperationService:
         self._owners: dict[str, _OwnerSession] = {}
         self._lock = RLock()
         self._operation_lock = RLock()
+
+    def _end_effector_resources(self) -> tuple[str, ...]:
+        settings = end_effectors(self._runtime).settings
+        return tuple(dict.fromkeys((
+            *(f"connection:{c.id}" for c in settings.connections),
+            *(f"end-effector:{m.arm}" for m in settings.mounts),
+            *(f"tool:{t.id}" for t in settings.tools),
+        )))
 
     @property
     def active(self) -> bool:
@@ -182,7 +192,7 @@ class TeleoperationService:
                 if self._lease is None:
                     lease = self._resources.acquire(
                         "teleoperation",
-                        (ROBOT_SYSTEM,),
+                        (ROBOT_SYSTEM, *self._end_effector_resources()),
                     )
                     try:
                         self._runtime.require(
@@ -409,6 +419,8 @@ class TeleoperationService:
         owner_id: str,
         arm: str | ArmId,
         position: int,
+        *,
+        tool_id: str = "",
     ) -> TeleoperationCommandResult:
         normalized_owner = _owner_id(owner_id)
         arm_id = _arm_id(arm)
@@ -421,7 +433,7 @@ class TeleoperationService:
                     normalized_owner,
                     arm_id,
                 )
-                if arm_session.last_gripper_position == normalized_position:
+                if arm_session.last_gripper_position == normalized_position and arm_session.last_gripper_tool_id == tool_id:
                     duplicate_result = TeleoperationCommandResult(
                         owner_id=normalized_owner,
                         arm=arm_id,
@@ -430,10 +442,9 @@ class TeleoperationService:
                     )
                     gripper = None
                 else:
-                    gripper = self._runtime.require(
-                        ROBOT_SYSTEM,
-                        GripperControl,
-                    )
+                    routing = end_effectors(self._runtime)
+                    target = routing.resolve("gripper", arm=arm_id, tool_id=tool_id)
+                    gripper = routing.gripper(target)
                     self._operation_lock.acquire()
         except Exception as exc:
             self._record_command_failure(
@@ -455,7 +466,7 @@ class TeleoperationService:
             return duplicate_result
         assert gripper is not None
         try:
-            gripper.move_gripper(arm_id, normalized_position)
+            routing.move_position(target, normalized_position)
         except DeviceOperationError as exc:
             self._record_command_failure(
                 TeleoperationEventType.GRIPPER_COMMAND,
@@ -484,6 +495,7 @@ class TeleoperationService:
         with self._lock:
             current = self._require_arm_unlocked(normalized_owner, arm_id)
             current.last_gripper_position = normalized_position
+            current.last_gripper_tool_id = tool_id
             result = TeleoperationCommandResult(
                 owner_id=normalized_owner,
                 arm=arm_id,

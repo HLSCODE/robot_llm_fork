@@ -6,6 +6,7 @@ import json
 import sys
 import time
 import unittest
+from tool_support import tool_settings
 from contextlib import contextmanager
 from types import ModuleType
 from unittest.mock import patch
@@ -16,7 +17,6 @@ from src.application import (
     create_application_services,
 )
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
-from src.configuration.settings import ApplicationSettings
 from src.devices import (
     DeviceCapability,
     DeviceContractError,
@@ -223,7 +223,7 @@ class CameraAccessServiceTests(unittest.TestCase):
 
     def test_status_returns_presentation_safe_snapshot(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
 
@@ -242,7 +242,7 @@ class CameraAccessServiceTests(unittest.TestCase):
         self.assertFalse(services.devices.shutdown_all())
 
     def test_successfully_probed_idle_camera_is_available_to_preflight(self):
-        defaults = ApplicationSettings.defaults()
+        defaults = tool_settings()
         services = create_application_services(
             replace(
                 defaults,
@@ -283,7 +283,7 @@ class CameraAccessServiceTests(unittest.TestCase):
 
     def test_camera_session_only_blocks_sequences_that_need_camera(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         session = services.camera_access.open("test")
@@ -340,7 +340,7 @@ class CameraAccessServiceTests(unittest.TestCase):
 
     def test_device_lifecycle_refuses_an_active_camera_session(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         session = services.camera_access.open("lifecycle-test")
@@ -355,7 +355,7 @@ class CameraAccessServiceTests(unittest.TestCase):
 
     def test_failed_device_initialization_releases_lifecycle_lease(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
 
@@ -428,7 +428,7 @@ class CameraProviderSessionTests(unittest.TestCase):
 class CameraWebSocketSessionTests(unittest.TestCase):
     def test_preview_holds_camera_until_last_subscriber_leaves(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         server = RobotWebSocketServer(services)
@@ -452,7 +452,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
 
     def test_preview_failure_releases_camera_session(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         server = RobotWebSocketServer(services)
@@ -478,7 +478,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
 
     def test_data_collection_holds_camera_and_teleoperation_resources(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         server = RobotWebSocketServer(services)
@@ -590,7 +590,7 @@ class CameraWebSocketSessionTests(unittest.TestCase):
 
     def test_device_shutdown_closes_active_data_collection_session(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
 

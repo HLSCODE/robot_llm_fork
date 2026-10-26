@@ -83,6 +83,8 @@ uv run robot-models-init --asr --kws --check
 `config/fragments/*.example.toml`。只创建缺失文件，已存在的本机配置会跳过且不会被修改。
 `migrate-data` 负责创建空的数据目录结构，并显式迁移受支持的旧 Action、Workflow、
 Robot Profile 和视觉工位数据。主程序启动只加载、校验数据，不会隐式迁移或覆盖文件。
+支持逐文件 `--dry-run` 预览，以及通过 `--target-map` 明确旧末端动作目标；版本链、备份和示例见 [数据迁移说明](docs/data-migration.md)。
+映射文件可省略：无法确定的目标迁移为“待配置”，启动后在界面补全；未补全动作会在执行前被拦截。
 
 按实际环境修改 `config/config.toml`。最常用配置项：
 
@@ -233,6 +235,8 @@ GUI 启动时会按配置初始化硬件；没有真实硬件时，请使用
 ├── config/                    # TOML 模板与本机配置
 ├── data/                      # 动作、工作流、技能、轨迹和运行产物（默认不提交）
 ├── docs/                      # 架构、配置、接口和专项维护文档
+│   └── references/            # 厂商原始手册与历史需求文档
+├── examples/                  # 硬件、Web、UDP 独立联调示例
 ├── scripts/                   # 校验、构建、迁移等维护脚本
 ├── src/                       # 业务源码
 ├── tests/                     # 单元、契约、GUI 模拟与回归测试
@@ -320,6 +324,13 @@ WebSocket 模式下可通过 `camera_status` 查询相机状态，通过 `subscr
 
 ## 硬件说明
 
+左右臂可独立配置固定夹爪或快换末端；睿尔曼内置夹爪继续复用 SDK，知行夹爪、ADP 和快换手通过
+Provider 接入。快换手与工具共用命名串口，流程明确选择工具，不推断已安装工具身份。
+主配置仅选择左右臂挂载（none/fixed/exchangeable）；厂商参数与共享连接分置于 `config/fragments/end-effectors/`。
+机械臂自带夹爪统一使用 `provider = "robot"`；设备离线或缺少该能力不阻止启动。
+配置见 [end-effectors.example.toml](config/fragments/end-effectors.example.toml)，
+启用方式、切换要求与真机验收见 [末端设备接入说明](docs/end-effector-provider-plan.md#14-已落地接入与部署步骤)。
+
 硬件模式下，启动器会尝试初始化：
 
 - Robot1 / Robot2 机械臂
@@ -382,6 +393,10 @@ uv run robot-llm --simulation
 
 ## 参考文档
 
+根目录中的技术手册与历史需求已归入 [docs/references](docs/references/README.md)，硬件、Web 和 UDP 测试 Demo 归入 [examples](examples/README.md)。硬件 Demo 会操作真实设备，不由主程序或自动化测试自动启动。
+
+设备控制浮窗顶部可选择末端工具、继电器或身体升降，默认显示末端工具。身体升降使用绝对目标位置（驱动器脉冲），不是毫米高度或连续点动；设备就绪后才允许执行，底部保留任务停止入口。切换控制页不会发送指令，各页输入独立保留。
+
 - [代码结构与模块说明](docs/codebase-architecture.md)
 - [版本更新日志](CHANGELOG.md)
 - [重构分支详细报告](docs/refactor-changelog.md)
@@ -389,6 +404,7 @@ uv run robot-llm --simulation
 - [WebSocket 接口手册](docs/websocket-api.md)
 - [依赖、配置与用户数据治理](docs/data-config-governance.md)
 - [配置说明](docs/configuration.md)
+- [大寰 RGD 夹爪接入与配置](docs/dh-rgd-gripper.md)
 - [视觉架构](docs/vision-architecture.md)
 - [机器人 Provider 架构](docs/robot-provider-architecture.md)
 - [工程质量门禁](docs/quality-gates.md)

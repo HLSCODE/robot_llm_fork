@@ -341,12 +341,6 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         options=["快换手"],
                         default="快换手",
                     ),
-                    "编号": _field(
-                        "select",
-                        "编号",
-                        options=[1, 2],
-                        default=1,
-                    ),
                     "操作": _field(
                         "select",
                         "操作",
@@ -379,7 +373,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                 },
             ),
             "夹爪": _variant(
-                "控制夹爪开关",
+                "夹爪控制",
                 {
                     "执行器": _field(
                         "select",
@@ -387,32 +381,11 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         options=["夹爪"],
                         default="夹爪",
                     ),
-                    "编号": _field(
-                        "select",
-                        "编号",
-                        options=[1, 2],
-                        default=1,
-                    ),
                     "操作": _field(
                         "select",
                         "操作",
                         options=["开", "关"],
                         default="开",
-                    ),
-                },
-            ),
-            "知行夹爪": _variant(
-                "控制知行夹爪开合度，左站号1、右站号2；0为全开，100为全闭",
-                {
-                    "执行器": _field(
-                        "select", "执行器", options=["知行夹爪"], default="知行夹爪",
-                    ),
-                    "编号": _field(
-                        "select", "站号（1=左，2=右）", options=[1, 2], default=1,
-                    ),
-                    "开合度": _field(
-                        "number", "开合度（0=开，100=关）", default=0.0,
-                        minimum=0, maximum=100, unit="%",
                     ),
                 },
             ),
@@ -1004,6 +977,24 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
 }
 
 
+for _executor, _kind in (("夹爪", "gripper"), ("吸液枪", "pipette"), ("快换手", "tool_changer"), ("右臂转圈注液", "pipette")):
+    _fields = _ACTION_SCHEMAS[ActionType.MANIPULATE.value]["variants"][_executor]["fields"]
+    _fields["arm"] = _field("select", "机械臂", required=True, options=[
+        {"value": "left", "label": "左臂"}, {"value": "right", "label": "右臂"},
+    ])
+    if _executor == "右臂转圈注液":
+        _fields["arm"]["options"] = [{"value": "right", "label": "右臂"}]
+    _fields["tool_id"] = _field("select", "工具实例", options_source=f"tools:{_kind}", options_source_field="arm")
+_gripper_fields = _ACTION_SCHEMAS[ActionType.MANIPULATE.value]["variants"]["夹爪"]["fields"]
+_gripper_fields["操作"]["options"] = ["开", "关", "定位", "初始化", "绝对旋转", "相对旋转", "停止旋转"]
+_gripper_fields["旋转角度"] = _field("number", "旋转角度", minimum=-32768, maximum=32767, default=0.0, unit="°")
+_gripper_fields["闭合度"] = _field("number", "闭合度（0=全开）", minimum=0, maximum=100, default=0.0, unit="%")
+_ACTION_SCHEMAS[ActionType.MANIPULATE.value]["variants"]["吸液枪"]["fields"]["操作"]["options"] = ["吸", "吐", "退枪头", "初始化"]
+_ACTION_SCHEMAS[ActionType.VISION_CAPTURE.value]["fields"]["tool_id"] = _field("select", "夹爪实例", options_source="tools:gripper", options_source_field="目标机械臂")
+_ACTION_SCHEMAS[ActionType.CHANGE_GUN.value]["fields"]["tool_id"] = _field("select", "放枪时使用的吸液枪", options_source="tools:pipette")
+_ACTION_SCHEMAS[ActionType.CHANGE_GUN.value]["fields"]["arm"] = _field("select", "末端机械臂", options=["right"], default="right")
+
+
 def get_action_schema() -> dict[str, ActionTypeSchema]:
     """Return a caller-owned copy of the canonical presentation schema."""
     return deepcopy(_ACTION_SCHEMAS)
@@ -1041,12 +1032,28 @@ def get_action_fields(
     return fields, None
 
 
+PENDING_TARGET_FIELDS = "_pending_target_fields"
+
+
+def pending_target_fields(parameters: object) -> tuple[str, ...]:
+    """Read migration-only target placeholders without choosing real devices."""
+    if not isinstance(parameters, dict):
+        return ()
+    fields = parameters.get(PENDING_TARGET_FIELDS)
+    if not isinstance(fields, list) or not fields or any(
+        not isinstance(value, str) or value not in ("arm", "tool_id") for value in fields
+    ) or len(set(fields)) != len(fields):
+        return ()
+    return tuple(fields)
+
+
 def validate_action_parameters(
     action_type: ActionType,
     parameters: object,
     *,
     apply_defaults: bool = True,
     reject_unknown: bool = True,
+    allow_pending_targets: bool = False,
 ) -> ActionParameterValidation:
     """Validate and normalize one action parameter mapping."""
     if not isinstance(parameters, dict):
@@ -1070,7 +1077,26 @@ def validate_action_parameters(
 
     normalized: dict[str, Any] = {}
     issues: list[ActionParameterIssue] = []
+    pending = pending_target_fields(parameters)
+    if PENDING_TARGET_FIELDS in parameters:
+        if not pending or action_type is not ActionType.MANIPULATE or parameters.get("执行器") not in (
+            "夹爪", "吸液枪", "快换手", "右臂转圈注液",
+        ):
+            issues.append(ActionParameterIssue(
+                ActionParameterIssueCode.INVALID_TYPE, PENDING_TARGET_FIELDS, "无效的迁移待配置目标标记",
+            ))
+            pending = ()
+        elif allow_pending_targets:
+            normalized[PENDING_TARGET_FIELDS] = list(pending)
+        else:
+            issues.extend(ActionParameterIssue(
+                ActionParameterIssueCode.MISSING_FIELD, name,
+                f"动作目标待配置：{name}；请编辑动作并选择机械臂和工具后再执行",
+            ) for name in pending)
     for field_name, field_schema in fields.items():
+        if allow_pending_targets and field_name in pending and parameters.get(field_name) in (None, ""):
+            normalized[field_name] = ""
+            continue
         if field_name in parameters:
             value = parameters[field_name]
         elif apply_defaults and "default" in field_schema:
@@ -1094,7 +1120,7 @@ def validate_action_parameters(
         normalized[field_name] = deepcopy(value)
 
     if reject_unknown:
-        for field_name in parameters.keys() - fields.keys():
+        for field_name in parameters.keys() - fields.keys() - {PENDING_TARGET_FIELDS}:
             issues.append(
                 ActionParameterIssue(
                     code=ActionParameterIssueCode.UNKNOWN_FIELD,

@@ -1,4 +1,4 @@
-"""Explicit one-way migration from legacy task/workflow files to workflow v5."""
+"""Explicit one-way migration from legacy tasks to current workflow documents."""
 
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--normalize-active",
         action="store_true",
-        help="Rewrite textual poses in active v5 workflows as numeric arrays.",
+        help="Rewrite textual poses in current workflows as numeric arrays.",
     )
     args = parser.parse_args(argv)
     root = args.data_root.resolve()
@@ -279,7 +279,7 @@ def normalize_active_workflows(
     workflows_directory: Path,
     backup_directory: Path | None = None,
 ) -> int:
-    """Rewrite valid v5 workflows to the canonical pose representation."""
+    """Rewrite current workflows to the canonical pose representation."""
     if not workflows_directory.is_dir():
         return 0
 

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 SKILL_DOCUMENT = SingleDocumentSpec(
     schema="robot_llm.skill",
     content_key="skill",
-    current_version=2,
+    current_version=3,
     schema_reference="../../schemas/skill.schema.json",
 )
 
@@ -234,7 +234,7 @@ def _validate_skill(path: Path, skill: Skill) -> None:
         raise JsonDocumentSchemaError(f"{path.name} requires unique non-empty step ids")
     for step in skill.steps:
         action_type = _resolve_action_type(path, step.action_type)
-        validation = validate_action_parameters(action_type, step.parameters)
+        validation = validate_action_parameters(action_type, step.parameters, allow_pending_targets=True)
         if not validation.is_valid:
             raise JsonDocumentSchemaError(
                 f"{path.name} step {step.step_id!r} has invalid parameters: "

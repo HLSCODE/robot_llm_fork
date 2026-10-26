@@ -1,7 +1,7 @@
 {
   "$schema": "../../schemas/skill.schema.json",
   "schema": "robot_llm.skill",
-  "schema_version": 2,
+  "schema_version": 3,
   "skill": {
     "id": "place_tool_1",
     "name": "放回枪头1",

@@ -151,7 +151,7 @@ class GuiToolbarTests(unittest.TestCase):
             self.assertEqual("", button.text())
             self.assertFalse(button.icon().isNull())
 
-        self.assertEqual("将当前流程保存为任务 (Ctrl+S)", controls.save_btn.toolTip())
+        self.assertEqual("另存为流程 (Ctrl+S)", controls.save_btn.toolTip())
         self.assertEqual("清空画布", controls.clear_btn.toolTip())
         self.assertEqual("画布适合内容", controls.fit_btn.toolTip())
         self.assertEqual("恢复 100% 缩放", controls.reset_zoom_btn.toolTip())

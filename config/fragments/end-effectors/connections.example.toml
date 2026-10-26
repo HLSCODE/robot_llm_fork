@@ -1,0 +1,22 @@
+# 共享串口只在此声明一次，所有设备实例通过 connection 引用。
+# tool_bus_1 是逻辑连接 ID，编号不表示机械臂或物理串口编号。
+# port 按现场填写：Windows 如 "COM9"，Linux 如 "/dev/ttyUSB0"，
+# 推荐 Linux 使用稳定的 /dev/serial/by-id/... 路径或自定义 udev 别名。
+[end_effectors.connections.tool_bus_1]
+transport = "serial"
+port = "/dev/hand"
+baudrate = 115200
+bytesize = 8
+parity = "N"
+stopbits = 1
+
+# 两个独立串口时，取消注释并填写另一个真实端口。
+# 工具通过 connection = "tool_bus_2" 引用它。
+# 同一 RS485 总线只需要上面的一个连接，不要再声明相同 port。
+# [end_effectors.connections.tool_bus_2]
+# transport = "serial"
+# port = "/dev/ttyUSB1" # Windows 例如 "COM10"；必须与 tool_bus_1 不同
+# baudrate = 115200
+# bytesize = 8
+# parity = "N"
+# stopbits = 1

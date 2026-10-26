@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ...devices import DeviceRuntime, Pipette, ToolRackControl
-from ...devices.runtime.ids import PIPETTE, ROBOT_SYSTEM
+from ...devices.runtime.ids import ROBOT_SYSTEM
 from ..handler_api import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -57,11 +57,11 @@ class ChangeToolActionHandler:
                 ROBOT_SYSTEM,
                 ToolRackControl,
             )
-            pipette = (
-                self._device_runtime.require(PIPETTE, Pipette)
-                if operation == "放"
-                else None
-            )
+            pipette = None
+            if operation == "放":
+                from ...devices.end_effectors import end_effectors
+                target = end_effectors(self._device_runtime).from_parameters("pipette", parameters)
+                pipette = self._device_runtime.require(target.device_id, Pipette)
         except Exception as exc:
             message = f"换枪所需设备不可用: {exc}"
             return context.failure(

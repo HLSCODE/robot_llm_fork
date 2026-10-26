@@ -16,5 +16,11 @@ class ToolChangerAdapter:
     def close(self) -> None:
         self._controller.close()
 
+    def read_status(self) -> dict[str, str]:
+        return {
+            "locked": str(self._controller.send_command("status")),
+            "power": str(self._controller.send_command("power_status")),
+        }
+
     def enter_safe_state(self) -> None:
         self.set_locked(True)

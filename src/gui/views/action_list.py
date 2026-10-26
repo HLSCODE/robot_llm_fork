@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor, QDrag, QIcon
 from PySide6.QtWidgets import QListWidget, QListWidgetItem, QWidget
 
 from ...domain.models import ActionDefinition, ActionType
+from ...domain.action_schema import pending_target_fields
 from ..icons import action_icon, themed_icon
 from ..drag_preview import create_drag_card_preview, execute_library_drag
 from .workflow_canvas.tokens import ACTION_COLORS
@@ -96,7 +97,8 @@ class ActionListWidget(QListWidget):
         start_action_drag(self, action, self._canvas_scale_provider())
 
     def add_action(self, action: ActionDefinition) -> None:
-        item = QListWidgetItem(action.name)
+        pending = pending_target_fields(action.parameters)
+        item = QListWidgetItem(f"⚠ {action.name}（待配置）" if pending else action.name)
         item.setTextAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
@@ -110,6 +112,8 @@ class ActionListWidget(QListWidget):
             f"{action.name}\n类型：{action.type.value}\n参数：{parameters or '无'}"
         )
         item.setData(Qt.ItemDataRole.UserRole, action)
+        if pending:
+            item.setToolTip(f"{action.name}\n目标待配置：{', '.join(pending)}\n请编辑动作后再执行")
         self.addItem(item)
 
     def get_selected_action(self) -> ActionDefinition | None:

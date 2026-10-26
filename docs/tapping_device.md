@@ -159,23 +159,23 @@ PC (USB-A)
               └── 针旋转电机 (地址 6)
 ```
 
-**注意：** 如果使用不带自动方向控制的 RS-485 适配器，可能需要启用 Linux 内核的 RS-485 模式（`ioctl` 设置 `SERIAL_RS485`）。调试脚本 `test_devices.py` 支持 `--rs485` 参数启用该模式。
+**注意：** 如果使用不带自动方向控制的 RS-485 适配器，可能需要启用 Linux 内核的 RS-485 模式（`ioctl` 设置 `SERIAL_RS485`）。当前 `examples/hardware/test_devices.py` 未提供 `--rs485` 参数，请使用支持自动方向控制的适配器或另行配置系统串口。
 
 ---
 
 ## 调试工具
 
-项目根目录下的 `test_devices.py` 提供了独立的调试脚本：
+`examples/hardware/test_devices.py` 提供了独立调试脚本，在项目根目录执行以下命令：
 
 ```bash
 # 扫描总线上的设备
-python test_devices.py --scan
+python -m examples.hardware.test_devices --scan
 
 # 交互模式，逐条控制
-python test_devices.py -i
+python -m examples.hardware.test_devices -i
 
 # 自动化测试序列
-python test_devices.py
+python -m examples.hardware.test_devices
 ```
 
 交互模式下支持全部加粉装置操作命令：`grip`, `release`, `gripper_open`, `lift_up`, `lift_down`, `rot_cw`, `rot_ccw` 等。

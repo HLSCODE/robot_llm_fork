@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from tool_support import tool_settings
 
 from src.application import (
     DATA_COLLECTION_TELEOPERATION_OWNER,
@@ -12,7 +13,6 @@ from src.application.teleoperation_observability import (
     TeleoperationEventType,
     TeleoperationObservability,
 )
-from src.configuration.settings import ApplicationSettings
 from src.devices import ArmId, ResourceArbiter
 from src.devices.runtime.factory import create_device_runtime
 from src.devices.runtime.ids import ROBOT_SYSTEM
@@ -29,7 +29,7 @@ class _FakeClock:
 class TeleoperationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.runtime = create_device_runtime(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         self.resources = ResourceArbiter()

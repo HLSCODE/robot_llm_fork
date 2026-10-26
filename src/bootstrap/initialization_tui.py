@@ -643,6 +643,7 @@ class InitializationApp(App[int]):
             kws_model=kws_ids[0] if kws_ids else "zh-en",
             frozen=self._initial_plan.frozen,
             dry_run=self._initial_plan.dry_run,
+            migration_target_map=self._initial_plan.migration_target_map,
         )
 
     def _refresh_review(self) -> None:

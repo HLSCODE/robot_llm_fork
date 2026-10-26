@@ -9,6 +9,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, TypedDict, TypeVar, cast
 
+from .end_effectors import EndEffectorSettings
+
 
 _SettingsT = TypeVar("_SettingsT")
 
@@ -158,8 +160,6 @@ class ExecutionSettings:
     execution_arm_move_max_attempts: int = 3
     execution_arm_move_retry_delay_seconds: float = 0.5
     execution_body_poll_interval_seconds: float = 0.1
-    execution_gripper_max_attempts: int = 3
-    execution_gripper_retry_delay_seconds: float = 0.5
     execution_trajectory_poll_interval_seconds: float = 0.5
     safety_stop_wait_timeout_seconds: float = 2.0
 
@@ -473,26 +473,6 @@ class DeviceSettings:
     body_slave_id: int = 1
     body_timeout: int = 1
     body_di_pan: bool = False
-    kuaihuanshou_serial_port: str = "/dev/ttyUSB2"
-    kuaihuanshou_baudrate: int = 115200
-    kuaihuanshou_timeout: int = 3
-    adp_serial_port: str = "/dev/ttyUSB2"
-    adp_baudrate: int = 115200
-    adp_timeout: int = 5
-    adp_max_retries: int = 3
-    adp_command_interval_seconds: float = 0.2
-    zhixing_gripper_serial_port: str = "COM4"
-    zhixing_gripper_baudrate: int = 115200
-    zhixing_gripper_timeout: float = 1.0
-    zhixing_gripper_wait_timeout: float = 8.0
-    zhixing_gripper_speed: int = 100
-    zhixing_gripper_torque: int = 60
-    zhixing_gripper_acceleration: int = 2000
-    zhixing_gripper_deceleration: int = 2000
-    zhixing_gripper_left_pos_min: int = 0
-    zhixing_gripper_left_pos_max: int = 4000
-    zhixing_gripper_right_pos_min: int = 0
-    zhixing_gripper_right_pos_max: int = 4000
     relay_serial_port: str = "/dev/ttyUSB0"
     relay_baudrate: int = 38400
     relay_timeout: int = 1
@@ -553,21 +533,6 @@ class DeviceSettings:
             "baudrate": self.body_baudrate,
             "slave_id": self.body_slave_id,
             "timeout": self.body_timeout,
-        }
-
-    def kuaihuanshou_config(self) -> dict[str, object]:
-        return {
-            "port": self.kuaihuanshou_serial_port,
-            "baudrate": self.kuaihuanshou_baudrate,
-            "timeout": self.kuaihuanshou_timeout,
-        }
-
-    def adp_config(self) -> dict[str, object]:
-        return {
-            "port": self.adp_serial_port,
-            "baudrate": self.adp_baudrate,
-            "timeout": self.adp_timeout,
-            "max_retries": self.adp_max_retries,
         }
 
     def relay_config(self) -> dict[str, object]:
@@ -1200,6 +1165,7 @@ class ApplicationSettings:
     devices: DeviceSettings
     vision: VisionSettings
     voice: VoiceSettings
+    end_effectors: EndEffectorSettings = field(default_factory=EndEffectorSettings)
 
     @classmethod
     def from_config(cls, config: Any) -> ApplicationSettings:
@@ -1248,6 +1214,7 @@ class ApplicationSettings:
             devices=_snapshot(DeviceSettings, config),
             vision=_snapshot(VisionSettings, config),
             voice=_snapshot(VoiceSettings, config),
+            end_effectors=_snapshot(EndEffectorSettings, config),
         )
 
     @classmethod

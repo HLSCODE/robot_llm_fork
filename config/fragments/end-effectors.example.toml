@@ -1,0 +1,50 @@
+# 这里只配置通用选项和左右臂挂载；设备参数见 end-effectors/ 子目录。
+# 所有片段由 config.toml 的 include 加载，子文件不再声明 include。
+# 以下默认不安装工具；修改挂载时需删除原表中的 mode/tool/changer/tools，
+# 按下面对应场景替换，不要把同名 TOML 表重复追加到文件末尾。
+# 完整组合与通信注意事项：docs/end-effector-configuration-examples.md。
+[end_effectors]
+status_poll_interval_seconds = 2.0
+
+[end_effectors.mounts.left]
+mode = "none"
+# 固定安装示例：mode = "fixed"，并添加 tool = "robot_gripper_1"。
+
+[end_effectors.mounts.right]
+mode = "none"
+# 快换示例：mode = "exchangeable"，并添加以下两项：
+# changer = "tool_changer_1"
+# tools = ["pipette_1", "zhixing_gripper_1"]
+# 通信连接由快换手实例决定；可选工具必须引用同一连接。
+
+# 场景1：左臂大寰、右臂知行，两个独立串口。
+# left 表改为 mode = "fixed"、tool = "dh_rgd_gripper_1"；
+# right 表改为 mode = "fixed"、tool = "zhixing_gripper_1"。
+# connections.toml 启用下方第二连接；dh-rgd.toml 的 connection 改为
+# "tool_bus_2"，zhixing.toml 保持 "tool_bus_1"。两者 station 均可为1。
+# config.toml 的 include 须包含 connections、zhixing 和 dh-rgd 实际配置。
+#
+# 场景2：左右臂同型号、独立串口。
+# 复制对应厂商工具表，使用不同 ID（例如 zhixing_gripper_1、zhixing_gripper_2），
+# 两个工具分别引用 tool_bus_1、tool_bus_2；分别固定挂载左右臂。
+# 每个工具独立配置运动参数，不继承另一个实例；站号均可为1。
+#
+# 场景3：左右臂同型号、同一条 RS485 总线。
+# 使用两个工具 ID，connection 均为 "tool_bus_1"，station 分别为1和2；
+# 两个 fixed 挂载分别引用两个 ID。只声明一个物理串口，不能重复声明相同 port。
+# 必须先通过厂商工具把夹爪硬件地址改成不同站号，配置不会修改硬件。
+#
+# 场景4：机械臂 SDK 内置夹爪。
+# fixed 挂载引用 robot_gripper_1，不填写 connection 或 sdk_arm。
+# 两臂都使用时需在 robot.toml 中声明第二个工具实例 robot_gripper_2。
+# 当前机器人 Provider 必须支持内置夹爪；天机不支持时请选外接 Provider。
+#
+# 场景5：快换手 + 多种备选工具。
+# 对应挂载使用 mode = "exchangeable"、changer = "tool_changer_1"、
+# tools = ["pipette_1", "zhixing_gripper_1", "dh_rgd_gripper_1"]，删除 tool。
+# 所有备选工具和 changer 引用同一个 connection；动作明确选择 tool_id。
+# 不推断当前安装的工具身份，流程负责保证物理安装正确。
+#
+# 场景6：未安装或仅单臂安装。
+# 未安装的臂保持 mode = "none"，不能同时保留 tool/changer/tools；
+# 另一臂独立配置为 fixed 或 exchangeable。

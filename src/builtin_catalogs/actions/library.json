@@ -1,7 +1,7 @@
 {
   "$schema": "../schemas/action-library.schema.json",
   "schema": "robot_llm.actions",
-  "schema_version": 3,
+  "schema_version": 4,
   "robot_profile_id": "realman-rm75-dual",
   "actions": [
     {
@@ -625,8 +625,9 @@
       "type": "ARM_ACTION",
       "parameters": {
         "执行器": "夹爪",
-        "编号": 2,
-        "操作": "关"
+        "操作": "关",
+        "arm": "right",
+        "tool_id": "zhixing_gripper_1"
       }
     },
     {
@@ -726,8 +727,9 @@
       "type": "ARM_ACTION",
       "parameters": {
         "执行器": "夹爪",
-        "编号": 1,
-        "操作": "开"
+        "操作": "开",
+        "arm": "left",
+        "tool_id": "robot_gripper_1"
       }
     },
     {
@@ -736,8 +738,9 @@
       "type": "ARM_ACTION",
       "parameters": {
         "执行器": "夹爪",
-        "编号": 1,
-        "操作": "关"
+        "操作": "关",
+        "arm": "left",
+        "tool_id": "robot_gripper_1"
       }
     }
   ]

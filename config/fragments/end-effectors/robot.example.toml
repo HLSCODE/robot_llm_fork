@@ -1,0 +1,8 @@
+# 使用当前 [robot].provider 所提供的内置夹爪能力，不重复指定厂商或机械臂。
+# robot_gripper_1 是实例名称；编号不表示机械臂或站号，可挂载到任一有能力的机械臂。
+# 实际操作哪条臂由 mounts.left/right 的 tool 绑定决定。
+# 没有内置夹爪能力时显示不可用，不阻止启动，也不会改用其他设备。
+[end_effectors.tools.robot_gripper_1]
+display_name = "机械臂内置夹爪" # 界面别名，动作仍保存上面的实例 ID
+kind = "gripper"
+provider = "robot"

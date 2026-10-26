@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from tool_support import tool_settings
+from src.devices.end_effectors.runtime import EndEffectorRuntime
 from dataclasses import replace
 
 from src.application import create_application_services
@@ -21,7 +23,7 @@ from src.devices import (
     RobotSystem,
 )
 from src.devices.runtime.factory import create_device_runtime
-from src.devices.runtime.ids import CAMERA, PIPETTE, ROBOT_SYSTEM
+from src.devices.runtime.ids import CAMERA, ROBOT_SYSTEM
 from src.execution import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -272,18 +274,19 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
         pipette = _Pipette()
         runtime.register(
             DeviceRegistration(
-                device_id=PIPETTE,
+                device_id="tool:pipette",
                 capabilities=frozenset({DeviceCapability.PIPETTE}),
                 factory=lambda: pipette,
                 close=lambda _device: None,
             )
         )
+        runtime.end_effectors = EndEffectorRuntime(runtime, tool_settings().end_effectors)
         handler = ChangeToolActionHandler(runtime)
         context, _logs = _action_context()
 
         self.assertTrue(
             handler(
-                {"Gun_Position": "2", "Operation": " 放 "},
+                {"Gun_Position": "2", "Operation": " 放 ", "arm": "right", "tool_id": "pipette"},
                 context,
             ).successful
         )
@@ -321,7 +324,7 @@ class ChangeToolActionHandlerTests(unittest.TestCase):
 
 class VisionActionHandlerTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.settings = ApplicationSettings.defaults()
+        self.settings = tool_settings()
         self._vision_directory = TemporaryDirectory()
         self.addCleanup(self._vision_directory.cleanup)
         self.vision_settings = replace(
@@ -371,7 +374,7 @@ class VisionActionHandlerTests(unittest.TestCase):
         )
         robot, camera, parameters = received[0]
         self.assertIs(
-            robot,
+            robot._robot,
             self.runtime.require(ROBOT_SYSTEM, RobotSystem),
         )
         self.assertIs(camera, self.runtime.get_if_ready(CAMERA))

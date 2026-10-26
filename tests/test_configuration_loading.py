@@ -18,6 +18,53 @@ from src.configuration.settings import CameraRole
 
 
 class ConfigurationLoadingTests(unittest.TestCase):
+    def test_robot_tool_configuration_does_not_repeat_robot_provider(self) -> None:
+        with TemporaryDirectory() as temporary_directory, patch.dict(os.environ, {}, clear=True):
+            root = Path(temporary_directory)
+            config_path = self._write(root, '''
+                schema_version = 6
+                [robot]
+                provider = "tianji"
+                [end_effectors.tools.robot_gripper_1]
+                kind = "gripper"
+                provider = "robot"
+                [end_effectors.mounts.left]
+                mode = "fixed"
+                tool = "robot_gripper_1"
+            ''')
+            settings = load_application_settings(config_path, env_file=root / "missing.env")
+        self.assertEqual("tianji", settings.robot.provider)
+        self.assertEqual("robot", settings.end_effectors.tools[0].provider)
+
+    def test_invalid_tool_setting_is_not_hidden_by_generic_loader_error(self) -> None:
+        with TemporaryDirectory() as temporary_directory, patch.dict(os.environ, {}, clear=True):
+            root = Path(temporary_directory)
+            config_path = self._write(root, '''
+                schema_version = 6
+                [end_effectors.tools.pipette_1]
+                kind = "pipette"
+                provider = "adp"
+                connection = "bus"
+                response_timeout_seconds = -1.0
+            ''')
+            with self.assertRaisesRegex(ConfigLoadError, "pipette_1.*超时"):
+                load_application_settings(config_path, env_file=root / "missing.env")
+
+    def test_robot_without_installed_tools_has_no_implicit_mount(self) -> None:
+        with TemporaryDirectory() as temporary_directory, patch.dict(os.environ, {}, clear=True):
+            root = Path(temporary_directory)
+            config_path = self._write(root, '''
+                schema_version = 6
+                [robot]
+                provider = "tianji"
+                [end_effectors]
+                status_poll_interval_seconds = 2.0
+            ''')
+            settings = load_application_settings(config_path, env_file=root / "missing.env")
+        self.assertEqual("tianji", settings.robot.provider)
+        self.assertEqual((), settings.end_effectors.mounts)
+        self.assertEqual((), settings.end_effectors.tools)
+
     def test_default_config_path_prefers_working_directory_then_project_root(self) -> None:
         with TemporaryDirectory() as working_directory, TemporaryDirectory() as project_directory:
             working_root = Path(working_directory)

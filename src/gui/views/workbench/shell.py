@@ -77,6 +77,7 @@ class WorkbenchPage:
     icon: IconName
     widget: QWidget
     full_workspace: bool = False
+    fit_content: bool = False
 
 
 class _ThinLineSplitterHandle(QSplitterHandle):
@@ -442,15 +443,14 @@ class WorkbenchStatusBar(QFrame):
             (
                 state.robot_ready,
                 state.body_ready,
-                state.pipette_ready,
                 state.relay_ready,
             )
         )
         device_button = self.buttons["devices"]
-        is_ready = ready_count == 4
+        is_ready = ready_count == 3
         role = "statusSuccess" if is_ready else "statusDanger"
         device_button.setProperty("themeRole", role)
-        summary = f"设备状态：{ready_count}/4 可用"
+        summary = f"基础设备状态：{ready_count}/3 可用（末端工具按需通信）"
         device_button.setToolTip(f"{summary}（打开设备详情）")
         device_button.setAccessibleName(summary)
         style = device_button.style()
@@ -604,6 +604,7 @@ class _FloatingDetailPanel(QFrame):
         layout.setContentsMargins(12, 8, 12, 12)
         layout.setSpacing(6)
         header = QHBoxLayout()
+        self._header_layout = header
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
         self.title_label = QLabel()
@@ -633,6 +634,21 @@ class _FloatingDetailPanel(QFrame):
         page = self._pages[page_key]
         self.title_label.setText(page.title)
         self.stack.setCurrentWidget(page.widget)
+
+    def preferred_size(self) -> QSize:
+        page = next((page for page in self._pages.values() if page.widget is self.stack.currentWidget()), None)
+        if page is None or not page.fit_content:
+            return QSize(DETAIL_PANEL_DEFAULT_WIDTH, DETAIL_PANEL_DEFAULT_HEIGHT)
+        content = page.widget.sizeHint()
+        layout = self.layout()
+        assert layout is not None
+        margins = layout.contentsMargins()
+        frame = self.contentsMargins()
+        return QSize(
+            max(DETAIL_PANEL_DEFAULT_WIDTH, content.width() + margins.left() + margins.right() + frame.left() + frame.right()),
+            max(1, content.height() + margins.top() + margins.bottom()
+                + self._header_layout.sizeHint().height() + layout.spacing() + frame.top() + frame.bottom()),
+        )
 
 
 class WorkbenchView(QWidget):
@@ -730,6 +746,10 @@ class WorkbenchView(QWidget):
         root.addWidget(self.status_bar)
         self.detail_panel = _FloatingDetailPanel(bottom_pages, self)
         self.detail_panel.close_requested.connect(self.close_bottom_page)
+        self._detail_resize_timer = QTimer(self)
+        self._detail_resize_timer.setSingleShot(True)
+        self._detail_resize_timer.timeout.connect(self._position_detail_panel)
+        self.detail_panel.stack.installEventFilter(self)
         self.notification_toast = _NotificationToast(self)
         self.notification_toast.dismissed.connect(self._position_notification_toast)
         self.bottom_stack = self.detail_panel.stack
@@ -929,6 +949,9 @@ class WorkbenchView(QWidget):
         super().hideEvent(event)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if self._active_bottom_page is not None and event.type() is QEvent.Type.LayoutRequest:
+            if watched is self.detail_panel.stack and self._bottom_pages[self._active_bottom_page].fit_content:
+                self._detail_resize_timer.start(0)
         if watched in self._scrollbar_cards:
             if event.type() is QEvent.Type.Enter:
                 self._set_card_hover_state(watched, visible=True)
@@ -998,8 +1021,9 @@ class WorkbenchView(QWidget):
             1,
             self.height() - self.status_bar.height() - (2 * DETAIL_PANEL_MARGIN),
         )
-        width = min(DETAIL_PANEL_DEFAULT_WIDTH, available_width)
-        height = min(DETAIL_PANEL_DEFAULT_HEIGHT, available_height)
+        preferred = self.detail_panel.preferred_size()
+        width = min(preferred.width(), available_width)
+        height = min(preferred.height(), available_height)
         x = max(DETAIL_PANEL_MARGIN, self.width() - DETAIL_PANEL_MARGIN - width)
         y = max(
             DETAIL_PANEL_MARGIN,

@@ -16,5 +16,12 @@ include = [
   "fragments/robots/tianji.toml",
   "fragments/mobile-base.toml",
   "fragments/devices.toml",
+  "fragments/end-effectors.toml",
+  "fragments/end-effectors/connections.toml",
+  "fragments/end-effectors/robot.toml",
+  "fragments/end-effectors/zhixing.toml",
+  "fragments/end-effectors/adp.toml",
+  "fragments/end-effectors/kuaihuanshou.toml",
+  "fragments/end-effectors/dh-rgd.toml",
   "fragments/voice.toml",
 ]

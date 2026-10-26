@@ -1,7 +1,7 @@
 {
   "$schema": "../../schemas/skill.schema.json",
   "schema": "robot_llm.skill",
-  "schema_version": 2,
+  "schema_version": 3,
   "skill": {
     "id": "youbi_prepare_liquid",
     "name": "右臂双枪吸液",
@@ -89,7 +89,9 @@
         "parameters": {
           "执行器": "吸液枪",
           "操作": "吸",
-          "容量": 500
+          "容量": 500,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {},
         "description": "吸取500ul液体",
@@ -162,7 +164,9 @@
         "parameters": {
           "执行器": "吸液枪",
           "操作": "吐",
-          "容量": 500
+          "容量": 500,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {},
         "description": "吐出500ul液体到主杯",
@@ -299,7 +303,9 @@
         "parameters": {
           "执行器": "吸液枪",
           "操作": "吸",
-          "容量": 500
+          "容量": 500,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {},
         "description": "吸取500ul液体",
@@ -372,7 +378,9 @@
         "parameters": {
           "执行器": "吸液枪",
           "操作": "吐",
-          "容量": 500
+          "容量": 500,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {},
         "description": "吐出500ul液体到主杯",

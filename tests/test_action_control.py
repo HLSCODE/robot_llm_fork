@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from tool_support import register_test_tools
 
 from src.domain.models import (
     ActionDefinition,
@@ -31,11 +32,9 @@ from src.devices.runtime.ids import (
     EXPRESSION_DISPLAY,
     MOBILE_BASE,
     NECK,
-    PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
     ROBOT_SYSTEM,
-    TOOL_CHANGER,
 )
 from src.execution import (
     ActionCancellationMode,
@@ -132,7 +131,7 @@ class ActionControlPolicyTests(unittest.TestCase):
                 resolve_manipulate_control_policy,
                 {"执行器": "快换手"},
                 ActionCancellationMode.AFTER_BLOCKING_CALL,
-                (TOOL_CHANGER,),
+                (),
                 "tool_changer.set_locked",
             ),
             (
@@ -146,14 +145,14 @@ class ActionControlPolicyTests(unittest.TestCase):
                 resolve_manipulate_control_policy,
                 {"执行器": "夹爪"},
                 ActionCancellationMode.AFTER_BLOCKING_CALL,
-                (ROBOT_SYSTEM,),
+                (),
                 "gripper.execute",
             ),
             (
                 resolve_manipulate_control_policy,
                 {"执行器": "吸液枪"},
                 ActionCancellationMode.AFTER_BLOCKING_CALL,
-                (PIPETTE,),
+                (),
                 "pipette.execute",
             ),
             (
@@ -188,7 +187,7 @@ class ActionControlPolicyTests(unittest.TestCase):
                 resolve_manipulate_control_policy,
                 {"执行器": "右臂转圈注液"},
                 ActionCancellationMode.DEVICE_ASSISTED,
-                (ROBOT_SYSTEM, PIPETTE),
+                (ROBOT_SYSTEM,),
                 "circle_dispense.execute",
             ),
             (
@@ -202,7 +201,7 @@ class ActionControlPolicyTests(unittest.TestCase):
                 resolve_change_tool_control_policy,
                 {"Operation": "放"},
                 ActionCancellationMode.DEVICE_ASSISTED,
-                (ROBOT_SYSTEM, PIPETTE),
+                (ROBOT_SYSTEM,),
                 "tool_rack.change_tool",
             ),
             (
@@ -340,7 +339,7 @@ class ActionControlPolicyTests(unittest.TestCase):
             )
 
     def test_sequence_resources_are_exact_and_include_loop_children(self):
-        engine = _create_engine(DeviceRuntime())
+        engine = _create_engine(register_test_tools(DeviceRuntime()))
         wait = SequenceItem.from_definition(ActionDefinition("wait", "wait", ActionType.WAIT, {}))
         vision = SequenceItem.from_definition(
             ActionDefinition(
@@ -357,7 +356,7 @@ class ActionControlPolicyTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            (ROBOT_SYSTEM, CAMERA),
+            (ROBOT_SYSTEM, CAMERA, "end-effector:left", "tool:left"),
             engine.required_resources(ExecutionPlan.from_entries((wait, loop))),
         )
 

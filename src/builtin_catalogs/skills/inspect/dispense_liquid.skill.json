@@ -1,7 +1,7 @@
 {
   "$schema": "../../schemas/skill.schema.json",
   "schema": "robot_llm.skill",
-  "schema_version": 2,
+  "schema_version": 3,
   "skill": {
     "id": "dispense_liquid",
     "name": "释放液体",
@@ -17,7 +17,9 @@
         "parameters": {
           "执行器": "吸液枪",
           "操作": "吐",
-          "容量": 500
+          "容量": 500,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {},
         "description": "释放液体",

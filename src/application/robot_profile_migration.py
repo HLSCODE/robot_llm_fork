@@ -11,6 +11,7 @@ from typing import Any
 from .action_catalog_normalization import normalize_legacy_action
 from ..configuration.data_paths import ApplicationDataPaths
 from ..domain.models import ActionDefinition
+from ..domain.workflow import WORKFLOW_DOCUMENT_VERSION
 from ..persistence.json_documents import (
     load_collection_document,
     read_json_document,
@@ -157,7 +158,7 @@ class LegacyRobotProfileMigrator:
             if not isinstance(raw, dict) or raw.get("schema") != "robot_llm.workflow":
                 continue
             profiled = dict(raw)
-            profiled["schema_version"] = 5
+            profiled["schema_version"] = WORKFLOW_DOCUMENT_VERSION
             profiled["robot_profile_id"] = self._paths.robot_profile_id
             profiled["$schema"] = "../../../schemas/workflow.schema.json"
             self._stamp_action_profiles(profiled)

@@ -77,10 +77,10 @@ Robot Action Orchestrator 是一个面向机器人动作编排、设备控制和
 | `models/kws/` | 唤醒词说明、词表及词表模板 | README、`keywords*.txt` 提交；模型权重不提交 |
 | `.github/workflows/quality.yml` | Windows/Linux 自动化质量检查 | 与 `scripts/` 中的检查入口配合 |
 | `README.md`、`CHANGELOG.md` | 使用入口、版本与日期管理 | 架构细节在 `docs/` 中维护 |
-| `test_client.html`、`test_panel.html` | 浏览器端联调页面 | 调试服务接口，不属于桌面应用启动链路 |
-| `test_devices.py` | 加粉装置 RS-485 硬件联调脚本 | 会操作真实设备，不等同于 `tests/` 自动化测试 |
-| `udp-receiver.py` | 独立 UDP 接收调试脚本 | 排查外部数据输入，不由主程序自动启动 |
-| `Robot Action Orchestrator_SRS.docx` | 需求说明资料 | 历史需求参考，当前实现以源码为准 |
+| `examples/web/` | 浏览器端联调页面 `test_client.html`、`test_panel.html` | 调试服务接口，不属于桌面应用启动链路 |
+| `examples/hardware/` | 加粉装置 `test_devices.py` 及知行、大寰夹爪原始 Demo | 会操作真实设备，不等同于 `tests/` 自动化测试；使用方法见 `examples/README.md` |
+| `examples/network/udp-receiver.py` | 独立 UDP 接收调试脚本 | 排查外部数据输入，不由主程序自动启动 |
+| `docs/references/` | 厂商原始 PDF 手册、历史 SRS 需求文档 | 参考资料索引见 `docs/references/README.md`；当前实现以源码为准 |
 | `CLAUDE.md`、`.agents/`、`.claude/`、`.trae/` | 开发辅助说明、工具配置及辅助资源 | 不是运行时模块；历史说明可能与当前目录不同 |
 
 配置模板的实际组织方式：
@@ -98,6 +98,13 @@ config/
     │   └── tianji.example.toml
     ├── mobile-base.example.toml
     ├── devices.example.toml
+    ├── end-effectors.example.toml
+    ├── end-effectors/
+    │   ├── connections.example.toml
+    │   ├── robot.example.toml
+    │   ├── zhixing.example.toml
+    │   ├── adp.example.toml
+    │   └── kuaihuanshou.example.toml
     └── voice.example.toml
 ```
 
@@ -273,6 +280,7 @@ DeviceRuntime ── Registration / Provider ── Adapter ── Driver / SDK 
 | `cameras/` | RealSense/OpenCV provider、相机 manager 与目录注册 |
 | `motion/` | 底盘 TCP、升降平台 body axis、颈部 PWM 等运动设备 |
 | `tools/` | 移液枪、快换手、继电器、粉末分配器及其驱动 |
+| `end_effectors/` | 按左右臂与工具 ID 路由；固定/快换挂载、睿尔曼 SDK/知行/ADP/快换手 Provider 与视觉兼容门面 |
 | `sensors/` | 天平等传感器 provider |
 | `transports/` | 可复用串口、Modbus RTU、TCP 传输、重试和测试替身 |
 | `displays/` | T5L DGUSII 等显示设备与界面协议 |
@@ -283,6 +291,16 @@ DeviceRuntime ── Registration / Provider ── Adapter ── Driver / SDK 
 `robots/realman/recording.py` 与 `robots/tianji/recording.py` 分别适配示教和录制流程。
 GUI 不直接调用厂商的拖动示教、采集或保存接口；回放仍走统一 trajectory Handler。
 新增同能力厂商实现时，优先复用现有 contract，避免把厂商分支扩散到表现层。
+
+末端工具独立于机械臂 Provider：`configuration/end_effectors.py` 定义部署，
+`devices/end_effectors/runtime.py` 同时解析工具与资源依赖；
+主片段只声明左右臂挂载，`fragments/end-effectors/` 按厂商与连接拆分参数，目录按实例 ID 合并。
+`robot` 末端复用当前机械臂能力和挂载臂，无需重复指定机器人 Provider。未挂载的工具不构造运行时对象，缺少能力或设备离线不阻止主界面启动；执行预检和 Handler 共用该解析结果。
+`application/end_effectors.py` 为独立手动入口申请资源，Handler 则复用执行器已有租约，避免重复加锁。
+`transports/shared_serial.py` 按物理端口共享句柄和收发锁；快换状态查询与工具命令不能并行读取串口。
+配置夹爪、吸液枪和快换实例只注册逻辑端点，真实通信按需启动；快换手不维护安装工具身份。
+设备面板后台单线程采样状态，退出先停止采样再关闭工具和连接池。
+仅接受新末端目录，不注册旧全局工具 ID；缺少绑定明确失败，旧数据不隐式迁移。详见 [末端 Provider 方案与接入](end-effector-provider-plan.md)。
 
 ### 5.7 持久化与用户数据：`persistence/` 与 `data/`
 

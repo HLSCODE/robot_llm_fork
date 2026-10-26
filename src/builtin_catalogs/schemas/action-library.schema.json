@@ -8,7 +8,7 @@
   "properties": {
     "$schema": {"type": "string"},
     "schema": {"const": "robot_llm.actions"},
-    "schema_version": {"const": 3},
+    "schema_version": {"const": 4},
     "robot_profile_id": {"type": "string", "minLength": 1},
     "actions": {
       "type": "array",

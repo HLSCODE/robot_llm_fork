@@ -5,10 +5,12 @@ from threading import Event
 from unittest.mock import patch
 
 import pytest
+from tool_support import tool_settings
+from src.execution.end_effector_policy import resolve_tool_policy
 
 from src.application.services import ManualControlService
 from src.configuration.settings import ApplicationSettings
-from src.devices import PercentGripperControl, ResourceArbiter, ResourceBusyError
+from src.devices import ResourceArbiter, ResourceBusyError
 from src.devices.runtime.factory import create_device_runtime
 from src.devices.runtime.ids import ZHIXING_GRIPPERS
 from src.devices.tools.zhixing_gripper import ZhixingGripperController
@@ -19,7 +21,6 @@ from src.domain.models import ActionType
 from src.execution import ActionExecutionContext, ActionResultCode, ExecutionControl
 from src.execution.action_control import resolve_manipulate_control_policy
 from src.execution.handlers.manipulation import (
-    ManipulationHandlerOptions,
     create_manipulation_handler,
 )
 
@@ -210,14 +211,14 @@ def test_shared_bus_serializes_entire_motions():
 
 
 def test_action_routing_and_manual_controls_share_bus_resource():
-    runtime = create_device_runtime(ApplicationSettings.defaults(), simulation=True)
+    runtime = create_device_runtime(tool_settings(), simulation=True)
     resources = ResourceArbiter()
     manual = ManualControlService(runtime, resources)
-    handler = create_manipulation_handler(runtime, ManipulationHandlerOptions(), lambda: {})
-    parameters = {"执行器": "知行夹爪", "编号": 2, "开合度": 37.5}
+    handler = create_manipulation_handler(runtime, lambda: {})
+    parameters = {"执行器": "夹爪", "arm": "right", "tool_id": "right", "操作": "定位", "闭合度": 37.5}
     assert validate_action_parameters(ActionType.MANIPULATE, parameters).is_valid
-    policy = resolve_manipulate_control_policy(parameters)
-    assert policy.device_ids == (ZHIXING_GRIPPERS,)
+    policy = resolve_tool_policy(runtime, ActionType.MANIPULATE, parameters, resolve_manipulate_control_policy(parameters))
+    assert "connection:bus" in policy.device_ids
     context = ActionExecutionContext(
         action_name="右知行夹爪",
         control=ExecutionControl(),
@@ -226,12 +227,12 @@ def test_action_routing_and_manual_controls_share_bus_resource():
     )
     result = handler(parameters, context)
     assert result.successful
-    device = runtime.require(ZHIXING_GRIPPERS, PercentGripperControl)
-    assert device.positions == {1: 0, 2: 37.5}
-    manual.set_zhixing_gripper(1, 100)
-    assert device.positions == {1: 100, 2: 37.5}
+    device = runtime.require("tool:right")
+    assert device.closure_percent == 37.5
+    manual.set_gripper("right", tool_id="right", closure_percent=100)
+    assert device.closure_percent == 100
     with resources.acquire("workflow", policy.device_ids), pytest.raises(ResourceBusyError):
-        manual.set_zhixing_gripper(2, 0)
+        manual.set_gripper("right", tool_id="right", closure_percent=0)
     runtime.shutdown_all()
 
 
@@ -248,7 +249,7 @@ def test_action_routing_and_manual_controls_share_bus_resource():
 )
 def test_action_handler_rejects_invalid_values_before_initialization(extra):
     runtime = create_device_runtime(ApplicationSettings.defaults(), simulation=True)
-    handler = create_manipulation_handler(runtime, ManipulationHandlerOptions(), lambda: {})
+    handler = create_manipulation_handler(runtime, lambda: {})
     result = handler(
         {"执行器": "知行夹爪", "编号": 1, "开合度": 50, **extra},
         ActionExecutionContext(
@@ -258,5 +259,5 @@ def test_action_handler_rejects_invalid_values_before_initialization(extra):
             log=lambda *_args: None,
         ),
     )
-    assert result.code is ActionResultCode.INVALID_PARAMETERS
-    assert runtime.get_if_ready(ZHIXING_GRIPPERS) is None
+    assert result.code is ActionResultCode.UNSUPPORTED_OPERATION
+    assert ZHIXING_GRIPPERS not in runtime.registered_device_ids()

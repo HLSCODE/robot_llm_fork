@@ -1,7 +1,7 @@
 {
   "$schema": "../../schemas/skill.schema.json",
   "schema": "robot_llm.skill",
-  "schema_version": 2,
+  "schema_version": 3,
   "skill": {
     "id": "zuobi_grab_place",
     "name": "左臂抓放瓶子",
@@ -56,8 +56,9 @@
         "action_type": "MANIPULATE",
         "parameters": {
           "执行器": "夹爪",
-          "编号": 1,
-          "操作": "关"
+          "操作": "关",
+          "arm": "left",
+          "tool_id": "robot_gripper_1"
         },
         "parameter_bindings": {},
         "description": "关闭夹爪抓取瓶子",
@@ -169,8 +170,9 @@
         "action_type": "MANIPULATE",
         "parameters": {
           "执行器": "夹爪",
-          "编号": 1,
-          "操作": "开"
+          "操作": "开",
+          "arm": "left",
+          "tool_id": "robot_gripper_1"
         },
         "parameter_bindings": {},
         "description": "打开夹爪释放瓶子",

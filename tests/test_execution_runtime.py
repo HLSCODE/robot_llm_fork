@@ -3,6 +3,7 @@ from __future__ import annotations
 from threading import Barrier, Event, Lock, Thread
 import logging
 import unittest
+from tool_support import tool_settings
 
 from src.application import create_application_services
 from src.domain.models import (
@@ -14,7 +15,6 @@ from src.domain.models import (
 )
 from src.domain.execution_plan import ExecutionPlan, iter_execution_steps
 from src.observability.logging_config import LoggingContextFilter
-from src.configuration.settings import ApplicationSettings
 from src.devices import (
     DeviceCapability,
     DeviceErrorCategory,
@@ -27,7 +27,7 @@ from src.devices import (
     ResourceBusyError,
     StopMode,
 )
-from src.devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM, TOOL_CHANGER
+from src.devices.runtime.ids import BODY_AXIS, RELAY_BANK, ROBOT_SYSTEM
 from src.execution import (
     EngineCallbacks,
     EngineResult,
@@ -607,23 +607,23 @@ class ExecutionManagerTests(unittest.TestCase):
 class ApplicationServiceTests(unittest.TestCase):
     def test_shutdown_skips_pipette_reset_and_applies_other_device_safe_states(self):
         services = create_application_services(
-            ApplicationSettings.defaults(), simulation=True,
+            tool_settings(), simulation=True,
         )
         runtime = services.manual_control._runtime
-        pipette = runtime.initialize(PIPETTE)
+        pipette = runtime.initialize("tool:pipette")
         relay = runtime.initialize(RELAY_BANK)
-        tool = runtime.initialize(TOOL_CHANGER)
+        tool = runtime.initialize("tool:changer")
         relay.set_channel(1, True)
 
         self.assertEqual({}, services.devices.shutdown_all())
 
         self.assertFalse(pipette.safe)
         self.assertFalse(relay.channels[1])
-        self.assertTrue(tool.locked)
+        self.assertFalse(tool.locked)
 
     def test_parallel_run_pause_resume_and_cancel_reaches_one_terminal_state(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         branch_started = Event()
@@ -677,7 +677,7 @@ class ApplicationServiceTests(unittest.TestCase):
 
     def test_simulated_wait_action_uses_unified_runtime(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         item = SequenceItem.from_definition(
@@ -696,7 +696,7 @@ class ApplicationServiceTests(unittest.TestCase):
 
     def test_teleoperation_session_blocks_sequence_execution(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         services.teleoperation.start("test", ("left",))
@@ -723,7 +723,7 @@ class ApplicationServiceTests(unittest.TestCase):
 
     def test_quick_stop_cancels_execution_and_stops_ready_robot(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         services.devices.initialize(ROBOT_SYSTEM)
@@ -754,7 +754,7 @@ class ApplicationServiceTests(unittest.TestCase):
 
     def test_quick_stop_exposes_ready_unsupported_motion_device(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         services.devices.initialize(BODY_AXIS)
@@ -771,7 +771,7 @@ class ApplicationServiceTests(unittest.TestCase):
 
     def test_quick_stop_releases_teleoperation_session(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         services.teleoperation.start("test", ("left",))
@@ -789,11 +789,11 @@ class ApplicationServiceTests(unittest.TestCase):
 
     def test_controlled_stop_applies_initialized_discrete_device_safe_states(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         services.devices.initialize_many(
-            ("relay-bank", "tool-changer", "pipette")
+            ("relay-bank", "tool:changer", "tool:pipette")
         )
         services.manual_control.set_relay(1, True)
 
@@ -801,7 +801,7 @@ class ApplicationServiceTests(unittest.TestCase):
 
         self.assertTrue(report.complete)
         self.assertEqual(
-            {"relay-bank", "tool-changer", "pipette"},
+            {"relay-bank"},
             {result.device_id for result in report.safe_devices},
         )
         self.assertTrue(all(result.successful for result in report.safe_devices))

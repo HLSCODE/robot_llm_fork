@@ -60,7 +60,6 @@ from .handlers import (
     BodyMoveActionHandler,
     ChangeToolActionHandler,
     InspectActionHandler,
-    ManipulationHandlerOptions,
     MotionHandlerOptions,
     MoveActionHandler,
     RobotMoveActionHandler,
@@ -118,12 +117,6 @@ class ActionEngine:
                 execution_settings.execution_body_poll_interval_seconds
             ),
         )
-        self._manipulation_handler_options = ManipulationHandlerOptions(
-            gripper_max_attempts=int(execution_settings.execution_gripper_max_attempts),
-            gripper_retry_delay_seconds=float(
-                execution_settings.execution_gripper_retry_delay_seconds
-            ),
-        )
         self._trajectory_handler_options = TrajectoryHandlerOptions(
             poll_interval_seconds=float(
                 execution_settings.execution_trajectory_poll_interval_seconds
@@ -174,7 +167,6 @@ class ActionEngine:
 
         manipulation_handler = create_manipulation_handler(
             self._device_runtime,
-            self._manipulation_handler_options,
             self._tapping_config_provider,
         )
         validate_control_policy_routes(
@@ -185,7 +177,7 @@ class ActionEngine:
         registry.register(
             ActionType.MANIPULATE,
             manipulation_handler,
-            resolve_manipulate_control_policy,
+            lambda parameters: self._tool_policy(ActionType.MANIPULATE, parameters, resolve_manipulate_control_policy(parameters)),
         )
         registry.register(
             ActionType.INSPECT,
@@ -200,7 +192,7 @@ class ActionEngine:
         registry.register(
             ActionType.CHANGE_GUN,
             ChangeToolActionHandler(self._device_runtime),
-            resolve_change_tool_control_policy,
+            lambda parameters: self._tool_policy(ActionType.CHANGE_GUN, parameters, resolve_change_tool_control_policy(parameters)),
         )
         registry.register(
             ActionType.VISION_CAPTURE,
@@ -210,7 +202,7 @@ class ActionEngine:
                 self._camera_runtime,
                 self._capture_camera_name,
             ),
-            resolve_vision_capture_control_policy,
+            lambda parameters: self._tool_policy(ActionType.VISION_CAPTURE, parameters, resolve_vision_capture_control_policy(parameters)),
         )
         registry.register(
             ActionType.VISION_RELOCALIZE,
@@ -232,6 +224,10 @@ class ActionEngine:
         )
         registry.validate_complete()
         return registry
+
+    def _tool_policy(self, kind: ActionType, parameters: Mapping[str, Any], policy: ActionControlPolicy) -> ActionControlPolicy:
+        from .end_effector_policy import resolve_tool_policy
+        return resolve_tool_policy(self._device_runtime, kind, parameters, policy)
 
     def _capture_camera_name(self, parameters: Mapping[str, Any]) -> str:
         target = str(parameters.get("目标机械臂", "robot1")).strip().lower()

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from tool_support import tool_settings
 
 from src.application import create_application_services
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
-from src.configuration.settings import ApplicationSettings
 from src.devices import (
     ArmId,
     BalanceReading,
@@ -36,9 +36,7 @@ from src.execution import (
 )
 from src.execution.handlers import (
     ExpressionDisplayActionHandler,
-    GripperActionHandler,
     ManipulateActionHandler,
-    ManipulationHandlerOptions,
     NeckActionHandler,
     PipetteActionHandler,
     PowderDispenseActionHandler,
@@ -280,7 +278,7 @@ class DiscreteOutputHandlerTests(unittest.TestCase):
         context, _logs = _context()
 
         self.assertTrue(
-            ToolChangerActionHandler(tool_runtime)(
+            ToolChangerActionHandler(tool_runtime, device_id=TOOL_CHANGER)(
                 {"操作": "开"},
                 context,
             ).successful
@@ -312,45 +310,13 @@ class DiscreteOutputHandlerTests(unittest.TestCase):
 
 
 class GripperActionHandlerTests(unittest.TestCase):
-    def test_gripper_number_selects_the_right_arm(self):
-        gripper = _Gripper()
-        runtime = _runtime_with(
-            ROBOT_SYSTEM,
-            DeviceCapability.GRIPPER,
-            gripper,
-        )
-        handler = GripperActionHandler(
-            runtime,
-            ManipulationHandlerOptions(),
-        )
-        context, _logs = _context()
-
-        self.assertTrue(
-            handler({"编号": 2, "操作": "开"}, context).successful
-        )
-        self.assertEqual([("open", ArmId.RIGHT)], gripper.calls)
-
-    def test_gripper_retry_policy_is_bounded_and_configurable(self):
-        gripper = _Gripper(failures_before_success=2)
-        runtime = _runtime_with(
-            ROBOT_SYSTEM,
-            DeviceCapability.GRIPPER,
-            gripper,
-        )
-        handler = GripperActionHandler(
-            runtime,
-            ManipulationHandlerOptions(
-                gripper_max_attempts=3,
-                gripper_retry_delay_seconds=0,
-            ),
-        )
-        context, _logs = _context()
-
-        self.assertTrue(handler({"操作": "关"}, context).successful)
-        self.assertEqual(
-            [("close", ArmId.LEFT)] * 3,
-            gripper.calls,
-        )
+    def test_unconfigured_gripper_does_not_use_robot_sdk_fallback(self):
+        from src.execution.handlers.end_effectors import ToolActionRouter
+        runtime = _runtime_with(ROBOT_SYSTEM, DeviceCapability.GRIPPER, _Gripper())
+        context, _ = _context()
+        result = ToolActionRouter(runtime, "gripper")({"arm": "left", "操作": "开"}, context)
+        self.assertFalse(result.successful)
+        self.assertEqual(DeviceState.REGISTERED, runtime.snapshot(ROBOT_SYSTEM).state)
 
 
 class PipetteActionHandlerTests(unittest.TestCase):
@@ -364,7 +330,7 @@ class PipetteActionHandlerTests(unittest.TestCase):
         )
         context, logs = _context()
 
-        result = PipetteActionHandler(runtime)(
+        result = PipetteActionHandler(runtime, device_id=PIPETTE)(
             {"操作": "吐", "容量": 200, "吐液速度": 800, "全吐": False},
             context,
         )
@@ -382,7 +348,7 @@ class PipetteActionHandlerTests(unittest.TestCase):
             DeviceCapability.PIPETTE,
             pipette,
         )
-        handler = PipetteActionHandler(runtime)
+        handler = PipetteActionHandler(runtime, device_id=PIPETTE)
         context, _logs = _context()
 
         self.assertTrue(
@@ -412,7 +378,7 @@ class PipetteActionHandlerTests(unittest.TestCase):
         context, logs = _context()
 
         self.assertFalse(
-            PipetteActionHandler(runtime)(
+            PipetteActionHandler(runtime, device_id=PIPETTE)(
                 {"操作": "吸", "容量": 0},
                 context,
             ).successful
@@ -614,14 +580,14 @@ class DisplayAndPowderHandlerTests(unittest.TestCase):
 class ManipulationRuntimeIntegrationTests(unittest.TestCase):
     def test_discrete_manipulation_actions_use_unified_registry(self):
         services = create_application_services(
-            ApplicationSettings.defaults(),
+            tool_settings(),
             simulation=True,
         )
         definitions = (
-            ("tool", {"执行器": "快换手", "操作": "关"}),
+            ("tool", {"执行器": "快换手", "arm": "right", "操作": "关"}),
             ("relay", {"执行器": "继电器", "编号": 1, "操作": "开"}),
-            ("gripper", {"执行器": "夹爪", "操作": "开"}),
-            ("pipette", {"执行器": "吸液枪", "操作": "吸", "容量": 10}),
+            ("gripper", {"执行器": "夹爪", "arm": "left", "操作": "开"}),
+            ("pipette", {"执行器": "吸液枪", "arm": "right", "tool_id": "pipette", "操作": "吸", "容量": 10}),
             (
                 "neck",
                 {

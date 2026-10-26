@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-import math
 from typing import Any
 
 from ..workflows import execute_right_arm_circle_dispense
@@ -12,14 +11,11 @@ from ..workflows.powder_dispense import (
     config_from_params,
 )
 from ...devices import (
-    ArmId,
     ArmMotion,
     BalanceReader,
     DeviceRuntime,
     DigitalOutputs,
     ExpressionDisplay,
-    GripperControl,
-    PercentGripperControl,
     NeckMotion,
     Pipette,
     PowderDispenser,
@@ -32,9 +28,7 @@ from ...devices.runtime.ids import (
     PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
-    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
-    TOOL_CHANGER,
 )
 from ..handler_api import (
     ActionCancelledError,
@@ -48,18 +42,6 @@ from ..handler_api import (
 
 
 TappingConfigProvider = Callable[[], Mapping[str, Any]]
-
-
-@dataclass(frozen=True, slots=True)
-class ManipulationHandlerOptions:
-    gripper_max_attempts: int = 3
-    gripper_retry_delay_seconds: float = 0.5
-
-    def __post_init__(self) -> None:
-        if self.gripper_max_attempts <= 0:
-            raise ValueError("gripper_max_attempts must be positive")
-        if self.gripper_retry_delay_seconds < 0:
-            raise ValueError("gripper_retry_delay_seconds must not be negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,8 +160,9 @@ class ManipulateActionHandler:
 class ToolChangerActionHandler:
     _OPERATION = "tool_changer.set_locked"
 
-    def __init__(self, device_runtime: DeviceRuntime) -> None:
+    def __init__(self, device_runtime: DeviceRuntime, *, device_id: str) -> None:
         self._device_runtime = device_runtime
+        self._device_id = device_id
 
     def __call__(
         self,
@@ -194,12 +177,12 @@ class ToolChangerActionHandler:
                 ActionResultCode.UNSUPPORTED_OPERATION,
                 f"未知的快换手操作: {operation}",
                 operation=self._OPERATION,
-                device_id=TOOL_CHANGER,
+                device_id=self._device_id,
             )
 
         try:
             tool_changer = self._device_runtime.require(
-                TOOL_CHANGER,
+                self._device_id,
                 ToolChanger,
             )
         except Exception as exc:
@@ -208,7 +191,7 @@ class ToolChangerActionHandler:
                 ActionResultCode.DEVICE_UNAVAILABLE,
                 f"快换手设备不可用: {exc}",
                 operation=self._OPERATION,
-                device_id=TOOL_CHANGER,
+                device_id=self._device_id,
                 error=exc,
             )
         try:
@@ -224,14 +207,14 @@ class ToolChangerActionHandler:
                 ActionResultCode.DEVICE_OPERATION_FAILED,
                 f"快换手{operation}执行失败: {exc}",
                 operation=self._OPERATION,
-                device_id=TOOL_CHANGER,
+                device_id=self._device_id,
                 error=exc,
             )
 
         context.log(f"快换手{operation}执行完成", "info")
         return context.success(
             operation=self._OPERATION,
-            device_id=TOOL_CHANGER,
+            device_id=self._device_id,
         )
 
 
@@ -316,152 +299,12 @@ class RelayActionHandler:
         )
 
 
-class ZhixingGripperActionHandler:
-    _OPERATION = "zhixing_gripper.move_percent"
-
-    def __init__(self, device_runtime: DeviceRuntime) -> None:
-        self._device_runtime = device_runtime
-
-    def __call__(
-        self, parameters: ActionParameters, context: ActionExecutionContext,
-    ) -> ActionHandlerResult:
-        try:
-            raw_station = parameters.get("编号", 1)
-            station = int(raw_station)
-            if isinstance(raw_station, bool) or station not in (1, 2) or float(raw_station) != station:
-                raise ValueError("站号必须为 1（左）或 2（右）")
-            raw_percent = parameters["开合度"]
-            percent = float(raw_percent)
-            if isinstance(raw_percent, bool) or not math.isfinite(percent) or not 0 <= percent <= 100:
-                raise ValueError("开合度必须在 0..100 之间")
-        except (KeyError, TypeError, ValueError, OverflowError) as exc:
-            return _failed_result(
-                context, ActionResultCode.INVALID_PARAMETERS,
-                f"知行夹爪参数无效: {exc}", operation=self._OPERATION,
-                device_id=ZHIXING_GRIPPERS, error=exc,
-            )
-        try:
-            grippers = self._device_runtime.require(ZHIXING_GRIPPERS, PercentGripperControl)
-        except Exception as exc:
-            return _failed_result(
-                context, ActionResultCode.DEVICE_UNAVAILABLE,
-                f"知行夹爪设备不可用: {exc}", operation=self._OPERATION,
-                device_id=ZHIXING_GRIPPERS, error=exc,
-            )
-        try:
-            context.invoke(self._OPERATION, lambda: grippers.move_percent(station, percent))
-        except (ActionCancelledError, ActionTimeoutError):
-            raise
-        except Exception as exc:
-            return _failed_result(
-                context, ActionResultCode.DEVICE_OPERATION_FAILED,
-                f"知行夹爪站号 {station} 执行失败: {exc}", operation=self._OPERATION,
-                device_id=ZHIXING_GRIPPERS, error=exc,
-            )
-        side = "左" if station == 1 else "右"
-        context.log(f"知行夹爪{side}开合度 {percent:g}% 执行完成", "info")
-        return context.success(operation=self._OPERATION, device_id=ZHIXING_GRIPPERS)
-
-
-class GripperActionHandler:
-    _OPERATION = "gripper.execute"
-
-    def __init__(
-        self,
-        device_runtime: DeviceRuntime,
-        options: ManipulationHandlerOptions,
-    ) -> None:
-        self._device_runtime = device_runtime
-        self._options = options
-
-    def __call__(
-        self,
-        parameters: ActionParameters,
-        context: ActionExecutionContext,
-    ) -> ActionHandlerResult:
-        operation = str(parameters.get("操作", "开")).strip()
-        if operation not in ("开", "关"):
-            return _failed_result(
-                context,
-                ActionResultCode.UNSUPPORTED_OPERATION,
-                f"未知的夹爪操作: {operation}",
-                operation=self._OPERATION,
-                device_id=ROBOT_SYSTEM,
-            )
-        try:
-            arm_number = int(parameters.get("编号", 1))
-            if arm_number not in {1, 2}:
-                raise ValueError("夹爪编号必须是 1 或 2")
-            arm = ArmId.LEFT if arm_number == 1 else ArmId.RIGHT
-        except (TypeError, ValueError) as exc:
-            return _failed_result(
-                context,
-                ActionResultCode.INVALID_PARAMETERS,
-                f"夹爪编号无效: {exc}",
-                operation=self._OPERATION,
-                device_id=ROBOT_SYSTEM,
-                error=exc,
-            )
-
-        try:
-            gripper = self._device_runtime.require(
-                ROBOT_SYSTEM,
-                GripperControl,
-            )
-        except Exception as exc:
-            return _failed_result(
-                context,
-                ActionResultCode.DEVICE_UNAVAILABLE,
-                f"夹爪设备不可用: {exc}",
-                operation=self._OPERATION,
-                device_id=ROBOT_SYSTEM,
-                error=exc,
-            )
-
-        def action() -> None:
-            if operation == "开":
-                gripper.open_gripper(arm)
-                return
-            gripper.close_gripper(arm)
-
-        context.log(f"夹爪动作: {operation}", "info")
-        last_error: Exception | None = None
-        for attempt in range(1, self._options.gripper_max_attempts + 1):
-            try:
-                context.invoke(self._OPERATION, action)
-            except (ActionCancelledError, ActionTimeoutError):
-                raise
-            except Exception as exc:
-                last_error = exc
-                context.log(
-                    f"执行夹爪出错 ({attempt}/{self._options.gripper_max_attempts})",
-                    "warn",
-                )
-            else:
-                context.log(f"夹爪{operation}执行完成", "info")
-                return context.success(
-                    operation=self._OPERATION,
-                    device_id=ROBOT_SYSTEM,
-                )
-
-            if attempt < self._options.gripper_max_attempts:
-                context.sleep(self._options.gripper_retry_delay_seconds)
-
-        return _failed_result(
-            context,
-            ActionResultCode.DEVICE_OPERATION_FAILED,
-            "夹爪重试次数耗尽",
-            operation=self._OPERATION,
-            device_id=ROBOT_SYSTEM,
-            error=last_error,
-        )
-
-
 class PipetteActionHandler:
     _OPERATION = "pipette.execute"
 
-    def __init__(self, device_runtime: DeviceRuntime) -> None:
+    def __init__(self, device_runtime: DeviceRuntime, *, device_id: str) -> None:
         self._device_runtime = device_runtime
+        self._device_id = device_id
 
     def __call__(
         self,
@@ -476,18 +319,18 @@ class PipetteActionHandler:
                 ActionResultCode.INVALID_PARAMETERS,
                 f"吸液枪参数无效: {exc}",
                 operation=self._OPERATION,
-                device_id=PIPETTE,
+                device_id=self._device_id,
             )
 
         try:
-            pipette = self._device_runtime.require(PIPETTE, Pipette)
+            pipette = self._device_runtime.require(self._device_id, Pipette)
         except Exception as exc:
             return _failed_result(
                 context,
                 ActionResultCode.DEVICE_UNAVAILABLE,
                 f"吸液枪设备不可用: {exc}",
                 operation=self._OPERATION,
-                device_id=PIPETTE,
+                device_id=self._device_id,
                 error=exc,
             )
         try:
@@ -516,7 +359,7 @@ class PipetteActionHandler:
                 ActionResultCode.DEVICE_OPERATION_FAILED,
                 f"执行吸液枪出错: {exc}",
                 operation=self._OPERATION,
-                device_id=PIPETTE,
+                device_id=self._device_id,
                 error=exc,
             )
 
@@ -531,13 +374,13 @@ class PipetteActionHandler:
         if success:
             return context.success(
                 operation=self._OPERATION,
-                device_id=PIPETTE,
+                device_id=self._device_id,
             )
         return context.failure(
             ActionResultCode.OPERATION_REJECTED,
             f"吸液枪{command.operation}执行失败",
             operation=self._OPERATION,
-            device_id=PIPETTE,
+            device_id=self._device_id,
             log=False,
         )
 
@@ -950,7 +793,10 @@ class CircleDispenseActionHandler:
                 error=exc,
             )
         try:
-            pipette = self._device_runtime.require(PIPETTE, Pipette)
+            from ...devices.end_effectors import end_effectors
+            routing = end_effectors(self._device_runtime)
+            target = routing.from_parameters("pipette", parameters)
+            pipette = self._device_runtime.require(target.device_id, Pipette)
         except Exception as exc:
             return _failed_result(
                 context,
@@ -1123,16 +969,11 @@ class PowderDispenseActionHandler:
 
 def create_manipulation_handler(
     device_runtime: DeviceRuntime,
-    options: ManipulationHandlerOptions,
     tapping_config_provider: TappingConfigProvider,
 ) -> ManipulateActionHandler:
     expression_handler = ExpressionDisplayActionHandler(device_runtime)
     handlers: dict[str, ActionHandler] = {
-        "快换手": ToolChangerActionHandler(device_runtime),
         "继电器": RelayActionHandler(device_runtime),
-        "夹爪": GripperActionHandler(device_runtime, options),
-        "知行夹爪": ZhixingGripperActionHandler(device_runtime),
-        "吸液枪": PipetteActionHandler(device_runtime),
         "颈部": NeckActionHandler(device_runtime),
         "表情屏": expression_handler,
         "表情": expression_handler,
@@ -1145,6 +986,9 @@ def create_manipulation_handler(
         ),
         "加粉装置": TappingActionHandler(device_runtime),
     }
+    from .end_effectors import ToolActionRouter
+    for executor, kind in (("夹爪", "gripper"), ("吸液枪", "pipette"), ("快换手", "tool_changer")):
+        handlers[executor] = ToolActionRouter(device_runtime, kind)
     return ManipulateActionHandler(handlers)
 
 

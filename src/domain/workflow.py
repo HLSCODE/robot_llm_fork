@@ -24,7 +24,7 @@ from .models import (
 
 
 WORKFLOW_DOCUMENT_SCHEMA = "robot_llm.workflow"
-WORKFLOW_DOCUMENT_VERSION = 5
+WORKFLOW_DOCUMENT_VERSION = 6
 WORKFLOW_SCHEMA_REFERENCE = "../../../schemas/workflow.schema.json"
 
 

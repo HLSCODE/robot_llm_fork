@@ -68,7 +68,7 @@ class SerialDeviceDriverTests(unittest.TestCase):
     def test_tool_changer_validates_response_and_decodes_status(self):
         transport = FakeTransport(
             (
-                b"\x53\x26\x02\x01\x01\x00\x00",
+                append_crc(b"\x53\x26\x02\x01\x01"),
                 b"\x00",
             )
         )
@@ -152,7 +152,7 @@ class SerialDeviceDriverTests(unittest.TestCase):
                     self.assertEqual(reply_data.decode("ascii"), raised.exception.raw_error_code)
                     self.assertEqual(1, len(transport.calls))
 
-    def test_pipette_ascii_reply_rejects_crc_address_function_and_partial_frames(self):
+    def test_pipette_1scii_reply_rejects_crc_address_function_and_partial_frames(self):
         def frame(body: bytes) -> bytes:
             return body + f"{ADP._cal_crc(body):04X}".encode("ascii") + b"\r\n"
 

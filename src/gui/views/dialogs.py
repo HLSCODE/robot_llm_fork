@@ -33,9 +33,11 @@ from ...domain.action_schema import (
     get_action_schema,
     get_action_fields,
     validate_action_parameters,
+    pending_target_fields,
 )
 from ...domain.arm_names import normalize_arm_name
 from ...domain.models import ActionDefinition, ActionType
+from ...application.end_effectors import ToolPresentation
 from ..app_dialogs import (
     AppDialog,
     ask_confirmation,
@@ -671,6 +673,8 @@ class SchemaActionForm(QWidget):
         localization_reader: LocalizationReader | None = None,
         station_choices_reader: StationChoicesReader | None = None,
         camera_choices_reader: CameraChoicesReader | None = None,
+        tool_choices_reader: Callable[[str, str | None], list[tuple[str, str]]] | None = None,
+        tool_description_reader: Callable[[str], ToolPresentation | None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -685,6 +689,9 @@ class SchemaActionForm(QWidget):
         self._localization_reader = localization_reader
         self._station_choices_reader = station_choices_reader
         self._camera_choices_reader = camera_choices_reader
+        self._tool_choices_reader = tool_choices_reader
+        self._tool_description_reader = tool_description_reader
+        self._gripper_tool_selection: str | None = None
         self._locked_variant = initial_variant
         self.setSizePolicy(
             QSizePolicy.Policy.Preferred,
@@ -762,6 +769,13 @@ class SchemaActionForm(QWidget):
         if variants is not None:
             values[self._type_schema["variant_key"]] = self._selected_variant_name()
         for field_name, widget in self._field_widgets.items():
+            if self._is_gripper_form() and field_name in ("闭合度", "旋转角度"):
+                operation_widget = self._field_widgets.get("操作")
+                operation = operation_widget.currentData() if isinstance(operation_widget, QComboBox) else None
+                if (field_name == "闭合度" and operation != "定位") or (
+                    field_name == "旋转角度" and operation not in ("绝对旋转", "相对旋转")
+                ):
+                    continue
             try:
                 value = self._widget_value(widget, self._field_schemas[field_name])
             except ValueError:
@@ -770,6 +784,10 @@ class SchemaActionForm(QWidget):
                 raise
             if value is not None:
                 values[field_name] = value
+        if self._is_gripper_form() and self._tool_description_reader:
+            description = self._tool_description_reader(str(values.get("tool_id") or ""))
+            if description and values.get("操作") not in description.operations:
+                raise ValueError("所选工具不支持该操作，请重新选择操作")
         return values
 
     def mark_missing_required_fields(self) -> tuple[str, ...]:
@@ -796,7 +814,16 @@ class SchemaActionForm(QWidget):
             self._validation_target(widget).setFocus()
 
     def _change_variant(self) -> None:
-        self._values.update(self.parameters())
+        # Switching executor is not a save: incomplete migrated targets must
+        # not raise from a Qt signal while rebuilding the form.
+        for name, widget in self._field_widgets.items():
+            if isinstance(widget, QComboBox):
+                self._values[name] = widget.currentData()
+            else:
+                try:
+                    self._values[name] = self._widget_value(widget, self._field_schemas[name])
+                except ValueError:
+                    continue  # Keep the previous value until explicit validation on save.
         self._render_fields()
         self.adjustSize()
         self.updateGeometry()
@@ -828,6 +855,8 @@ class SchemaActionForm(QWidget):
         for field_name, field_schema in fields.items():
             if field_name == variant_key or field_schema.get("hidden", False):
                 continue
+            if field_name in pending_target_fields(self._values):
+                field_schema = {**field_schema, "required": True, "placeholder": "未指定（待配置）"}
             widget = self._create_widget(field_schema, self._values.get(field_name))
             label = field_schema.get("label", field_name)
             unit = field_schema.get("unit", "")
@@ -844,6 +873,12 @@ class SchemaActionForm(QWidget):
             self._connect_validation_reset(widget)
         self._bind_current_pose_sources()
         self._bind_dynamic_select_sources()
+        if self._is_gripper_form():
+            for name in ("tool_id", "操作"):
+                combo = self._field_widgets.get(name)
+                if isinstance(combo, QComboBox):
+                    combo.currentIndexChanged.connect(self._refresh_gripper_fields)
+            self._refresh_gripper_fields()
         mode_widget = self._field_widgets.get("模式")
         if self._action_type is ActionType.MOVE and isinstance(mode_widget, QComboBox):
             mode_widget.currentIndexChanged.connect(self._change_motion_mode)
@@ -856,6 +891,46 @@ class SchemaActionForm(QWidget):
         ):
             arm_widget.currentTextChanged.connect(compensation_widget.set_arm)
             compensation_widget.set_arm(arm_widget.currentText())
+
+    def _is_gripper_form(self) -> bool:
+        return self._action_type is ActionType.MANIPULATE and self._selected_variant_name() == "夹爪"
+
+    def _refresh_gripper_fields(self) -> None:
+        operation = self._field_widgets.get("操作")
+        tool = self._field_widgets.get("tool_id")
+        if not isinstance(operation, QComboBox) or not isinstance(tool, QComboBox):
+            return
+        description = self._tool_description_reader(str(tool.currentData() or "")) if self._tool_description_reader else None
+        if description:
+            tool.setToolTip(description.details)
+            selected = operation.currentData()
+            identity = str(tool.currentData() or "")
+            changed_tool = self._gripper_tool_selection is not None and identity != self._gripper_tool_selection
+            self._gripper_tool_selection = identity
+            if changed_tool and selected not in description.operations:
+                selected = description.operations[0]
+            operation.blockSignals(True)
+            try:
+                operation.clear()
+                for value in description.operations:
+                    operation.addItem({"开": "张开", "关": "夹持", "定位": "开度定位"}.get(value, value), value)
+                if selected and selected not in description.operations:
+                    operation.addItem(f"{selected}（该工具不支持，请重选）", selected)
+                operation.setCurrentIndex(max(0, operation.findData(selected)))
+            finally:
+                operation.blockSignals(False)
+            angle = self._field_widgets.get("旋转角度")
+            if isinstance(angle, QDoubleSpinBox):
+                angle.setRange(description.rotation_min, description.rotation_max)
+        selected = operation.currentData()
+        for name, visible in (
+            ("闭合度", selected == "定位"),
+            ("旋转角度", selected in ("绝对旋转", "相对旋转")),
+        ):
+            widget = self._field_widgets.get(name)
+            if widget is not None:
+                self._fields_layout.setRowVisible(widget, visible)
+        self.content_size_changed.emit()
 
     def _bind_current_pose_sources(self) -> None:
         for field_name, widget in self._field_widgets.items():
@@ -941,11 +1016,14 @@ class SchemaActionForm(QWidget):
     ) -> FieldWidget:
         value = schema.get("default") if current is None else current
         field_type = schema["type"]
+        widget: FieldWidget
         if field_type == "select":
             widget = QComboBox()
             if schema.get("options_source"):
                 self._populate_dynamic_choices(widget, schema, value)
             else:
+                if schema.get("placeholder") == "未指定（待配置）":
+                    widget.addItem("未指定（待配置）", "")
                 for option in schema.get("options", []):
                     option_value = option.get("value") if isinstance(option, dict) else option
                     option_label = option.get("label") if isinstance(option, dict) else str(option)
@@ -1007,6 +1085,10 @@ class SchemaActionForm(QWidget):
             widget.addItem(placeholder, "")
             for option_value, label in choices:
                 widget.addItem(label, option_value)
+                if schema.get("options_source", "").startswith("tools:") and self._tool_description_reader:
+                    description = self._tool_description_reader(str(option_value))
+                    if description:
+                        widget.setItemData(widget.count() - 1, description.details, Qt.ItemDataRole.ToolTipRole)
             selected_index = widget.findData(selected)
             preserve_unknown = (
                 schema.get("options_source") != "cameras"
@@ -1024,6 +1106,12 @@ class SchemaActionForm(QWidget):
         schema: ActionFieldSchema,
     ) -> tuple[str, list[tuple[str, str]]]:
         source = schema.get("options_source", "")
+        if source.startswith("tools:"):
+            field = schema.get("options_source_field", "arm")
+            source_widget = self._field_widgets.get(field)
+            arm = source_widget.currentData() if isinstance(source_widget, QComboBox) else self._values.get(field)
+            choices = self._tool_choices_reader(source.split(":", 1)[1], str(arm) if arm else None) if self._tool_choices_reader else []
+            return "使用固定绑定（快换工具必须选择）", choices
         readers: dict[
             str,
             Callable[[ActionFieldSchema], list[tuple[str, str]]],
@@ -1177,6 +1265,8 @@ class ActionConfigDialog(AppDialog):
         localization_reader: LocalizationReader | None = None,
         station_choices_reader: StationChoicesReader | None = None,
         camera_choices_reader: CameraChoicesReader | None = None,
+        tool_choices_reader: Callable[[str, str | None], list[tuple[str, str]]] | None = None,
+        tool_description_reader: Callable[[str], ToolPresentation | None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.action_type = action_type
@@ -1211,6 +1301,8 @@ class ActionConfigDialog(AppDialog):
             localization_reader=localization_reader,
             station_choices_reader=station_choices_reader,
             camera_choices_reader=camera_choices_reader,
+            tool_choices_reader=tool_choices_reader,
+            tool_description_reader=tool_description_reader,
         )
         layout.addWidget(self.action_form)
         self.action_form.content_size_changed.connect(

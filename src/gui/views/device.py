@@ -3,28 +3,33 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFrame,
+    QComboBox,
+    QFormLayout,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
+    QScrollArea,
+    QSpinBox,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from ..view_models.models import DeviceViewState
+from ...domain.action_schema import get_action_fields
+from ...domain.models import ActionType
+from ..theme import set_theme_role
 
 
 _DEVICE_STATUS_TITLES = {
     "robot": "机械臂",
     "body": "身体轴",
-    "pipette": "移液器",
     "relay": "继电器",
-    "zhixing_gripper": "知行夹爪",
 }
 
 
@@ -34,7 +39,40 @@ class DeviceHealthView(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.addWidget(self._create_status_panel())
+        self._end_effectors = QLabel()
+        self._end_effectors.setTextFormat(Qt.TextFormat.PlainText)
+        self._end_effectors.setWordWrap(True)
+        self._end_effectors.setVisible(False)
+        layout.addWidget(self._end_effectors)
         layout.addStretch(1)
+
+    def render_end_effectors(self, mounts: list[dict[str, object]], states: list[dict[str, object]]) -> None:
+        import datetime
+        lines = []
+        for mount in mounts:
+            side = "左臂" if mount["arm"] == "left" else "右臂"
+            if mount["mode"] == "none":
+                lines.append(f"{side}：未安装末端工具")
+                continue
+            if mount["mode"] == "fixed":
+                lines.append(f"{side}固定末端配置：{mount.get('tool_label', mount['tool'])}")
+                if mount.get("unavailable"):
+                    lines.append(str(mount["unavailable"]))
+                continue
+            state = next((s for s in states if s.get("arm") == mount["arm"]), {})
+            locked = {"locked": "锁紧", "unlocked": "解锁"}.get(str(state.get("locked")), "未知")
+            power = {"on": "开", "off": "关"}.get(str(state.get("power")), "未知")
+            lines.append(f"{side}快换手：{locked} · 供电：{power}")
+            sampled = state.get("sampled_at")
+            if isinstance(sampled, (int, float)):
+                lines.append(f"最近采样：{datetime.datetime.fromtimestamp(sampled):%H:%M:%S}")
+            if state.get("error"):
+                lines.append(f"通信异常：{state['error']}")
+            tools = mount.get("tool_labels", mount.get("tools", ()))
+            if isinstance(tools, (list, tuple)):
+                lines.append("可选工具配置：" + "、".join(str(t) for t in tools))
+        self._end_effectors.setVisible(bool(lines))
+        self._end_effectors.setText("末端设备\n" + "\n".join(lines))
 
     def _create_status_panel(self) -> QWidget:
         panel = QFrame()
@@ -54,9 +92,11 @@ class DeviceHealthView(QWidget):
         status_grid.setColumnStretch(0, 1)
         status_grid.setColumnStretch(1, 1)
         self._statuses: dict[str, tuple[QLabel, QLabel]] = {}
+        self._status_rows: dict[str, QWidget] = {}
         for index, (key, status_title) in enumerate(_DEVICE_STATUS_TITLES.items()):
             widget, indicator, text = self._create_status_item(status_title, key)
             self._statuses[key] = (indicator, text)
+            self._status_rows[key] = widget
             status_grid.addWidget(widget, index // 2, index % 2)
         layout.addLayout(status_grid)
         camera_title = QLabel("相机")
@@ -91,9 +131,7 @@ class DeviceHealthView(QWidget):
         readiness = {
             "robot": state.robot_ready,
             "body": state.body_ready,
-            "pipette": state.pipette_ready,
             "relay": state.relay_ready,
-            "zhixing_gripper": state.zhixing_gripper_ready,
         }
         for key, ready in readiness.items():
             indicator, label = self._statuses[key]
@@ -105,6 +143,8 @@ class DeviceHealthView(QWidget):
     def render_cameras(self, cameras: tuple[dict[str, object], ...]) -> None:
         while self._camera_layout.count():
             item = self._camera_layout.takeAt(0)
+            if item is None:
+                break
             widget = item.widget()
             if widget is not None:
                 widget.deleteLater()
@@ -229,61 +269,42 @@ class DevicePoseView(QWidget):
 
 
 class DeviceControlView(QFrame):
-    gripper_requested = Signal(bool)
-    zhixing_gripper_requested = Signal(int, float)
     relay_requested = Signal(int, bool)
-    pipette_eject_requested = Signal()
-    pipette_initialize_requested = Signal()
+    body_move_requested = Signal(int)
+    execution_stop_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        self._outer_layout = outer
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._content = QWidget()
+        layout = QVBoxLayout(self._content)
+        self._controls_layout = layout
+        layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
-        title = QLabel("基础控制")
-        title_font = title.font()
-        title_font.setBold(True)
-        title.setFont(title_font)
-        layout.addWidget(title)
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        self._gripper_buttons = [
-            self._button("🔓 夹爪打开", lambda: self.gripper_requested.emit(True)),
-            self._button("🔒 夹爪关闭", lambda: self.gripper_requested.emit(False)),
-        ]
-        self._pipette_button = self._button("💉 退枪头", self.pipette_eject_requested.emit)
-        self._pipette_initialize_button = self._button(
-            "初始化移液枪", self.pipette_initialize_requested.emit,
-        )
-        self._pipette_ready = False
-        self._pipette_actions_enabled = True
-        self.set_pipette_action_enabled(True)
-        for button in (
-            *self._gripper_buttons, self._pipette_initialize_button, self._pipette_button,
-        ):
-            row.addWidget(button)
-        layout.addLayout(row)
-
-        gripper_grid = QGridLayout()
-        gripper_grid.setSpacing(6)
-        self._zhixing_gripper_buttons: list[QPushButton] = []
-        self._zhixing_gripper_ready = False
-        self._zhixing_gripper_actions_enabled = True
-        for row_index, (station, side) in enumerate(((1, "左"), (2, "右"))):
-            for column, (label, percent) in enumerate((("开", 0.0), ("关", 100.0))):
-                button = self._button(
-                    f"知行夹爪{side} {label}",
-                    partial(self.zhixing_gripper_requested.emit, station, percent),
-                )
-                button.setObjectName(f"zhixingGripper{station}{'Open' if column == 0 else 'Close'}")
-                button.setToolTip(f"站号 {station}，开合度 {percent:g}%（0=全开，100=全闭）")
-                self._zhixing_gripper_buttons.append(button)
-                gripper_grid.addWidget(button, row_index, column)
-        self.set_zhixing_gripper_action_enabled(True)
-        layout.addLayout(gripper_grid)
-
-        group = QGroupBox("继电器控制")
+        selector = QHBoxLayout()
+        selector.setSpacing(8)
+        selector.addWidget(QLabel("控制设备"))
+        self.device_selector = QComboBox()
+        self.device_selector.setAccessibleName("选择控制设备")
+        for label, identity in (("末端工具", "tools"), ("继电器", "relay"), ("身体升降", "body")):
+            self.device_selector.addItem(label, identity)
+        selector.addWidget(self.device_selector, 1)
+        layout.addLayout(selector)
+        self._tool_page = QWidget()
+        self._tool_layout = QVBoxLayout(self._tool_page)
+        self._tool_layout.setContentsMargins(0, 0, 0, 0)
+        self._tool_placeholder = QLabel("未配置末端工具")
+        self._tool_layout.addWidget(self._tool_placeholder)
+        layout.addWidget(self._tool_page)
+        group = QWidget()
         relay_row = QHBoxLayout(group)
         relay_row.setContentsMargins(8, 6, 8, 6)
         relay_row.setSpacing(6)
@@ -296,7 +317,67 @@ class DeviceControlView(QFrame):
             self._relay_buttons.append(button)
             relay_row.addWidget(button)
         layout.addWidget(group)
+        self._body_page = QWidget()
+        body_layout = QVBoxLayout(self._body_page)
+        body_layout.setContentsMargins(0, 8, 0, 0)
+        body_layout.setSpacing(12)
+        self.body_status = QLabel("身体控制器未就绪，请先在设备菜单中初始化")
+        self.body_status.setWordWrap(True)
+        body_layout.addWidget(self.body_status)
+        fields, _ = get_action_fields(ActionType.MOVE, {"目标": "身体"})
+        assert fields is not None
+        position_schema = fields["位置"]
+        self.body_position = QSpinBox()
+        self.body_position.setRange(int(position_schema["min"]), int(position_schema["max"]))
+        self.body_position.setValue(int(position_schema["default"]))
+        self.body_position.setSuffix(" 脉冲")
+        self.body_position.setAccessibleName("身体升降目标位置（脉冲）")
+        body_form = QFormLayout()
+        body_form.addRow("目标位置", self.body_position)
+        body_layout.addLayout(body_form)
+        self.body_move_button = self._button("移动到目标", lambda: self.body_move_requested.emit(self.body_position.value()))
+        body_layout.addWidget(self.body_move_button)
+        hint = QLabel("绝对位置控制，单位为驱动器脉冲。请先确认行程和周围空间；当前接口不提供实时位置读取。")
+        hint.setWordWrap(True)
+        set_theme_role(hint, "muted")
+        body_layout.addWidget(hint)
+        layout.addWidget(self._body_page)
+        self._pages = {"tools": self._tool_page, "relay": group, "body": self._body_page}
+        self._execution_active = False
+        self._state = DeviceViewState(False, False, False)
+        layout.addStretch(1)
+        self.scroll_area.setWidget(self._content)
+        outer.addWidget(self.scroll_area)
+        self.stop_button = self._button("停止当前任务", self.execution_stop_requested.emit)
+        set_theme_role(self.stop_button, "danger")
+        self.stop_button.setToolTip("请求取消当前执行任务；身体升降将在取消检查点发送软件停止指令。不能替代实体急停。")
+        outer.addWidget(self.stop_button)
+        self.device_selector.currentIndexChanged.connect(self._select_device)
+        self._select_device()
+        self.render_state(self._state)
+        self._content.installEventFilter(self)
         self.setObjectName("deviceControl")
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        margins = self.contentsMargins()
+        return self._content.sizeHint() + QSize(
+            16 + margins.left() + margins.right(), margins.top() + margins.bottom()
+            + max(self.stop_button.sizeHint().height(), self.stop_button.minimumHeight())
+            + self._outer_layout.spacing(),
+        )
+
+    def _select_device(self) -> None:
+        selected = self.device_selector.currentData()
+        for identity, page in self._pages.items():
+            page.setVisible(identity == selected)
+        self._controls_layout.invalidate()
+        self.scroll_area.verticalScrollBar().setValue(0)
+        self.updateGeometry()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched is self._content and event.type() is QEvent.Type.LayoutRequest:
+            self.updateGeometry()
+        return super().eventFilter(watched, event)
 
     @staticmethod
     def _button(text: str, callback: Callable[[], None]) -> QPushButton:
@@ -306,21 +387,19 @@ class DeviceControlView(QFrame):
         return button
 
     def render_state(self, state: DeviceViewState) -> None:
-        self._zhixing_gripper_ready = state.zhixing_gripper_ready
-        self.set_zhixing_gripper_action_enabled(self._zhixing_gripper_actions_enabled)
-        self._pipette_ready = state.pipette_ready
-        self.set_pipette_action_enabled(self._pipette_actions_enabled)
-        for button in self._gripper_buttons:
-            button.setEnabled(state.robot_ready)
+        self._state = state
         for button in self._relay_buttons:
-            button.setEnabled(state.relay_ready)
+            button.setEnabled(state.relay_ready and not self._execution_active)
+            button.setToolTip("" if state.relay_ready else "继电器未就绪，请先在设备菜单中初始化")
+        self.body_position.setEnabled(state.body_ready and not self._execution_active)
+        self.body_move_button.setEnabled(state.body_ready and not self._execution_active)
+        self.body_status.setText("身体控制器已就绪" if state.body_ready else "身体控制器未就绪，请先在设备菜单中初始化")
+        self.stop_button.setEnabled(self._execution_active)
 
-    def set_zhixing_gripper_action_enabled(self, enabled: bool) -> None:
-        self._zhixing_gripper_actions_enabled = enabled
-        for button in self._zhixing_gripper_buttons:
-            button.setEnabled(enabled and self._zhixing_gripper_ready)
+    def set_execution_active(self, active: bool) -> None:
+        self._execution_active = active
+        self.render_state(self._state)
 
-    def set_pipette_action_enabled(self, enabled: bool) -> None:
-        self._pipette_actions_enabled = enabled
-        self._pipette_initialize_button.setEnabled(enabled)
-        self._pipette_button.setEnabled(enabled and self._pipette_ready)
+    def use_configured_end_effectors(self, controls: QWidget) -> None:
+        self._tool_placeholder.hide()
+        self._tool_layout.addWidget(controls)

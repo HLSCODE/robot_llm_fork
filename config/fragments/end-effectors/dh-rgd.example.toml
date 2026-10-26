@@ -1,0 +1,25 @@
+# 大寰 RGD 旋转夹爪；ID 与安装机械臂无关。
+# 在 config.toml 的 include 中加入本文件的实际副本，随后在 mounts 中引用此 ID。
+# 复用 connections.toml 声明的连接；出厂串口为 115200 / 8N1。
+# 与知行分别连接独立串口时，本实例改用 connection = "tool_bus_2"。
+# 两只大寰：复制本表及参数，第二实例 ID 改为 dh_rgd_gripper_2；
+# 共用总线时两实例 connection 相同、station 不同；独立串口则 connection 不同。
+# 同总线不要为两只夹爪重复声明同一个 port。硬件站号须提前设置。
+[end_effectors.tools.dh_rgd_gripper_1]
+display_name = "大寰旋转夹爪" # 界面别名，动作仍保存上面的实例 ID
+kind = "gripper"
+provider = "dh_rgd"
+connection = "tool_bus_1"
+station = 1
+response_timeout_seconds = 1.0
+motion_timeout_seconds = 8.0
+command_interval_seconds = 0.05
+speed = 100 # 开合速度 1～100%
+torque = 60 # 开合力 20～100%
+rotation_speed = 50 # 1～100%
+rotation_force = 60 # 20～100%
+# 手册V2.1为1；测试Demo所用新固件为10。必须与实际固件一致，不自动猜测。
+rotation_units_per_degree = 1.0
+# 原始寄存器端点；按现场实测方向配置，系统闭合度始终0=开、100=关。
+open_position = 0
+closed_position = 1000

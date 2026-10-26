@@ -341,7 +341,7 @@ class TeleoperationWebSocketHandler:
 
             if grip is not None:
                 self._server._schedule_background_task(
-                    self._execute_grip_async(owner_id, arm, grip),
+                    self._execute_grip_async(owner_id, arm, grip, self._grip_tool_id(data, arm)),
                     name=f"WebSocketGrip-{arm}",
                 )
 
@@ -445,6 +445,7 @@ class TeleoperationWebSocketHandler:
                                 owner_id,
                                 arm_name,
                                 grip_val,
+                                self._grip_tool_id(data, arm_name),
                             ),
                             name=f"WebSocketGrip-{arm_name}",
                         )
@@ -670,11 +671,21 @@ class TeleoperationWebSocketHandler:
                 payload["frames"] = error.frames
         await websocket.send(self._server._json_msg(payload))
 
+    @staticmethod
+    def _grip_tool_id(data: WebSocketRequest, arm: str) -> str:
+        value = data.get("grip_tool_id", "")
+        if isinstance(value, dict):
+            value = value.get(arm, "")
+        if not isinstance(value, str):
+            raise ValueError("grip_tool_id 必须是工具 ID 或按臂指定的工具 ID 表")
+        return value
+
     async def _execute_grip_async(
         self,
         owner_id: str,
         arm: str,
         position: int,
+        tool_id: str = "",
     ) -> None:
         """在线程池中异步执行夹爪位置指令，不阻塞关节指令流"""
         if not self._server._services.devices.is_ready(ROBOT_SYSTEM):
@@ -686,6 +697,7 @@ class TeleoperationWebSocketHandler:
                 owner_id,
                 arm,
                 position,
+                **({"tool_id": tool_id} if tool_id else {}),
             )
             logger.info("遥操作夹爪位置: %s臂 %d", arm, position)
         except Exception as e:

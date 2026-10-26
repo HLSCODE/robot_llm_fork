@@ -1,7 +1,7 @@
 {
   "$schema": "../../schemas/skill.schema.json",
   "schema": "robot_llm.skill",
-  "schema_version": 2,
+  "schema_version": 3,
   "skill": {
     "id": "shuangbi_inject",
     "name": "双臂注入液体",
@@ -48,8 +48,9 @@
         "action_type": "MANIPULATE",
         "parameters": {
           "执行器": "夹爪",
-          "编号": 1,
-          "操作": "关"
+          "操作": "关",
+          "arm": "left",
+          "tool_id": "robot_gripper_1"
         },
         "parameter_bindings": {},
         "description": "关闭夹爪抓取瓶子",
@@ -137,7 +138,9 @@
         "parameters": {
           "执行器": "吸液枪",
           "操作": "吸",
-          "容量": 500
+          "容量": 500,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {},
         "description": "吸取500ul液体",
@@ -211,7 +214,9 @@
         "parameters": {
           "执行器": "吸液枪",
           "操作": "吐",
-          "容量": 500
+          "容量": 500,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {},
         "description": "吐出液体注入瓶中",

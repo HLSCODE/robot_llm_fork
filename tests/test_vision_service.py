@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
 import unittest
+from tool_support import tool_settings
 from unittest.mock import patch
 
 from src.application import create_application_services
@@ -14,7 +15,6 @@ from src.domain.execution_context import ExecutionContext, VisionRelocalizationS
 from src.persistence.json_documents import JsonDocumentSchemaError
 from src.domain.models import ActionDefinition, ActionType, SequenceItem
 from src.configuration.settings import (
-    ApplicationSettings,
     CameraProfile,
     CameraRole,
     VisionSettings,
@@ -423,7 +423,7 @@ class VisionSimulationIntegrationTests(unittest.TestCase):
             }
             original = json.dumps(legacy_document)
             station_path.write_text(original, encoding="utf-8")
-            defaults = ApplicationSettings.defaults()
+            defaults = tool_settings()
             settings = replace(
                 defaults,
                 vision=replace(
@@ -440,7 +440,7 @@ class VisionSimulationIntegrationTests(unittest.TestCase):
 
     def test_simulation_fixture_executes_capture_and_relocalization_without_models(self) -> None:
         with TemporaryDirectory() as directory:
-            defaults = ApplicationSettings.defaults()
+            defaults = tool_settings()
             settings = replace(
                 defaults,
                 vision=replace(

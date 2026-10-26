@@ -1,7 +1,7 @@
 {
   "$schema": "../../schemas/skill.schema.json",
   "schema": "robot_llm.skill",
-  "schema_version": 2,
+  "schema_version": 3,
   "skill": {
     "id": "absorb_liquid",
     "name": "吸取液体",
@@ -40,7 +40,9 @@
           "执行器": "吸液枪",
           "操作": "吸",
           "容量": 500,
-          "吸液速度": 1200
+          "吸液速度": 1200,
+          "arm": "right",
+          "tool_id": "pipette_1"
         },
         "parameter_bindings": {
           "volume": "容量"

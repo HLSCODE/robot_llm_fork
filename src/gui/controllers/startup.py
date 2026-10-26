@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal, Slot
 
-from ...devices.runtime.ids import BODY_AXIS, CAMERA, MOBILE_BASE, PIPETTE, RELAY_BANK, ROBOT_SYSTEM, ZHIXING_GRIPPERS
+from ...devices.runtime.ids import BODY_AXIS, CAMERA, MOBILE_BASE, RELAY_BANK, ROBOT_SYSTEM
 
 
 if TYPE_CHECKING:
@@ -136,16 +136,8 @@ class GuiHardwareStartupWorker(QObject):
                     lambda: self._services.devices.initialize(BODY_AXIS),
                 ),
                 (
-                    PIPETTE,
-                    self._services.manual_control.initialize_pipette,
-                ),
-                (
                     RELAY_BANK,
                     lambda: self._services.devices.initialize(RELAY_BANK),
-                ),
-                (
-                    ZHIXING_GRIPPERS,
-                    lambda: self._services.devices.initialize(ZHIXING_GRIPPERS),
                 ),
             )
         )
@@ -177,7 +169,7 @@ class GuiHardwareStartupWorker(QObject):
         operation: Callable[[], object],
     ) -> HardwareStartupStepResult:
         try:
-            result = operation()
+            operation()
         except Exception as exc:
             logger.exception(
                 "Hardware startup step failed: device_id=%s, error=%s",
@@ -188,16 +180,6 @@ class GuiHardwareStartupWorker(QObject):
                 device_id=device_id,
                 succeeded=False,
                 error=str(exc),
-            )
-        if device_id == PIPETTE and result is not True:
-            logger.warning(
-                "Hardware startup step was not confirmed: device_id=%s",
-                device_id,
-            )
-            return HardwareStartupStepResult(
-                device_id=device_id,
-                succeeded=False,
-                error="设备未确认初始化成功",
             )
         return HardwareStartupStepResult(device_id=device_id, succeeded=True)
 

@@ -38,13 +38,13 @@ class ActionCatalogTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_save_and_load_use_schema_v3_profiled_catalog(self) -> None:
+    def test_save_and_load_use_schema_v4_profiled_catalog(self) -> None:
         self.repository.save_actions((_action(),))
 
         document = _read_json(self.actions_directory / "library.json")
 
         self.assertEqual("robot_llm.actions", document["schema"])
-        self.assertEqual(3, document["schema_version"])
+        self.assertEqual(4, document["schema_version"])
         self.assertEqual("unscoped", document["robot_profile_id"])
         self.assertEqual("../../../schemas/action-library.schema.json", document["$schema"])
         self.assertEqual(["action-1"], [item.id for item in self.repository.load_actions()])

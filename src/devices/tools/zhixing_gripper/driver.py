@@ -1,4 +1,4 @@
-"""Zhixing protocol from gripper_control_v2, using the shared serial transport."""
+"""Zhixing protocol from examples/hardware/gripper_control_v2.py, using shared transport."""
 
 from __future__ import annotations
 
@@ -32,26 +32,30 @@ class ZhixingGripperController:
         wait_timeout: float = 8.0,
         left_range: tuple[int, int] = (0, 4000),
         right_range: tuple[int, int] = (0, 4000),
+        station_ranges: dict[int, tuple[int, int]] | None = None,
     ) -> None:
         if not math.isfinite(wait_timeout) or wait_timeout <= 0:
             raise ValueError("知行夹爪等待超时必须为正数")
         for value in (speed, torque, acceleration, deceleration):
             if not 1 <= value <= 0xFFFF:
                 raise ValueError("知行夹爪运动参数必须在 1..65535 之间")
-        for low, high in (left_range, right_range):
+        ranges = station_ranges if station_ranges is not None else {1: left_range, 2: right_range}
+        if not ranges or any(isinstance(station, bool) or not 1 <= station <= 247 for station in ranges):
+            raise ValueError("夹爪站号必须在 1～247")
+        for low, high in ranges.values():
             if not -(2**31) <= low < high < 2**31:
                 raise ValueError("知行夹爪行程范围无效")
         self._transport = transport
         self._protocol = ModbusRTUProtocol()
         self._lock = RLock()
-        self._ranges = {1: left_range, 2: right_range}
+        self._ranges = dict(ranges)
         self._motion_values = (speed, torque, acceleration, deceleration)
         self._wait_timeout = wait_timeout
         self._enabled: set[int] = set()
 
     def initialize(self) -> None:
         with self._lock:
-            for station in (1, 2):
+            for station in self._ranges:
                 # Verify both slaves respond even if their mapping is unavailable.
                 self._check_alarm(station)
                 try:
@@ -70,8 +74,8 @@ class ZhixingGripperController:
                     self._ranges[station] = (low, high)
 
     def move_percent(self, station: int, percent: float) -> None:
-        if isinstance(station, bool) or station not in (1, 2):
-            raise ValueError("知行夹爪站号必须为 1（左）或 2（右）")
+        if isinstance(station, bool) or station not in self._ranges:
+            raise ValueError("知行夹爪站号未配置")
         if isinstance(percent, bool) or not math.isfinite(percent) or not 0 <= percent <= 100:
             raise ValueError("知行夹爪开合度必须在 0..100 之间")
         with self._lock:
@@ -110,6 +114,10 @@ class ZhixingGripperController:
             finally:
                 self._enabled.clear()
                 self._transport.close()
+
+    def release_transport(self) -> None:
+        """Release a borrowed endpoint without changing a held load."""
+        self._transport.close()
 
     def _check_alarm(self, station: int) -> None:
         alarm = self._read(station, 0x0612)[0]

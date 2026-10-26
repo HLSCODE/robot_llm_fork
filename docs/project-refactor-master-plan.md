@@ -866,7 +866,7 @@ src/
   可选依赖隔离矩阵已建立。
 - Ruff 已以 `src/`、`scripts/` 和 `tests/` 目录为范围覆盖全部第一方 Python 代码，不再使用文件白名单。
 - Mypy 已默认检查全部手写 `src/` 与 `scripts/` Python 代码；唯一排除项为 Qt 资源编译器生成的 `src/gui/resources_rc.py`。
-- `test_devices.py` 等主要是硬件联调脚本。
+- `examples/hardware/test_devices.py` 等主要是硬件联调脚本。
 - 大量硬件代码难以在无设备环境导入和测试。
 
 目标：

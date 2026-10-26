@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import tomllib
-from typing import get_type_hints
+from typing import Any, get_type_hints
 
 from .errors import ConfigLoadError
 from .settings import (
@@ -40,7 +40,8 @@ def load_toml_sections(path: Path) -> dict[str, dict[str, object]]:
     Fragments are loaded in declaration order. Later fragments override earlier
     fragments field by field, and fields declared in the entry document override
     every fragment. Sequence-valued fields are replaced as one value rather than
-    implicitly appended.
+    implicitly appended. Named end-effector catalogs merge by instance identity;
+    later complete instances replace only an identically named instance.
     """
     entry = _read_document(path)
     _validate_entry_version(entry)
@@ -92,27 +93,19 @@ def _load_fragments(entry: _ConfigDocument) -> tuple[_ConfigDocument, ...]:
     fragments: list[_ConfigDocument] = []
     for index, raw_path in enumerate(raw_includes):
         if not isinstance(raw_path, str) or not raw_path.strip():
-            raise ConfigLoadError(
-                f"配置项 include[{index}] 必须是非空相对路径: {entry.path}"
-            )
+            raise ConfigLoadError(f"配置项 include[{index}] 必须是非空相对路径: {entry.path}")
         include_path = Path(raw_path)
         if include_path.is_absolute():
-            raise ConfigLoadError(
-                f"配置项 include[{index}] 不允许使用绝对路径: {entry.path}"
-            )
+            raise ConfigLoadError(f"配置项 include[{index}] 不允许使用绝对路径: {entry.path}")
         resolved_path = (base_directory / include_path).resolve()
         if not resolved_path.is_relative_to(base_directory):
-            raise ConfigLoadError(
-                f"配置项 include[{index}] 不允许超出入口配置目录: {entry.path}"
-            )
+            raise ConfigLoadError(f"配置项 include[{index}] 不允许超出入口配置目录: {entry.path}")
         if resolved_path in seen_paths:
             raise ConfigLoadError(f"配置 include 重复: {resolved_path}")
         seen_paths.add(resolved_path)
         fragment = _read_document(resolved_path)
         if "schema_version" in fragment.content or _INCLUDE_KEY in fragment.content:
-            raise ConfigLoadError(
-                f"子配置不得声明 schema_version 或 include: {fragment.path}"
-            )
+            raise ConfigLoadError(f"子配置不得声明 schema_version 或 include: {fragment.path}")
         fragments.append(fragment)
     return tuple(fragments)
 
@@ -132,20 +125,14 @@ def _parse_sections(
 
     forbidden = set(document.content) & _FORBIDDEN_TOML_GROUPS
     if forbidden:
-        raise ConfigLoadError(
-            f"敏感字段不得写入 TOML，请使用 .env 或系统环境变量: {document.path}"
-        )
+        raise ConfigLoadError(f"敏感字段不得写入 TOML，请使用 .env 或系统环境变量: {document.path}")
 
     sections: dict[str, dict[str, object]] = {}
     raw_robot_providers = document.content.get(_ROBOT_PROVIDER_GROUP)
     if raw_robot_providers is not None:
         if not isinstance(raw_robot_providers, dict):
-            raise ConfigLoadError(
-                f"配置项 {_ROBOT_PROVIDER_GROUP} 必须是 TOML 表: {document.path}"
-            )
-        sections.update(
-            _normalize_robot_provider_sections(raw_robot_providers, document.path)
-        )
+            raise ConfigLoadError(f"配置项 {_ROBOT_PROVIDER_GROUP} 必须是 TOML 表: {document.path}")
+        sections.update(_normalize_robot_provider_sections(raw_robot_providers, document.path))
 
     for group_name, settings_type in group_types.items():
         if (
@@ -156,11 +143,23 @@ def _parse_sections(
             continue
         raw_section = document.content[group_name]
         if not isinstance(raw_section, dict):
-            raise ConfigLoadError(
-                f"配置项 {group_name} 必须是 TOML 表: {document.path}"
-            )
+            raise ConfigLoadError(f"配置项 {group_name} 必须是 TOML 表: {document.path}")
         if group_name == "llm_providers":
             raw_section = _normalize_llm_provider_catalog(raw_section, document.path)
+        if group_name == "end_effectors":
+            raw_section = dict(raw_section)
+            for catalog, key in (("connections", "id"), ("tools", "id"), ("mounts", "arm")):
+                if catalog not in raw_section:
+                    continue
+                raw_catalog = raw_section[catalog]
+                if not isinstance(raw_catalog, dict):
+                    raise ConfigLoadError(f"end_effectors.{catalog} 必须是命名配置表")
+                normalized = []
+                for identity, values in raw_catalog.items():
+                    if not isinstance(values, dict) or key in values:
+                        raise ConfigLoadError(f"end_effectors.{catalog}.{identity} 无效")
+                    normalized.append({key: identity, **values})
+                raw_section[catalog] = normalized
         field_types = get_type_hints(settings_type)
         unknown_fields = set(raw_section) - set(field_types)
         if unknown_fields:
@@ -209,21 +208,18 @@ def _normalize_robot_provider_sections(
         except KeyError as exc:
             supported = ", ".join(sorted(_ROBOT_PROVIDER_TYPES))
             raise ConfigLoadError(
-                f"未知 Robot provider 配置: {provider_name}; 支持: {supported}: "
-                f"{source_path}"
+                f"未知 Robot provider 配置: {provider_name}; 支持: {supported}: {source_path}"
             ) from exc
         if not isinstance(raw_provider, dict):
             raise ConfigLoadError(
-                f"配置项 robot_providers.{provider_name} 必须是 TOML 表: "
-                f"{source_path}"
+                f"配置项 robot_providers.{provider_name} 必须是 TOML 表: {source_path}"
             )
 
         provider_values = dict(raw_provider)
         raw_kind = provider_values.pop("kind", None)
         if not isinstance(raw_kind, str) or not raw_kind.strip():
             raise ConfigLoadError(
-                f"配置项 robot_providers.{provider_name}.kind 必须是非空字符串: "
-                f"{source_path}"
+                f"配置项 robot_providers.{provider_name}.kind 必须是非空字符串: {source_path}"
             )
         if raw_kind.strip().lower() != normalized_name:
             raise ConfigLoadError(
@@ -268,7 +264,19 @@ def _merge_sections(
     source: dict[str, dict[str, object]],
 ) -> None:
     for group_name, values in source.items():
-        target.setdefault(group_name, {}).update(values)
+        destination = target.setdefault(group_name, {})
+        for field_name, value in values.items():
+            if group_name == "end_effectors" and field_name in {"connections", "tools", "mounts"}:
+                # Instances are keyed catalogs, not lists whose last file wins.
+                # A later complete instance replaces only the same identity.
+                key = "arm" if field_name == "mounts" else "id"
+                previous: Any = destination.get(field_name, ())
+                incoming: Any = value
+                catalog = {getattr(item, key): item for item in previous}
+                catalog.update({getattr(item, key): item for item in incoming})
+                destination[field_name] = tuple(catalog.values())
+            else:
+                destination[field_name] = value
 
 
 def _raise_unknown(kind: str, names: set[str], source_path: Path) -> None:

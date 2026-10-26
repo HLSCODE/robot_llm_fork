@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from ...configuration.runtime_paths import application_root
+from dataclasses import replace
 from typing import Any
 
-from ...configuration.settings import (
-    ApplicationSettings,
-    DeviceSettings,
-)
+from ...configuration.runtime_paths import application_root
 from ..cameras.registry import resolve_camera_provider
 from ..displays.display import ExpressionDisplay, ExpressionDisplaySettings
 from ..displays.registry import resolve_expression_display_provider
 from ..motion.mobile_base import TCP_MOBILE_BASE_PROVIDER
+from ..robots.registry import resolve_robot_provider
+from ...configuration.settings import (
+    ApplicationSettings,
+    DeviceSettings,
+)
 from ..transports import SerialSettings, SerialTransport
-from ..tools.pipette import PipetteAdapter
+from ..transports.shared_serial import SharedSerialPool
+from ..end_effectors.factory import register_tools
 from ..tools.relay import RelayBankAdapter
-from ..tools.tool_changer import ToolChangerAdapter
 from .fakes import (
     SimulatedBodyAxis,
     SimulatedCamera,
@@ -23,11 +25,8 @@ from .fakes import (
     SimulatedExpressionDisplay,
     SimulatedMobileBase,
     SimulatedNeck,
-    SimulatedPipette,
-    SimulatedPercentGrippers,
     SimulatedPowderDispenser,
     SimulatedRobotSystem,
-    SimulatedToolChanger,
 )
 from .ids import (
     BODY_AXIS,
@@ -35,15 +34,11 @@ from .ids import (
     EXPRESSION_DISPLAY,
     MOBILE_BASE,
     NECK,
-    PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
-    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
-    TOOL_CHANGER,
 )
 from .models import DeviceCapability, DeviceInitializationError
-from ..robots.registry import resolve_robot_provider
 from .runtime import DeviceRegistration, DeviceRuntime
 
 
@@ -53,10 +48,14 @@ def create_device_runtime(
     simulation: bool,
 ) -> DeviceRuntime:
     runtime = DeviceRuntime()
+    pool = SharedSerialPool(lambda options: SerialTransport(options))
+    runtime.register(_registration("end-effector-connections", set(), lambda: pool))
+    runtime.initialize("end-effector-connections")
     if simulation:
-        _register_simulated_devices(runtime)
+        _register_simulated_devices(runtime, settings)
     else:
         _register_real_devices(runtime, settings)
+    register_tools(runtime, settings.end_effectors, pool, simulation=simulation)
     return runtime
 
 
@@ -78,13 +77,8 @@ def _registration(
     )
 
 
-def _register_simulated_devices(runtime: DeviceRuntime) -> None:
+def _register_simulated_devices(runtime: DeviceRuntime, settings: ApplicationSettings) -> None:
     registrations = (
-        _registration(
-            ZHIXING_GRIPPERS,
-            {DeviceCapability.PERCENT_GRIPPER},
-            SimulatedPercentGrippers,
-        ),
         _registration(
             ROBOT_SYSTEM,
             {
@@ -94,7 +88,6 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
                 DeviceCapability.ARM_MOTION,
                 DeviceCapability.ARM_STATE,
                 DeviceCapability.ARM_TELEMETRY,
-                DeviceCapability.GRIPPER,
                 DeviceCapability.ROBOT_TELEOPERATION,
                 DeviceCapability.TRAJECTORY,
                 DeviceCapability.TRAJECTORY_RECORDING,
@@ -124,19 +117,6 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
             enter_safe_state=lambda device: device.enter_safe_state(),
         ),
         _registration(
-            TOOL_CHANGER,
-            {DeviceCapability.TOOL_CHANGER, DeviceCapability.SAFE_STATE},
-            SimulatedToolChanger,
-            enter_safe_state=lambda device: device.enter_safe_state(),
-        ),
-        _registration(
-            PIPETTE,
-            {DeviceCapability.PIPETTE, DeviceCapability.SAFE_STATE},
-            SimulatedPipette,
-            enter_safe_state=lambda device: device.enter_safe_state(),
-            initialize=_initialize_pipette,
-        ),
-        _registration(
             POWDER_DISPENSER,
             {
                 DeviceCapability.MOTION,
@@ -157,6 +137,13 @@ def _register_simulated_devices(runtime: DeviceRuntime) -> None:
         ),
     )
     for registration in registrations:
+        if (
+            registration.device_id == ROBOT_SYSTEM
+            and DeviceCapability.GRIPPER in resolve_robot_provider(settings.robot).capabilities
+        ):
+            registration = replace(
+                registration, capabilities=registration.capabilities | {DeviceCapability.GRIPPER}
+            )
         runtime.register(registration)
 
 
@@ -164,100 +151,58 @@ def _register_real_devices(
     runtime: DeviceRuntime,
     settings: ApplicationSettings,
 ) -> None:
-    runtime.register(
-        _registration(
-            ZHIXING_GRIPPERS,
-            {DeviceCapability.PERCENT_GRIPPER},
-            lambda: _zhixing_gripper_factory(settings.devices),
-            initialize=lambda device: device.initialize(),
-        )
-    )
     robot_provider = resolve_robot_provider(settings.robot)
     camera_provider = resolve_camera_provider(settings.vision)
     display_settings = ExpressionDisplaySettings.from_mapping(
-        settings.devices.expression_display_mapping(
-            application_root()
-        )
+        settings.devices.expression_display_mapping(application_root())
     )
     resolve_expression_display_provider(display_settings.provider)
-    runtime.register(
+    registrations = (
         _registration(
             ROBOT_SYSTEM,
             set(robot_provider.capabilities),
             lambda: robot_provider.create(settings.robot_configuration()),
-        )
-    )
-    runtime.register(
+        ),
         _registration(
             BODY_AXIS,
             {DeviceCapability.MOTION, DeviceCapability.BODY_AXIS},
             lambda: _body_factory(settings.devices),
-        )
-    )
-    runtime.register(
+        ),
         _registration(
             MOBILE_BASE,
             {DeviceCapability.MOTION, DeviceCapability.MOBILE_BASE},
             lambda: TCP_MOBILE_BASE_PROVIDER.create(settings.mobile_base),
-        )
-    )
-    runtime.register(
+        ),
         _registration(
             NECK,
             {DeviceCapability.MOTION, DeviceCapability.NECK_MOTION},
             lambda: _neck_factory(settings.devices),
-        )
-    )
-    runtime.register(
+        ),
         _registration(
             RELAY_BANK,
             {DeviceCapability.DIGITAL_OUTPUT, DeviceCapability.SAFE_STATE},
             lambda: _relay_factory(settings.devices),
             enter_safe_state=lambda device: device.enter_safe_state(),
-        )
-    )
-    runtime.register(
-        _registration(
-            TOOL_CHANGER,
-            {DeviceCapability.TOOL_CHANGER, DeviceCapability.SAFE_STATE},
-            lambda: _tool_changer_factory(settings.devices),
-            enter_safe_state=lambda device: device.enter_safe_state(),
-        )
-    )
-    runtime.register(
-        _registration(
-            PIPETTE,
-            {DeviceCapability.PIPETTE, DeviceCapability.SAFE_STATE},
-            lambda: _pipette_factory(settings.devices),
-            enter_safe_state=lambda device: device.enter_safe_state(),
-            initialize=_initialize_pipette,
-        )
-    )
-    runtime.register(
+        ),
         _registration(
             POWDER_DISPENSER,
-            {
-                DeviceCapability.MOTION,
-                DeviceCapability.POWDER_DISPENSER,
-            },
+            {DeviceCapability.MOTION, DeviceCapability.POWDER_DISPENSER},
             lambda: _powder_dispenser_factory(settings.devices),
-        )
-    )
-    runtime.register(
+        ),
         _registration(
             CAMERA,
             set(camera_provider.capabilities),
             lambda: camera_provider.create(settings.vision),
             lambda device: device.stop(),
-        )
-    )
-    runtime.register(
+        ),
         _registration(
             EXPRESSION_DISPLAY,
             {DeviceCapability.EXPRESSION_DISPLAY},
             lambda: ExpressionDisplay(display_settings),
-        )
+        ),
     )
+    for registration in registrations:
+        runtime.register(registration)
 
 
 def _body_factory(settings: DeviceSettings) -> Any:
@@ -316,74 +261,7 @@ def _relay_factory(settings: DeviceSettings) -> RelayBankAdapter:
     )
 
 
-def _tool_changer_factory(settings: DeviceSettings) -> ToolChangerAdapter:
-    from ..tools.tool_changer.driver import Kuaihuanshou
-
-    if Kuaihuanshou is None:
-        raise DeviceInitializationError("Kuaihuanshou unavailable")
-    return ToolChangerAdapter(
-        Kuaihuanshou(
-            SerialTransport(
-                SerialSettings(
-                    port=settings.kuaihuanshou_serial_port,
-                    baudrate=settings.kuaihuanshou_baudrate,
-                    timeout_seconds=settings.kuaihuanshou_timeout,
-                )
-            )
-        )
-    )
-
-
-def _initialize_pipette(device: Any) -> None:
-    if device.initialize() is not True:
-        raise DeviceInitializationError("pipette initialization was not confirmed")
-
-
-def _pipette_factory(settings: DeviceSettings) -> PipetteAdapter:
-    from ..tools.pipette.driver import ADP
-    if ADP is None:
-        raise DeviceInitializationError("ADP unavailable")
-    return PipetteAdapter(
-        ADP(
-            SerialTransport(
-                SerialSettings(
-                    port=settings.adp_serial_port,
-                    baudrate=settings.adp_baudrate,
-                    timeout_seconds=settings.adp_timeout,
-                    open_attempts=settings.adp_max_retries,
-                    open_retry_delay_seconds=1.0,
-                )
-            ),
-            command_interval_seconds=settings.adp_command_interval_seconds,
-        ),
-    )
-
-
 def _powder_dispenser_factory(settings: DeviceSettings) -> Any:
     from ..tools.powder_dispenser.driver import TappingController
 
     return TappingController.from_settings(settings)
-
-
-def _zhixing_gripper_factory(settings: DeviceSettings) -> Any:
-    from ..tools.zhixing_gripper import ZhixingGripperController
-
-    transport = SerialTransport(SerialSettings(
-        port=settings.zhixing_gripper_serial_port,
-        baudrate=settings.zhixing_gripper_baudrate,
-        timeout_seconds=settings.zhixing_gripper_timeout,
-    ))
-    try:
-        return ZhixingGripperController(
-            transport,
-            speed=settings.zhixing_gripper_speed,
-            torque=settings.zhixing_gripper_torque,
-            acceleration=settings.zhixing_gripper_acceleration,
-            deceleration=settings.zhixing_gripper_deceleration,
-            wait_timeout=settings.zhixing_gripper_wait_timeout,
-            left_range=(settings.zhixing_gripper_left_pos_min, settings.zhixing_gripper_left_pos_max),
-            right_range=(settings.zhixing_gripper_right_pos_min, settings.zhixing_gripper_right_pos_max),
-        )
-    except Exception:
-        transport.close()
-        raise

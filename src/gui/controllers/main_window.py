@@ -54,9 +54,7 @@ from ...devices.runtime.ids import (
     BODY_AXIS,
     CAMERA,
     MOBILE_BASE,
-    PIPETTE,
     RELAY_BANK,
-    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
 )
 from ..views.log_widget import LogFilter, LogWidget
@@ -73,7 +71,6 @@ from .startup import (
     HardwareStartupStepResult,
 )
 from .trajectory_dialog import TrajectoryRecordingDialog
-from .gripper_control import ZhixingGripperWorker
 from .teaching import TeachingController
 from ..views.teaching import TeachingView
 from ..view_models.models import DeviceViewModel, ExecutionViewModel
@@ -145,7 +142,6 @@ class MainWindow(RoundedMainWindow):
         self._startup_lifecycle = GuiStartupLifecycle()
         self._speech_startup_wait_timer: QTimer | None = None
         self._hardware_startup_thread: QThread | None = None
-        self._zhixing_gripper_worker: ZhixingGripperWorker | None = None
         self._hardware_startup_worker: GuiHardwareStartupWorker | None = None
         self._camera_test_thread: QThread | None = None
         self._startup_begin_timer = QTimer(self)
@@ -153,6 +149,10 @@ class MainWindow(RoundedMainWindow):
         self._startup_begin_timer.timeout.connect(self.start_startup_initialization)
 
         self.init_ui()
+        from .end_effector_status import EndEffectorStatusController
+        self._end_effector_status = EndEffectorStatusController(
+            self._services.manual_control.end_effectors, self.device_status_view, self,
+        )
         self._execution_display_list: WorkflowCanvasWidget | None = (
             self.workflow_view.sequence_list
         )
@@ -347,9 +347,7 @@ class MainWindow(RoundedMainWindow):
             ROBOT_SYSTEM: (54, "正在连接机械臂..."),
             MOBILE_BASE: (66, "正在连接移动底盘..."),
             BODY_AXIS: (76, "正在初始化身体控制器..."),
-            PIPETTE: (88, "正在初始化移液枪..."),
             RELAY_BANK: (90, "正在连接继电器..."),
-            ZHIXING_GRIPPERS: (92, "正在连接知行夹爪..."),
             CAMERA: (94, "正在检测全部相机..."),
         }
         percent, message = progress.get(device_id, (60, "正在初始化设备..."))
@@ -365,9 +363,7 @@ class MainWindow(RoundedMainWindow):
             ROBOT_SYSTEM: 64,
             MOBILE_BASE: 74,
             BODY_AXIS: 86,
-            PIPETTE: 90,
             RELAY_BANK: 92,
-            ZHIXING_GRIPPERS: 94,
             CAMERA: 96,
         }
         state = "完成" if result.succeeded else "不可用，稍后可在主界面重试"
@@ -410,9 +406,7 @@ class MainWindow(RoundedMainWindow):
             ROBOT_SYSTEM: "机械臂",
             MOBILE_BASE: "移动底盘",
             BODY_AXIS: "身体控制器",
-            PIPETTE: "移液枪",
             RELAY_BANK: "继电器",
-            ZHIXING_GRIPPERS: "知行夹爪",
             CAMERA: "相机",
         }.get(device_id, device_id)
 
@@ -436,6 +430,18 @@ class MainWindow(RoundedMainWindow):
         self.device_status_view = DeviceHealthView()
         self.device_pose_view = DevicePoseView()
         self.device_control_view = DeviceControlView()
+        from ..views.end_effector_controls import EndEffectorControls
+        self._end_effector_controls: EndEffectorControls | None = None
+        self._manual_rotation_parameters: dict[str, Any] | None = None
+        self._manual_rotation_action_id: str | None = None
+        tool_controls = EndEffectorControls(
+            self._services.manual_control.end_effectors.choices,
+            tuple(mount.arm for mount in self.settings.end_effectors.mounts),
+            describe_tool=self._services.manual_control.end_effectors.describe_tool,
+        )
+        tool_controls.action_requested.connect(self._execute_manual_tool)
+        self.device_control_view.use_configured_end_effectors(tool_controls)
+        self._end_effector_controls = tool_controls
         self.log_widget = LogWidget()
         self.workbench_view = WorkbenchView(
             side_pages=(
@@ -466,7 +472,7 @@ class MainWindow(RoundedMainWindow):
             bottom_pages=(
                 WorkbenchPage("devices", "设备", IconName.DEVICES, self.device_status_view),
                 WorkbenchPage("poses", "位姿", IconName.POSES, self.device_pose_view),
-                WorkbenchPage("controls", "控制", IconName.CONTROLS, self.device_control_view),
+                WorkbenchPage("controls", "控制", IconName.CONTROLS, self.device_control_view, fit_content=True),
                 WorkbenchPage("logs", "日志", IconName.LOGS, self.log_widget),
             ),
             layout_store=self._layout_store,
@@ -539,11 +545,34 @@ class MainWindow(RoundedMainWindow):
         self.device_pose_view.refresh_requested.connect(self.refresh_arm_poses)
         self.device_pose_view.copy_pose_requested.connect(self.copy_robot_pose)
         controls = self.device_control_view
-        controls.gripper_requested.connect(self._set_gripper_state)
-        controls.zhixing_gripper_requested.connect(self._set_zhixing_gripper_state)
         controls.relay_requested.connect(self._set_relay_state)
-        controls.pipette_eject_requested.connect(self.eject_pipette_tip)
-        controls.pipette_initialize_requested.connect(self.initialize_pipette)
+        controls.body_move_requested.connect(self._execute_manual_body)
+        controls.execution_stop_requested.connect(self.stop_execution)
+
+    def _execute_manual_body(self, position: int) -> None:
+        action = ActionDefinition(
+            id=uuid4().hex, name="身体升降手动控制", type=ActionType.MOVE,
+            parameters={"目标": "身体", "位置": position},
+            robot_profile_id=self._services.settings.robot_profile_id(),
+        )
+        self._start_sequence_execution([SequenceItem.from_definition(action)], label="身体升降")
+
+    def _execute_manual_tool(self, parameters: dict[str, Any]) -> None:
+        if parameters.get("操作") == "停止旋转" and self._execution_view_model.snapshot().active:
+            active = self._manual_rotation_parameters
+            if active and all(active.get(key) == parameters.get(key) for key in ("arm", "tool_id")):
+                self._execution_view_model.cancel()
+                self._notifications.warning("已请求停止当前手动旋转（非硬件急停）", modal=False)
+            else:
+                self._notifications.warning("当前不是该工具的手动旋转，请使用任务停止控制", modal=False)
+            return
+        action = ActionDefinition(
+            id=uuid4().hex, name="末端工具手动控制", type=ActionType.MANIPULATE,
+            parameters=parameters, robot_profile_id=self._services.settings.robot_profile_id(),
+        )
+        if not self._execution_view_model.snapshot().active:
+            self._manual_rotation_action_id = action.id if parameters.get("操作") in ("绝对旋转", "相对旋转") else None
+        self._start_sequence_execution([SequenceItem.from_definition(action)], label="末端工具手动控制")
 
     def create_menu(self) -> None:
         title_bar = ApplicationTitleBar(self)
@@ -722,51 +751,6 @@ class MainWindow(RoundedMainWindow):
             self._notifications.warning(
                 f"继电器 Y{channel} {action_text}失败:\n{e}"
             )
-
-    def _set_zhixing_gripper_state(self, station: int, percent: float) -> None:
-        if self._zhixing_gripper_worker is not None:
-            return
-        if not self._device_view_model.snapshot().zhixing_gripper_ready:
-            self._notifications.warning("知行夹爪未连接")
-            return
-        worker = ZhixingGripperWorker(
-            self._services.manual_control, station, percent, self,
-        )
-        self._zhixing_gripper_worker = worker
-        self.device_control_view.set_zhixing_gripper_action_enabled(False)
-        worker.finished.connect(self._on_zhixing_gripper_finished)
-        worker.start()
-
-    def _on_zhixing_gripper_finished(self) -> None:
-        worker = self._zhixing_gripper_worker
-        if worker is None:
-            return
-        self._zhixing_gripper_worker = None
-        side = "左" if worker.station == 1 else "右"
-        if worker.error:
-            self._notifications.warning(f"知行夹爪{side}操作失败: {worker.error}")
-        else:
-            self._notifications.info(f"知行夹爪{side}开合度已设为 {worker.percent:g}%")
-        worker.deleteLater()
-        self.device_control_view.set_zhixing_gripper_action_enabled(True)
-
-    def _set_gripper_state(self, opened: bool) -> None:
-        if not self._device_view_model.snapshot().robot_ready:
-            self._notifications.warning("Robot1 未连接")
-            return
-
-        action = "打开" if opened else "关闭"
-        try:
-            success = self._services.manual_control.set_gripper(
-                "left",
-                opened=opened,
-            )
-            if success:
-                self._notifications.info(f"Robot1 夹爪已{action}")
-            else:
-                self._notifications.warning(f"Robot1 夹爪{action}失败")
-        except Exception as e:
-            self._notifications.warning(f"Robot1 夹爪{action}异常: {e}")
 
     def record_trajectory(self, robot_name: str, *, create_action: bool = False) -> None:
         if not self._device_view_model.snapshot().robot_ready:
@@ -1010,57 +994,6 @@ class MainWindow(RoundedMainWindow):
         self.workbench_view.status_bar.render_device_state(state)
         self.device_control_view.render_state(state)
 
-    def initialize_pipette(self) -> None:
-        """Initialize the runtime-owned pipette."""
-        self._notifications.info("开始初始化移液枪...")
-        self.device_control_view.set_pipette_action_enabled(False)
-        try:
-            success = self._services.manual_control.initialize_pipette()
-            self._render_device_state()
-            if success:
-                self._notifications.info("移液枪已连接，初始化命令已收到回复")
-            else:
-                self._notifications.warning(
-                    "移液枪初始化失败，请检查串口或设备"
-                )
-        except Exception as e:
-            self._render_device_state()
-            self._notifications.warning(f"移液枪初始化异常: {e}")
-        finally:
-            self.device_control_view.set_pipette_action_enabled(True)
-
-    def initialize_pipette_on_startup(self) -> None:
-        """Initialize pipette automatically when app starts."""
-        self._notifications.info("自动初始化移液枪...")
-        try:
-            success = self._services.manual_control.initialize_pipette()
-            self._render_device_state()
-            if success:
-                self._notifications.info("移液枪已连接，初始化命令已收到回复")
-            else:
-                self._notifications.warning("移液枪初始化失败", modal=False)
-        except Exception as e:
-            self._render_device_state()
-            self._notifications.warning(
-                f"移液枪初始化异常: {e}",
-                modal=False,
-            )
-
-    def eject_pipette_tip(self) -> None:
-        """Eject pipette tip manually."""
-        self.device_control_view.set_pipette_action_enabled(False)
-        try:
-            self._notifications.info("正在退枪头...")
-            success = self._services.manual_control.eject_pipette_tip()
-            if success:
-                self._notifications.info("枪头已退出")
-            else:
-                self._notifications.warning("退枪头失败")
-        except Exception as e:
-            self._notifications.warning(f"退枪头异常: {e}")
-        finally:
-            self.device_control_view.set_pipette_action_enabled(True)
-
     def initialize_body(self) -> None:
         """初始化身体（ModbusMotor）"""
         self._notifications.info("开始初始化身体...")
@@ -1116,6 +1049,8 @@ class MainWindow(RoundedMainWindow):
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
             camera_choices_reader=self._camera_choices,
+            tool_choices_reader=self._services.manual_control.end_effectors.choices,
+            tool_description_reader=self._services.manual_control.end_effectors.describe_tool,
         )
         if dialog.exec():
             action = dialog.get_action_definition()
@@ -1260,6 +1195,8 @@ class MainWindow(RoundedMainWindow):
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
             camera_choices_reader=self._camera_choices,
+            tool_choices_reader=self._services.manual_control.end_effectors.choices,
+            tool_description_reader=self._services.manual_control.end_effectors.describe_tool,
         )
         if not dialog.exec():
             return
@@ -1793,6 +1730,12 @@ class MainWindow(RoundedMainWindow):
 
     def _render_execution_state(self) -> None:
         state = self._execution_view_model.snapshot()
+        self.device_control_view.set_execution_active(state.active)
+        if self._end_effector_controls is not None:
+            self._end_effector_controls.setEnabled(bool(self.settings.end_effectors.mounts))
+            self._end_effector_controls.set_execution_active(state.active)
+        if not state.active:
+            self._manual_rotation_parameters = None
         self.workflow_view.render_execution_controls(
             state.pause_button_text,
             state.can_pause or state.can_resume,
@@ -1801,12 +1744,15 @@ class MainWindow(RoundedMainWindow):
         self._sync_start_from_selection_action()
 
     def on_step_started(self, index: int, item: SequenceItem) -> None:
+        if item.definition.id == self._manual_rotation_action_id:
+            self._manual_rotation_parameters = dict(item.definition.parameters)
         display_list = self._execution_display_list
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
             display_list.update_execution_step(index, item)
 
     def on_step_completed(self, index: int, item: SequenceItem) -> None:
+        self._manual_rotation_parameters = None
         display_list = self._execution_display_list
         if display_list is not None:
             self._ensure_canvas_execution_mapping(display_list)
@@ -1998,6 +1944,8 @@ class MainWindow(RoundedMainWindow):
             localization_reader=self._services.external_localization.latest,
             station_choices_reader=self._services.vision.list_station_choices,
             camera_choices_reader=self._camera_choices,
+            tool_choices_reader=self._services.manual_control.end_effectors.choices,
+            tool_description_reader=self._services.manual_control.end_effectors.describe_tool,
         )
         if not dialog.exec():
             return
@@ -2140,6 +2088,7 @@ class MainWindow(RoundedMainWindow):
         self._notifications.info("应用正在关闭，后台资源将按顺序释放...")
         self._startup_begin_timer.stop()
         self._teaching_controller.prepare_shutdown()
+        self._end_effector_status.prepare_shutdown()
         execution_state = self._execution_view_model.snapshot()
         if execution_state.active:
             self._execution_view_model.cancel()
@@ -2157,10 +2106,8 @@ class MainWindow(RoundedMainWindow):
 
     def shutdown_after_event_loop(self) -> None:
         """Join GUI workers before their Qt owners and services are destroyed."""
-        gripper_worker = self._zhixing_gripper_worker
-        if gripper_worker is not None and gripper_worker.isRunning():
-            gripper_worker.wait()
         self._teaching_controller.shutdown()
+        self._end_effector_status.shutdown()
         hardware_thread = self._hardware_startup_thread
         if hardware_thread is not None and hardware_thread.isRunning():
             if self._hardware_startup_worker is not None:

@@ -8,7 +8,7 @@
   "properties": {
     "$schema": {"type": "string"},
     "schema": {"const": "robot_llm.skill"},
-    "schema_version": {"const": 2},
+    "schema_version": {"const": 3},
     "skill": {
       "type": "object",
       "additionalProperties": false,

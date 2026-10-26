@@ -107,6 +107,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--no-frozen", action="store_true", help="依赖同步时允许更新 uv.lock。"
     )
     parser.add_argument("--dry-run", action="store_true", help="仅展示计划，不执行副作用。")
+    parser.add_argument("--target-map", type=Path, help="旧末端动作目标映射 JSON 文件")
     return parser
 
 
@@ -120,6 +121,7 @@ def _plan_from_arguments(arguments: argparse.Namespace) -> InitializationPlan:
         kws_model=arguments.kws_model,
         frozen=not arguments.no_frozen,
         dry_run=arguments.dry_run,
+        migration_target_map=arguments.target_map,
     )
 
 
@@ -160,12 +162,14 @@ def _run_data_migration_command(argv: Sequence[str]) -> int:
     )
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
     parser.add_argument("--dry-run", action="store_true", help="仅展示步骤，不写入数据。")
+    parser.add_argument("--target-map", type=Path, help="显式指定旧动作的 arm/tool_id 映射 JSON")
     arguments = parser.parse_args(argv)
     return _run_plain(
         InitializationPlan(
             project_root=arguments.project_root.resolve(),
             steps=(InitializationStep.DATA_MIGRATION,),
             dry_run=arguments.dry_run,
+            migration_target_map=arguments.target_map,
         )
     )
 

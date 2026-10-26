@@ -74,6 +74,8 @@ class VisionCaptureActionHandler:
         context: ActionExecutionContext,
     ) -> ActionHandlerResult:
         managed_camera = False
+        camera: CameraSource
+        robot_system: GrippingRobotSystem
         try:
             if self._camera_runtime is None:
                 camera = self._device_runtime.require(CAMERA, DepthCameraSource)
@@ -90,10 +92,11 @@ class VisionCaptureActionHandler:
                 if not isinstance(camera, DepthCameraSource):
                     raise TypeError("camera does not provide depth frames")
                 managed_camera = True
-            robot_system = self._device_runtime.require(
-                ROBOT_SYSTEM,
-                GrippingRobotSystem,
-            )
+            from ...devices.end_effectors import end_effectors
+            from ...devices.end_effectors.vision_facade import VisionRobotFacade
+            routing = end_effectors(self._device_runtime)
+            target = routing.resolve("gripper", arm=str(parameters.get("目标机械臂", "robot1")), tool_id=str(parameters.get("tool_id") or ""))
+            robot_system = VisionRobotFacade(routing, target)
         except Exception as exc:
             message = f"视觉抓取设备不可用: {exc}"
             return context.failure(

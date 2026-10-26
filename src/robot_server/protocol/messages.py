@@ -262,6 +262,7 @@ ACTION_REQUEST_SCHEMAS: Mapping[str, ActionRequestSchema] = MappingProxyType(
             follow=_field(bool),
             trajectory_mode=_field(int),
             grip=_field(int, dict),
+            grip_tool_id=_field(str, dict),
         ),
         "teleop_stop": _schema(
             arm=_field(str),

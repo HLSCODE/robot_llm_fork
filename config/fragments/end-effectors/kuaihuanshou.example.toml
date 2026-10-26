@@ -1,0 +1,8 @@
+# 快换手仅报告自身锁紧、供电状态，不识别已安装的工具。
+# tool_changer_1 是实例 ID，不限制挂载在哪条机械臂上。
+[end_effectors.tools.tool_changer_1]
+display_name = "快换手" # 界面别名，动作仍保存上面的实例 ID
+kind = "tool_changer"
+provider = "kuaihuanshou"
+connection = "tool_bus_1"
+response_timeout_seconds = 3.0

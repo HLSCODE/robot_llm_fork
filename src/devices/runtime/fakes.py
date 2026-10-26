@@ -281,6 +281,9 @@ class SimulatedToolChanger:
     def set_locked(self, locked: bool) -> None:
         self.locked = locked
 
+    def read_status(self) -> dict[str, str]:
+        return {"locked": "locked" if self.locked else "unlocked", "power": "on"}
+
     def close(self) -> None:
         return None
 

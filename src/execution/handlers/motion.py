@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from ...domain.execution_context import ExecutionContext
+from ...domain.models import ActionType
+from ...domain.action_schema import validate_action_parameters
 from ..target_pose import resolve_robot_target_pose
 from ...configuration.settings import VisionSettings
 from ...devices import (
@@ -314,8 +316,15 @@ class BodyMoveActionHandler:
         context: ActionExecutionContext,
     ) -> ActionHandlerResult:
         try:
+            if isinstance(parameters.get("位置", 0), bool):
+                raise ValueError("位置不能为布尔值")
+            if isinstance(parameters.get("位置", 0), float) and not parameters["位置"].is_integer():
+                raise ValueError("目标位置必须是整数脉冲")
             position = int(parameters.get("位置", 0))
-        except (TypeError, ValueError) as exc:
+            validation = validate_action_parameters(ActionType.MOVE, {"目标": "身体", "位置": position})
+            if not validation.is_valid:
+                raise ValueError(validation.message)
+        except (TypeError, ValueError, OverflowError) as exc:
             message = f"身体目标位置无效: {exc}"
             return context.failure(
                 ActionResultCode.INVALID_PARAMETERS,
@@ -347,6 +356,7 @@ class BodyMoveActionHandler:
                     controller.is_reached,
                 )
                 if reached is None:
+                    self._stop_body(controller, context)
                     message = "身体通信异常"
                     return context.failure(
                         ActionResultCode.DEVICE_OPERATION_FAILED,
@@ -365,8 +375,10 @@ class BodyMoveActionHandler:
                     )
                 context.sleep(self._options.body_poll_interval_seconds)
         except (ActionCancelledError, ActionTimeoutError):
+            self._stop_body(controller, context)
             raise
         except Exception as exc:
+            self._stop_body(controller, context)
             message = f"执行身体移动出错: {exc}"
             return context.failure(
                 ActionResultCode.DEVICE_OPERATION_FAILED,
@@ -375,6 +387,16 @@ class BodyMoveActionHandler:
                 device_id=BODY_AXIS,
                 error=exc,
             )
+
+
+    @staticmethod
+    def _stop_body(controller: BodyAxis, context: ActionExecutionContext) -> None:
+        # Cleanup runs inside the worker/resource lease, bypassing a cancelled
+        # context checkpoint so the stop command itself is not skipped.
+        try:
+            controller.emergency_stop()
+        except Exception as error:
+            context.log(f"身体停止指令失败，请使用实体急停：{error}", "error")
 
 
 class BaseMoveActionHandler:

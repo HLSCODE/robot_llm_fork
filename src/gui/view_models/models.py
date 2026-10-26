@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ...application import DeviceManagementService, ExecutionService
-from ...devices.runtime.ids import BODY_AXIS, PIPETTE, RELAY_BANK, ROBOT_SYSTEM, ZHIXING_GRIPPERS
+from ...devices.runtime.ids import BODY_AXIS, RELAY_BANK, ROBOT_SYSTEM
 from ...execution import ExecutionState, ExecutionStateError
 
 
@@ -11,9 +11,7 @@ from ...execution import ExecutionState, ExecutionStateError
 class DeviceViewState:
     robot_ready: bool
     body_ready: bool
-    pipette_ready: bool
     relay_ready: bool
-    zhixing_gripper_ready: bool = False
 
 
 class DeviceViewModel:
@@ -27,9 +25,7 @@ class DeviceViewModel:
         return DeviceViewState(
             robot_ready=_is_ready(statuses, ROBOT_SYSTEM),
             body_ready=_is_ready(statuses, BODY_AXIS),
-            pipette_ready=_is_ready(statuses, PIPETTE),
             relay_ready=_is_ready(statuses, RELAY_BANK),
-            zhixing_gripper_ready=_is_ready(statuses, ZHIXING_GRIPPERS),
         )
 
 

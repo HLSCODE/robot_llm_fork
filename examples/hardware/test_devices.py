@@ -8,9 +8,9 @@ RS-485 总线上的三个设备：
   3. 针旋转电机 (Stepper Motor, M系列)
 
 使用方法:
-  python test_devices.py -i            # 交互模式（推荐）
-  python test_devices.py                # 自动化序列
-  python test_devices.py --scan         # 扫描总线设备
+  python -m examples.hardware.test_devices -i       # 在项目根目录执行，交互模式
+  python -m examples.hardware.test_devices          # 自动化序列，会操作真实设备
+  python -m examples.hardware.test_devices --scan   # 扫描总线设备
 """
 
 from __future__ import annotations

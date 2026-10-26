@@ -1,0 +1,10 @@
+# 吸液枪仅在明确操作时通信；初始化/复位需要显式执行。
+# pipette_1 是实例 ID，不表示工具位、机械臂或已安装身份。
+[end_effectors.tools.pipette_1]
+display_name = "吸液枪" # 界面别名，动作仍保存上面的实例 ID
+kind = "pipette"
+provider = "adp"
+connection = "tool_bus_1"
+response_timeout_seconds = 5.0
+motion_timeout_seconds = 60.0
+command_interval_seconds = 0.2

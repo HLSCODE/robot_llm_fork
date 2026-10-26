@@ -283,7 +283,6 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `execution_action_timeout_seconds` | `600.0` 秒 | 单个动作的统一执行超时；不应用它替代机械臂控制器自身的安全限位。 |
 | `execution_arm_move_max_attempts` / `execution_arm_move_retry_delay_seconds` | `3` / `0.5` 秒 | 机械臂运动失败后的最多尝试次数和间隔。 |
 | `execution_body_poll_interval_seconds` | `0.1` 秒 | 升降等身体轴的状态轮询间隔。 |
-| `execution_gripper_max_attempts` / `execution_gripper_retry_delay_seconds` | `3` / `0.5` 秒 | 夹爪动作失败后的重试参数。 |
 | `execution_trajectory_poll_interval_seconds` | `0.5` 秒 | 轨迹回放完成状态的轮询间隔。 |
 | `safety_stop_wait_timeout_seconds` | `2.0` 秒 | 发出安全停止后等待执行线程确认退出的最长时间。 |
 
@@ -373,9 +372,6 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `timeout_seconds` | `5.0` 秒 | 移动底盘通信超时。 |
 | `body_serial_port` / `body_baudrate` / `body_slave_id` / `body_timeout` | `/dev/ttyUSB1` / `115200` / `1` / `1` 秒 | 身体升降轴 Modbus 串口、波特率、从站地址与响应超时。 |
 | `body_di_pan` | `false` | 是否使用身体轴 DI 输入判断到位。 |
-| `kuaihuanshou_*` | `/dev/ttyUSB2`、`115200`、`3` 秒 | 快换手串口、波特率和超时。 |
-| `adp_*` / `adp_max_retries` | `/dev/ttyUSB2`、`115200`、`5` 秒、`3` | ADP 连接参数；`adp_timeout` 是单次串口读写超时，`adp_max_retries` 是打开串口的尝试次数。动作完成等待及状态查询重试见日志文档的移液枪协议诊断。 |
-| `adp_command_interval_seconds` | `0.2` 秒 | ADP ASCII 命令交换结束后，到下一条命令发送前的最小间隔，包括速度设置、吸液、吐液和状态查询；必须为有限正数。用于现场排查连续指令过快的问题，具体值需结合设备协议验证。 |
 | `relay_*` | `/dev/ttyUSB0`、`38400`、`1` 秒 | 继电器串口、波特率和超时。 |
 | `pwm_neck_serial_port` / `pwm_neck_baudrate` | `/dev/neck` / `9600` | 颈部 PWM 控制板连接参数。 |
 | `pwm_neck_[h|v]_servo_id` | `0` / `1` | 水平、垂直舵机通道 ID。 |
@@ -396,6 +392,61 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `tapping_lift_safe_position` / `_dispense_position` / `tapping_rotation_home_position` | `0` / `50000` / `0` | 升降安全位、加粉位和旋转原点，单位为设备步数。 |
 | `powder_dispense_large_step` / `_medium_step` / `_small_step` / `_micro_step` | `20000` / `8000` / `2000` / `500` | 自适应加粉四档电机步数。 |
 | `powder_dispense_large_step_threshold_mg` / `_medium_...` / `_small_...` | `25.0` / `10.0` / `3.0` mg | 根据剩余目标质量选择档位的阈值。 |
+
+### `[end_effectors]`：双臂末端、Provider 与共享串口
+
+末端设备唯一配置入口，完整示例见 [end-effectors.example.toml](../config/fragments/end-effectors.example.toml)。
+常见独立串口、同总线双夹爪、SDK 内置夹爪和快换组合见 [末端配置场景速查](end-effector-configuration-examples.md)。
+主文件只保留通用选项与左右臂挂载；设备参数拆到 `config/fragments/end-effectors/`：
+
+- `connections.toml`：共享串口，一处声明，多个设备引用。
+- `robot.toml`：当前机械臂自带夹爪，统一使用 `provider = "robot"`。
+- `zhixing.toml`、`dh-rgd.toml`、`adp.toml`、`kuaihuanshou.toml`：各自的工具实例和厂商参数；大寰配置详见 [RGD 接入说明](dh-rgd-gripper.md)。
+
+新入口默认 include 主文件与上述五个子文件。仍只由根 `config.toml` 加载，不支持子配置嵌套 include。
+`robot-config-init` 递归增量生成这些文件，已有入口及实际子配置不会覆盖；已有入口需自行补全 include。
+默认左右臂均为 `mode = "none"`，不会根据机器人类型猜测或自动安装末端。
+工具 ID 使用不包含左右臂的名称，例如 `robot_gripper_1`、`zhixing_gripper_1`、`pipette_1`、`tool_changer_1`；
+ID 及其数字后缀均不表示机械臂、站号或工具位，实际归属只由 `mounts.left/right` 决定。
+更改实例 ID 时必须同步挂载和动作的 `tool_id` 引用；初始化不会自动改写已有任务数据。
+支持直接在 `config.toml` 写完整配置。旧 `[devices]` 中的 `kuaihuanshou_*`、`adp_*`、`zhixing_gripper_*` 已删除，继续填写会报未知字段；其他设备配置不变。
+未声明末端时可以运行不涉及工具的功能，但工具动作会明确失败，不回退旧设备，也不自动迁移 Action/Workflow。
+
+| 配置表 / 字段 | 默认 | 功能 |
+|---|---|---|
+| `end_effectors.status_poll_interval_seconds` | `2.0` | 快换手后台状态查询完成后的等待时间，至少 0.5 秒；不轮询工具身份。 |
+| `connections.<id>.transport` | `serial` | 当前仅支持串口；`<id>` 是供工具引用的连接名称。 |
+| `connections.<id>.port` | 必填 | 实际串口，如 `COM5`、`/dev/hand`；同一物理端口只声明一次。 |
+| `connections.<id>.baudrate` / `bytesize` / `parity` / `stopbits` | `115200 / 8 / N / 1` | 整条共享线路的参数。后端工具必须兼容这些参数，不自动按工具切换波特率。 |
+| `tools.<id>.kind` / `provider` | 必填 | `gripper`→`robot`、`zhixing` 或 `dh_rgd`；`pipette`→`adp`；`tool_changer`→`kuaihuanshou`。 |
+| `tools.<id>.display_name` | 空字符串 | 工具界面别名，例如“大寰旋转夹爪”“知行夹爪”。手动控制、创建动作和设备面板共用，空值回退实例ID；同名选项附加ID区分。重命名别名不会改变动作保存的 `tool_id`。 |
+| `tools.<id>.connection` | 空 | 外接设备必填，引用命名连接；`robot` 夹爪复用机械臂连接，不得设置。 |
+| `tools.<id>.station` | `1` | 知行/大寰 RGD Modbus 地址 1～247，与左右臂无关；ADP/快换协议当前为固定地址，只允许默认 1。 |
+| `tools.<id>.response_timeout_seconds` | `3.0` | 单笔串口读写超时，有限正数；不是整个工作流超时，也不代表失败自动重发。 |
+| `tools.<id>.motion_timeout_seconds` | `60.0` | 知行、RGD 或 ADP 等待到位的上限，有限正数；知行/RGD 示例设为 8 秒。 |
+| `tools.<id>.command_interval_seconds` | `0.2` | ADP 相邻 ASCII 交换最小间隔，有限正数；新配置不再读取旧 `adp_command_interval_seconds`。 |
+| `tools.<id>.speed` / `torque` / `acceleration` / `deceleration` | `100 / 60 / 2000 / 2000` | 知行运动寄存器参数，1～65535，单位按厂商协议，不解释为机械臂速度。 |
+| `tools.<id>.position_min` / `position_max` | `0 / 4000` | 知行闭合比例映射行程，带符号 32 位范围且 min < max；0% 映射 min、100% 映射 max，方向需真机核实。 |
+| `tools.<id>.rotation_speed` / `rotation_force` | `50 / 60` | RGD 旋转速度1～100%、力20～100%；RGD 的通用 `speed` / `torque` 分别限制为开合速度1～100%、力20～100%。 |
+| `tools.<id>.rotation_units_per_degree` | `1.0` | RGD 每度寄存器单位，必须为有限正数。V2.1 手册为1，Demo所用新固件为10，务必现场确认；不自动猜测。 |
+| `tools.<id>.open_position` / `closed_position` | `0 / 1000` | RGD 原始开闭端点，各为0～1000且不相同；按现场方向核对，可反向设置。系统闭合度仍为0全开、100全闭。 |
+| `mounts.<arm>.mode` | 必填 | `<arm>` 为 `left/right`；`none` 未安装、`fixed` 固定挂载或 `exchangeable` 快换挂载；none 不填写其他挂载字段。 |
+| `mounts.<arm>.tool` | 空 | 固定模式必须引用一个工具，不同时声明 changer 或 tools。 |
+| `mounts.<arm>.changer` | 空 | 快换模式引用快换手实例；共享连接直接取该实例的 connection，不在挂载里重复配置。 |
+| `mounts.<arm>.tools` | `[]` | 快换模式的可选工具实例 ID；与快换手共用连接，不是已安装列表，也不触发逐个握手。 |
+
+工具实例只能属于一个末端。相同协议地址仅允许在同一快换末端的互斥备选工具之间复用。
+`connections`、`tools` 按 ID 合并，`mounts` 按 left/right 合并；不同子文件的实例不会互相覆盖。
+同名实例由后加载的完整定义替换，入口优先于子文件；不支持只填写一个实例的部分字段。其他数组仍整体替换。
+
+工具目录只声明可用配置，仅为实际挂载的实例创建协议对象。未挂载的厂商配置不会连接设备。
+`provider = "robot"` 自动复用当前 `[robot].provider` 的夹爪能力，并由挂载确定操作哪条臂，不再配置 `sdk_arm` 或 `robot_device_id`。
+机械臂缺少内置夹爪能力时，工具显示不可用、操作明确失败，但不阻止主界面启动，也不会改用外接设备。
+连接失败、未安装和响应超时不会阻止主界面启动；TOML 语法错误、无效引用和线路冲突仍作为配置错误拒绝加载。
+新工具按需打开通信连接，启动不对所有工具握手或复位。设备面板的工具列表表示配置，非在线证明。
+快换手只显示真实锁紧/供电查询结果和采样时间；失败/过期显示未知，不识别当前工具。
+新动作保存 `arm`、`tool_id` 和业务参数；快换工具应明确选择实例。旧夹爪编号、厂商专用动作及缺少目标的旧动作不再兼容，应手动重新配置。
+详见 [实施与接入说明](end-effector-provider-plan.md#14-已落地接入与部署步骤)。
 
 ### `[vision]`（除相机目录外）
 

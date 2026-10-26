@@ -108,6 +108,8 @@ class ActionSchemaTests(unittest.TestCase):
                 "执行器": "吸液枪",
                 "操作": "吸",
                 "容量": 10001,
+                "arm": "right",
+                "tool_id": "pipette_1",
                 "legacy_value": 1,
             },
         )

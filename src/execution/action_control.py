@@ -14,12 +14,9 @@ from ..devices.runtime.ids import (
     EXPRESSION_DISPLAY,
     MOBILE_BASE,
     NECK,
-    PIPETTE,
     POWDER_DISPENSER,
     RELAY_BANK,
-    ZHIXING_GRIPPERS,
     ROBOT_SYSTEM,
-    TOOL_CHANGER,
 )
 
 
@@ -223,12 +220,8 @@ def resolve_manipulate_control_policy(
 def resolve_change_tool_control_policy(
     parameters: ActionParameters,
 ) -> ActionControlPolicy:
-    additional_devices = (
-        (PIPETTE,) if str(parameters.get("Operation", "取")).strip() == "放" else ()
-    )
     return _robot_stoppable_policy(
         "tool_rack.change_tool",
-        *additional_devices,
     )
 
 
@@ -325,12 +318,10 @@ MANIPULATE_CONTROL_POLICIES: Mapping[
     {
         "快换手": _blocking_policy(
             "tool_changer.set_locked",
-            TOOL_CHANGER,
         ),
         "继电器": _blocking_policy("relay.set_channel", RELAY_BANK),
-        "夹爪": _blocking_policy("gripper.execute", ROBOT_SYSTEM),
-        "知行夹爪": _blocking_policy("zhixing_gripper.move_percent", ZHIXING_GRIPPERS),
-        "吸液枪": _blocking_policy("pipette.execute", PIPETTE),
+        "夹爪": _blocking_policy("gripper.execute"),
+        "吸液枪": _blocking_policy("pipette.execute"),
         "颈部": _blocking_policy("neck.move", NECK),
         "表情屏": _EXPRESSION_CONTROL_POLICY,
         "表情": _EXPRESSION_CONTROL_POLICY,
@@ -338,7 +329,6 @@ MANIPULATE_CONTROL_POLICIES: Mapping[
         "expression": _EXPRESSION_CONTROL_POLICY,
         "右臂转圈注液": _robot_stoppable_policy(
             "circle_dispense.execute",
-            PIPETTE,
         ),
         "智能加粉": _blocking_policy(
             "powder_dispense.run",

@@ -74,9 +74,6 @@ execution_arm_move_max_attempts = 3
 execution_arm_move_retry_delay_seconds = 0.5
 # 身体轴状态轮询间隔。
 execution_body_poll_interval_seconds = 0.1
-# 夹爪动作最大尝试次数及重试间隔。
-execution_gripper_max_attempts = 3
-execution_gripper_retry_delay_seconds = 0.5
 # 轨迹完成状态轮询间隔。
 execution_trajectory_poll_interval_seconds = 0.5
 # 安全停止后等待执行线程确认退出的最长时间。
