@@ -157,6 +157,14 @@ class TeachingService:
                 device.move_to_joints(state.arm, target, options)
             else:
                 pose = offset_pose(state.pose, axis, amount)
+                # Tianji skips targets already inside its tolerance. Keep this
+                # command's threshold below even the smallest teaching step,
+                # without changing the configured tolerance of normal actions.
+                step_size = abs(amount) / 1000 if axis < 3 else math.radians(abs(amount))
+                options = MotionOptions(
+                    velocity_percent=speed, blocking=True,
+                    cartesian_tolerance=step_size / 10,
+                )
                 assert isinstance(device, ArmMotion)
                 self._require_enabled()
                 device.move_to_pose(state.arm, pose, MotionMode.LINEAR, options)

@@ -33,6 +33,7 @@ class ZhixingGripperController:
         left_range: tuple[int, int] = (0, 4000),
         right_range: tuple[int, int] = (0, 4000),
         station_ranges: dict[int, tuple[int, int]] | None = None,
+        reverse_direction: bool = False,
     ) -> None:
         if not math.isfinite(wait_timeout) or wait_timeout <= 0:
             raise ValueError("知行夹爪等待超时必须为正数")
@@ -52,6 +53,7 @@ class ZhixingGripperController:
         self._motion_values = (speed, torque, acceleration, deceleration)
         self._wait_timeout = wait_timeout
         self._enabled: set[int] = set()
+        self._reverse_direction = reverse_direction
 
     def initialize(self) -> None:
         with self._lock:
@@ -72,6 +74,7 @@ class ZhixingGripperController:
                     )
                 else:
                     self._ranges[station] = (low, high)
+                    logger.info("知行夹爪设备行程: station=%s range=%s", station, (low, high))
 
     def move_percent(self, station: int, percent: float) -> None:
         if isinstance(station, bool) or station not in self._ranges:
@@ -86,7 +89,13 @@ class ZhixingGripperController:
             self._write(station, 0x0100, 1)
             time.sleep(0.2)
             low, high = self._ranges[station]
-            target = int(round(low + percent / 100.0 * (high - low))) & 0xFFFFFFFF
+            fraction = (100 - percent if self._reverse_direction else percent) / 100
+            raw_target = int(round(low + fraction * (high - low)))
+            target = raw_target & 0xFFFFFFFF
+            logger.info(
+                "知行夹爪指令: station=%s closure_percent=%s target=%s range=%s reverse=%s",
+                station, percent, raw_target, (low, high), self._reverse_direction,
+            )
             values = [(target >> 16) & 0xFFFF, target & 0xFFFF]
             request = self._protocol.build_write_registers(station, 0x0102, values)
             response = self._exchange(request, 8)
@@ -99,6 +108,11 @@ class ZhixingGripperController:
                 self._check_alarm(station)
                 torque_arrived, position_arrived = self._read(station, 0x0601, 2)
                 if position_arrived == 1 or torque_arrived == 1:
+                    logger.info(
+                        "知行夹爪完成: station=%s target=%s position_arrived=%s torque_arrived=%s "
+                        "（力矩到达不代表完全闭合）",
+                        station, raw_target, position_arrived, torque_arrived,
+                    )
                     return
                 time.sleep(0.02)
             raise TimeoutError(f"知行夹爪站号 {station} 运动超时 ({self._wait_timeout}s)")

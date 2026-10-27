@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from collections.abc import Callable
 from typing import Protocol, runtime_checkable
+from threading import RLock
 
 from ...configuration.end_effectors import EndEffectorTool
 from ..runtime.ids import ROBOT_SYSTEM
@@ -72,6 +74,8 @@ class ZhixingGripper:
         from ..tools.zhixing_gripper.driver import ZhixingGripperController
 
         self._station = settings.station
+        self._range_loaded = not settings.read_device_range
+        self._motion_lock = RLock()
         self._controller = ZhixingGripperController(
             transport,
             speed=settings.speed,
@@ -80,6 +84,7 @@ class ZhixingGripper:
             deceleration=settings.deceleration,
             wait_timeout=settings.motion_timeout_seconds,
             station_ranges={settings.station: (settings.position_min, settings.position_max)},
+            reverse_direction=settings.reverse_direction,
         )
 
     def open(self) -> None:
@@ -89,7 +94,14 @@ class ZhixingGripper:
         self.move_closure(100)
 
     def move_closure(self, percent: float) -> None:
-        self._controller.move_percent(self._station, percent)
+        if isinstance(percent, bool) or not math.isfinite(percent) or not 0 <= percent <= 100:
+            raise ValueError("夹爪闭合比例必须为 0～100%")
+        with self._motion_lock:
+            if not self._range_loaded:
+                # Read calibration on first use, never perform startup motion or homing.
+                self._controller.initialize()
+                self._range_loaded = True
+            self._controller.move_percent(self._station, percent)
 
     def close(self) -> None:
         # Do not send disable commands at application exit: a gripper may hold

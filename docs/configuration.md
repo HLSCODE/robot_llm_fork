@@ -351,6 +351,8 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `movel_tolerance` | `0.02` | 直线运动的位姿误差各分量阈值；旋转分量单位 rad、平移分量单位 m，共用一个数值。 |
 | `movel_step_tolerance` | `0.02` | SDK 末端相对直线运动的位姿误差阈值，单位与 `movel_tolerance` 相同。 |
 | `run_trajectory_tolerance` | `0.01` rad | 轨迹回放终点的每关节误差阈值；当前 SDK 到达轨迹起点时使用该值的 0.2 倍。 |
+
+笛卡尔示教按世界坐标计算目标并调用 `movel`，每次单独使用 `min(movel_tolerance, 本次步长/10)` 作为容差（平移先换算为 m，旋转先换算为 rad）。例如 1 mm 单步的阈值最多为 0.0001 m，避免被默认 0.02 的阈值当作已到位而跳过。普通动作和关节示教保持原有配置；SDK 的零距离规划保护仍然保留。不新增需用户维护的示教容差配置。
 | `left_base_transform` / `right_base_transform` | 内置 4×4 矩阵 | 左右机械臂基座相对世界坐标系的齐次变换。 |
 | `left_tool_transform` / `right_tool_transform` | 内置 4×4 矩阵 | 左右工具相对末端坐标系的齐次变换。 |
 | `joint_limits_rad` | 内置 7 组范围 | 七个关节的弧度上下限；必须与机械臂控制器和实际安全范围一致。 |

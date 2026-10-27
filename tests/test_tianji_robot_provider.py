@@ -259,6 +259,10 @@ class TianjiProviderTests(unittest.TestCase):
             self.assertEqual({"vel": 14, "is_block": False, "tolerance": 0.004}, kwargs)
             runtime.move_linear("A", [0] * 6, velocity_percent=15, blocking=True)
             self.assertEqual(0.005, client.movel.call_args.kwargs["tolerance"])
+            runtime.move_linear("A", [0] * 6, velocity_percent=5, blocking=True, tolerance=0.00001)
+            self.assertEqual(0.00001, client.movel.call_args.kwargs["tolerance"])
+            runtime.move_linear("A", [0] * 6, velocity_percent=15, blocking=True)
+            self.assertEqual(0.005, client.movel.call_args.kwargs["tolerance"])
             runtime.move_linear_step("B", [0] * 6, velocity_percent=16, blocking=True)
             self.assertEqual(0.006, client.movel_step.call_args.kwargs["tolerance"])
             runtime.run_trajectory("A", "recording.fmv", blocking=True)
@@ -341,6 +345,29 @@ class TianjiDriverTests(unittest.TestCase):
             ("B", (0.4, 0.5, 0.6, 0.1, 0.2, 0.3), 20, False),
             runtime.moves[-1],
         )
+
+    def test_teaching_tolerance_reaches_runtime_without_changing_normal_calls(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        pose = CartesianPose(.101, .2, .3, 0, 0, 0)
+        with patch.object(runtime, "move_linear") as move:
+            adapter.move_to_pose(ArmId.LEFT, pose, MotionMode.LINEAR,
+                                 MotionOptions(velocity_percent=5, cartesian_tolerance=.0001))
+            self.assertEqual(.0001, move.call_args.kwargs["tolerance"])
+            adapter.move_to_pose(ArmId.LEFT, pose, MotionMode.LINEAR)
+            self.assertNotIn("tolerance", move.call_args.kwargs)
+
+    def test_invalid_command_tolerance_never_reaches_sdk(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        for value in (0, -1, float("nan"), float("inf"), True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                MotionOptions(cartesian_tolerance=value)
+            with self.subTest(driver_value=value), self.assertRaises(ValueError):
+                driver.move_to_pose("A", [0] * 6, linear=True, velocity_percent=5,
+                                    blocking=True, cartesian_tolerance=value)
+        self.assertEqual([], runtime.moves)
 
     def test_close_is_idempotent(self) -> None:
         driver, runtime = _driver()

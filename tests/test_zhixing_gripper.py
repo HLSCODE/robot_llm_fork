@@ -123,6 +123,62 @@ def test_torque_arrival_completes_motion():
         ZhixingGripperController(FakeTransport(tuple(responses))).move_percent(2, 100)
 
 
+@pytest.mark.parametrize("percent,target", [(0, 4000), (25, 3000), (100, 0)])
+def test_reverse_direction_preserves_closure_semantics(percent, target):
+    transport = FakeTransport(motion_responses(1))
+    device = ZhixingGripperController(transport, reverse_direction=True)
+    with patch("src.devices.tools.zhixing_gripper.driver.time.sleep"):
+        device.move_percent(1, percent)
+    assert transport.calls[2].payload[7:11] == target.to_bytes(4, "big")
+
+
+def test_provider_loads_device_stroke_once_on_first_motion():
+    from src.configuration.end_effectors import EndEffectorTool
+    from src.devices.end_effectors.providers import ZhixingGripper
+
+    transport = FakeTransport((
+        read_response(1, 0), read_response(1, 0, 0), read_response(1, 0, 6500),
+        *motion_responses(1), *motion_responses(1),
+    ))
+    device = ZhixingGripper(transport, EndEffectorTool(
+        "test", "gripper", "zhixing", connection="bus",
+    ))
+    assert not transport.calls
+    with patch("src.devices.tools.zhixing_gripper.driver.time.sleep"):
+        device.grip()
+        device.open()
+    assert transport.calls[5].payload[7:11] == (6500).to_bytes(4, "big")
+    assert transport.calls[15].payload[7:11] == bytes(4)
+    assert len(transport.calls) == 23
+
+
+def test_provider_manual_range_skips_device_mapping():
+    from src.configuration.end_effectors import EndEffectorTool
+    from src.devices.end_effectors.providers import ZhixingGripper
+
+    transport = FakeTransport(motion_responses(1))
+    device = ZhixingGripper(transport, EndEffectorTool(
+        "test", "gripper", "zhixing", connection="bus",
+        read_device_range=False, position_max=7200, reverse_direction=True,
+    ))
+    with patch("src.devices.tools.zhixing_gripper.driver.time.sleep"):
+        device.open()
+    assert transport.calls[2].payload[7:11] == (7200).to_bytes(4, "big")
+
+
+def test_provider_invalid_percent_does_not_read_mapping():
+    from src.configuration.end_effectors import EndEffectorTool
+    from src.devices.end_effectors.providers import ZhixingGripper
+
+    transport = FakeTransport()
+    device = ZhixingGripper(transport, EndEffectorTool(
+        "test", "gripper", "zhixing", connection="bus",
+    ))
+    with pytest.raises(ValueError):
+        device.move_closure(float("nan"))
+    assert not transport.calls
+
+
 def test_retry_reconfirms_enable_after_lost_reply():
     transport = FakeTransport(
         (

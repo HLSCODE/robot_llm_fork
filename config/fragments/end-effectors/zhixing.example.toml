@@ -17,3 +17,7 @@ acceleration = 2000
 deceleration = 2000
 position_min = 0
 position_max = 4000
+# 首次操作读取设备行程；false 时严格使用上面的手动标定范围，不执行回零。
+read_device_range = true
+# 软件闭合度固定 0=全开、100=全闭。实机方向相反时设为 true。
+reverse_direction = false

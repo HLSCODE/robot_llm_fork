@@ -111,12 +111,20 @@ class MotionOptions:
     blend_radius: int = 0
     connected: bool = False
     blocking: bool = True
+    cartesian_tolerance: float | None = None
 
     def __post_init__(self) -> None:
         if not 1 <= self.velocity_percent <= 100:
             raise ValueError("velocity_percent must be in range 1..100")
         if self.blend_radius < 0:
             raise ValueError("blend_radius must be non-negative")
+        # Optional per-command Cartesian error threshold: metres / radians.
+        if self.cartesian_tolerance is not None and (
+            isinstance(self.cartesian_tolerance, bool)
+            or not math.isfinite(self.cartesian_tolerance)
+            or self.cartesian_tolerance <= 0
+        ):
+            raise ValueError("cartesian_tolerance must be positive and finite")
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,6 +13,8 @@ from ...transports.core.strategies import ModbusRTUStrategy
 from ...transports.core.transport import Transport
 from ...transports.protocols.modbus_rtu import ModbusRTUProtocol
 
+logger = logging.getLogger(__name__)
+
 
 class RGDGripper:
     def __init__(self, transport: Transport, settings: EndEffectorTool) -> None:
@@ -37,6 +39,11 @@ class RGDGripper:
         with self._lock:
             self._require_initialized(0x0200)
             start = self._read(0x0202)
+            logger.info(
+                "RGD 夹爪指令: tool=%s station=%s closure_percent=%s start=%s target=%s open=%s closed=%s",
+                settings.id, settings.station, percent, start, target,
+                settings.open_position, settings.closed_position,
+            )
             closing = (target - start) * (settings.closed_position - settings.open_position) > 0
             self._write(0x0101, settings.torque)
             self._write(0x0104, settings.speed)
@@ -92,10 +99,17 @@ class RGDGripper:
         if state == 2:
             if not allow_contact:
                 raise IOError("RGD 张开过程受阻")
+            logger.info("RGD 接触夹持完成: tool=%s target=%s actual=%s", self._settings.id, target, self._read(0x0202))
             return True
         if state not in (0, 1):
             raise IOError(f"RGD 夹持状态异常: {state}")
-        return state == 1 and self._read(0x0202) == target
+        if state != 1:
+            return False
+        actual = self._read(0x0202)
+        if actual != target:
+            return False
+        logger.info("RGD 位置到达: tool=%s target=%s actual=%s", self._settings.id, target, actual)
+        return True
 
     def _rotation_complete(self, expected: int) -> bool:
         state = self._read(0x020B)

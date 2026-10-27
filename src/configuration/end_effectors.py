@@ -51,12 +51,16 @@ class EndEffectorTool:
     open_position: int = 0
     closed_position: int = 1000
     display_name: str = ""
+    reverse_direction: bool = False
+    read_device_range: bool = True
 
     @property
     def label(self) -> str:
         return self.display_name.strip() or self.id
 
     def __post_init__(self) -> None:
+        if not isinstance(self.reverse_direction, bool) or not isinstance(self.read_device_range, bool):
+            raise ConfigLoadError("夹爪 reverse_direction/read_device_range 必须为布尔值")
         if not isinstance(self.display_name, str):
             raise ConfigLoadError("末端工具 display_name 必须为字符串")
         supported = {

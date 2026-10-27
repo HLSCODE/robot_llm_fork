@@ -22,6 +22,7 @@ class TianjiSdkRuntime(Protocol):
         *,
         velocity_percent: int,
         blocking: bool,
+        tolerance: float | None = None,
     ) -> None: ...
 
     def read_state(self, arm: str) -> dict[str, object]: ...
@@ -124,19 +125,29 @@ class TianjiRobotDriver:
         linear: bool,
         velocity_percent: int,
         blocking: bool,
+        cartesian_tolerance: float | None = None,
     ) -> bool:
         sdk_arm = _validate_arm(arm)
         target = _numeric_values(pose, 6, "pose")
         if not 1 <= velocity_percent <= 100:
             raise ValueError("velocity_percent must be in range 1..100")
+        if cartesian_tolerance is not None and (
+            not linear or isinstance(cartesian_tolerance, bool)
+            or not math.isfinite(cartesian_tolerance) or cartesian_tolerance <= 0
+        ):
+            raise ValueError("Cartesian tolerance requires linear motion and a positive finite value")
         with self._lock:
             self._require_open()
             move = self._runtime.move_linear if linear else self._runtime.move_joint_pose
+            tolerance_options = (
+                {"tolerance": cartesian_tolerance} if cartesian_tolerance is not None else {}
+            )
             move(
                 sdk_arm,
                 target,
                 velocity_percent=velocity_percent,
                 blocking=blocking,
+                **tolerance_options,
             )
         return True
 
@@ -357,13 +368,14 @@ class _OfficialTianjiSdkRuntime:
         *,
         velocity_percent: int,
         blocking: bool,
+        tolerance: float | None = None,
     ) -> None:
         self._client.movel(
             self._arm_type[arm],
             self._pose_factory(pose),
             vel=velocity_percent,
             is_block=blocking,
-            tolerance=self._movel_tolerance,
+            tolerance=self._movel_tolerance if tolerance is None else min(self._movel_tolerance, tolerance),
         )
 
     def read_state(self, arm: str) -> dict[str, object]:

@@ -26,6 +26,7 @@ class TianjiDriver(Protocol):
         linear: bool,
         velocity_percent: int,
         blocking: bool,
+        cartesian_tolerance: float | None = None,
     ) -> bool: ...
 
     def read_state(self, arm: str) -> dict[str, object]: ...
@@ -213,12 +214,17 @@ class TianjiRobotAdapter:
                 detail=("Tianji provider does not support blend_radius or connected motion"),
             )
         try:
+            tolerance_options = (
+                {"cartesian_tolerance": selected.cartesian_tolerance}
+                if selected.cartesian_tolerance is not None else {}
+            )
             succeeded = self._driver.move_to_pose(
                 self._arm_key(arm),
                 pose.to_list(),
                 linear=mode is MotionMode.LINEAR,
                 velocity_percent=selected.velocity_percent,
                 blocking=selected.blocking,
+                **tolerance_options,
             )
         except RobotOperationError:
             raise

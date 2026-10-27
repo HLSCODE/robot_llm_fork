@@ -64,6 +64,25 @@ def test_steps_use_actual_state_and_selected_arm():
     service.close()
 
 
+@pytest.mark.parametrize("axis,amount", [(0, .1), (1, -1), (2, 10), (3, .1), (4, -1), (5, 5)])
+def test_cartesian_teaching_tolerance_is_below_step(axis, amount):
+    class CapturingRobot(SimulatedRobotSystem):
+        def move_to_pose(self, arm, pose, mode, options=None):
+            self.options = options
+            super().move_to_pose(arm, pose, mode, options)
+
+    robot = CapturingRobot()
+    service, _ = service_for(robot)
+    service.begin(ArmId.LEFT)
+    try:
+        service.step(joint=False, axis=axis, amount=amount, speed=5)
+        step_size = abs(amount) / 1000 if axis < 3 else math.radians(abs(amount))
+        assert robot.options.cartesian_tolerance == pytest.approx(step_size / 10)
+        assert 0 < robot.options.cartesian_tolerance < step_size
+    finally:
+        service.close()
+
+
 @pytest.mark.parametrize("joint,axis,amount,speed", [
     (False, 0, 11, 5), (False, 3, 6, 5), (True, 7, 1, 5),
     (True, 0, 6, 5), (False, 0, float("nan"), 5), (False, 0, 1, 11),

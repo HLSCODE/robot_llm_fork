@@ -87,6 +87,19 @@ def test_configured_endpoints_and_signed_rotations():
     assert bus.registers[0x0208] == (-160) & 65535
 
 
+@pytest.mark.parametrize("opened,closed", [(0, 1000), (1000, 0)])
+def test_alternating_open_grip_and_position_use_same_mapping(opened, closed):
+    bus = Bus()
+    gripper = RGDGripper(bus, configuration(open_position=opened, closed_position=closed))
+    for _ in range(3):
+        gripper.open()
+        assert bus.registers[0x0202] == opened
+        gripper.grip()
+        assert bus.registers[0x0202] == closed
+        gripper.move_closure(25)
+        assert bus.registers[0x0202] == round(opened + (closed - opened) * .25)
+
+
 @pytest.mark.parametrize("values", [
     {"speed": 101}, {"torque": 19}, {"rotation_force": 101},
     {"rotation_speed": 0}, {"rotation_units_per_degree": float("nan")},
