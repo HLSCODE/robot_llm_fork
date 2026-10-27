@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import json
 import logging
 import time
 from threading import Event, RLock
@@ -138,8 +139,25 @@ class TeachingService:
                 raise RuntimeError("上一步移动尚未结束")
             self._idle.clear()
             device = self._device
+        started_at = time.monotonic()
+        diagnostic: dict[str, object] = {
+            "step_id": uuid4().hex,
+            "arm": self._arm.value,
+            "joint": joint,
+            "axis": axis,
+            "amount": amount,
+            "amount_unit": "deg" if joint or axis >= 3 else "mm",
+            "speed_percent": speed,
+            "pose_units": "m,rad",
+            "joint_units": "deg",
+        }
         try:
             state = self.read_state()
+            diagnostic.update(
+                actual_pose=state.pose.to_list(),
+                actual_joints=state.joints.to_list() if state.joints is not None else None,
+                device_error_code=state.device_error_code,
+            )
             options = MotionOptions(velocity_percent=speed, blocking=True)
             logger.info(
                 "Teaching step: arm=%s joint=%s axis=%s amount=%s speed_percent=%s",
@@ -153,6 +171,8 @@ class TeachingService:
                     raise ValueError("无效的关节轴或步长")
                 values[axis] += amount
                 target = JointVector.from_iterable(values)
+                diagnostic["target_joints"] = target.to_list()
+                logger.info("Teaching command: %s", json.dumps(diagnostic, ensure_ascii=False))
                 self._require_enabled()
                 device.move_to_joints(state.arm, target, options)
             else:
@@ -165,12 +185,25 @@ class TeachingService:
                     velocity_percent=speed, blocking=True,
                     cartesian_tolerance=step_size / 10,
                 )
+                diagnostic.update(target_pose=pose.to_list(), cartesian_tolerance=options.cartesian_tolerance)
+                logger.info("Teaching command: %s", json.dumps(diagnostic, ensure_ascii=False))
                 assert isinstance(device, ArmMotion)
                 self._require_enabled()
                 device.move_to_pose(state.arm, pose, MotionMode.LINEAR, options)
-        except Exception:
+        except Exception as error:
+            diagnostic.update(
+                elapsed_seconds=round(time.monotonic() - started_at, 6),
+                error_type=f"{type(error).__module__}.{type(error).__name__}",
+                error=str(error),
+            )
+            logger.exception("Teaching command failed: %s", json.dumps(diagnostic, ensure_ascii=False))
             self.request_stop()
             raise
+        else:
+            logger.info(
+                "Teaching command completed: step_id=%s elapsed_seconds=%.6f",
+                diagnostic["step_id"], time.monotonic() - started_at,
+            )
         finally:
             self._idle.set()
 

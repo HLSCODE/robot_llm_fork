@@ -297,6 +297,7 @@ def _operation_error(
 ) -> RobotOperationError:
     native_code = getattr(error, "native_code", None)
     code = native_code if isinstance(native_code, int) else None
-    sdk_detail = str(getattr(error, "detail", "")).strip()
+    raw_detail = getattr(error, "detail", None)
+    sdk_detail = str(raw_detail).strip() if raw_detail is not None else ""
     detail = sdk_detail or str(error).strip() or type(error).__name__
     return RobotOperationError(operation, arm, code=code, detail=detail)

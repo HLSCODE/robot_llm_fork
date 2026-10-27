@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from types import SimpleNamespace
@@ -170,6 +172,54 @@ def test_joint_controls_require_vendor_capability():
     with pytest.raises(RuntimeError, match="不支持"):
         service.step(joint=True, axis=0, amount=1, speed=5)
     service.close()
+
+
+@pytest.mark.parametrize("joint,axis,amount", [(False, 2, 10), (True, 0, -1)])
+def test_failed_motion_logs_actual_and_target_without_reading_again(caplog, joint, axis, amount):
+    failure = RuntimeError("Linear trajectory planning failed")
+
+    class FailingRobot(SimulatedRobotSystem):
+        reads = 0
+
+        def read_arm_state(self, arm):
+            self.reads += 1
+            return super().read_arm_state(arm)
+
+        def move_to_pose(self, *args, **kwargs):
+            raise failure
+
+        def move_to_joints(self, *args, **kwargs):
+            raise failure
+
+    robot = FailingRobot()
+    service, _ = service_for(robot)
+    service.begin(ArmId.LEFT)
+    try:
+        with caplog.at_level(logging.INFO, logger="src.application.teaching"):
+            with pytest.raises(RuntimeError) as caught:
+                service.step(joint=joint, axis=axis, amount=amount, speed=5)
+        assert caught.value is failure
+        records = [r for r in caplog.records if r.getMessage().startswith("Teaching command failed:")]
+        assert len(records) == 1
+        record = records[0]
+        context = json.loads(record.getMessage().split(": ", 1)[1])
+        assert context["arm"] == "left"
+        assert context["actual_pose"] == [0] * 6
+        assert len(context["actual_joints"]) == 7
+        assert context["axis"] == axis
+        assert context["amount"] == amount
+        assert context["error"] == str(failure)
+        assert context["step_id"]
+        assert record.exc_info[1] is failure
+        if joint:
+            assert context["target_joints"][0] == -1
+        else:
+            assert context["target_pose"][2] == pytest.approx(.01)
+            assert context["cartesian_tolerance"] == pytest.approx(.001)
+        assert robot.reads == 1
+        assert not service.enabled
+    finally:
+        service.close()
 
 
 def test_cancellation_during_target_read_prevents_dispatch():

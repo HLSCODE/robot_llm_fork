@@ -369,6 +369,22 @@ class TianjiDriverTests(unittest.TestCase):
                                     blocking=True, cartesian_tolerance=value)
         self.assertEqual([], runtime.moves)
 
+    def test_sdk_none_detail_preserves_original_message_and_exception_chain(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(driver, default_motion=MotionOptions())
+        for detail in (None, "", "  ", "native planner rejected"):
+            error = RuntimeError("Linear trajectory planning failed")
+            error.detail = detail
+            error.native_code = 42
+            with self.subTest(detail=detail), patch.object(runtime, "move_linear", side_effect=error):
+                with self.assertRaises(RobotOperationError) as caught:
+                    adapter.move_to_pose(ArmId.LEFT, CartesianPose(.1, .2, .3, 0, 0, 0), MotionMode.LINEAR)
+                expected = (detail or "").strip() or "Linear trajectory planning failed"
+                self.assertEqual(expected, caught.exception.detail)
+                self.assertIs(error, caught.exception.__cause__)
+                self.assertEqual(42, caught.exception.code)
+
     def test_close_is_idempotent(self) -> None:
         driver, runtime = _driver()
 
