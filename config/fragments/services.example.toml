@@ -1,3 +1,7 @@
+# 用途：数据采集、外部定位 UDP 接收与动作执行策略，不配置网络任务服务端。
+# 场景：调整采集格式/帧率、定位监听端口、动作超时、运动重试和安全停止等待。
+# 使用：复制为 services.toml 后 include；WebSocket/TCP 启停、端口及认证见 server.toml。
+
 [data_collection]
 # 采集帧率及 OpenCV 摄像头索引。
 fps = 30

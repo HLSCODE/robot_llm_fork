@@ -406,6 +406,7 @@ uv run robot-llm --simulation
 - [多协议任务服务与 TCP 接入](docs/remote-task-service.md)
 - [依赖、配置与用户数据治理](docs/data-config-governance.md)
 - [配置说明](docs/configuration.md)
+- [配置示例用途索引](config/README.md)
 - [大寰 RGD 夹爪接入与配置](docs/dh-rgd-gripper.md)
 - [视觉架构](docs/vision-architecture.md)
 - [机器人 Provider 架构](docs/robot-provider-architecture.md)

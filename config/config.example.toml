@@ -1,4 +1,6 @@
-# Robot Action Orchestrator 配置模板
+# 用途：应用配置总入口，声明要加载的子配置，也可集中编写全部配置。
+# 使用：复制为 config/config.toml；子配置不会自动加载，必须在 include 中引用。
+# 查找：各示例文件的职责和选择建议见 config/README.md。
 #
 # 本文件是唯一配置入口。include 按声明顺序加载子配置，本文件中声明的
 # 同名字段覆盖所有子配置；.env 和系统环境变量拥有最高优先级。

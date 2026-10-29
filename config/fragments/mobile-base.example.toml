@@ -1,3 +1,7 @@
+# 用途：独立移动底盘的连接地址、通信端口与超时，不属于机械臂 Provider 配置。
+# 场景：接入或更换移动底盘、调整底盘服务地址和本地绑定端口。
+# 使用：复制为 mobile-base.toml，由 config/config.toml 的 include 引入。
+
 [mobile_base]
 # 移动底盘是独立设备，不属于机械臂 Provider。
 host = "192.168.3.216"

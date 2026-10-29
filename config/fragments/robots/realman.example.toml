@@ -1,3 +1,7 @@
+# 用途：睿尔曼机械臂 Provider 的型号、左右控制器连接及初始位姿参数。
+# 场景：部署睿尔曼双臂，修改控制器 IP/端口或启动位姿。
+# 使用：复制为 robots/realman.toml 后 include；在 robot.toml 中选择 provider="realman"。
+
 [robot_providers.realman]
 kind = "realman"
 model = "rm75-dual"

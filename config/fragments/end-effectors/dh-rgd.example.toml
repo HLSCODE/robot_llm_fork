@@ -1,3 +1,6 @@
+# 用途：大寰 RGD 旋转夹爪工具实例、开闭端点、夹持/旋转参数及角度单位换算。
+# 场景：接入大寰夹爪，适配现场开闭方向、固件角度单位、速度和力值。
+# 使用：复制为 end-effectors/dh-rgd.toml 后 include；配置连接及挂载，协议说明见 docs/dh-rgd-gripper.md。
 # 大寰 RGD 旋转夹爪；ID 与安装机械臂无关。
 # 在 config.toml 的 include 中加入本文件的实际副本，随后在 mounts 中引用此 ID。
 # 复用 connections.toml 声明的连接；出厂串口为 115200 / 8N1。

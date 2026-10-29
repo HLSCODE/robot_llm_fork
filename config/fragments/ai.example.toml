@@ -1,3 +1,7 @@
+# 用途：配置 LLM 默认选择、Provider 实例及聊天/指令规划/视觉融合等任务路由。
+# 场景：切换模型服务、修改模型名称或地址、指定不同 AI 任务使用的 Provider。
+# 使用：复制为 ai.toml 后 include；API Key 放 .env，语音采集/唤醒参数见 voice.toml。
+
 [llm]
 default_provider = "minicpm"
 default_temperature = 0.3

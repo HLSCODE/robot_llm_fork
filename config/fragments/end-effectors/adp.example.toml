@@ -1,3 +1,6 @@
+# 用途：ADP 吸液枪/移液工具实例、通信连接及命令/运动超时。
+# 场景：接入吸液、吐液等移液操作使用的工具，支持固定或快换挂载。
+# 使用：复制为 end-effectors/adp.toml 后 include；连接见 connections.toml，挂载见 end-effectors.toml。
 # 吸液枪仅在明确操作时通信；初始化/复位需要显式执行。
 # pipette_1 是实例 ID，不表示工具位、机械臂或已安装身份。
 [end_effectors.tools.pipette_1]

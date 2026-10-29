@@ -1,3 +1,7 @@
+# 用途：身体升降、继电器、颈部、表情屏等外围设备，以及视觉参数和相机目录/角色配置。
+# 场景：修改设备串口、相机标识与角色、视觉检测/抓取/重定位及调试图片设置。
+# 使用：复制为 devices.toml 后 include；机械臂见 robot.toml，夹爪/吸液枪/快换手见 end-effectors.toml。
+
 [devices]
 # 身体升降轴 Modbus 串口、波特率、从站地址和响应超时（秒）。
 body_serial_port = "/dev/body"

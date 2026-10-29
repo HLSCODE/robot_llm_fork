@@ -1,3 +1,6 @@
+# 用途：快换手工具实例、通信连接及响应超时，提供锁紧/供电等自身控制。
+# 场景：机械臂运行中动态更换末端设备；不依靠本文件识别实际装上的工具。
+# 使用：复制为 end-effectors/kuaihuanshou.toml 后 include，在 end-effectors.toml 的快换挂载中引用。
 # 快换手仅报告自身锁紧、供电状态，不识别已安装的工具。
 # tool_changer_1 是实例 ID，不限制挂载在哪条机械臂上。
 [end_effectors.tools.tool_changer_1]

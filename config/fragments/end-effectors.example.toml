@@ -1,3 +1,6 @@
+# 用途：末端系统通用选项和左右臂挂载关系，声明无工具、固定安装或动态快换模式。
+# 场景：指定左右臂使用哪些工具实例、配置快换手及允许调用的工具。
+# 使用：复制为 end-effectors.toml 后 include；端口和厂商参数分别在 end-effectors/ 子目录配置。
 # 这里只配置通用选项和左右臂挂载；设备参数见 end-effectors/ 子目录。
 # 所有片段由 config.toml 的 include 加载，子文件不再声明 include。
 # 以下默认不安装工具；修改挂载时需删除原表中的 mode/tool/changer/tools，

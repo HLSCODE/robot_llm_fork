@@ -1,3 +1,7 @@
+# 用途：选择当前机械臂 Provider、Robot Profile 数据隔离标识和通用运动默认值。
+# 场景：切换睿尔曼/天机、选择独立数据配置档案，或调整默认运动速度等参数。
+# 使用：复制为 robot.toml 后 include；厂商连接与运动学参数另见 robots/realman.toml、robots/tianji.toml。
+
 [robot]
 # 当前启用的机械臂 Provider。所有 Provider 配置会同时加载，但只初始化本项选中的实现。
 provider = "realman"

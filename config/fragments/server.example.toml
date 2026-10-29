@@ -1,3 +1,6 @@
+# 用途：集中配置 WebSocket/TCP 服务端、共享认证与控制权、任务白名单及运行回执。
+# 场景：选择仅 TCP/仅 WebSocket/同时启动、调整监听端口、TLS 和请求限制。
+# 使用：复制为 server.toml 后 include；认证密钥放 .env，协议见 docs/remote-task-service.md。
 # 可单独 include 本文件，也可将内容直接写进 config.toml。
 # 网络服务的完整配置只在本文件维护；services.example.toml 不再声明 [server]。
 [server]

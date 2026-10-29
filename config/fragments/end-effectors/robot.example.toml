@@ -1,3 +1,6 @@
+# 用途：将机械臂 SDK 内置的夹爪能力声明为可挂载的末端工具实例。
+# 场景：使用睿尔曼等机械臂提供的内置夹爪控制，无需独立夹爪串口。
+# 使用：复制为 end-effectors/robot.toml 后 include，并在 end-effectors.toml 挂载工具 ID。
 # 使用当前 [robot].provider 所提供的内置夹爪能力，不重复指定厂商或机械臂。
 # robot_gripper_1 是实例名称；编号不表示机械臂或站号，可挂载到任一有能力的机械臂。
 # 实际操作哪条臂由 mounts.left/right 的 tool 绑定决定。

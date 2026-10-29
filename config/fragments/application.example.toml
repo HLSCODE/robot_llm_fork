@@ -1,3 +1,7 @@
+# 用途：应用通用设置，包括仿真模式、交互限制、GUI 主题、日志和数据存储目录。
+# 场景：切换仿真/硬件、调整主题或日志级别、修改 Action/Workflow/轨迹保存位置。
+# 使用：复制为 application.toml，由 config/config.toml 的 include 引入。
+
 [runtime]
 # 是否使用仿真设备；true 时不连接真实硬件。
 simulation_mode = false
