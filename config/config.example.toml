@@ -10,6 +10,7 @@ schema_version = 6
 include = [
   "fragments/application.toml",
   "fragments/services.toml",
+  "fragments/server.toml",
   "fragments/ai.toml",
   "fragments/robot.toml",
   "fragments/robots/realman.toml",

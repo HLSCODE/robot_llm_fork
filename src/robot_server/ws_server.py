@@ -220,6 +220,7 @@ class RobotWebSocketServer:
         reverse_proxy_mode: bool = False,
         teleoperation_command_timeout_seconds: float = 1.0,
         audit_sink: AuditSink | None = None,
+        access_controller: WebSocketAccessController | None = None,
     ) -> None:
         normalized_host = host.strip()
         if not normalized_host:
@@ -268,7 +269,8 @@ class RobotWebSocketServer:
         # 已连接的客户端集合
         self._clients: Set = set()
         self._client_ids: dict[Any, str] = {}
-        self._access = WebSocketAccessController(
+        self._owns_access = access_controller is None
+        self._access = access_controller or WebSocketAccessController(
             auth_token,
             security_enabled=self._security_enabled,
             control_lease_seconds=control_lease_seconds,
@@ -404,8 +406,11 @@ class RobotWebSocketServer:
         self._interaction_handler._close_interaction_session()
         await self._teleoperation_handler.close_data_collection()
         self._clients.clear()
+        for client_id in tuple(self._client_ids.values()):
+            self._access.unregister(client_id)
         self._client_ids.clear()
-        self._access.clear()
+        if self._owns_access:
+            self._access.clear()
         self._minicpm_sessions.clear()
         self._loop = None
         logger.info("WebSocket 服务已停止")

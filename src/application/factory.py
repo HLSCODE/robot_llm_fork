@@ -8,6 +8,7 @@ from ..configuration.settings import ApplicationSettings, DataCollectionSettings
 from ..persistence.storage import JsonCompositionRepository
 from ..persistence.trajectory_storage import TrajectoryStorage
 from ..persistence.vision_station_storage import VisionStationStorage
+from ..persistence.task_run_journal import TaskRunJournal
 from ..devices import (
     ArmTelemetryReader,
     DepthCameraSource,
@@ -51,6 +52,7 @@ from .teleoperation import TeleoperationService
 from .workflow_editing import WorkflowEditingSession
 from .workflow_compiler import WorkflowCompiler
 from .workflow_preflight import WorkflowPreflightService
+from .saved_tasks import SavedTaskService
 
 
 def create_application_services(
@@ -198,6 +200,15 @@ def create_application_services(
         },
     )
     workflow_preflight = WorkflowPreflightService(execution, devices)
+    saved_tasks = SavedTaskService(
+        composition, workflow_compiler, workflow_preflight, execution,
+        TaskRunJournal(
+            data_paths.profile_root / "runtime" / "task-runs.sqlite3",
+            max_records=settings.server.task_history_max_records,
+            retention_seconds=settings.server.task_history_retention_seconds,
+        ),
+        allowlist=settings.server.task_allowlist,
+    )
     data_collection = DataCollectionService(
         camera_access=camera_access,
         devices=devices,
@@ -226,6 +237,7 @@ def create_application_services(
         execution=execution,
         workflow_compiler=workflow_compiler,
         workflow_preflight=workflow_preflight,
+        saved_tasks=saved_tasks,
         devices=devices,
         manual_control=manual_control,
         teleoperation=teleoperation,

@@ -94,6 +94,7 @@ schema_version = 4
 include = [
   "fragments/application.toml",
   "fragments/services.toml",
+  "fragments/server.toml",
   "fragments/ai.toml",
   "fragments/devices.toml",
   "fragments/voice.toml",
@@ -402,6 +403,7 @@ uv run robot-llm --simulation
 - [重构分支详细报告](docs/refactor-changelog.md)
 - [GUI 应用架构](docs/gui-application-architecture.md)
 - [WebSocket 接口手册](docs/websocket-api.md)
+- [多协议任务服务与 TCP 接入](docs/remote-task-service.md)
 - [依赖、配置与用户数据治理](docs/data-config-governance.md)
 - [配置说明](docs/configuration.md)
 - [大寰 RGD 夹爪接入与配置](docs/dh-rgd-gripper.md)

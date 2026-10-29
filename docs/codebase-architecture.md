@@ -153,7 +153,7 @@ config/
 | `devices/` | 设备运行时、能力协议、Provider、Adapter、Driver、Transport | 以同一接口替换 RealMan、天机或模拟设备 |
 | `persistence/` | JSON 文档、动作库、工作流、轨迹与工位数据持久化 | 原子保存动作/工作流、加载轨迹 |
 | `gui/` | PySide6 工作台、画布、表单、主题、快捷键、窗口生命周期 | 桌面编排、设备状态、AI 助手、通知 |
-| `robot_server/` | WebSocket 协议、控制器、安全、流量限制和指标 | 外部客户端控制、订阅事件和相机帧 |
+| `robot_server/` | 多协议任务 API、TCP/WS 接入、共享安全、流量限制和指标 | 外部客户端执行已保存任务；WS 另支持相机、AI 和遥操作 |
 | `llm/` | Provider 注册、模型路由、流式响应、任务规划与回归 | OpenAI-compatible / MiniCPM 聊天与规划 |
 | `skill_system/` | 技能模型、目录扫描、参数绑定与匹配 | 将“抓取瓶子”等意图映射为动作序列 |
 | `vision/` | 视觉服务、抓取管线、重定位、工件与调试产物 | 检测抓取点、示教/运行重定位 |
@@ -371,19 +371,22 @@ GUI 只管理表现状态。设备连接、执行状态、文件写入和任务�
 后台工作完成后通过 Qt signal 回到 GUI 线程更新界面；关闭窗口时仍需等待、取消或回收其 worker，
 不能把 Python 异常保护当作原生对象生命周期管理的替代品。
 
-### 5.9 WebSocket 服务：`robot_server/`
+### 5.9 多协议服务：`robot_server/`
 
 | 文件/目录 | 功能 |
 |---|---|
 | `ws_server.py` | 后台 asyncio WebSocket 宿主，与 GUI 同进程启停 |
+| `contracts.py` / `access.py` | 协议无关请求上下文、任务 API、共享身份及控制权接口 |
+| `tcp/server.py` | TCP JSON Lines v1 接入、请求限额、运行状态和最终结果回报 |
+| `application/saved_tasks.py` | 已保存任务编译/预检/提交、去重、归属校验，不依赖网络协议 |
+| `persistence/task_run_journal.py` | 当前 Robot Profile 下的 SQLite 回执，重启未完成记录标为 unknown |
 | `protocol/messages.py` | 请求/响应/事件 payload schema |
 | `protocol/routing.py` | action 名到 controller 的路由 |
 | `controllers/` | 设备、执行、组合、AI 交互、遥操作等 API 控制器 |
 | `security/` | 访问控制、传输安全和请求限额 |
 | `metrics/` | WebSocket 连接、请求和事件指标 |
 
-完整消息协议见 [WebSocket 接口手册](websocket-api.md)。HTTP 服务若新增，应复用
-`ApplicationServices` 和这些应用用例，而不是复制 controller 业务逻辑。
+完整消息协议见 [WebSocket 接口手册](websocket-api.md) 和 [多协议任务服务](remote-task-service.md)。HTTP 服务新增时适配共享 `TaskApi` 和应用用例，不复制 controller 业务逻辑。两个适配器由已有 `AuxiliaryServiceHost` 独立启停，复用一套设备、执行管理器和控制租约；不提前创建 HTTP 占位模块。
 
 ### 5.10 AI、技能与语音
 

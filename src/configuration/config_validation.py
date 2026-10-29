@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 import math
 from pathlib import Path
@@ -211,7 +211,15 @@ def validate_startup_configuration(
     )
 
     if options.websocket_enabled:
-        _validate_websocket(settings.server, settings.secrets.websocket_auth_token, options, issues)
+        effective_server = settings.server
+        if effective_server.security_enabled is not None:
+            effective_server = replace(effective_server, websocket_security_enabled=effective_server.security_enabled)
+        _validate_websocket(effective_server, settings.secrets.server_auth_token or settings.secrets.websocket_auth_token,
+                            options, issues)
+    if settings.server.tcp_enabled:
+        _validate_tcp(settings, options, issues)
+    for field in ("task_history_max_records", "task_history_retention_seconds"):
+        _positive_value(getattr(settings.server, field), issues, field.upper())
     if not options.simulation:
         ports = [
             ("MOBILE_BASE_PORT", settings.mobile_base.port),
@@ -658,6 +666,27 @@ def _reject_existing_file(
             field,
             "数据目录路径已被普通文件占用",
         )
+
+
+def _validate_tcp(settings: ApplicationSettings, options: StartupOptions,
+                  issues: list[ConfigurationIssue]) -> None:
+    server = settings.server
+    _port_value(server.tcp_port, issues, "TCP_PORT")
+    if not server.tcp_host.strip():
+        _error(issues, "empty_tcp_host", "TCP_HOST", "TCP 监听地址不能为空")
+    for field in ("tcp_max_message_size_bytes", "tcp_max_connections", "tcp_max_requests_per_second",
+                  "tcp_idle_timeout_seconds", "tcp_send_timeout_seconds"):
+        _positive_value(getattr(server, field), issues, field.upper())
+    security = server.security_enabled if server.security_enabled is not None else server.websocket_security_enabled
+    token = settings.secrets.server_auth_token or settings.secrets.websocket_auth_token
+    if token and is_placeholder_secret(token):
+        _error(issues, "placeholder_secret", "SERVER_AUTH_TOKEN", "不能使用示例占位凭据")
+    if bool(server.tcp_tls_certificate_path) != bool(server.tcp_tls_private_key_path):
+        _error(issues, "incomplete_tcp_tls", "TCP_TLS_CERTIFICATE_PATH", "证书与私钥必须同时配置")
+    if not is_loopback_host(server.tcp_host) and (not security or not token or not server.tcp_tls_certificate_path):
+        _error(issues, "insecure_tcp_binding", "TCP_HOST", "非本机 TCP 监听必须启用认证和 TLS")
+    if options.websocket_enabled and options.websocket_port == server.tcp_port:
+        _error(issues, "server_port_conflict", "TCP_PORT", "TCP 与 WebSocket 请使用不同端口")
 
 
 def _validate_websocket(

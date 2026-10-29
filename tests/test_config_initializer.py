@@ -1,13 +1,55 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import fields
+import shutil
 from tempfile import TemporaryDirectory
+import tomllib
 import unittest
 
 from src.configuration.config_initializer import initialize_configuration, main
+from src.configuration.settings import ServerSettings
+from src.configuration.toml_source import load_toml_sections
 
 
 class ConfigInitializerTests(unittest.TestCase):
+    def test_repository_templates_have_one_complete_server_configuration(self) -> None:
+        repository = Path(__file__).resolve().parents[1]
+        templates = repository / "config" / "fragments"
+        owners = []
+        for template in templates.rglob("*.example.toml"):
+            with template.open("rb") as stream:
+                if "server" in tomllib.load(stream):
+                    owners.append(template.relative_to(templates).as_posix())
+        self.assertEqual(["server.example.toml"], owners)
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "config" / "fragments").mkdir(parents=True)
+            shutil.copyfile(repository / ".env.example", root / ".env.example")
+            shutil.copyfile(repository / "config" / "config.example.toml", root / "config" / "config.example.toml")
+            for template in templates.rglob("*.example.toml"):
+                target = root / "config" / "fragments" / template.relative_to(templates)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(template, target)
+            result = initialize_configuration(root)
+            server_file = root / "config" / "fragments" / "server.toml"
+            self.assertIn(server_file, result.created)
+            sections = load_toml_sections(root / "config" / "config.toml")
+            # Legacy security flag is intentionally replaced by the common flag
+            # in new examples; every other server setting has a single home.
+            self.assertEqual(
+                {field.name for field in fields(ServerSettings)} - {"websocket_security_enabled"},
+                set(sections["server"]),
+            )
+            self.assertTrue(sections["server"]["security_enabled"])
+            self.assertFalse(sections["server"]["tcp_enabled"])
+            content = server_file.read_bytes() + b"\n# local customization\n"
+            server_file.write_bytes(content)
+            rerun = initialize_configuration(root)
+            self.assertIn(server_file, rerun.skipped)
+            self.assertEqual(content, server_file.read_bytes())
+
     def test_initialization_copies_config_fragments_and_env(self) -> None:
         with TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

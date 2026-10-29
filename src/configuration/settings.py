@@ -117,6 +117,20 @@ class LocalizationSettings:
 
 @dataclass(frozen=True, slots=True)
 class ServerSettings:
+    security_enabled: bool | None = None
+    task_allowlist: tuple[str, ...] = ()
+    task_history_max_records: int = 10000
+    task_history_retention_seconds: float = 604800.0
+    tcp_enabled: bool = False
+    tcp_host: str = "127.0.0.1"
+    tcp_port: int = 8766
+    tcp_max_message_size_bytes: int = 65536
+    tcp_max_connections: int = 16
+    tcp_max_requests_per_second: int = 30
+    tcp_idle_timeout_seconds: float = 300.0
+    tcp_send_timeout_seconds: float = 2.0
+    tcp_tls_certificate_path: str = ""
+    tcp_tls_private_key_path: str = ""
     websocket_enabled: bool = True
     websocket_security_enabled: bool = False
     websocket_host: str = "127.0.0.1"
@@ -139,6 +153,7 @@ class ServerSettings:
 
 @dataclass(frozen=True, slots=True)
 class SecretSettings:
+    server_auth_token: str = ""
     openai_api_key: str = ""
     deepseek_api_key: str = ""
     dashscope_api_key: str = ""

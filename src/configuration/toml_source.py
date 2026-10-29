@@ -144,6 +144,21 @@ def _parse_sections(
         raw_section = document.content[group_name]
         if not isinstance(raw_section, dict):
             raise ConfigLoadError(f"配置项 {group_name} 必须是 TOML 表: {document.path}")
+        if group_name == "server":
+            raw_section = dict(raw_section)
+            # Flatten endpoint tables before merging, preserving field-level
+            # include overrides and existing flat WebSocket configuration.
+            for transport in ("websocket", "tcp"):
+                endpoint = raw_section.pop(transport, None)
+                if endpoint is None:
+                    continue
+                if not isinstance(endpoint, dict):
+                    raise ConfigLoadError(f"server.{transport} 必须是 TOML 表")
+                for key, value in endpoint.items():
+                    field = f"{transport}_{key}"
+                    if field in raw_section:
+                        raise ConfigLoadError(f"重复配置 server.{field}")
+                    raw_section[field] = value
         if group_name == "llm_providers":
             raw_section = _normalize_llm_provider_catalog(raw_section, document.path)
         if group_name == "end_effectors":

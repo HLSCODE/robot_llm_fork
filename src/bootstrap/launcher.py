@@ -7,6 +7,7 @@ import sys
 from typing import TYPE_CHECKING, Protocol
 
 from .auxiliary_services import (
+    AsyncAuxiliaryService,
     AuxiliaryServiceHost,
     AuxiliaryServiceSnapshot,
 )
@@ -49,13 +50,22 @@ def build_auxiliary_service_host(
     services: "ApplicationServices",
 ) -> AuxiliaryServiceHost:
     """Compose enabled optional services around the shared application."""
-    auxiliary_services = []
+    auxiliary_services: list[AsyncAuxiliaryService] = []
     options = resolve_startup_options(args, settings)
+    from ..robot_server.security import ServerAccessController
+
+    security_enabled = (
+        settings.server.security_enabled if settings.server.security_enabled is not None
+        else settings.server.websocket_security_enabled
+    )
+    auth_token = settings.secrets.server_auth_token or settings.secrets.websocket_auth_token
+    access = ServerAccessController(
+        auth_token, security_enabled=security_enabled,
+        control_lease_seconds=settings.server.websocket_control_lease_seconds,
+    )
     if options.websocket_enabled:
         from ..robot_server.ws_server import RobotWebSocketServer
 
-        security_enabled = settings.server.websocket_security_enabled
-        auth_token = settings.secrets.websocket_auth_token
         if not security_enabled:
             logger.warning(
                 "WEBSOCKET_SECURITY_ENABLED=false；WebSocket TLS、认证和 Origin 限制已关闭"
@@ -71,6 +81,7 @@ def build_auxiliary_service_host(
                 port=options.websocket_port,
                 security_enabled=security_enabled,
                 auth_token=auth_token,
+                access_controller=access,
                 control_lease_seconds=(settings.server.websocket_control_lease_seconds),
                 max_message_size_bytes=(settings.server.websocket_max_message_size_bytes),
                 max_requests_per_second=(settings.server.websocket_max_requests_per_second),
@@ -87,6 +98,15 @@ def build_auxiliary_service_host(
                 ),
             )
         )
+
+    if settings.server.tcp_enabled:
+        from ..robot_server.contracts import TaskApi
+        from ..robot_server.tcp import RobotTcpServer
+
+        auxiliary_services.append(RobotTcpServer(
+            TaskApi(services.saved_tasks, access), settings.server,
+            authentication_configured=access.authentication_configured,
+        ))
 
     return AuxiliaryServiceHost(
         tuple(auxiliary_services),
@@ -492,13 +512,14 @@ def main() -> int:
         logger.info("启动配置校验通过")
         return 0
     logger.info(
-        "启动 GUI 应用: mode=%s websocket=%s",
+        "启动 GUI 应用: mode=%s websocket=%s tcp=%s",
         "simulation" if args.simulation else "hardware",
         (
             "disabled"
             if args.disable_websocket or not settings.server.websocket_enabled
             else "enabled"
         ),
+        "enabled" if settings.server.tcp_enabled else "disabled",
     )
     from ..observability.crash_diagnostics import CrashDiagnostics
 

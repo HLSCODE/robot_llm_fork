@@ -44,3 +44,11 @@ uv run python examples/network/udp-receiver.py
 ```
 
 `scripts/` 保留构建、初始化与项目维护工具；不要将这些原始 Demo 移入正式 Provider 或自动化测试启动流程。
+
+TCP 已保存任务客户端（会触发真实任务执行，请先核对任务及设备）：
+
+```shell
+uv run --env-file .env python examples/network/tcp-task-client.py --task 移液
+```
+
+不提供 `--task` 时仅查询任务列表。协议、安全配置与重试规则见 [多协议任务服务](../docs/remote-task-service.md)。

@@ -11,6 +11,7 @@ from .value_parsing import parse_environment_value
 
 
 _FIELD_ENV_NAMES: dict[tuple[str, str], str] = {
+    ("server", "security_enabled"): "SERVER_SECURITY_ENABLED",
     ("gui", "theme"): "GUI_THEME",
     ("logging", "level"): "LOG_LEVEL",
     ("logging", "directory"): "LOG_DIRECTORY",

@@ -2,6 +2,7 @@
 
 from .access_control import (
     AuditSink,
+    ServerAccessController,
     WebSocketAccessController,
     WebSocketAccessError,
     WebSocketAccessLevel,
@@ -13,6 +14,7 @@ from .transport import create_server_ssl_context, normalize_allowed_origins
 
 __all__ = [
     "AuditSink",
+    "ServerAccessController",
     "WebSocketAccessController",
     "WebSocketAccessError",
     "WebSocketAccessLevel",

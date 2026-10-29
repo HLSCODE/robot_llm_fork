@@ -16,16 +16,20 @@ from threading import RLock
 security_audit_logger = logging.getLogger("security.websocket")
 
 
-class WebSocketAccessLevel(str, Enum):
+class ServerAccessLevel(str, Enum):
     PUBLIC = "public"
     AUTHENTICATED = "authenticated"
     CONTROL = "control"
 
 
-class WebSocketAccessError(RuntimeError):
+class ServerAccessError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+WebSocketAccessLevel = ServerAccessLevel
+WebSocketAccessError = ServerAccessError
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +120,7 @@ class _ClientSession:
     remote_address: str
     authenticated: bool = False
     principal: str | None = None
+    control_cleanup: bool = True
 
     def snapshot(self) -> ClientSessionSnapshot:
         return ClientSessionSnapshot(
@@ -133,8 +138,8 @@ class _ControlLease:
     expires_at_seconds: float
 
 
-class WebSocketAccessController:
-    """Own authentication sessions and the single WebSocket control lease."""
+class ServerAccessController:
+    """Own authentication sessions and one control lease across transports."""
 
     def __init__(
         self,
@@ -152,6 +157,7 @@ class WebSocketAccessController:
         self._clock = clock
         self._sessions: dict[str, _ClientSession] = {}
         self._control_lease: _ControlLease | None = None
+        self._expired_owners: list[str] = []
         self._lock = RLock()
 
     @property
@@ -162,7 +168,7 @@ class WebSocketAccessController:
     def control_lease_seconds(self) -> float:
         return self._control_lease_seconds
 
-    def register(self, client_id: str, remote_address: str) -> None:
+    def register(self, client_id: str, remote_address: str, *, control_cleanup: bool = True) -> None:
         if not client_id:
             raise ValueError("client_id must not be empty")
         with self._lock:
@@ -171,6 +177,7 @@ class WebSocketAccessController:
             session = _ClientSession(
                 client_id=client_id,
                 remote_address=remote_address,
+                control_cleanup=control_cleanup,
             )
             if not self._security_enabled:
                 session.authenticated = True
@@ -192,6 +199,7 @@ class WebSocketAccessController:
         with self._lock:
             self._sessions.clear()
             self._control_lease = None
+            self._expired_owners.clear()
 
     def authenticate(
         self,
@@ -205,7 +213,7 @@ class WebSocketAccessController:
             if not self._auth_token:
                 raise WebSocketAccessError(
                     "authentication_not_configured",
-                    "WebSocket 写操作认证尚未配置",
+                    "服务端写操作认证尚未配置",
                 )
             if not isinstance(provided_token, str) or not provided_token:
                 raise WebSocketAccessError(
@@ -297,7 +305,8 @@ class WebSocketAccessController:
 
     def expire_control(self) -> str | None:
         with self._lock:
-            return self._expire_control_unlocked()
+            self._expire_control_unlocked()
+            return self._expired_owners.pop(0) if self._expired_owners else None
 
     def _expire_control_unlocked(self) -> str | None:
         lease = self._control_lease
@@ -307,6 +316,11 @@ class WebSocketAccessController:
         ):
             return None
         self._control_lease = None
+        session = self._sessions.get(lease.owner_client_id)
+        # Stateful adapters (e.g. WS teleoperation) need their own cleanup.
+        # Stateless task connections must not trigger another adapter's cleanup.
+        if session is not None and session.control_cleanup:
+            self._expired_owners.append(lease.owner_client_id)
         return lease.owner_client_id
 
     def _require_session_unlocked(self, client_id: str) -> _ClientSession:
@@ -315,7 +329,7 @@ class WebSocketAccessController:
         except KeyError as exc:
             raise WebSocketAccessError(
                 "unknown_client",
-                "WebSocket 客户端会话不存在",
+                "客户端会话不存在",
             ) from exc
 
     def _require_authenticated_unlocked(
@@ -357,3 +371,7 @@ class WebSocketAccessController:
                 lease.expires_at_seconds - self._clock(),
             ),
         )
+
+
+# Keep the public WebSocket import stable while transports share one controller.
+WebSocketAccessController = ServerAccessController

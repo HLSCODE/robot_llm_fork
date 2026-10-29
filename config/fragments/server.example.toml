@@ -1,0 +1,49 @@
+# 可单独 include 本文件，也可将内容直接写进 config.toml。
+# 网络服务的完整配置只在本文件维护；services.example.toml 不再声明 [server]。
+[server]
+# 两个协议使用同一身份与控制权。密钥只放 .env 的 SERVER_AUTH_TOKEN。
+security_enabled = true
+# 空列表允许执行当前 Robot Profile 下的所有已保存任务；非空时仅允许列出的名称。
+task_allowlist = [] # 例如 ["移液", "瓶子抓取"]，不填目录。
+# 去重及运行历史：保留至少七天，上限满时拒绝新任务，不自动淘汰未过期记录。
+task_history_max_records = 10000
+task_history_retention_seconds = 604800.0
+# 共用租约时长；沿用原字段名以免破坏已有配置。
+websocket_control_lease_seconds = 30.0
+# 遥操作命令过期时间，超时命令不会继续下发硬件。
+teleoperation_command_timeout_seconds = 1.0
+# 附加服务（WebSocket、TCP、后续 HTTP 等）的启动和停止超时。
+auxiliary_service_start_timeout_seconds = 5.0
+auxiliary_service_stop_timeout_seconds = 10.0
+
+[server.websocket]
+enabled = true
+host = "127.0.0.1"
+port = 8765
+# 单条消息上限、每连接请求速率、服务级并发请求上限和接收队列上限。
+max_message_size_bytes = 1048576
+max_requests_per_second = 120
+max_concurrent_requests = 16
+max_queued_messages = 16
+# 单次发送超时；超过 slow_send 阈值会记录慢发送。
+send_timeout_seconds = 2.0
+slow_send_threshold_seconds = 0.5
+# 远程 WS 需明确配置浏览器 Origin 白名单及 TLS 证书。
+allowed_origins = []
+tls_certificate_path = ""
+tls_private_key_path = ""
+# 可信反向代理模式仅允许本机绑定，与直接 TLS 互斥。
+reverse_proxy_mode = false
+
+[server.tcp]
+enabled = false
+host = "127.0.0.1"
+port = 8766
+max_message_size_bytes = 65536
+max_connections = 16
+max_requests_per_second = 30
+idle_timeout_seconds = 300.0
+send_timeout_seconds = 2.0
+# 非本机监听必须同时配置证书、私钥和认证；不允许裸 TCP 暴露到网络。
+tls_certificate_path = ""
+tls_private_key_path = ""

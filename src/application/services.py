@@ -50,6 +50,7 @@ from .teleoperation import TeleoperationService
 from .workflow_editing import WorkflowEditingSession
 from .workflow_compiler import WorkflowCompiler
 from .workflow_preflight import WorkflowPreflightService
+from .saved_tasks import SavedTaskService
 from .teaching import TeachingService
 
 if TYPE_CHECKING:
@@ -507,6 +508,7 @@ class ApplicationServices:
     execution: ExecutionService
     workflow_compiler: WorkflowCompiler
     workflow_preflight: WorkflowPreflightService
+    saved_tasks: SavedTaskService
     devices: DeviceManagementService
     manual_control: ManualControlService
     teleoperation: TeleoperationService

@@ -111,6 +111,7 @@ schema_version = 6
 include = [
   "fragments/application.toml",
   "fragments/services.toml",
+  "fragments/server.toml",
   "fragments/ai.toml",
   "fragments/robot.toml",
   "fragments/robots/realman.toml",
@@ -265,8 +266,20 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 
 ### `[server]` 与 `[execution]`
 
+网络服务支持 WebSocket 与 TCP 独立启停，共享设备和执行管理器。也支持 `[server.websocket] enabled/host/port`、`[server.tcp] enabled/host/port` 等分组配置；同一文件内不要与扁平字段重复声明。完整示例见 `config/fragments/server.example.toml`，协议及重试约定见 [多协议任务服务](remote-task-service.md)。
+
 | 字段 | 默认 | 功能与使用建议 |
 |---|---:|---|
+| `security_enabled` | 未设置 | 设置后统一控制 WS/TCP 认证；否则沿用 `websocket_security_enabled`。`.env` 的 `SERVER_AUTH_TOKEN` 非空时优先于旧 `WEBSOCKET_AUTH_TOKEN`。 |
+| `tcp_enabled` | `false` | 独立启用 TCP；两个协议可同时启用或全部关闭。 |
+| `tcp_host` / `tcp_port` | `127.0.0.1` / `8766` | TCP 监听地址和端口；非本机监听强制要求认证及 TLS。 |
+| `tcp_max_message_size_bytes` | `65536` | 换行分隔 JSON 消息字节上限。 |
+| `tcp_max_connections` / `tcp_max_requests_per_second` | `16` / `30` | TCP 最大连接数及单连接请求速率。 |
+| `tcp_idle_timeout_seconds` / `tcp_send_timeout_seconds` | `300.0` / `2.0` 秒 | 空闲和发送超时；断线不取消已受理任务。 |
+| `tcp_tls_certificate_path` / `tcp_tls_private_key_path` | 空 | TCP TLS 证书链和私钥路径，须成对配置。 |
+| `task_allowlist` | 空数组 | 远程任务白名单，空表示当前 Profile 所有已保存任务，不接受路径。 |
+| `task_history_max_records` | `10000` | 持久化回执上限，满时拒绝新任务。 |
+| `task_history_retention_seconds` | `604800.0` 秒 | 非活动运行回执保留期；过期后不保证请求 ID 去重。 |
 | `websocket_enabled` | `true` | 是否随主应用启动 WebSocket 附加服务。只使用桌面端时可关闭。 |
 | `websocket_security_enabled` | `false` | 启用 Token、Origin、TLS 等安全策略。监听非本机地址时应开启。 |
 | `websocket_host` / `websocket_port` | `127.0.0.1` / `8765` | 监听地址与端口；对外暴露前应评估防火墙、TLS 与认证。 |

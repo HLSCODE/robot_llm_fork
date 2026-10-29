@@ -7,6 +7,9 @@ from collections.abc import Sequence
 import logging
 import threading
 from typing import Any
+from uuid import uuid4
+
+from ...application.saved_tasks import TaskRequestContext
 
 from ...domain.models import (
     ActionDefinition,
@@ -93,14 +96,6 @@ class ExecutionWebSocketHandler:
         加载并执行已保存的任务
         请求: {"action": "execute_task", "name": "xxx.workflow.json"}
         """
-        if self._server._services.execution.snapshot().active:
-            await websocket.send(
-                self._server._json_msg(
-                    {"event": "error", "message": "已有序列正在执行，请先停止"}
-                )
-            )
-            return
-
         task_name = data.get("name", "")
         if not task_name:
             await websocket.send(
@@ -108,32 +103,13 @@ class ExecutionWebSocketHandler:
             )
             return
 
-        try:
-            entries = await asyncio.to_thread(
-                self._server._services.composition.load_task,
-                task_name,
-            )
-        except (FileNotFoundError, ValueError):
-            entries = ()
-        if not entries:
-            await websocket.send(
-                self._server._json_msg(
-                    {"event": "error", "message": f"任务 '{task_name}' 不存在或为空"}
-                )
-            )
-            return
-
-        for entry in entries:
-            _reset_entry(entry)
-
-        total_steps = sum(_expanded_step_count(entry) for entry in entries)
-
         await self._submit_execution(
             websocket,
-            entries,
+            (),
             origin="websocket-task",
             message=f"加载任务 '{task_name}'，开始执行",
-            steps=total_steps,
+            steps=0,
+            task_name=task_name,
         )
 
     async def _handle_stop(self, websocket: Any, data: WebSocketRequest) -> None:
@@ -228,6 +204,7 @@ class ExecutionWebSocketHandler:
         origin: str,
         message: str,
         steps: int,
+        task_name: str | None = None,
     ) -> bool:
         gate_lock = threading.Lock()
         pending_events: list[ExecutionEvent] = []
@@ -241,27 +218,45 @@ class ExecutionWebSocketHandler:
                     return
             self._on_execution_event(event)
 
+        request_context = CURRENT_WEBSOCKET_REQUEST.get()
         try:
-            handle = self._server._services.execution.start_entries(
-                sequence,
-                origin=origin,
-                listener=listener,
-            )
+            if task_name is not None:
+                correlation = request_context.correlation if request_context is not None else None
+                result = await asyncio.to_thread(
+                    self._server._services.saved_tasks.run_task,
+                    task_name,
+                    TaskRequestContext(
+                        (correlation.principal or correlation.client_id) if correlation else "local-websocket",
+                        correlation.request_id if correlation else uuid4().hex,
+                        origin,
+                    ),
+                    listener=listener,
+                )
+                run_id = result["run_id"]
+                steps = result.get("steps", 0)
+                if result["duplicate"]:
+                    await websocket.send(self._server._json_msg({"event": "accepted", **result}))
+                    return True
+            else:
+                handle = self._server._services.execution.start_entries(
+                    sequence, origin=origin, listener=listener,
+                )
+                run_id = handle.run_id
         except Exception as exc:
             await websocket.send(
                 self._server._json_msg(
                     {
                         "event": "error",
                         "message": f"提交执行失败: {exc}",
+                        "code": getattr(exc, "code", "request_failed"),
                     }
                 )
             )
             return False
-        request_context = CURRENT_WEBSOCKET_REQUEST.get()
         if request_context is not None:
-            request_context.run_id = handle.run_id
+            request_context.run_id = run_id
             with self._server._execution_requests_lock:
-                self._server._execution_requests[handle.run_id] = (
+                self._server._execution_requests[run_id] = (
                     request_context.execution_correlation()
                 )
             correlation = request_context.correlation
@@ -271,13 +266,13 @@ class ExecutionWebSocketHandler:
                 action=correlation.action,
                 request_id=correlation.request_id,
                 outcome="accepted",
-                run_id=handle.run_id,
+                run_id=run_id,
             )
             request_context.initial_audit_recorded = True
         await self._server._broadcast(
             {
                 "event": "accepted",
-                "run_id": handle.run_id,
+                "run_id": run_id,
                 "message": message,
                 "steps": steps,
             }
