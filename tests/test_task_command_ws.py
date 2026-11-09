@@ -1,8 +1,11 @@
 import asyncio
 import json
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from src.core.models import SequenceItemStatus
+from src.core.storage import StorageManager
 from src.robot_server.ws_server import RobotWebSocketServer
 
 
@@ -37,6 +40,11 @@ class FakeExecutor:
 
 class TaskCommandWebSocketTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
+        # 旧任务协议使用迁移备份验证，不恢复或改写生产任务目录。
+        templates_dir = Path(__file__).resolve().parent.parent / "data" / "migration-backups" / "workflow-v4"
+        storage_patch = patch.object(StorageManager, "TASKS_DIR", templates_dir)
+        storage_patch.start()
+        self.addCleanup(storage_patch.stop)
         self.server = RobotWebSocketServer()
         self.server._executor = FakeExecutor()
         self.server._loop = asyncio.get_running_loop()
@@ -97,6 +105,31 @@ class TaskCommandWebSocketTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual("command_rejected", rejection["event"])
         self.assertEqual("BUSY", rejection["code"])
         self.assertEqual("busy-1", rejection["request_id"])
+        self.assertEqual([], self.server._executor.executions)
+
+    async def test_executor_receives_converted_device_units(self):
+        await self.server._dispatch(self.websocket, {
+            "command_type": "730-zhuye",
+            "request_id": "converted-1",
+            "flow_rate_ml_min": 48,
+            "volume_ml": 0.5,
+        })
+        self.assertEqual(1, len(self.server._executor.executions))
+        dispense = next(
+            item for item in self.server._executor.executions[0]
+            if item.definition.name == "tuye"
+        )
+        self.assertEqual(800, dispense.definition.parameters["吐液速度"])
+        self.assertEqual(500, dispense.definition.parameters["容量"])
+
+    async def test_converted_value_out_of_range_does_not_start_executor(self):
+        await self.server._dispatch(self.websocket, {
+            "command_type": "730-zhuye",
+            "flow_rate_ml_min": 600,
+        })
+        rejection = self.websocket.messages[-1]
+        self.assertEqual("command_rejected", rejection["event"])
+        self.assertEqual("INVALID_ARGUMENT", rejection["code"])
         self.assertEqual([], self.server._executor.executions)
 
     async def test_action_and_command_type_are_rejected_as_ambiguous(self):

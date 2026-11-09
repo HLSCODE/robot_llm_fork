@@ -1,0 +1,20 @@
+# Robot Action Orchestrator 配置模板
+#
+# 本文件是唯一配置入口。include 按声明顺序加载子配置，本文件中声明的
+# 同名字段覆盖所有子配置；.env 和系统环境变量拥有最高优先级。
+# 如需使用单文件配置，可删除 include 并将所有配置表直接写入本文件。
+# API Key、认证 Token 等敏感值只能配置在 .env 或系统环境变量中。
+
+schema_version = 6
+
+include = [
+  "fragments/application.toml",
+  "fragments/services.toml",
+  "fragments/ai.toml",
+  "fragments/robot.toml",
+  "fragments/robots/realman.toml",
+  "fragments/robots/tianji.toml",
+  "fragments/mobile-base.toml",
+  "fragments/devices.toml",
+  "fragments/voice.toml",
+]

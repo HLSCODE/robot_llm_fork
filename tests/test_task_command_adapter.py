@@ -1,9 +1,11 @@
 import json
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.core.models import LoopBlock, SequenceItem
 from src.core.pose_compensation import parse_pose
+from src.core.storage import StorageManager
 from src.robot_server.task_command_adapter import (
     ALLOWED_COMMANDS,
     DEFAULT_POINTS_FILE,
@@ -13,7 +15,8 @@ from src.robot_server.task_command_adapter import (
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-TASKS_DIR = PROJECT_ROOT / "data" / "tasks"
+# 迁移后的工作区用备份作为旧任务协议的只读测试样本。
+TASKS_DIR = PROJECT_ROOT / "data" / "migration-backups" / "workflow-v4"
 
 
 def sequence_items(entries):
@@ -27,6 +30,9 @@ def sequence_items(entries):
 class TaskCommandAdapterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        storage_patch = patch.object(StorageManager, "TASKS_DIR", TASKS_DIR)
+        storage_patch.start()
+        cls.addClassCleanup(storage_patch.stop)
         cls.adapter = TaskCommandAdapter()
         cls.original_task_bytes = {
             command: (TASKS_DIR / f"{command}.task").read_bytes()
@@ -60,7 +66,7 @@ class TaskCommandAdapterTests(unittest.TestCase):
         prepared = self.adapter.prepare(
             {
                 "command_type": "730-peiye",
-                "aspirate_volume_ml": 200.5,
+                "aspirate_volume_ml": 0.2005,
                 "station_id": 4,
                 "height_level": "lower",
                 "method": "circular",
@@ -107,8 +113,8 @@ class TaskCommandAdapterTests(unittest.TestCase):
                                 "station_id": station_id,
                                 "height_level": height_level,
                                 "method": method,
-                                "flow_rate_ml_min": 700.5,
-                                "volume_ml": 400.5,
+                                "flow_rate_ml_min": 42.03,
+                                "volume_ml": 0.4005,
                                 "aspirate_volume_ml": 1234,
                             }
                         )
@@ -182,14 +188,47 @@ class TaskCommandAdapterTests(unittest.TestCase):
             ({"command_type": "730-zhuye", "method": "wall_side"}, "INVALID_ARGUMENT"),
             ({"command_type": "730-zhuye", "flow_rate_ml_min": 0}, "INVALID_ARGUMENT"),
             ({"command_type": "730-zhuye", "flow_rate_ml_min": 10000}, "INVALID_ARGUMENT"),
+            ({"command_type": "730-zhuye", "flow_rate_ml_min": 599.97}, "INVALID_ARGUMENT"),
+            ({"command_type": "730-zhuye", "flow_rate_ml_min": 0.029}, "INVALID_ARGUMENT"),
             ({"command_type": "730-zhuye", "volume_ml": 65536}, "INVALID_ARGUMENT"),
+            ({"command_type": "730-zhuye", "volume_ml": 65.5355}, "INVALID_ARGUMENT"),
+            ({"command_type": "730-zhuye", "volume_ml": 0.00049}, "INVALID_ARGUMENT"),
             ({"command_type": "730-peiye", "aspirate_volume_ml": None}, "INVALID_ARGUMENT"),
+            ({"command_type": "730-peiye", "aspirate_volume_ml": 65.536}, "INVALID_ARGUMENT"),
         )
         for payload, code in invalid_cases:
             with self.subTest(payload=payload):
                 with self.assertRaises(TaskCommandError) as raised:
                     self.adapter.prepare(payload)
                 self.assertEqual(code, raised.exception.code)
+
+    def test_converted_values_round_at_device_unit_boundaries(self):
+        for flow, volume, expected_speed, expected_volume in (
+            (0.03, 0.0005, 1, 1),
+            (48, 0.5, 800, 500),
+            (599.94, 65.535, 9999, 65535),
+        ):
+            with self.subTest(flow=flow, volume=volume):
+                prepared = self.adapter.prepare({
+                    "command_type": "730-zhuye",
+                    "flow_rate_ml_min": flow,
+                    "volume_ml": volume,
+                })
+                dispense = next(
+                    item for item in sequence_items(prepared.entries)
+                    if item.definition.name == "tuye"
+                )
+                self.assertEqual(expected_speed, dispense.definition.parameters["吐液速度"])
+                self.assertEqual(expected_volume, dispense.definition.parameters["容量"])
+
+    def test_circular_dispense_missing_values_keep_device_unit_defaults(self):
+        prepared = self.adapter.prepare({"command_type": "730-zhuye", "method": "circular"})
+        dispense = next(
+            item for item in sequence_items(prepared.entries)
+            if item.definition.name == "zhuanquanzhuye"
+        )
+        self.assertEqual(800, dispense.definition.parameters["吐液速度"])
+        self.assertEqual(500, dispense.definition.parameters["吐液量"])
 
     def test_no_task_template_is_written(self):
         for command in ALLOWED_COMMANDS:

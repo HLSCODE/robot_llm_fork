@@ -902,12 +902,12 @@ ws.onmessage = (event) => {
 {
   "command_type": "730-zhuye",
   "request_id": "client-request-001",
-  "aspirate_volume_ml": 200,
+  "aspirate_volume_ml": 0.2,
   "station_id": 2,
   "height_level": "middle",
   "method": "circular",
-  "flow_rate_ml_min": 800,
-  "volume_ml": 500
+  "flow_rate_ml_min": 48,
+  "volume_ml": 0.5
 }
 ```
 
@@ -916,14 +916,14 @@ ws.onmessage = (event) => {
 | 字段 | 类型 | 默认值 | 使用任务 | 说明 |
 |---|---|---|---|---|
 | `request_id` | string | 服务端 UUID | 全部 | 关联异步执行事件 |
-| `aspirate_volume_ml` | number | 保留模板值 | `730-peiye` | 修改全部 `XI200` 的吸液容量 |
+| `aspirate_volume_ml` | number | 保留模板值 | `730-peiye` | 吸液容量，单位 mL；乘以 1000 转为 μL，修改全部 `XI200` |
 | `station_id` | integer | `1` | `730-zhuye` | 工位 `1\|2\|3\|4` |
 | `height_level` | string | `upper` | `730-zhuye` | `upper\|middle\|lower` |
 | `method` | string | `vertical` | `730-zhuye` | `vertical\|circular` |
-| `flow_rate_ml_min` | number | 模板值 `800` | `730-zhuye` | 直接作为设备吐液速度，不做单位换算 |
-| `volume_ml` | number | 模板值 `500` | `730-zhuye` | 直接作为设备吐液容量，不做单位换算 |
+| `flow_rate_ml_min` | number | 模板值 `800 μL/s`（相当于 `48 mL/min`） | `730-zhuye` | 流量，单位 mL/min；乘以 1000 再除以 60 转为 μL/s |
+| `volume_ml` | number | 模板值 `500 μL`（相当于 `0.5 mL`） | `730-zhuye` | 吐液容量，单位 mL；乘以 1000 转为 μL |
 
-请求可以携带所有阶段字段，当前任务不使用的字段会被忽略。数值按十进制四舍五入；速度范围 `1..9999`，容量范围 `1..65535`。字段缺失时采用默认值，但字段存在且非法时会拒绝整条命令。
+请求可以携带所有阶段字段，当前任务不使用的字段会被忽略。显式传入的数值先换算为设备单位，再按十进制四舍五入到整数；设备速度范围 `1..9999 μL/s`，容量范围 `1..65535 μL`，按换算、取整后的结果校验。例如 `48 mL/min` 转为 `800 μL/s`，`0.5 mL` 转为 `500 μL`。字段缺失时保留模板中的设备单位默认值，不重复换算；字段存在且非法时会拒绝整条命令。垂直和转圈注液均使用此规则。
 
 四个工位的 `shang/upper/middle/lower` 六维点位保存在 `config/injection_points.json`。服务端每次执行 `730-zhuye` 前重新读取并完整校验该文件。
 
@@ -968,8 +968,8 @@ ws.onmessage = (event) => {
 仓库内提供命令行联调脚本：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts\test_task_command_client.py 730-peiye --aspirate-volume 200
-.\.venv\Scripts\python.exe scripts\test_task_command_client.py 730-zhuye --station-id 2 --height-level middle --method circular --flow-rate 800 --volume 500
+.\.venv\Scripts\python.exe scripts\test_task_command_client.py 730-peiye --aspirate-volume 0.2
+.\.venv\Scripts\python.exe scripts\test_task_command_client.py 730-zhuye --station-id 2 --height-level middle --method circular --flow-rate 48 --volume 0.5
 .\.venv\Scripts\python.exe scripts\test_task_command_client.py pause
 .\.venv\Scripts\python.exe scripts\test_task_command_client.py resume
 ```

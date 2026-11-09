@@ -179,6 +179,7 @@ class TaskCommandAdapter:
             field="aspirate_volume_ml",
             minimum=1,
             maximum=65535,
+            multiplier=1000,
         )
         for item in targets:
             item.definition.parameters["容量"] = capacity
@@ -248,6 +249,8 @@ class TaskCommandAdapter:
                 field="flow_rate_ml_min",
                 minimum=1,
                 maximum=9999,
+                multiplier=1000,
+                divisor=60,
             )
         else:
             dispense_speed = self._rounded_device_value(
@@ -264,6 +267,7 @@ class TaskCommandAdapter:
                 field="volume_ml",
                 minimum=1,
                 maximum=65535,
+                multiplier=1000,
             )
         else:
             dispense_volume = self._rounded_device_value(
@@ -363,6 +367,8 @@ class TaskCommandAdapter:
         minimum: int,
         maximum: int,
         error_code: str = "INVALID_ARGUMENT",
+        multiplier: int = 1,
+        divisor: int = 1,
     ) -> int:
         if isinstance(value, bool):
             raise TaskCommandError(error_code, f"{field} 必须是数字")
@@ -372,12 +378,15 @@ class TaskCommandAdapter:
             raise TaskCommandError(error_code, f"{field} 必须是数字") from exc
         if not decimal_value.is_finite():
             raise TaskCommandError(error_code, f"{field} 必须是有限数字")
+        # 仅远程显式参数需要转换：mL -> μL，mL/min -> μL/s。
+        # 模板默认值已使用设备单位，调用时保留默认比例 1。
+        decimal_value = decimal_value * multiplier / divisor
         # Decimal 的 ROUND_HALF_UP 符合操作者通常理解的“四舍五入”，避免 Python round 的银行家舍入。
         rounded = int(decimal_value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         if rounded < minimum or rounded > maximum:
             raise TaskCommandError(
                 error_code,
-                f"{field} 四舍五入后必须在 {minimum}..{maximum} 范围内",
+                f"{field} 换算为设备单位并四舍五入后必须在 {minimum}..{maximum} 范围内",
             )
         return rounded
 

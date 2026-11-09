@@ -1,0 +1,36 @@
+[runtime]
+# 是否使用仿真设备；true 时不连接真实硬件。
+simulation_mode = false
+# 单次自然语言交互的总超时。
+interaction_turn_timeout_s = 90.0
+# GUI/API 动作预览在确认执行前的有效期。
+command_preview_ttl_seconds = 120.0
+# 机械臂相对移动的默认步长与单次指令最大位移。
+command_arm_relative_step_mm = 10.0
+command_arm_relative_max_mm = 100.0
+# 移动底盘相对移动的默认步长与单次指令最大位移。
+command_base_relative_step_cm = 10.0
+command_base_relative_max_cm = 100.0
+
+[gui]
+# 主题："system"、"light" 或 "dark"。
+theme = "system"
+
+[logging]
+# 日志级别：DEBUG、INFO、WARNING、ERROR 或 CRITICAL。
+level = "INFO"
+# 日志目录；相对路径以项目根目录为基准。
+directory = "logs"
+# 日志文件保留天数。
+retention_days = 14
+
+[data]
+# 项目运行数据根目录。
+robot_data_dir = "data"
+# 以下目录为空时，分别使用 robot_data_dir 下的默认 actions、workflows、drafts、skills、trajectories 目录。
+actions_library_directory = ""
+workflows_directory = ""
+workflow_drafts_directory = ""
+skill_library_directory = ""
+# 轨迹录制默认自动保存到该目录；留空使用 robot_data_dir/trajectories。
+trajectories_directory = ""

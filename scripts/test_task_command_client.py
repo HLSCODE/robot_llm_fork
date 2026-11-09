@@ -2,8 +2,8 @@
 """命令行测试客户端：发送固定任务 command_type 与执行控制命令。
 
 示例：
-    python scripts/test_task_command_client.py 730-peiye --aspirate-volume 200
-    python scripts/test_task_command_client.py 730-zhuye --station-id 2 --height-level middle --method circular --flow-rate 800 --volume 500
+    python scripts/test_task_command_client.py 730-peiye --aspirate-volume 0.2
+    python scripts/test_task_command_client.py 730-zhuye --station-id 2 --height-level middle --method circular --flow-rate 48 --volume 0.5
     python scripts/test_task_command_client.py pause
 """
 
@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--url", default="ws://127.0.0.1:8765", help="WebSocket 服务地址")
     parser.add_argument("--request-id", help="可选的客户端请求标识；默认自动生成")
-    parser.add_argument("--aspirate-volume", type=float, help="aspirate_volume_ml")
+    parser.add_argument("--aspirate-volume", type=float, help="吸液量，单位 mL（aspirate_volume_ml）")
     parser.add_argument("--station-id", type=int, choices=(1, 2, 3, 4), help="station_id")
     parser.add_argument(
         "--height-level",
@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
         help="height_level",
     )
     parser.add_argument("--method", choices=("vertical", "circular"), help="method")
-    parser.add_argument("--flow-rate", type=float, help="flow_rate_ml_min")
-    parser.add_argument("--volume", type=float, help="volume_ml")
+    parser.add_argument("--flow-rate", type=float, help="流量，单位 mL/min（flow_rate_ml_min）")
+    parser.add_argument("--volume", type=float, help="吐液量，单位 mL（volume_ml）")
     parser.add_argument(
         "--no-wait",
         action="store_true",

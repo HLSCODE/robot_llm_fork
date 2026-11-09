@@ -1,0 +1,12 @@
+[robot]
+# 当前启用的机械臂 Provider。所有 Provider 配置会同时加载，但只初始化本项选中的实现。
+provider = "realman"
+# 可选稳定资源隔离标识；留空时由 provider 和对应 model 自动生成。
+# 修改该值会切换到另一套 Action、Workflow、草稿和轨迹数据。
+profile_id = ""
+
+# Provider 无关的默认运动参数。
+move_velocity = 10
+move_radius = 0
+move_connect = 0
+move_block = 1
