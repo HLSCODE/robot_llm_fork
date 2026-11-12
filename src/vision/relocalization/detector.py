@@ -126,7 +126,7 @@ def find_l_inner_corners(
         if verbose:
             print(f"ERROR: Cannot read {image_name}")
         return None
-
+ 
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 

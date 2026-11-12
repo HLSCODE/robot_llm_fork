@@ -417,13 +417,10 @@ def apply_planar_compensation(
     t_b1_m_planar = marker_pose_to_planar_transform(t_b1_m)
     t_delta_planar = t_b1_m_planar @ invert_transform(t_b0_m_planar)
     t_delta_planar = constrain_planar_delta(t_delta_planar, planar_constraint)
+    # The planar transform preserves height and applies yaw to the full tool
+    # orientation. Overwriting rotation-vector components would change its tilt.
     t_b1_g_planar = t_delta_planar @ as_matrix4(t_b0_g, "T_B0_G")
-    taught_pose = transform_to_pose(t_b0_g, rotation_type="rotvec", angle_unit="rad")
-    planar_pose = transform_to_pose(t_b1_g_planar, rotation_type="rotvec", angle_unit="rad")
-    planar_pose[2] = taught_pose[2]
-    planar_pose[3] = taught_pose[3]
-    planar_pose[4] = taught_pose[4]
-    return pose_to_transform(planar_pose, rotation_type="rotvec", angle_unit="rad"), t_delta_planar
+    return t_b1_g_planar, t_delta_planar
 
 
 def compensate_taught_pose(
