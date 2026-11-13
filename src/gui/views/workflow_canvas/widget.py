@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from math import hypot
 from uuid import uuid4
+from ....domain.outputs import NodeOutput
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QPainterPath, QPen, QUndoCommand, QUndoStack
@@ -570,8 +571,9 @@ class WorkflowCanvasWidget(QWidget):
                 return _clone_canvas_entry(found)
         return None
 
-    def update_current_action(self, definition: ActionDefinition) -> bool:
-        if not self._current_item_uuid:
+    def update_current_action(self, definition: ActionDefinition, *, output: NodeOutput | None = None,
+                              update_output: bool = False) -> bool:
+        if not self._editing_enabled or not self._current_item_uuid:
             return False
         updated = list(_clone_entries(self._entries))
         for entry in updated:
@@ -579,6 +581,8 @@ class WorkflowCanvasWidget(QWidget):
             if item is None:
                 continue
             item.definition = definition
+            if update_output:
+                item.output = output
             self._push(updated, "修改动作参数")
             return True
         return False
@@ -708,7 +712,7 @@ class WorkflowCanvasWidget(QWidget):
         node_id = self._compiled.node_id_for_step(runtime_index)
         if node_id is None:
             return
-        updated = list(_clone_entries(self._entries))
+        updated = list(_clone_entries(self._root_entries))
         for entry in updated:
             rendered_item = _find_sequence_item(entry, item.uuid)
             if rendered_item is not None:
@@ -716,11 +720,9 @@ class WorkflowCanvasWidget(QWidget):
                 node_id = entry.uuid
                 break
         self._root_entries = tuple(updated)
-        self._entries = self._root_entries
-        self._rebuild_scene(selected_node_ids=(node_id,))
-        node_item = self._node_items.get(node_id)
-        if node_item is not None:
-            self.view.centerOn(node_item)
+        self._entries = _scope_entries(self._root_entries, self._scope_path)
+        # Status refreshes must not steal selection or scroll from inspection.
+        self._rebuild_scene()
 
     def update_loop_progress(
         self,
@@ -732,15 +734,15 @@ class WorkflowCanvasWidget(QWidget):
         node_id = self._compiled.node_id_for_loop(loop_uuid)
         if node_id is None:
             return
-        updated = list(_clone_entries(self._entries))
+        updated = list(_clone_entries(self._root_entries))
         for entry in updated:
             loop = _find_loop(entry, loop_uuid)
             if loop is not None:
                 loop.current_iteration = current_iteration
                 break
         self._root_entries = tuple(updated)
-        self._entries = self._root_entries
-        self._rebuild_scene(selected_node_ids=(node_id,))
+        self._entries = _scope_entries(self._root_entries, self._scope_path)
+        self._rebuild_scene()
 
     def update_parallel_branch_state(
         self,
@@ -754,7 +756,7 @@ class WorkflowCanvasWidget(QWidget):
         if node_id is None:
             return
         self._parallel_branch_states[(parallel_uuid, branch_id)] = state
-        self._rebuild_scene(selected_node_ids=(node_id,))
+        self._rebuild_scene()
 
     def finish_execution(self) -> None:
         # Cancellation has no STEP_COMPLETED/STEP_FAILED event. Clear only
@@ -775,6 +777,7 @@ class WorkflowCanvasWidget(QWidget):
         self._compiled = None
         self._parallel_branch_states.clear()
         self.view.setAcceptDrops(True)
+        self._entries = _scope_entries(self._root_entries, self._scope_path)
         self._rebuild_scene()
         self.can_undo_changed.emit(self._undo_stack.canUndo())
         self.can_redo_changed.emit(self._undo_stack.canRedo())
@@ -821,8 +824,12 @@ class WorkflowCanvasWidget(QWidget):
     def _rebuild_scene(
         self,
         *,
-        selected_node_ids: tuple[str, ...] = (),
+        selected_node_ids: tuple[str, ...] | None = None,
     ) -> None:
+        if selected_node_ids is None:
+            selected_node_ids = tuple(
+                node_id for node_id, node in self._node_items.items() if node.isSelected()
+            )
         self._clear_insertion_target()
         self._active_drag_node_id = None
         self._pending_node_drop = None
@@ -865,6 +872,8 @@ class WorkflowCanvasWidget(QWidget):
             )
             node.setPos(center_x - node.node_width / 2.0, node_y)
             node.setSelected(entry.uuid in selected_node_ids)
+            if node.isSelected() and self._current_item_uuid != entry.uuid:
+                node.set_active_child_uuid(self._current_item_uuid or "")
             node.focused.connect(self._on_node_focused)
             node.edit_requested.connect(self._on_node_edit_requested)
             node.subworkflow_open_requested.connect(self.enter_subworkflow)

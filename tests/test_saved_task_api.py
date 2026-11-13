@@ -52,6 +52,7 @@ def services(tmp_path):
                     ),
                 )
             ),
+            allow_remote=True,
         )
         services.composition.save_workflow(name, document, origin="test")
     yield services
@@ -62,6 +63,112 @@ def services(tmp_path):
 
 def context(request_id="one", principal="tester"):
     return TaskRequestContext(principal, request_id, "test")
+
+
+def test_private_task_is_local_only_and_cannot_be_invoked_by_name(services):
+    document = replace(services.composition.load_workflow("demo"), allow_remote=False)
+    services.composition.save_workflow("private", document, origin="test")
+    assert "private.workflow.json" in services.composition.list_workflows()
+    assert "private.workflow.json" not in services.saved_tasks.list_tasks()
+    with pytest.raises(TaskServiceError) as caught:
+        services.saved_tasks.run_task("private", context())
+    assert caught.value.code == "task_forbidden"
+    assert not services.execution.snapshot().active
+
+
+def test_old_document_defaults_to_local_only_and_rejects_non_boolean(services):
+    raw = services.composition.load_workflow("demo").to_dict()
+    raw.pop("allow_remote")
+    assert WorkflowDocument.from_dict(raw).allow_remote is False
+    for value in ("false", 1, None, [], {}):
+        with pytest.raises(ValueError):
+            WorkflowDocument.from_dict({**raw, "allow_remote": value})
+
+
+def test_remote_permission_can_be_revoked_without_removing_local_task(services):
+    session = services.workflow_editing
+    session.open("demo")
+    session.save_as("demo", allow_remote=False)
+    assert "demo.workflow.json" not in services.saved_tasks.list_tasks()
+    with pytest.raises(TaskServiceError) as caught:
+        services.saved_tasks.run_task("demo", context())
+    assert caught.value.code == "task_forbidden"
+    session.save_as("demo", allow_remote=True)
+    assert "demo.workflow.json" in services.saved_tasks.list_tasks()
+    assert services.composition.load_workflow("demo").allow_remote
+
+
+def test_public_parent_can_execute_local_only_child_snapshot(services):
+    services.workflow_editing.open("demo")
+    services.workflow_editing.save_as("child", allow_remote=False)
+    child = services.workflow_editing.instantiate("child")
+    services.workflow_editing.save_as("parent", entries=[child], allow_remote=True)
+    receipt = services.saved_tasks.run_task("parent", context())
+    assert services.execution.wait(3).state.value == "succeeded"
+    assert services.saved_tasks.get_run(receipt["run_id"], "tester")["status"] == "succeeded"
+    assert "child.workflow.json" not in services.saved_tasks.list_tasks()
+
+
+def test_websocket_lists_and_broadcasts_only_remote_tasks(services):
+    private = replace(services.composition.load_workflow("demo"), allow_remote=False)
+    services.composition.save_workflow("private", private, origin="test")
+
+    class Socket:
+        def __init__(self):
+            self.messages = []
+
+        async def send(self, message):
+            self.messages.append(json.loads(message))
+
+    async def scenario():
+        server = RobotWebSocketServer(services, security_enabled=False)
+        socket = Socket()
+        server._register_client(socket, "local")
+        await server._composition_handler._handle_list_tasks(socket, {})
+        assert set(socket.messages[-1]["tasks"]) == {"demo.workflow.json", "long.workflow.json"}
+        before = services.composition.sequence_entries()
+        await server._composition_handler._handle_load_task(socket, {"name": "private"})
+        assert socket.messages[-1]["code"] == "task_forbidden"
+        assert services.composition.sequence_entries() == before
+        from src.application.composition import CompositionChangeType
+        event = SimpleNamespace(change_type=CompositionChangeType.TASKS, revision=1, change_revision=1, origin="test")
+        broadcast = server._composition_event_payload(event)
+        assert {task["name"] for task in broadcast["tasks"]} == {"demo.workflow.json", "long.workflow.json"}
+        server._access.clear()
+
+    asyncio.run(scenario())
+
+
+def test_tcp_cannot_discover_or_start_local_only_task(services):
+    private = replace(services.composition.load_workflow("demo"), allow_remote=False)
+    services.composition.save_workflow("private", private, origin="test")
+
+    async def scenario():
+        access = ServerAccessController("", security_enabled=False, control_lease_seconds=30)
+        server = RobotTcpServer(
+            TaskApi(services.saved_tasks, access),
+            replace(services.settings.server, tcp_port=0), authentication_configured=False,
+        )
+        await server.start()
+        reader, writer = await asyncio.open_connection("127.0.0.1", server._server.sockets[0].getsockname()[1])
+        try:
+            async def send(command, **parameters):
+                writer.write((json.dumps({"version": 1, "request_id": command, "command": command, **parameters}) + "\n").encode())
+                await writer.drain()
+                return json.loads(await asyncio.wait_for(reader.readline(), 2))
+
+            result = await send("task.list")
+            assert result["tasks"] == ["demo", "long"]
+            assert (await send("control.acquire"))["ok"]
+            rejected = await send("task.run", task="private")
+            assert not rejected["ok"] and rejected["error"]["code"] == "task_forbidden"
+            assert not services.execution.snapshot().active
+        finally:
+            writer.close()
+            await writer.wait_closed()
+            await server.stop()
+
+    asyncio.run(scenario())
 
 
 def test_saved_run_deduplicates_and_does_not_change_editor(services):

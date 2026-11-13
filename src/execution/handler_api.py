@@ -10,6 +10,7 @@ from typing import Any, Protocol, TypeVar
 from ..devices.runtime.errors import normalize_device_error
 from ..devices.runtime.models import DeviceErrorCategory
 from .control import ExecutionControl
+from ..domain.outputs import json_output
 
 
 ActionLog = Callable[[str, str], None]
@@ -47,6 +48,7 @@ class ActionResultCode(str, Enum):
     ACTION_TIMEOUT = "action_timeout"
     CONTROL_POLICY_MISMATCH = "control_policy_mismatch"
     INTERNAL_ERROR = "internal_error"
+    INVALID_OUTPUT = "invalid_output"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,8 +62,10 @@ class ActionHandlerResult:
     device_id: str = ""
     error_category: str = ""
     raw_error_code: str = ""
+    outputs: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "outputs", json_output(self.outputs))
         if self.status is ActionResultStatus.SUCCEEDED:
             if self.code is not ActionResultCode.SUCCESS:
                 raise ValueError(
@@ -86,6 +90,7 @@ class ActionHandlerResult:
         device_id: str = "",
         error_category: str = "",
         raw_error_code: str = "",
+        outputs: dict[str, Any] | None = None,
     ) -> ActionHandlerResult:
         return cls(
             status=ActionResultStatus.SUCCEEDED,
@@ -95,6 +100,7 @@ class ActionHandlerResult:
             device_id=device_id,
             error_category=error_category,
             raw_error_code=raw_error_code,
+            outputs=outputs if outputs is not None else {},
         )
 
     @classmethod
@@ -253,11 +259,13 @@ class ActionExecutionContext:
         message: str = "",
         operation: str = "",
         device_id: str = "",
+        outputs: dict[str, Any] | None = None,
     ) -> ActionHandlerResult:
         return ActionHandlerResult.succeeded(
             message=message,
             operation=operation,
             device_id=device_id,
+            outputs=outputs,
         )
 
     def failure(

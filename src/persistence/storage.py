@@ -217,6 +217,28 @@ class JsonCompositionRepository:
             requested_name = f"{requested_name}{WORKFLOW_FILE_SUFFIX}"
         return self._workflows_directory / requested_name
 
+    def update_workflow_properties(
+        self, workflow_name: str, new_name: str, document: WorkflowDocument,
+    ) -> str:
+        old_path = self._workflow_path(workflow_name)
+        new_path = self._workflow_path(new_name)
+        self._require_profile(document.robot_profile_id, workflow_name)
+        with self._lock:
+            if not old_path.is_file():
+                raise FileNotFoundError(old_path.name)
+            same_file = old_path.resolve() == new_path.resolve()
+            if new_path.exists() and not same_file:
+                raise FileExistsError(new_path.name)
+            write_json_atomic(new_path, document.to_dict())
+            if not same_file:
+                try:
+                    old_path.unlink()
+                except OSError:
+                    # Keep the original as authority if removing it failed.
+                    new_path.unlink()
+                    raise
+        return new_path.name
+
     def _workflow_draft_path(self, draft_name: str) -> Path:
         requested_name = self._plain_name(draft_name, "workflow draft")
         if not requested_name.endswith(WORKFLOW_DRAFT_FILE_SUFFIX):

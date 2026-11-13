@@ -299,6 +299,7 @@ def normalize_active_workflows(
             revision=document.revision,
             entries=entries,
             positions=document.position_map(),
+            allow_remote=document.allow_remote,
             robot_profile_id=document.robot_profile_id,
         )
         if normalized.to_dict() != document.to_dict():

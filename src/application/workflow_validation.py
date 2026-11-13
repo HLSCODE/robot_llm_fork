@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from ..domain.action_schema import validate_action_parameters
+from ..domain.execution_plan import ExecutionPlan
 from ..domain.workflow import (
     WorkflowActionNode,
     WorkflowDocument,
@@ -35,6 +36,7 @@ class WorkflowIssueCode(str, Enum):
     EXPANSION_LIMIT = "expansion_limit"
     NESTING_LIMIT = "nesting_limit"
     ROBOT_PROFILE_MISMATCH = "robot_profile_mismatch"
+    INVALID_OUTPUT = "invalid_output"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +118,11 @@ class WorkflowValidator:
                 f"工作流展开后包含 {expanded} 个步骤，超过限制 "
                 f"{self._max_expanded_steps}",
             ))
+        if not state.issues:
+            try:
+                ExecutionPlan.from_entries(document.to_entries())
+            except ValueError as error:
+                state.issues.append(WorkflowValidationIssue(WorkflowIssueCode.INVALID_OUTPUT, str(error), field="output"))
         return WorkflowValidationResult(tuple(state.issues), expanded)
 
     def _validate_sequence(

@@ -276,6 +276,7 @@ class WorkflowCompiler:
                 robot_profile_id=definition.robot_profile_id,
             ),
             status=SequenceItemStatus.PENDING,
+            output=node.output,
         )
 
     def _collect_mappings(

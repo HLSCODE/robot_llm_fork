@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Sequence
 from threading import RLock
 from uuid import uuid4
@@ -78,6 +78,7 @@ class WorkflowEditingSession:
         workflow_name: str,
         *,
         entries: Sequence[SequenceEntry] | None = None,
+        allow_remote: bool | None = None,
     ) -> tuple[str, WorkflowEditingState]:
         with self._lock:
             document = self._state.document
@@ -92,6 +93,7 @@ class WorkflowEditingSession:
             entries=document.to_entries() if entries is None else entries,
             robot_profile_id=self._composition.robot_profile_id,
             positions=document.position_map() if entries is None else {},
+            allow_remote=document.allow_remote if allow_remote is None else allow_remote,
         )
         stored_name, stored = self._composition.save_workflow(
             workflow_name,
@@ -109,6 +111,24 @@ class WorkflowEditingSession:
         with self._lock:
             document = self._state.document
         self._composition.save_workflow_draft(document)
+
+    def update_task_properties(
+        self, task_name: str, new_name: str, *, allow_remote: bool,
+        expected_revision: int, expected_workflow_id: str,
+    ) -> str:
+        with self._lock:
+            stored_name, stored = self._composition.update_task_properties(
+                task_name, new_name, allow_remote=allow_remote,
+                expected_revision=expected_revision, expected_workflow_id=expected_workflow_id,
+                origin="gui",
+            )
+            if self._state.workflow_name.removesuffix(".workflow.json") == task_name.removesuffix(".workflow.json"):
+                self._state = replace(
+                    self._state, workflow_name=stored_name,
+                    document=replace(self._state.document, name=stored.name,
+                                     revision=stored.revision, allow_remote=stored.allow_remote),
+                )
+        return stored_name
 
     def _set_state(
         self,

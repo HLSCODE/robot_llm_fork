@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import time
 from typing import Any
+from ..domain.outputs import RUN_OUTPUT_MAX_BYTES, json_output
 
 
 class ExecutionState(str, Enum):
@@ -58,6 +59,8 @@ class ExecutionSnapshot:
     raw_error_code: str = ""
     started_at: float | None = None
     finished_at: float | None = None
+    outputs: dict[str, Any] = field(default_factory=dict)
+    outputs_complete: bool = False
 
     @property
     def active(self) -> bool:
@@ -92,6 +95,11 @@ class EngineResult:
     error_device_id: str = ""
     error_category: str = ""
     raw_error_code: str = ""
+    outputs: dict[str, Any] = field(default_factory=dict)
+    outputs_complete: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "outputs", json_output(self.outputs, limit=RUN_OUTPUT_MAX_BYTES))
 
 
 class ExecutionRuntimeError(RuntimeError):

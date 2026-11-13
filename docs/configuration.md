@@ -277,7 +277,7 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `tcp_max_connections` / `tcp_max_requests_per_second` | `16` / `30` | TCP 最大连接数及单连接请求速率。 |
 | `tcp_idle_timeout_seconds` / `tcp_send_timeout_seconds` | `300.0` / `2.0` 秒 | 空闲和发送超时；断线不取消已受理任务。 |
 | `tcp_tls_certificate_path` / `tcp_tls_private_key_path` | 空 | TCP TLS 证书链和私钥路径，须成对配置。 |
-| `task_allowlist` | 空数组 | 远程任务白名单，空表示当前 Profile 所有已保存任务，不接受路径。 |
+| `task_allowlist` | 空数组 | 远程任务附加白名单；任务必须先在保存窗口开启“允许远程调用”。空数组不追加限制，非空再按名称筛选，不接受路径。 |
 | `task_history_max_records` | `10000` | 持久化回执上限，满时拒绝新任务。 |
 | `task_history_retention_seconds` | `604800.0` 秒 | 非活动运行回执保留期；过期后不保证请求 ID 去重。 |
 | `websocket_enabled` | `true` | 是否随主应用启动 WebSocket 附加服务。只使用桌面端时可关闭。 |

@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import Mapping
 
 from ..configuration.settings import VisionSettings
+from ..domain.outputs import json_output
 
 
 class VisionOperation(StrEnum):
@@ -24,8 +25,10 @@ class VisionPipelineResult:
     successful: bool
     frames_processed: int
     inference_count: int
+    outputs: dict[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "outputs", json_output(self.outputs))
         if self.frames_processed < 0:
             raise ValueError("vision frames_processed must be non-negative")
         if self.inference_count < 0:
@@ -67,6 +70,10 @@ class VisionResult:
     message: str
     artifacts: tuple[VisionArtifact, ...] = ()
     metadata: Mapping[str, object] = field(default_factory=lambda: MappingProxyType({}))
+    outputs: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "outputs", json_output(self.outputs))
 
     @property
     def successful(self) -> bool:

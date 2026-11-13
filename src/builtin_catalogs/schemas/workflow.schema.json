@@ -13,6 +13,7 @@
     "workflow_id": {"type": "string", "minLength": 1},
     "name": {"type": "string", "minLength": 1},
     "revision": {"type": "integer", "minimum": 0},
+    "allow_remote": {"type": "boolean", "default": false},
     "root": {"$ref": "#/$defs/sequence"},
     "presentation": {
       "type": "object",
@@ -60,6 +61,17 @@
         "kind": {"const": "action"},
         "node_id": {"type": "string", "minLength": 1},
         "item_uuid": {"type": "string", "minLength": 1},
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": {
+            "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"},
+            "field": {"type": "string", "maxLength": 256, "pattern": "^$|^/"},
+            "mode": {"enum": ["single", "all", "last"]},
+            "required": {"type": "boolean"}
+          }
+        },
         "definition": {
           "type": "object",
           "additionalProperties": false,

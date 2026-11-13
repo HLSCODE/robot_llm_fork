@@ -9,6 +9,8 @@
     <file alias="chevron-right-on-dark.svg">assets/icons/chevron-right-on-dark.svg</file>
     <file alias="collapse-all.svg">assets/icons/collapse-all.svg</file>
     <file alias="tasks.svg">assets/icons/tasks.svg</file>
+    <file alias="task-remote.svg">assets/icons/task-remote.svg</file>
+    <file alias="task-local.svg">assets/icons/task-local.svg</file>
     <file alias="actions.svg">assets/icons/actions.svg</file>
     <file alias="action-move.svg">assets/icons/action-move.svg</file>
     <file alias="action-arm-move.svg">assets/icons/action-arm-move.svg</file>

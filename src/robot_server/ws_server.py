@@ -461,12 +461,14 @@ class RobotWebSocketServer:
         elif event.change_type is CompositionChangeType.ACTIONS:
             payload["actions"] = [action.to_dict() for action in composition.list_actions()]
         elif event.change_type is CompositionChangeType.TASKS:
+            allowed = set(self._services.saved_tasks.list_tasks())
             payload["tasks"] = [
                 {
                     "name": summary.name,
                     "steps": summary.step_count,
                 }
                 for summary in composition.list_tasks()
+                if summary.name in allowed
             ]
         return payload
 
@@ -1389,10 +1391,18 @@ class RobotWebSocketServer:
 
     async def _broadcast(self, data: dict) -> None:
         """广播消息到所有已连接的客户端"""
-        disconnected = await self._deliver(
-            data,
-            tuple(self._clients),
-        )
+        clients = tuple(self._clients)
+        if data.get("outputs") and self._security_enabled:
+            authenticated = tuple(client for client in clients
+                                  if self._access.session(self._client_id(client)).authenticated)
+            public = tuple(client for client in clients if client not in authenticated)
+            disconnected = await self._deliver(data, authenticated)
+            # Keep legacy public status events, but never expose newly exported
+            # business measurements to unauthenticated observers.
+            redacted = {**data, "outputs": {}, "outputs_complete": False}
+            disconnected = (*disconnected, *await self._deliver(redacted, public))
+        else:
+            disconnected = await self._deliver(data, clients)
         for client in disconnected:
             await self._unregister_client(
                 client,

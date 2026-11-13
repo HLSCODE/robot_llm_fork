@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Iterator, Sequence, TypeAlias
+from .outputs import validate_output_specs
 
 from .models import (
     ActionDefinition,
@@ -84,6 +85,7 @@ class ExecutionPlan:
         )
         if expanded_steps > 10_000:
             raise ValueError("execution plan exceeds 10000 expanded steps")
+        validate_output_specs((identity.node_id, item.output) for identity, item in iter_execution_steps(self))
 
     @classmethod
     def from_entries(cls, entries: Sequence[SequenceEntry]) -> ExecutionPlan:
@@ -247,6 +249,7 @@ def _clone_item(item: SequenceItem) -> SequenceItem:
         uuid=item.uuid,
         definition=ActionDefinition.from_dict(deepcopy(item.definition.to_dict())),
         status=SequenceItemStatus.PENDING,
+        output=item.output,
     )
 
 

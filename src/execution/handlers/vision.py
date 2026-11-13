@@ -12,6 +12,7 @@ from ...devices import (
 )
 from ...devices.runtime.ids import CAMERA, ROBOT_SYSTEM
 from ...vision.models import VisionResult
+from ...domain.outputs import OutputDataError
 from ..handler_api import (
     ActionCancelledError,
     ActionExecutionContext,
@@ -120,6 +121,8 @@ class VisionCaptureActionHandler:
                 )
             except (ActionCancelledError, ActionTimeoutError):
                 raise
+            except OutputDataError as exc:
+                return context.failure(ActionResultCode.INVALID_OUTPUT, str(exc), operation=self._OPERATION, device_id=CAMERA)
             except Exception as exc:
                 message = f"视觉抓取失败: {exc}"
                 return context.failure(
@@ -140,6 +143,7 @@ class VisionCaptureActionHandler:
             return context.success(
                 operation=self._OPERATION,
                 device_id=CAMERA,
+                outputs=dict(result.outputs),
             )
         finally:
             if managed_camera and self._camera_runtime is not None:
@@ -210,6 +214,8 @@ class VisionRelocalizationActionHandler:
                 )
             except (ActionCancelledError, ActionTimeoutError):
                 raise
+            except OutputDataError as exc:
+                return context.failure(ActionResultCode.INVALID_OUTPUT, str(exc), operation=self._OPERATION, device_id=CAMERA)
             except ValueError as exc:
                 message = f"视觉重定位配置无效: {exc}"
                 return context.failure(
@@ -238,6 +244,7 @@ class VisionRelocalizationActionHandler:
             return context.success(
                 operation=self._OPERATION,
                 device_id=CAMERA,
+                outputs=dict(result.outputs),
             )
         finally:
             if managed_camera and self._camera_runtime is not None:

@@ -4,6 +4,7 @@ from enum import Enum
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 from uuid import uuid4
+from .outputs import NodeOutput
 
 
 class ActionType(Enum):
@@ -59,12 +60,14 @@ class SequenceItem:
     uuid: str
     definition: ActionDefinition
     status: SequenceItemStatus = SequenceItemStatus.PENDING
+    output: NodeOutput | None = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "uuid": self.uuid,
             "definition": self.definition.to_dict(),
-            "status": self.status.value
+            "status": self.status.value,
+            **({"output": self.output.to_dict()} if self.output is not None else {}),
         }
 
     @classmethod
@@ -72,7 +75,8 @@ class SequenceItem:
         return cls(
             uuid=data["uuid"],
             definition=ActionDefinition.from_dict(data["definition"]),
-            status=SequenceItemStatus(data.get("status", "PENDING"))
+            status=SequenceItemStatus(data.get("status", "PENDING")),
+            output=NodeOutput.from_dict(data["output"]) if data.get("output") is not None else None,
         )
 
     @classmethod

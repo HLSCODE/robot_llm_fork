@@ -12,7 +12,7 @@ from ...observability.crash_diagnostics import record_failure, record_stage
 from ...observability.logging_config import log_context
 
 from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QCursor, QIcon
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QCursor
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -61,7 +61,7 @@ from ..views.log_widget import LogFilter, LogWidget
 from ..views.ai_assistant import AIAssistantWidget
 from ..bridges.composition import CompositionBridge
 from ..views.device import DeviceControlView, DeviceHealthView, DevicePoseView
-from ..views.dialogs import ActionConfigDialog
+from ..views.dialogs import ActionConfigDialog, NodeInspectionDialog, ask_workflow_save, ask_task_properties
 from ..views.action_picker import ActionPickerDialog
 from ..bridges.notifications import GuiNotificationCenter
 from .startup import (
@@ -82,7 +82,7 @@ from ..views.workflow import (
 from ..views.workflow_canvas import WorkflowCanvasWidget
 from ..views.workbench import WorkbenchPage, WorkbenchView
 from ..theme import ThemeController, ThemeMode, ThemeTransitionOverlay
-from ..icons import IconName, themed_icon
+from ..icons import IconName
 from ..shortcuts import ShortcutRegistry
 from ..workbench_layout import WorkbenchLayoutStore
 from ..window_chrome import ApplicationTitleBar, RoundedMainWindow
@@ -191,6 +191,7 @@ class MainWindow(RoundedMainWindow):
                 revision=state.document.revision,
                 entries=initial_entries,
                 robot_profile_id=state.document.robot_profile_id,
+                allow_remote=state.document.allow_remote,
             )
             self._services.workflow_editing.replace_document(document)
         self._render_sequence(
@@ -507,6 +508,7 @@ class MainWindow(RoundedMainWindow):
         self.task_library_view.task_insert_requested.connect(
             self.insert_selected_task
         )
+        self.task_library_view.task_properties_requested.connect(self.edit_selected_task_properties)
 
         workflow = self.workflow_view
         workflow.save_requested.connect(self.save_task)
@@ -1245,6 +1247,7 @@ class MainWindow(RoundedMainWindow):
                 revision=state.document.revision,
                 entries=self._services.composition.sequence_entries(),
                 robot_profile_id=state.document.robot_profile_id,
+                allow_remote=state.document.allow_remote,
             )
             self._services.workflow_editing.replace_document(document)
             self._render_sequence(document.to_entries())
@@ -1257,6 +1260,7 @@ class MainWindow(RoundedMainWindow):
             revision=state.document.revision,
             entries=self.workflow_view.sequence_list.get_entries(),
             positions=state.document.position_map(),
+            allow_remote=state.document.allow_remote,
             robot_profile_id=state.document.robot_profile_id,
         )
         self._services.workflow_editing.replace_document(document)
@@ -1394,22 +1398,25 @@ class MainWindow(RoundedMainWindow):
             task_name = summary.name
             display_name = _display_task_name(task_name)
             step_count = summary.step_count
+            access_label = "远程" if summary.allow_remote else "仅本地"
             item = QListWidgetItem(f"{display_name} ({step_count} 步)")
             item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             item.setSizeHint(QSize(100, 40))
-            item.setIcon(self._create_task_list_icon())
-            item.setToolTip(f"{display_name}\n步骤数: {step_count}\n拖到组合计划中")
+            self.task_library_view.task_library_list.set_task_access(
+                item, allow_remote=summary.allow_remote,
+            )
+            access_description = (
+                "允许远程调用：是（仍受认证、控制权及服务端白名单限制）"
+                if summary.allow_remote
+                else "允许远程调用：否（仅本地使用，不对远程客户端开放）"
+            )
+            item.setToolTip(
+                f"{display_name}\n步骤数: {step_count}\n{access_description}"
+                "\n右键“编辑任务属性”可修改名称与远程调用设置。\n拖到组合计划中"
+            )
+            item.setData(Qt.ItemDataRole.AccessibleTextRole, f"{display_name}，{access_label}，{step_count} 步")
             item.setData(Qt.ItemDataRole.UserRole, task_name)
             self.task_library_view.task_library_list.addItem(item)
-
-    def _create_task_list_icon(self) -> QIcon:
-        task_list = self.task_library_view.task_library_list
-        return themed_icon(
-            task_list,
-            IconName.WORKFLOW,
-            size=20,
-            color=task_list.palette().highlight().color(),
-        )
 
     def save_task(self) -> None:
         state = self._services.workflow_editing.snapshot()
@@ -1424,11 +1431,10 @@ class MainWindow(RoundedMainWindow):
             or state.workflow_name.removesuffix(".workflow.json")
             or "未命名任务"
         )
-        name, accepted = ask_text(
+        name, allow_remote, accepted = ask_workflow_save(
             self,
-            "另存为流程",
-            "流程名称（同名将覆盖）：",
             text=default_name,
+            allow_remote=state.document.allow_remote if scope_name is None else False,
         )
         if not accepted:
             return
@@ -1440,6 +1446,7 @@ class MainWindow(RoundedMainWindow):
             stored_name, saved_state = self._services.workflow_editing.save_as(
                 workflow_name,
                 entries=entries if scope_name is not None else None,
+                allow_remote=allow_remote,
             )
         except CompositionRevisionConflict:
             self._notifications.warning("保存失败：该任务已被其他入口修改")
@@ -1450,6 +1457,42 @@ class MainWindow(RoundedMainWindow):
         if scope_name is not None:
             self._render_sequence(saved_state.document.to_entries())
         self._notifications.info(f"任务已保存: {stored_name}")
+
+    def edit_selected_task_properties(self) -> None:
+        task_name = self._selected_task_name()
+        if task_name is None:
+            return
+        try:
+            document = self._services.composition.load_workflow(task_name)
+            name, allow_remote, accepted = ask_task_properties(
+                self, text=_display_task_name(task_name), allow_remote=document.allow_remote,
+            )
+            if not accepted:
+                return
+            stored_name = self._services.workflow_editing.update_task_properties(
+                task_name, name, allow_remote=allow_remote,
+                expected_revision=document.revision, expected_workflow_id=document.workflow_id,
+            )
+        except FileExistsError:
+            self._notifications.warning("修改失败：同名任务已存在，请使用其他名称")
+            return
+        except FileNotFoundError:
+            self._notifications.warning("修改失败：任务已不存在，请刷新列表")
+            return
+        except (ValueError, CompositionRevisionConflict) as error:
+            self._notifications.warning(f"修改失败：{error}")
+            return
+        except OSError as error:
+            logger.exception("Failed to update task properties: task=%s", task_name)
+            self._notifications.warning(f"修改失败：无法写入任务文件（{error}）")
+            return
+        self.refresh_task_library()
+        task_list = self.task_library_view.task_library_list
+        for index in range(task_list.count()):
+            if task_list.item(index).data(Qt.ItemDataRole.UserRole) == stored_name:
+                task_list.setCurrentRow(index)
+                break
+        self._notifications.info(f"任务属性已更新: {stored_name}")
 
     def open_selected_task(self) -> None:
         task_name = self._selected_task_name()
@@ -1906,6 +1949,12 @@ class MainWindow(RoundedMainWindow):
         return rows
 
     def edit_sequence_item(self) -> None:
+        if self._execution_view_model.snapshot().active:
+            entry = self.workflow_view.sequence_list.current_entry()
+            if entry is not None:
+                name = entry.definition.name if isinstance(entry, SequenceItem) else "流程容器"
+                NodeInspectionDialog(name, entry.to_dict(), self).exec()
+            return
         seq_item = self.workflow_view.sequence_list.current_sequence_item()
         if seq_item is None:
             loop = self.workflow_view.sequence_list.current_loop_block()
@@ -1946,13 +1995,15 @@ class MainWindow(RoundedMainWindow):
             camera_choices_reader=self._camera_choices,
             tool_choices_reader=self._services.manual_control.end_effectors.choices,
             tool_description_reader=self._services.manual_control.end_effectors.describe_tool,
+            allow_node_output=True,
+            node_output=seq_item.output,
         )
         if not dialog.exec():
             return
 
         updated_definition = dialog.get_action_definition()
         self.workflow_view.sequence_list.update_current_action(
-            updated_definition
+            updated_definition, output=dialog.get_node_output(), update_output=True,
         )
         self._notifications.info(f"已更新序列动作: {updated_definition.name}")
 

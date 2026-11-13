@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -37,6 +38,8 @@ from ...domain.action_schema import (
 )
 from ...domain.arm_names import normalize_arm_name
 from ...domain.models import ActionDefinition, ActionType
+from ...domain.outputs import NodeOutput, supports_action_output
+from .node_output import NodeOutputEditor
 from ...application.end_effectors import ToolPresentation
 from ..app_dialogs import (
     AppDialog,
@@ -48,6 +51,64 @@ from ..application_lifecycle import register_gui_background_thread
 from ..icons import IconName
 from ..theme import set_theme_role
 from ..toolbars import IconToolButton
+
+
+class WorkflowSaveDialog(AppDialog):
+    """Name a workflow and explicitly opt it into remote task execution."""
+
+    def __init__(self, name: str, *, allow_remote: bool = False, parent: QWidget | None = None,
+                 edit_properties: bool = False) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("编辑任务属性" if edit_properties else "另存为流程")
+        self.setMinimumWidth(380)
+        self.content_layout.addWidget(QLabel("流程名称：" if edit_properties else "流程名称（同名将覆盖）："))
+        self.name_edit = QLineEdit(name)
+        self.name_edit.selectAll()
+        self.content_layout.addWidget(self.name_edit)
+        self.allow_remote_checkbox = QCheckBox("允许远程调用")
+        self.allow_remote_checkbox.setChecked(allow_remote)
+        self.allow_remote_checkbox.setToolTip("启用后，远程客户端才能发现和执行此任务；仍需通过服务端权限与设备检查。")
+        self.content_layout.addWidget(self.allow_remote_checkbox)
+        buttons = QHBoxLayout()
+        cancel = QPushButton("取消")
+        cancel.clicked.connect(self.reject)
+        save = QPushButton("保存")
+        save.setDefault(True)
+        set_theme_role(save, "primary")
+        save.clicked.connect(self.accept)
+        buttons.addStretch()
+        buttons.addWidget(cancel)
+        buttons.addWidget(save)
+        self.content_layout.addLayout(buttons)
+
+
+def ask_workflow_save(parent: QWidget, *, text: str, allow_remote: bool) -> tuple[str, bool, bool]:
+    dialog = WorkflowSaveDialog(text, allow_remote=allow_remote, parent=parent)
+    accepted = bool(dialog.exec())
+    return dialog.name_edit.text(), dialog.allow_remote_checkbox.isChecked(), accepted
+
+
+def ask_task_properties(parent: QWidget, *, text: str, allow_remote: bool) -> tuple[str, bool, bool]:
+    dialog = WorkflowSaveDialog(text, allow_remote=allow_remote, parent=parent, edit_properties=True)
+    accepted = bool(dialog.exec())
+    return dialog.name_edit.text(), dialog.allow_remote_checkbox.isChecked(), accepted
+
+
+class NodeInspectionDialog(AppDialog):
+    """Inspect a running node without creating editable or device-reading controls."""
+
+    def __init__(self, name: str, details: dict[str, Any], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(f"查看节点 · {name}")
+        self.resize(560, 440)
+        self.content_layout.addWidget(QLabel("执行中仅供查看，不可修改参数。"))
+        self.details = QPlainTextEdit()
+        self.details.setReadOnly(True)
+        self.details.setPlainText(json.dumps(details, ensure_ascii=False, indent=2))
+        self.content_layout.addWidget(self.details, stretch=1)
+        close = QPushButton("关闭")
+        close.clicked.connect(self.accept)
+        self.content_layout.addWidget(close)
 
 
 class ActionPreviewDialog(AppDialog):
@@ -1267,6 +1328,8 @@ class ActionConfigDialog(AppDialog):
         camera_choices_reader: CameraChoicesReader | None = None,
         tool_choices_reader: Callable[[str, str | None], list[tuple[str, str]]] | None = None,
         tool_description_reader: Callable[[str], ToolPresentation | None] | None = None,
+        allow_node_output: bool = False,
+        node_output: NodeOutput | None = None,
     ) -> None:
         super().__init__(parent)
         self.action_type = action_type
@@ -1275,6 +1338,8 @@ class ActionConfigDialog(AppDialog):
         current_name = str(self.action_data.get("name", ""))
         self._existing_names.discard(current_name)
         self._definition: ActionDefinition | None = None
+        self._node_output = node_output
+        self.output_editor: NodeOutputEditor | None = None
 
         schema = get_action_schema()[action_type.value]
         self.setWindowTitle(f"配置 {schema.get('label', action_type.value)} 动作")
@@ -1305,6 +1370,10 @@ class ActionConfigDialog(AppDialog):
             tool_description_reader=tool_description_reader,
         )
         layout.addWidget(self.action_form)
+        if allow_node_output and (supports_action_output(action_type) or node_output is not None):
+            self.output_editor = NodeOutputEditor(node_output, self.content)
+            self.output_editor.content_changed.connect(self._schedule_content_resize)
+            layout.addWidget(self.output_editor)
         self.action_form.content_size_changed.connect(
             self._schedule_content_resize
         )
@@ -1370,7 +1439,19 @@ class ActionConfigDialog(AppDialog):
                 self.action_data.get("robot_profile_id", "unscoped")
             ),
         )
+        if self.output_editor is not None:
+            try:
+                self._node_output = self.output_editor.value()
+            except ValueError as error:
+                self._definition = None
+                show_warning(self, "输出设置错误", str(error))
+                return
         self.accept()
+
+    def get_node_output(self) -> NodeOutput | None:
+        if self._definition is None:
+            raise RuntimeError("node output is only available after acceptance")
+        return self._node_output
 
     def _set_name_invalid(self, invalid: bool) -> None:
         _set_widget_validation_state(self.name_input, invalid)

@@ -41,6 +41,15 @@ class GuiIconTests(unittest.TestCase):
             ):
                 self.assertFalse(icon.pixmap(size).isNull(), (resource, size))
 
+    def test_remote_and_local_task_icons_have_distinct_shapes(self) -> None:
+        widget = QWidget()
+        for color in (QColor("#ffffff"), QColor("#172033")):
+            remote = themed_icon(widget, IconName.TASK_REMOTE, color=color).pixmap(20, 20).toImage()
+            local = themed_icon(widget, IconName.TASK_LOCAL, color=color).pixmap(20, 20).toImage()
+            self.assertFalse(remote.isNull())
+            self.assertFalse(local.isNull())
+            self.assertNotEqual(remote, local)
+
     def test_monochrome_svg_uses_requested_palette_color(self) -> None:
         widget = QWidget()
 

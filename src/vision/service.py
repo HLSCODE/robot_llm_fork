@@ -182,6 +182,12 @@ class VisionService:
                 else f"vision {operation.value} rejected"
             ),
             artifacts=artifacts,
+            outputs={
+                "frames_processed": pipeline_result.frames_processed,
+                "inference_count": pipeline_result.inference_count,
+                "duration_seconds": duration_seconds,
+                **pipeline_result.outputs,
+            },
             metadata=MappingProxyType(
                 {
                     "run_id": run.run_id,

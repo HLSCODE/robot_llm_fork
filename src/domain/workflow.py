@@ -8,6 +8,7 @@ import math
 from collections.abc import Callable
 from typing import Any, Mapping, Sequence, TypeAlias
 from uuid import uuid4
+from .outputs import NodeOutput
 
 from .models import (
     ActionDefinition,
@@ -72,6 +73,7 @@ class WorkflowActionNode:
     node_id: str
     item_uuid: str
     definition: ActionDefinition
+    output: NodeOutput | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.node_id, "action node_id")
@@ -85,6 +87,7 @@ class WorkflowActionNode:
             "node_id": self.node_id,
             "item_uuid": self.item_uuid,
             "definition": deepcopy(self.definition.to_dict()),
+            **({"output": self.output.to_dict()} if self.output is not None else {}),
         }
 
     @classmethod
@@ -97,6 +100,7 @@ class WorkflowActionNode:
                 node_id=data["node_id"],
                 item_uuid=data["item_uuid"],
                 definition=ActionDefinition.from_dict(dict(raw_definition)),
+                output=NodeOutput.from_dict(data["output"]) if data.get("output") is not None else None,
             )
         except KeyError as exc:
             raise WorkflowDocumentError(
@@ -348,8 +352,11 @@ class WorkflowDocument:
     robot_profile_id: str
     root: WorkflowSequence
     positions: tuple[tuple[str, CanvasPosition], ...] = ()
+    allow_remote: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.allow_remote, bool):
+            raise TypeError("workflow allow_remote must be a boolean")
         _require_text(self.workflow_id, "workflow_id")
         _require_text(self.name, "workflow name")
         _require_text(self.robot_profile_id, "robot_profile_id")
@@ -377,6 +384,7 @@ class WorkflowDocument:
             "name": self.name,
             "revision": self.revision,
             "robot_profile_id": self.robot_profile_id,
+            "allow_remote": self.allow_remote,
             "root": self.root.to_dict(),
             "presentation": {
                 "positions": {
@@ -415,6 +423,7 @@ class WorkflowDocument:
                 name=data["name"],
                 revision=data["revision"],
                 robot_profile_id=data["robot_profile_id"],
+                allow_remote=data.get("allow_remote", False),
                 root=WorkflowSequence.from_dict(raw_root),
                 positions=tuple(
                     (node_id, CanvasPosition.from_dict(position))
@@ -440,6 +449,7 @@ class WorkflowDocument:
         entries: Sequence[SequenceEntry],
         robot_profile_id: str = "unscoped",
         positions: Mapping[str, CanvasPosition] | None = None,
+        allow_remote: bool = False,
     ) -> WorkflowDocument:
         nodes: list[WorkflowNode] = []
         for entry in entries:
@@ -490,6 +500,7 @@ class WorkflowDocument:
             revision=revision,
             robot_profile_id=robot_profile_id,
             root=WorkflowSequence(tuple(nodes)),
+            allow_remote=allow_remote,
             positions=tuple(
                 (node.node_id, selected_positions[node.node_id])
                 for node in nodes
@@ -577,6 +588,7 @@ def clone_sequence_entry(entry: SequenceEntry) -> SequenceEntry:
             uuid=entry.uuid,
             definition=ActionDefinition.from_dict(deepcopy(entry.definition.to_dict())),
             status=SequenceItemStatus.PENDING,
+            output=entry.output,
         )
     raise TypeError(f"unsupported sequence entry: {type(entry).__name__}")
 
@@ -611,6 +623,7 @@ def _clone_entry_with_new_ids(
                 deepcopy(entry.definition.to_dict())
             ),
             status=SequenceItemStatus.PENDING,
+            output=entry.output,
         )
     if isinstance(entry, LoopBlock):
         return LoopBlock(
@@ -666,6 +679,7 @@ def _action_node(item: SequenceItem, *, node_id: str) -> WorkflowActionNode:
         node_id=node_id,
         item_uuid=item.uuid,
         definition=ActionDefinition.from_dict(deepcopy(item.definition.to_dict())),
+        output=item.output,
     )
 
 
@@ -674,6 +688,7 @@ def _sequence_item(node: WorkflowActionNode) -> SequenceItem:
         uuid=node.item_uuid,
         definition=ActionDefinition.from_dict(deepcopy(node.definition.to_dict())),
         status=SequenceItemStatus.PENDING,
+        output=node.output,
     )
 
 
@@ -682,6 +697,7 @@ def _clone_item(item: SequenceItem) -> SequenceItem:
         uuid=item.uuid,
         definition=ActionDefinition.from_dict(deepcopy(item.definition.to_dict())),
         status=SequenceItemStatus.PENDING,
+        output=item.output,
     )
 
 

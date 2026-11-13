@@ -47,6 +47,7 @@ class CompositionEvent:
 class TaskSummary:
     name: str
     step_count: int
+    allow_remote: bool = False
 
 
 class CompositionRevisionConflict(RuntimeError):
@@ -81,6 +82,10 @@ class CompositionRepository(Protocol):
     ) -> str: ...
 
     def delete_workflow(self, workflow_name: str) -> bool: ...
+
+    def update_workflow_properties(
+        self, workflow_name: str, new_name: str, document: WorkflowDocument,
+    ) -> str: ...
 
     def rename_workflow(
         self,
@@ -392,6 +397,7 @@ class CompositionService:
                     TaskSummary(
                         name=task_name,
                         step_count=len(_flatten_entries(entries)),
+                        allow_remote=document.allow_remote,
                     )
                 )
             return tuple(summaries)
@@ -510,6 +516,26 @@ class CompositionService:
             )
         self._notify(event)
         return names
+
+    def update_task_properties(
+        self, task_name: str, new_name: str, *, allow_remote: bool,
+        expected_revision: int, expected_workflow_id: str, origin: str,
+    ) -> tuple[str, WorkflowDocument]:
+        normalized = new_name.strip().removesuffix(".workflow.json")
+        if not normalized:
+            raise ValueError("流程名称不能为空")
+        with self._lock:
+            current = self._repository.load_workflow(task_name)
+            if current is None:
+                raise FileNotFoundError(task_name)
+            if current.revision != expected_revision or current.workflow_id != expected_workflow_id:
+                raise CompositionRevisionConflict("任务已被其他入口修改，请重新打开属性")
+            updated = replace(current, name=normalized, allow_remote=allow_remote,
+                              revision=current.revision + 1)
+            stored_name = self._repository.update_workflow_properties(task_name, normalized, updated)
+            event = self._next_event_unlocked(CompositionChangeType.TASKS, origin)
+        self._notify(event)
+        return stored_name, _clone_workflow(updated)
 
     def list_workflows(self) -> tuple[str, ...]:
         with self._lock:
@@ -714,6 +740,7 @@ class CompositionService:
             revision=revision,
             entries=entries,
             robot_profile_id=self._robot_profile_id,
+            allow_remote=current.allow_remote if current is not None else False,
         )
         return self._repository.save_workflow(task_name, document)
 
@@ -831,6 +858,7 @@ def _profiled_workflow(
         entries=entries,
         robot_profile_id=robot_profile_id,
         positions=document.position_map(),
+        allow_remote=document.allow_remote,
     )
 
 

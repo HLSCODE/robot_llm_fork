@@ -7,6 +7,7 @@ from PySide6.QtGui import QAction, QDrag
 from PySide6.QtWidgets import (
     QApplication,
     QListWidget,
+    QListWidgetItem,
     QMenu,
     QVBoxLayout,
     QWidget,
@@ -23,6 +24,8 @@ from ..toolbars import PaneHeader
 
 
 class TaskLibraryListWidget(QListWidget):
+    _ALLOW_REMOTE_ROLE = Qt.ItemDataRole.UserRole + 1
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setDragEnabled(True)
@@ -35,6 +38,19 @@ class TaskLibraryListWidget(QListWidget):
     def set_canvas_scale_provider(self, provider: Callable[[], float]) -> None:
         self._canvas_scale_provider = provider
 
+    def set_task_access(self, item: QListWidgetItem, *, allow_remote: bool) -> None:
+        item.setData(self._ALLOW_REMOTE_ROLE, allow_remote)
+        self._refresh_task_icon(item)
+
+    def _refresh_task_icon(self, item: QListWidgetItem) -> None:
+        allow_remote = item.data(self._ALLOW_REMOTE_ROLE) is True
+        item.setIcon(themed_icon(
+            self,
+            IconName.TASK_REMOTE if allow_remote else IconName.TASK_LOCAL,
+            size=20,
+            color=self.palette().highlight().color(),
+        ))
+
     def changeEvent(self, event: QEvent) -> None:  # noqa: N802
         super().changeEvent(event)
         if event.type() not in {
@@ -42,11 +58,8 @@ class TaskLibraryListWidget(QListWidget):
             QEvent.Type.ApplicationPaletteChange,
         }:
             return
-        color = QApplication.palette().highlight().color()
         for index in range(self.count()):
-            self.item(index).setIcon(
-                themed_icon(self, IconName.WORKFLOW, size=20, color=color)
-            )
+            self._refresh_task_icon(self.item(index))
 
     def startDrag(self, supported_actions: Qt.DropAction) -> None:  # noqa: N802
         del supported_actions
@@ -66,7 +79,7 @@ class TaskLibraryListWidget(QListWidget):
             self,
             title=current_item.text(),
             subtitle="已保存任务 · 拖入画布",
-            icon=themed_icon(self, IconName.WORKFLOW, size=20, color=accent),
+            icon=current_item.icon(),
             accent=accent,
             canvas_scale=self._canvas_scale_provider(),
         )
@@ -199,6 +212,7 @@ class ActionLibraryView(QWidget):
 class TaskLibraryView(QWidget):
     task_open_requested = Signal()
     task_insert_requested = Signal()
+    task_properties_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -210,6 +224,9 @@ class TaskLibraryView(QWidget):
             IconName.OPEN,
             "打开选中任务",
             self.task_open_requested.emit,
+        )
+        self.properties_button = header.add_action(
+            IconName.EDIT, "编辑任务属性", self.task_properties_requested.emit,
         )
         self.insert_button = header.add_action(
             IconName.INSERT,
@@ -228,16 +245,23 @@ class TaskLibraryView(QWidget):
         self.task_library_list.customContextMenuRequested.connect(
             self._show_context_menu
         )
+        self.properties_button.setEnabled(False)
+        self.task_library_list.itemSelectionChanged.connect(
+            lambda: self.properties_button.setEnabled(self.task_library_list.currentItem() is not None)
+        )
         layout.addWidget(self.task_library_list, stretch=1)
 
     def set_canvas_scale_provider(self, provider: Callable[[], float]) -> None:
         self.task_library_list.set_canvas_scale_provider(provider)
 
     def _show_context_menu(self, position: QPoint) -> None:
-        if self.task_library_list.itemAt(position) is None:
+        item = self.task_library_list.itemAt(position)
+        if item is None:
             return
+        self.task_library_list.setCurrentItem(item)
         menu = QMenu(self)
         menu.addAction("打开", self.task_open_requested.emit)
+        menu.addAction("编辑任务属性…", self.task_properties_requested.emit)
         menu.addAction("插入到当前任务", self.task_insert_requested.emit)
         menu.exec(self.task_library_list.viewport().mapToGlobal(position))
 

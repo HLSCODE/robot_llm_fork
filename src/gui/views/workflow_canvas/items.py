@@ -58,7 +58,6 @@ from .tokens import (
     LOOP_HEADER_HEIGHT,
     LOOP_NODE_WIDTH,
     LOOP_SECTION_GAP,
-    MAX_VISIBLE_LOOP_CHILDREN,
     PARALLEL_BRANCH_GAP,
     PARALLEL_BRANCH_HEADER_HEIGHT,
     PARALLEL_BRANCH_PADDING,
@@ -279,10 +278,7 @@ class WorkflowNodeItem(QGraphicsObject):
             )
         if not isinstance(self.entry, LoopBlock):
             return NODE_HEIGHT
-        visible_children = min(
-            len(self.entry.items),
-            MAX_VISIBLE_LOOP_CHILDREN,
-        )
+        visible_children = len(self.entry.items)
         children_height = visible_children * LOOP_CHILD_HEIGHT
         children_gaps = max(0, visible_children - 1) * LOOP_CHILD_GAP
         empty_body_height = 44.0 if visible_children == 0 else 0.0
@@ -576,7 +572,7 @@ class WorkflowNodeItem(QGraphicsObject):
         if isinstance(self.entry, LoopBlock):
             body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
             card_left = (LOOP_NODE_WIDTH - NODE_WIDTH) / 2.0
-            for index, _child in enumerate(self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]):
+            for index, _child in enumerate(self.entry.items):
                 child_rect = QRectF(
                     card_left,
                     body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP),
@@ -808,7 +804,7 @@ class WorkflowNodeItem(QGraphicsObject):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             "循环体",
         )
-        visible_children = loop.items[:MAX_VISIBLE_LOOP_CHILDREN]
+        visible_children = loop.items
         if visible_children:
             children_bottom = (
                 body_top
@@ -869,7 +865,7 @@ class WorkflowNodeItem(QGraphicsObject):
             if is_dragged_child:
                 painter.restore()
         if visible_children:
-            if self._editing_enabled and len(loop.items) <= MAX_VISIBLE_LOOP_CHILDREN:
+            if self._editing_enabled:
                 self._paint_insert_marker(
                     painter,
                     children_bottom + LOOP_SECTION_GAP / 2.0,
@@ -901,13 +897,6 @@ class WorkflowNodeItem(QGraphicsObject):
             Qt.AlignmentFlag.AlignCenter,
             "循环完成",
         )
-        if len(loop.items) > MAX_VISIBLE_LOOP_CHILDREN:
-            painter.setPen(secondary_text)
-            painter.drawText(
-                QRectF(card_left, footer_top - 30.0, NODE_WIDTH, 22.0),
-                Qt.AlignmentFlag.AlignCenter,
-                f"另有 {len(loop.items) - MAX_VISIBLE_LOOP_CHILDREN} 个动作",
-            )
         self._paint_loop_paths(painter, header_rect, footer_rect, control.path)
 
     @staticmethod
@@ -1298,15 +1287,13 @@ class WorkflowNodeItem(QGraphicsObject):
         )
 
     def _item_uuid_at(self, position: QPointF) -> str:
-        if not self._editing_enabled:
-            return self.entry.uuid
         if isinstance(self.entry, ParallelBlock):
             target = self.parallel_child_at(position)
             return target[1] if target is not None else self.entry.uuid
         if not isinstance(self.entry, LoopBlock):
             return self.entry.uuid
         body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
-        for index, child in enumerate(self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]):
+        for index, child in enumerate(self.entry.items):
             child_top = body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP)
             if child_top <= position.y() <= child_top + LOOP_CHILD_HEIGHT:
                 return child.uuid
@@ -1317,7 +1304,7 @@ class WorkflowNodeItem(QGraphicsObject):
         if isinstance(self.entry, LoopBlock):
             body_top = LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
             card_left = (LOOP_NODE_WIDTH - NODE_WIDTH) / 2.0
-            for index, child in enumerate(self.entry.items[:MAX_VISIBLE_LOOP_CHILDREN]):
+            for index, child in enumerate(self.entry.items):
                 child_rect = QRectF(
                     card_left,
                     body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP),
@@ -1422,7 +1409,7 @@ class WorkflowNodeItem(QGraphicsObject):
         )
 
     def _loop_insertion_index_at(self, position: QPointF) -> int | None:
-        if not isinstance(self.entry, LoopBlock):
+        if not self._editing_enabled or not isinstance(self.entry, LoopBlock):
             return None
         if abs(position.x() - LOOP_NODE_WIDTH / 2.0) > 24.0:
             return None
@@ -1430,9 +1417,9 @@ class WorkflowNodeItem(QGraphicsObject):
         insertion_centers = [body_top - LOOP_SECTION_GAP / 2.0]
         insertion_centers.extend(
             body_top + index * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP) - LOOP_CHILD_GAP / 2.0
-            for index in range(1, min(len(self.entry.items), MAX_VISIBLE_LOOP_CHILDREN))
+            for index in range(1, len(self.entry.items))
         )
-        if 0 < len(self.entry.items) <= MAX_VISIBLE_LOOP_CHILDREN:
+        if self.entry.items:
             insertion_centers.append(
                 body_top
                 + len(self.entry.items) * LOOP_CHILD_HEIGHT

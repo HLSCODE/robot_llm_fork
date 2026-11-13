@@ -94,7 +94,7 @@ class TaskApi:
         session = self.access.authorize(request.client_id, level)
         principal = session.principal or request.client_id
         if command == "task.list":
-            return {"tasks": list(self.tasks.list_tasks())}
+            return {"tasks": [name.removesuffix(".workflow.json") for name in self.tasks.list_tasks()]}
         if command == "task.run":
             return self.tasks.run_task(
                 parameters.get("task", ""),

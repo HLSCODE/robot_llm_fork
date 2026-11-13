@@ -209,26 +209,67 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         opened = self.services.workflow_editing.open("startup-visible")
         self.window._render_sequence(opened.document.to_entries())
         with patch(
-            "src.gui.controllers.main_window.ask_text",
-            return_value=("save-as-smoke", True),
+            "src.gui.controllers.main_window.ask_workflow_save",
+            return_value=("save-as-smoke", True, True),
         ) as name_dialog:
             self.window.save_task()
+            self.window._publish_current_sequence()
             self.window.save_task()
 
         self.assertEqual(2, name_dialog.call_count)
         self.assertEqual("startup-visible", name_dialog.call_args_list[0].kwargs["text"])
         self.assertEqual("save-as-smoke", name_dialog.call_args_list[1].kwargs["text"])
+        self.assertFalse(name_dialog.call_args_list[0].kwargs["allow_remote"])
+        self.assertTrue(name_dialog.call_args_list[1].kwargs["allow_remote"])
         self.assertEqual("save-as-smoke.workflow.json", self.services.workflow_editing.snapshot().workflow_name)
         self.assertEqual(2, self.services.composition.load_workflow("save-as-smoke").revision)
+        self.assertTrue(self.services.composition.load_workflow("save-as-smoke").allow_remote)
+        self.window.refresh_task_library()
+        task_list = self.window.task_library_view.task_library_list
+        rows = {task_list.item(index).data(Qt.ItemDataRole.UserRole): task_list.item(index)
+                for index in range(task_list.count())}
+        self.assertEqual("save-as-smoke (1 步)", rows["save-as-smoke.workflow.json"].text())
+        self.assertIn("允许远程调用：是", rows["save-as-smoke.workflow.json"].toolTip())
+        self.assertNotEqual(rows["save-as-smoke.workflow.json"].icon().cacheKey(),
+                            rows["startup-visible.workflow.json"].icon().cacheKey())
+        self.assertIn("允许远程调用：否", rows["startup-visible.workflow.json"].toolTip())
         self.assertEqual(1, self.services.composition.load_workflow("startup-visible").revision)
+        with patch(
+            "src.gui.controllers.main_window.ask_workflow_save",
+            return_value=("save-as-smoke", False, True),
+        ):
+            self.window.save_task()
+        self.window.refresh_task_library()
+        updated = next(task_list.item(index) for index in range(task_list.count())
+                       if task_list.item(index).data(Qt.ItemDataRole.UserRole) == "save-as-smoke.workflow.json")
+        self.assertIn("允许远程调用：否", updated.toolTip())
+
+    def test_edit_task_properties_without_opening_or_saving_canvas(self) -> None:
+        before = self.services.workflow_editing.snapshot()
+        self.window.refresh_task_library()
+        tasks = self.window.task_library_view.task_library_list
+        tasks.setCurrentRow(next(index for index in range(tasks.count())
+                                 if tasks.item(index).data(Qt.ItemDataRole.UserRole) == "startup-visible.workflow.json"))
+        self.assertTrue(self.window.task_library_view.properties_button.isEnabled())
+        with patch("src.gui.controllers.main_window.ask_task_properties",
+                   return_value=("renamed-properties", True, True)):
+            self.window.edit_selected_task_properties()
+        saved = self.services.composition.load_workflow("renamed-properties")
+        self.assertTrue(saved.allow_remote)
+        self.assertEqual("renamed-properties.workflow.json", tasks.currentItem().data(Qt.ItemDataRole.UserRole))
+        self.assertEqual(before.document.root, self.services.workflow_editing.snapshot().document.root)
+        with patch("src.gui.controllers.main_window.ask_task_properties",
+                   return_value=("ignored", False, False)):
+            self.window.edit_selected_task_properties()
+        self.assertEqual(saved, self.services.composition.load_workflow("renamed-properties"))
 
     def test_save_task_rejects_empty_name(self) -> None:
         opened = self.services.workflow_editing.open("startup-visible")
         self.window._render_sequence(opened.document.to_entries())
         with (
             patch(
-                "src.gui.controllers.main_window.ask_text",
-                return_value=("   ", True),
+                "src.gui.controllers.main_window.ask_workflow_save",
+                return_value=("   ", False, True),
             ),
             patch.object(self.window._notifications, "warning") as warning,
         ):
@@ -241,8 +282,8 @@ class GuiSimulationSmokeTests(unittest.TestCase):
         opened = self.services.workflow_editing.open("startup-visible")
         self.window._render_sequence(opened.document.to_entries())
         with patch(
-            "src.gui.controllers.main_window.ask_text",
-            return_value=("ignored", False),
+            "src.gui.controllers.main_window.ask_workflow_save",
+            return_value=("ignored", True, False),
         ):
             self.window.save_task()
 
@@ -267,8 +308,8 @@ class GuiSimulationSmokeTests(unittest.TestCase):
             self.window._publish_current_sequence()
             self.assertTrue(canvas.enter_subworkflow(subworkflow.uuid))
             with patch(
-                "src.gui.controllers.main_window.ask_text",
-                return_value=(target_name, True),
+                "src.gui.controllers.main_window.ask_workflow_save",
+                return_value=(target_name, False, True),
             ):
                 self.window.save_task()
 

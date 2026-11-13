@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from copy import deepcopy
 import logging
 from threading import RLock, Thread
 import time
@@ -136,6 +137,8 @@ class ExecutionManager:
         self._worker_factory = worker_factory
         self._thread: ExecutionWorker | None = None
         self._listener: ExecutionListener | None = None
+        self._outputs: dict[str, Any] = {}
+        self._outputs_complete = False
 
     def required_resources(
         self,
@@ -189,6 +192,8 @@ class ExecutionManager:
             self._finished_at = None
             self._control = control
             self._listener = listener
+            self._outputs = {}
+            self._outputs_complete = False
             self._thread = self._worker_factory(
                 lambda: self._run(
                     run_id,
@@ -396,6 +401,8 @@ class ExecutionManager:
                 self._error_category = result.error_category
                 self._raw_error_code = result.raw_error_code
                 self._finished_at = time.time()
+                self._outputs = deepcopy(result.outputs)
+                self._outputs_complete = result.outputs_complete and final_state is ExecutionState.SUCCEEDED
         self._emit(
             run_id,
             final_event,
@@ -407,6 +414,8 @@ class ExecutionManager:
                 "device_id": result.error_device_id,
                 "error_category": result.error_category,
                 "raw_error_code": result.raw_error_code,
+                "outputs": deepcopy(result.outputs),
+                "outputs_complete": result.outputs_complete and final_state is ExecutionState.SUCCEEDED,
             },
         )
         logger.info("Execution finished: state=%s", final_state.value)
@@ -519,6 +528,8 @@ class ExecutionManager:
             raw_error_code=self._raw_error_code,
             started_at=self._started_at,
             finished_at=self._finished_at,
+            outputs=deepcopy(self._outputs),
+            outputs_complete=self._outputs_complete,
         )
 
     def _required_control(self) -> ExecutionControl:

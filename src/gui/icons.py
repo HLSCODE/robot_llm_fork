@@ -39,6 +39,8 @@ class IconName(str, Enum):
     ACTION_LOCATE = "action-locate"
     ACTION_TRAJECTORY = "action-trajectory"
     WORKFLOW = "workflow"
+    TASK_REMOTE = "task-remote"
+    TASK_LOCAL = "task-local"
     ASSISTANT = "assistant"
     DEVICES = "devices"
     POSES = "poses"

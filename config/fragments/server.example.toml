@@ -6,7 +6,7 @@
 [server]
 # 两个协议使用同一身份与控制权。密钥只放 .env 的 SERVER_AUTH_TOKEN。
 security_enabled = true
-# 空列表允许执行当前 Robot Profile 下的所有已保存任务；非空时仅允许列出的名称。
+# 仅允许流程自身勾选“允许远程调用”的任务；空列表不追加限制，非空再按名称筛选。
 task_allowlist = [] # 例如 ["移液", "瓶子抓取"]，不填目录。
 # 去重及运行历史：保留至少七天，上限满时拒绝新任务，不自动淘汰未过期记录。
 task_history_max_records = 10000

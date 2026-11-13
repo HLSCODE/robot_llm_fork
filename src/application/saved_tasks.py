@@ -84,6 +84,7 @@ class SavedTaskService:
             name
             for name in self._composition.list_workflows()
             if not self._allowlist or name.removesuffix(".workflow.json") in self._allowlist
+            if self._composition.load_workflow(name).allow_remote
         )
 
     def run_task(
@@ -112,6 +113,8 @@ class SavedTaskService:
                 raise TaskServiceError("task_not_found", "已保存任务不存在") from error
             except (ValueError, TypeError) as error:
                 raise TaskServiceError("invalid_workflow", str(error)) from error
+            if not document.allow_remote:
+                raise TaskServiceError("task_forbidden", "该任务未允许远程调用")
             try:
                 workflow = self._compiler.compile(document)
             except (ValueError, TypeError) as error:

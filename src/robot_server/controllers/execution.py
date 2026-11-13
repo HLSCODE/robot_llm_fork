@@ -492,6 +492,8 @@ class ExecutionWebSocketHandler:
                 "state": event.event_type.value,
                 "success": succeeded,
                 "error": event.message or None,
+                "outputs": event.data.get("outputs", {}),
+                "outputs_complete": event.data.get("outputs_complete", False),
                 "failure": {
                     "code": event.data.get("code") or None,
                     "operation": event.data.get("operation") or None,

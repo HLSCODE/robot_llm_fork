@@ -1,5 +1,9 @@
 # 多协议任务服务
 
+客户端从连接到接收结果的完整接入步骤、消息分发、断线恢复与排错见 [TCP 客户端接入指南](tcp-client-integration.md)。
+
+结构化测量结果与节点导出设置见 [流程节点输出](workflow-outputs.md)。TCP 最终事件及运行查询的 `result.outputs` 返回流程显式导出的数据，`result.outputs_complete` 标识是否完整；WebSocket 完成事件提供同样的业务输出。
+
 ## 架构与范围
 
 TCP、WebSocket（未来可加入 HTTP）共享同一 `ApplicationServices`、设备运行时、执行管理器、远程控制租约及已保存任务服务。不得同时启动两个应用进程控制同一套机器人。
@@ -99,7 +103,7 @@ port = 8766
 
 典型错误码：`authentication_required`、`invalid_credentials`、`control_busy`、`control_required`、`invalid_request`、`unsupported_version`、`task_not_found`、`task_forbidden`、`invalid_workflow`、`not_ready`、`busy`、`request_conflict`、`run_not_found`、`run_not_active`、`history_full`、`internal_error`。
 
-`task_allowlist=[]` 表示允许所有当前 Profile 已保存任务；非空时任务列表与远程执行同时受限，不影响 GUI 本地任务编辑。
+任务需在保存窗口显式勾选“允许远程调用”（流程字段 `allow_remote=true`）才能被远程发现和启动；缺失该字段按关闭处理，本地使用不受影响。`task_allowlist=[]` 表示不追加白名单限制，而不是自动开放所有任务；非空时还需同时位于白名单。TCP 与 WebSocket 的任务列表和已保存任务执行入口共用此规则。
 
 ## 示例客户端
 

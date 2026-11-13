@@ -4,6 +4,9 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from typing import Any
+from dataclasses import replace
+from .outputs import OutputCollector
+from ..domain.outputs import OutputDataError
 
 from ..domain.execution_context import ExecutionContext
 from ..domain.robot_profile import normalize_robot_profile_id
@@ -105,6 +108,7 @@ class ActionEngine:
         self._camera_runtime = camera_runtime
         self._robot_profile_id = normalize_robot_profile_id(robot_profile_id)
         self._callbacks: EngineCallbacks | None = None
+        self._outputs = OutputCollector()
         self._default_action_timeout_seconds = execution_settings.execution_action_timeout_seconds
         if self._default_action_timeout_seconds <= 0:
             raise ValueError("EXECUTION_ACTION_TIMEOUT_SECONDS must be positive")
@@ -254,14 +258,16 @@ class ActionEngine:
         self._require_plan_profile(plan)
         self._callbacks = callbacks
         self.execution_context.clear()
+        self._outputs = OutputCollector()
         identities = {identity.path: identity for identity, _item in iter_execution_steps(plan)}
         try:
-            return self._execute_sequence(
+            result = self._execute_sequence(
                 plan.root,
                 control,
                 identities,
                 path="root",
             )
+            return replace(result, outputs=self._outputs.snapshot(), outputs_complete=result.success)
         finally:
             self._callbacks = None
 
@@ -351,6 +357,13 @@ class ActionEngine:
             self._on_step_started(identity, item, policy)
             result = self._execute_action(item, control, policy)
             if result.successful:
+                try:
+                    self._outputs.add(item.output, result.outputs, identity)
+                except ValueError as error:
+                    failure = ActionHandlerResult.failed(ActionResultCode.INVALID_OUTPUT, str(error), operation="action.output")
+                    item.status = SequenceItemStatus.FAILED
+                    self._on_step_failed(identity, item, failure)
+                    return _engine_failure(failure)
                 item.status = SequenceItemStatus.SUCCESS
                 self._on_step_completed(identity, item)
                 return EngineResult(success=True)
@@ -613,6 +626,8 @@ class ActionEngine:
                 message,
                 operation=self._ACTION_OPERATION,
             )
+        except OutputDataError as exc:
+            return ActionHandlerResult.failed(ActionResultCode.INVALID_OUTPUT, str(exc), operation="action.output")
         except Exception as exc:
             message = f"执行错误: {exc}"
             self._on_log(message, "error")

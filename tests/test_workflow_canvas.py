@@ -79,6 +79,42 @@ class WorkflowCanvasTests(unittest.TestCase):
     def setUp(self) -> None:
         self.canvas = WorkflowCanvasWidget()
 
+    def test_running_loop_children_remain_inspectable_beyond_five(self) -> None:
+        children = [_item(f"child-{index}") for index in range(12)]
+        loop = LoopBlock(uuid="loop", items=children, repeat_count=2)
+        document = WorkflowDocument.from_entries(
+            workflow_id="inspect", name="Inspect", revision=0, entries=[loop],
+        )
+        self.canvas.resize(620, 500)
+        self.canvas.render_entries([loop])
+        self.canvas.begin_execution(WorkflowCompiler().compile(document))
+        self.canvas.show()
+        QApplication.processEvents()
+        node = self.canvas._node_items["loop"]
+        position = QPointF(
+            node.node_width / 2,
+            LOOP_HEADER_HEIGHT + LOOP_SECTION_GAP
+            + 11 * (LOOP_CHILD_HEIGHT + LOOP_CHILD_GAP) + LOOP_CHILD_HEIGHT / 2,
+        )
+        self.assertEqual("child-11", node.item_uuid_at(position))
+        self.assertGreater(node.node_height, position.y())
+        self.assertIsNone(node._loop_insertion_index_at(position))
+        self.canvas.view.centerOn(node.mapToScene(position))
+        QApplication.processEvents()
+        requests = []
+        self.canvas.edit_requested.connect(lambda: requests.append(True))
+        QTest.mouseDClick(
+            self.canvas.view.viewport(), Qt.MouseButton.LeftButton,
+            pos=self.canvas.view.mapFromScene(node.mapToScene(position)),
+        )
+        self.assertEqual([True], requests)
+        self.assertEqual("child-11", self.canvas.current_sequence_item().uuid)
+        running = _item("child-0")
+        running.status = SequenceItemStatus.RUNNING
+        self.canvas.update_execution_step(0, running)
+        self.assertEqual("child-11", self.canvas.current_sequence_item().uuid)
+        self.assertFalse(self.canvas.update_current_action(children[0].definition))
+
     def test_subworkflow_scope_edits_publish_the_root_document(self) -> None:
         subworkflow = SubworkflowBlock(
             uuid="subworkflow",

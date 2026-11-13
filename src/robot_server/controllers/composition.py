@@ -400,10 +400,12 @@ class CompositionWebSocketHandler:
         )
 
     async def _handle_list_tasks(self, websocket: Any, data: WebSocketRequest) -> None:
-        """返回所有已保存的任务文件名"""
+        """Only advertise saved tasks explicitly enabled for remote invocation."""
         summaries = await asyncio.to_thread(
             self._server._services.composition.list_tasks
         )
+        allowed = set(await asyncio.to_thread(self._server._services.saved_tasks.list_tasks))
+        summaries = tuple(summary for summary in summaries if summary.name in allowed)
         await websocket.send(
             self._server._json_msg(
                 {
@@ -471,6 +473,14 @@ class CompositionWebSocketHandler:
             )
             return
 
+        allowed = await asyncio.to_thread(self._server._services.saved_tasks.list_tasks)
+        if task_name.removesuffix(".workflow.json") not in {
+            name.removesuffix(".workflow.json") for name in allowed
+        }:
+            await websocket.send(self._server._json_msg(
+                {"event": "error", "code": "task_forbidden", "message": "该任务未允许远程调用"}
+            ))
+            return
         try:
             entries = await asyncio.to_thread(
                 self._server._services.composition.load_task_into_sequence,
