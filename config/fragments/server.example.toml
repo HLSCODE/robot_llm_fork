@@ -47,6 +47,8 @@ max_connections = 16
 max_requests_per_second = 30
 idle_timeout_seconds = 300.0
 send_timeout_seconds = 2.0
-# 非本机监听必须同时配置证书、私钥和认证；不允许裸 TCP 暴露到网络。
+# TLS 可选；未配置时使用明文 TCP。0.0.0.0 可监听所有网卡。
+# 如需无认证监听，在 [server] 设置 security_enabled=false（同时影响 WebSocket）。
+# 对外无认证/无 TLS 仅适合隔离的受信任网络，请用防火墙限制来源，不要暴露公网。
 tls_certificate_path = ""
 tls_private_key_path = ""

@@ -272,7 +272,7 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 |---|---:|---|
 | `security_enabled` | 未设置 | 设置后统一控制 WS/TCP 认证；否则沿用 `websocket_security_enabled`。`.env` 的 `SERVER_AUTH_TOKEN` 非空时优先于旧 `WEBSOCKET_AUTH_TOKEN`。 |
 | `tcp_enabled` | `false` | 独立启用 TCP；两个协议可同时启用或全部关闭。 |
-| `tcp_host` / `tcp_port` | `127.0.0.1` / `8766` | TCP 监听地址和端口；非本机监听强制要求认证及 TLS。 |
+| `tcp_host` / `tcp_port` | `127.0.0.1` / `8766` | TCP 监听地址和端口；支持 `0.0.0.0` 无认证/无 TLS 监听，但会警告风险，应限制防火墙来源。认证由 `security_enabled` 控制，TLS 独立可选。 |
 | `tcp_max_message_size_bytes` | `65536` | 换行分隔 JSON 消息字节上限。 |
 | `tcp_max_connections` / `tcp_max_requests_per_second` | `16` / `30` | TCP 最大连接数及单连接请求速率。 |
 | `tcp_idle_timeout_seconds` / `tcp_send_timeout_seconds` | `300.0` / `2.0` 秒 | 空闲和发送超时；断线不取消已受理任务。 |

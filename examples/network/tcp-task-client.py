@@ -23,7 +23,7 @@ def main() -> None:
     parser.add_argument(
         "--request-id", default=None, help="Stable unique ID; reuse only for the same task"
     )
-    parser.add_argument("--ca", help="Trusted TLS CA certificate (required for remote deployment)")
+    parser.add_argument("--ca", help="Trusted TLS CA certificate (use when the server enables TLS)")
     args = parser.parse_args()
     request_id = args.request_id or uuid4().hex
     print(f"execution request_id={request_id}", flush=True)

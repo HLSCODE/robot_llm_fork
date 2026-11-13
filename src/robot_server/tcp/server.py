@@ -54,8 +54,10 @@ class RobotTcpServer:
             settings.tcp_tls_private_key_path,
         )
         if settings.tcp_host.lower() not in {"127.0.0.1", "localhost", "::1"}:
-            if self._ssl is None or not authentication_configured:
-                raise ValueError("非本机 TCP 监听必须启用 TLS 和认证")
+            if not authentication_configured:
+                logger.warning("TCP 非本机监听未启用认证：host=%s；可访问端口的客户端可申请控制权，请限制防火墙访问范围", settings.tcp_host)
+            if self._ssl is None:
+                logger.warning("TCP 非本机监听未启用 TLS：host=%s；通信为明文，请仅在受信任网络使用", settings.tcp_host)
         self._server: asyncio.Server | None = None
         self._connections: dict[asyncio.Task[Any], asyncio.StreamWriter] = {}
         self._watchers: dict[str, asyncio.Task[None]] = {}

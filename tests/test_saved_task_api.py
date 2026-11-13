@@ -281,7 +281,8 @@ def test_tcp_configuration_reports_port_and_remote_security_errors(services):
     )
     options = StartupOptions(True, True, "127.0.0.1", 8765, "INFO")
     codes = {i.code for i in validate_startup_configuration(settings, options).errors}
-    assert {"insecure_tcp_binding", "server_port_conflict"} <= codes
+    assert "server_port_conflict" in codes
+    assert "insecure_tcp_binding" not in codes
 
 
 def test_all_four_service_enable_combinations(services):
@@ -413,14 +414,37 @@ def test_tcp_disconnect_does_not_cancel_accepted_task(services):
     asyncio.run(scenario())
 
 
-def test_tcp_remote_bind_requires_tls_and_authentication(services):
-    access = ServerAccessController("key", security_enabled=True, control_lease_seconds=30)
-    with pytest.raises(ValueError, match="TLS"):
-        RobotTcpServer(
-            TaskApi(services.saved_tasks, access),
-            replace(services.settings.server, tcp_host="0.0.0.0"),
-            authentication_configured=True,
-        )
+def test_tcp_remote_bind_allows_no_auth_or_tls_and_warns(services, caplog):
+    access = ServerAccessController("", security_enabled=False, control_lease_seconds=30)
+    server = RobotTcpServer(
+        TaskApi(services.saved_tasks, access),
+        replace(services.settings.server, tcp_host="0.0.0.0", security_enabled=False),
+        authentication_configured=False,
+    )
+    assert server.endpoint == "tcp://0.0.0.0:8766"
+    assert "未启用认证" in caplog.text and "未启用 TLS" in caplog.text
+
+
+def test_remote_tcp_no_auth_passes_startup_validation_with_warnings(services):
+    settings = replace(
+        services.settings,
+        server=replace(services.settings.server, tcp_enabled=True, tcp_host="0.0.0.0",
+                       security_enabled=False, websocket_enabled=False),
+    )
+    report = validate_startup_configuration(settings, StartupOptions(True, False, "127.0.0.1", 8765, "INFO"))
+    assert not report.errors
+    codes = {issue.code for issue in report.warnings}
+    assert {"unauthenticated_tcp_binding", "unencrypted_tcp_binding"} <= codes
+
+
+def test_tcp_authentication_enabled_still_requires_token(services):
+    settings = replace(
+        services.settings,
+        server=replace(services.settings.server, tcp_enabled=True, tcp_host="0.0.0.0", security_enabled=True),
+        secrets=replace(services.settings.secrets, server_auth_token="", websocket_auth_token=""),
+    )
+    report = validate_startup_configuration(settings, StartupOptions(True, False, "127.0.0.1", 8765, "INFO"))
+    assert "missing_tcp_auth_token" in {issue.code for issue in report.errors}
 
 
 def test_tcp_message_and_connection_limits_are_enforced(services):

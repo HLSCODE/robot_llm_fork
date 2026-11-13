@@ -48,7 +48,7 @@ port = 8766
 
 `.env` 中设置 `SERVER_AUTH_TOKEN`（不要提交真实值）。非空时优先于旧 `WEBSOCKET_AUTH_TOKEN`，两个协议使用同一凭据。`security_enabled` 显式设置后同时控制两个协议；未设置时沿用旧的 `websocket_security_enabled`。因此旧配置默认保持原 WS 行为、TCP 默认关闭；启用 TCP 时建议明确设置 `security_enabled=true`。
 
-非本机 TCP 监听必须启用认证和 TLS，并配置 `tcp.tls_certificate_path` / `tcp.tls_private_key_path`。不允许把不加密的明文 TCP 直接开放到局域网。TLS 最低 1.2。客户端必须校验证书，不要关闭验证。
+非本机 TCP 监听也支持关闭认证和不配置 TLS，但会给出安全警告；仅应在隔离、受信任网络使用，并用防火墙限制来源，不要直接暴露公网。关闭认证使用 `[server] security_enabled=false`，同时影响 WebSocket；客户端仍须获取控制权。建议启用认证与 TLS，通过 `tcp.tls_certificate_path` / `tcp.tls_private_key_path` 配置证书和私钥（必须成对提供）。TLS 最低 1.2；使用 TLS 时客户端必须校验证书，不要关闭验证。
 
 当前单个 API Key 代表一个操作身份，不是多用户权限系统；持有同一 Key 的客户端重连或切换协议后可以查询该身份的运行。连接级控制租约仍互斥。GUI 执行、示教等通过现有执行/资源仲裁互斥，不经过远程租约。
 

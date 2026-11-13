@@ -38,13 +38,15 @@ uv run --env-file .env python examples/network/tcp-task-client.py --task 移液
 
 示例客户端源码：[tcp-task-client.py](../examples/network/tcp-task-client.py)。它用于串行联调，不是支持多请求并发、自动心跳的完整客户端库。
 
-非本机访问必须启用认证和 TLS：设置 `security_enabled=true`，在 `.env` 配置 `SERVER_AUTH_TOKEN`，并在 `[server.tcp]` 配置 `tls_certificate_path`、`tls_private_key_path` 和监听地址。客户端使用可信 CA 校验证书及主机名：
+非本机访问建议启用认证和 TLS：设置 `security_enabled=true`，在 `.env` 配置 `SERVER_AUTH_TOKEN`，并在 `[server.tcp]` 配置 `tls_certificate_path`、`tls_private_key_path` 和监听地址。客户端使用可信 CA 校验证书及主机名：
 
 ```powershell
 uv run --env-file .env python examples/network/tcp-task-client.py --host robot.example.com --ca certs/ca.pem --task 移液
 ```
 
 `127.0.0.1` 只能由服务端本机连接。不要通过关闭证书验证解决 TLS 错误，也不要向他人提供真实 Token。
+
+隔离内网中如需无认证明文接入，可设置 `[server] security_enabled=false`、`[server.tcp] host="0.0.0.0"`，证书和私钥均留空。服务端会警告但不阻止启动。客户端连接服务端实际局域网 IP（不是 `0.0.0.0`），无需认证和 `--ca`，但仍需 `control.acquire` 才能执行任务。该认证开关同时影响 WebSocket；任何可访问端口的客户端都可申请控制权，请通过防火墙限制来源，不要开放公网。
 
 ## 2. 分帧与消息分发
 

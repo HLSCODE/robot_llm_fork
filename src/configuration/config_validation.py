@@ -683,8 +683,13 @@ def _validate_tcp(settings: ApplicationSettings, options: StartupOptions,
         _error(issues, "placeholder_secret", "SERVER_AUTH_TOKEN", "不能使用示例占位凭据")
     if bool(server.tcp_tls_certificate_path) != bool(server.tcp_tls_private_key_path):
         _error(issues, "incomplete_tcp_tls", "TCP_TLS_CERTIFICATE_PATH", "证书与私钥必须同时配置")
-    if not is_loopback_host(server.tcp_host) and (not security or not token or not server.tcp_tls_certificate_path):
-        _error(issues, "insecure_tcp_binding", "TCP_HOST", "非本机 TCP 监听必须启用认证和 TLS")
+    if security and not token:
+        _error(issues, "missing_tcp_auth_token", "SERVER_AUTH_TOKEN", "TCP 已启用认证，请配置 SERVER_AUTH_TOKEN，或显式设置 [server] security_enabled=false")
+    if not is_loopback_host(server.tcp_host):
+        if not security:
+            _warning(issues, "unauthenticated_tcp_binding", "TCP_HOST", "TCP 对外监听且未启用认证，请限制防火墙访问范围")
+        if not server.tcp_tls_certificate_path:
+            _warning(issues, "unencrypted_tcp_binding", "TCP_HOST", "TCP 对外监听且未启用 TLS，通信为明文")
     if options.websocket_enabled and options.websocket_port == server.tcp_port:
         _error(issues, "server_port_conflict", "TCP_PORT", "TCP 与 WebSocket 请使用不同端口")
 
