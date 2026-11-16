@@ -29,6 +29,9 @@ _FIELDS = {
     "task.run": {"task"},
     "run.status": {"run_id"},
     "run.cancel": {"run_id"},
+    "execution.pause": set(),
+    "execution.resume": set(),
+    "safety.emergency_stop": set(),
 }
 
 

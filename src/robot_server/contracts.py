@@ -9,6 +9,10 @@ import logging
 from typing import Any
 
 from ..application.saved_tasks import SavedTaskService, TaskRequestContext, TaskServiceError
+from ..application.services import ExecutionService
+from ..application.safety import SafetyService
+from ..devices import StopMode
+from ..execution import ExecutionStateError
 from .access import ServerAccessController, ServerAccessLevel
 
 audit_logger = logging.getLogger("security.remote")
@@ -30,9 +34,12 @@ class TaskApi:
     Per-client leases still prevent simultaneous controllers across protocols.
     """
 
-    def __init__(self, tasks: SavedTaskService, access: ServerAccessController) -> None:
+    def __init__(self, tasks: SavedTaskService, access: ServerAccessController, *,
+                 execution: ExecutionService | None = None, safety: SafetyService | None = None) -> None:
         self.tasks = tasks
         self.access = access
+        self._execution = execution
+        self._safety = safety
 
     def dispatch(self, request: ServerRequest) -> dict[str, Any]:
         try:
@@ -88,11 +95,28 @@ class TaskApi:
             return {"lease": lease.to_dict() if lease is not None else None}
         level = (
             ServerAccessLevel.CONTROL
-            if command in {"task.run", "run.cancel"}
+            if command in {"task.run", "run.cancel", "execution.pause", "execution.resume", "safety.emergency_stop"}
             else ServerAccessLevel.AUTHENTICATED
         )
         session = self.access.authorize(request.client_id, level)
         principal = session.principal or request.client_id
+        if command in {"execution.pause", "execution.resume"}:
+            if self._execution is None:
+                raise TaskServiceError("unavailable", "执行控制服务未配置")
+            try:
+                if command == "execution.pause":
+                    self._execution.pause()
+                else:
+                    self._execution.resume()
+            except ExecutionStateError as error:
+                raise TaskServiceError("invalid_execution_state", str(error)) from error
+            snapshot = self._execution.snapshot()
+            return {"run_id": snapshot.run_id, "status": "pause_requested" if command == "execution.pause" else "resume_requested"}
+        if command == "safety.emergency_stop":
+            if self._safety is None:
+                raise TaskServiceError("unavailable", "安全停止服务未配置")
+            report = self._safety.stop(StopMode.EMERGENCY)
+            return {"status": "stop_report", "report": report.to_dict()}
         if command == "task.list":
             return {"tasks": [name.removesuffix(".workflow.json") for name in self.tasks.list_tasks()]}
         if command == "task.run":

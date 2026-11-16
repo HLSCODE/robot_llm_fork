@@ -104,7 +104,7 @@ def build_auxiliary_service_host(
         from ..robot_server.tcp import RobotTcpServer
 
         auxiliary_services.append(RobotTcpServer(
-            TaskApi(services.saved_tasks, access), settings.server,
+            TaskApi(services.saved_tasks, access, execution=services.execution, safety=services.safety), settings.server,
             authentication_configured=access.authentication_configured,
         ))
 

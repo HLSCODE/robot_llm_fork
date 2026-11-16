@@ -184,6 +184,22 @@ if message["status"] == "succeeded" and result.get("outputs_complete"):
 
 ## 6. 断线恢复与安全重试
 
+### 暂停、恢复与双臂软件急停
+
+以下操作需先认证（启用认证时）并取得控制权，作用于应用当前执行，不限定为本连接启动的任务；软件急停也可在没有任务运行时调用。
+
+```json
+{"version":1,"request_id":"pause-001","command":"execution.pause"}
+{"version":1,"request_id":"resume-001","command":"execution.resume"}
+{"version":1,"request_id":"emergency-001","command":"safety.emergency_stop"}
+```
+
+暂停/恢复响应为 `ok=true`、`run_id`、`status="pause_requested"` 或 `resume_requested`。暂停不打断当前节点，节点结束后才暂停；没有可操作任务或状态不允许时返回 `invalid_execution_state`。不得把暂停响应视为机械臂已停稳。
+
+软件急停复用 GUI 的安全停止服务，取消当前任务并发送设备级软件急停（天机双臂），还会执行现有安全状态与控制会话释放逻辑。响应为 `ok=true,status="stop_report",report={...}`；必须检查 `report.complete`、`report.errors`、`report.execution` 和 `report.devices`，`ok=true` 仅表示取得了报告，并不表示全部停止成功。SDK 阻塞调用未退出时可返回不完整报告，不会强制重置任务状态。该指令不是实体急停，不提供安全等级或立即停稳保证。服务处理停止报告期间，同一 TCP 连接的后续请求会等待；正式客户端应设置足够的响应超时并继续区分运行推送和请求响应。
+
+WebSocket 已有对应指令 `pause`、`resume`、`emergency_stop`，沿用其现有协议格式与权限规则。
+
 - 断线、超时、未收到受理响应都不代表任务未启动；客户端本地等待超时也不是任务取消。
 - 已知 `run_id`：重连、认证后调用 `run.status`。
 - 未知 `run_id`：重连、认证、获取控制权后，用**原 `request_id` 和完全相同的任务名称**再次提交 `task.run`，利用去重取得原运行；不要换 ID 自动重跑。
