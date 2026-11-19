@@ -341,7 +341,7 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 |---|---:|---|
 | `provider` | `realman` | 当前机械臂 provider，如 `realman` 或 `tianji`；运行时只装配选中的实现。 |
 | `profile_id` | 空 | 显式数据 Profile ID；仅在需要稳定自定义目录名时设置。 |
-| `move_velocity` | `10` | Provider 无关的默认运动速度，具体单位和可接受范围由机械臂 adapter 定义。 |
+| `move_velocity` | `10` | 机械臂默认速度比例（1–100 %），不是 mm/s。 |
 | `move_radius` | `0` | 默认轨迹过渡/圆角参数；语义由机械臂 provider 定义。 |
 | `move_connect` | `0` | 默认运动连接方式参数，传给支持它的 provider。 |
 | `move_block` | `1` | 默认是否等待运动完成；动作可在 schema 允许时覆盖。 |
@@ -369,6 +369,8 @@ distortion_coefficients = [0.0, 0.0, 0.0, 0.0, 0.0]
 | `left_base_transform` / `right_base_transform` | 内置 4×4 矩阵 | 左右机械臂基座相对世界坐标系的齐次变换。 |
 | `left_tool_transform` / `right_tool_transform` | 内置 4×4 矩阵 | 左右工具相对末端坐标系的齐次变换。 |
 | `joint_limits_rad` | 内置 7 组范围 | 七个关节的弧度上下限；必须与机械臂控制器和实际安全范围一致。 |
+
+「机械臂移动」（直线、关节插补、七关节目标）和「机械臂相对移动」可在动作表单中取消勾选「使用全局默认速度」，填写本次动作的速度比例。保存为基础动作时，插入流程的节点会复制这个值；在画布中编辑节点，仅修改该节点的快照，不会回写基础动作或其他节点。字段 `velocity_percent` 缺失时继承 `move_velocity`，包括已有动作，不需要迁移。覆盖仅改变速度，不改变过渡半径、连接、阻塞或轨迹回放设置。
 
 `left/right_initial_pose`、工具架位姿和天机变换矩阵均属于安全相关标定值。不要从其他设备、
 其他 Profile 或未验证的录制文件直接复制。

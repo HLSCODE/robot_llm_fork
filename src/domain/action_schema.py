@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 import math
@@ -87,6 +88,7 @@ class ActionParameterValidation:
 
 
 _MISSING = object()
+ARM_SPEED_PERCENT = "velocity_percent"
 
 
 def _field(
@@ -135,6 +137,23 @@ def _field(
     if current_pose is not None:
         schema["current_pose"] = current_pose
     return schema
+
+
+_ARM_SPEED_FIELD = _field(
+    "integer", "速度比例", minimum=1, maximum=100, unit="%",
+    placeholder="使用全局默认速度",
+)
+
+
+def arm_speed_override(parameters: Mapping[str, Any]) -> int | None:
+    """Return the validated per-command speed, or inherit the provider default."""
+    if ARM_SPEED_PERCENT not in parameters:
+        return None
+    value = parameters[ARM_SPEED_PERCENT]
+    issue = _validate_field_value(ARM_SPEED_PERCENT, value, _ARM_SPEED_FIELD)
+    if issue is not None:
+        raise ValueError(issue.message)
+    return int(value)
 
 
 def _variant(
@@ -199,6 +218,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                         "补偿方式",
                         default={"mode": "none"},
                     ),
+                    ARM_SPEED_PERCENT: _ARM_SPEED_FIELD,
                 },
             ),
             "机械臂相对": _variant(
@@ -237,6 +257,7 @@ _ACTION_SCHEMAS: dict[str, ActionTypeSchema] = {
                     "z_mm": _field(
                         "number", "Z 偏移", default=0.0, minimum=-100, maximum=100, unit="mm"
                     ),
+                    ARM_SPEED_PERCENT: _ARM_SPEED_FIELD,
                 },
             ),
             "身体": _variant(
@@ -1171,9 +1192,9 @@ def _validate_field_value(
             message=f"动作参数 {field_name} 类型必须是 {field_type}",
         )
 
-    if field_type == "number":
-        numeric_value = float(value)
-        if not math.isfinite(numeric_value):
+    if field_type in {"number", "integer"}:
+        numeric_value = value
+        if isinstance(numeric_value, float) and not math.isfinite(numeric_value):
             return ActionParameterIssue(
                 code=ActionParameterIssueCode.INVALID_TYPE,
                 field=field_name,
@@ -1271,6 +1292,8 @@ def _matches_field_type(value: Any, field_type: str) -> bool:
             and all(isinstance(item, (int, float)) and not isinstance(item, bool)
                     and math.isfinite(item) for item in value)
         )
+    if field_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
     if field_type == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if field_type == "text":

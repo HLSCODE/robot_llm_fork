@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
@@ -114,7 +114,11 @@ class MotionOptions:
     cartesian_tolerance: float | None = None
 
     def __post_init__(self) -> None:
-        if not 1 <= self.velocity_percent <= 100:
+        if (
+            isinstance(self.velocity_percent, bool)
+            or not isinstance(self.velocity_percent, int)
+            or not 1 <= self.velocity_percent <= 100
+        ):
             raise ValueError("velocity_percent must be in range 1..100")
         if self.blend_radius < 0:
             raise ValueError("blend_radius must be non-negative")
@@ -125,6 +129,9 @@ class MotionOptions:
             or self.cartesian_tolerance <= 0
         ):
             raise ValueError("cartesian_tolerance must be positive and finite")
+
+    def with_velocity_override(self, velocity_percent: int | None) -> MotionOptions:
+        return self if velocity_percent is None else replace(self, velocity_percent=velocity_percent)
 
 
 @dataclass(frozen=True, slots=True)

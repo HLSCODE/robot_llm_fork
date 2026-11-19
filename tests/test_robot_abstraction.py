@@ -420,6 +420,23 @@ class RealManRobotAdapterTests(unittest.TestCase):
             tool_rack_options=_tool_rack_options(),
         )
 
+    def test_action_speed_changes_only_this_move(self):
+        adapter = RealManRobotAdapter(
+            self.controller,
+            default_motion=MotionOptions(
+                velocity_percent=20, blend_radius=2, connected=True, blocking=False,
+            ),
+            tool_rack_options=_tool_rack_options(),
+        )
+        pose = CartesianPose.from_iterable((1, 2, 3, 4, 5, 6))
+        adapter.move_to_pose(ArmId.LEFT, pose, MotionMode.LINEAR, velocity_percent=5)
+        adapter.move_to_pose(ArmId.LEFT, pose, MotionMode.LINEAR)
+        calls = self.controller.robot1_ctrl.robot.calls
+        self.assertEqual(
+            [{"v": speed, "r": 2, "connect": 1, "block": 0} for speed in (5, 20)],
+            [call[2] for call in calls[-2:]],
+        )
+
     def test_adapter_implements_vendor_neutral_contract(self):
         self.assertIsInstance(self.adapter, RobotSystem)
         self.assertIsInstance(self.adapter, ArmTelemetryReader)

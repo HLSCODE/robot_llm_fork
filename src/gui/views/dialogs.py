@@ -706,6 +706,33 @@ class CompensationEditor(QWidget):
         return dict(reference) if isinstance(reference, dict) else None
 
 
+class OptionalIntegerEditor(QWidget):
+    """Show an inherited mode without persisting a placeholder number."""
+
+    def __init__(self, schema: ActionFieldSchema, value: int | None) -> None:
+        super().__init__()
+        spin = self.spin_box = QSpinBox()
+        spin.setRange(int(schema["min"]), int(schema["max"]))
+        spin.setAccessibleName(schema["label"])
+        unit = schema.get("unit")
+        if unit:
+            spin.setSuffix(f" {unit}")
+        spin.setValue(spin.minimum() if value is None else value)
+        self.inherit = QCheckBox(schema.get("placeholder", "使用默认值"))
+        self.inherit.setChecked(value is None)
+        self.inherit.toggled.connect(spin.setHidden)
+        spin.setHidden(value is None)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.inherit)
+        layout.addWidget(spin)
+        self.setFocusProxy(self.inherit)
+
+    def value(self) -> int | None:
+        return None if self.inherit.isChecked() else self.spin_box.value()
+
+
 FieldWidget = (
     QLineEdit
     | QComboBox
@@ -714,6 +741,7 @@ FieldWidget = (
     | QCheckBox
     | PoseEditor
     | CompensationEditor
+    | OptionalIntegerEditor
 )
 
 
@@ -932,6 +960,8 @@ class SchemaActionForm(QWidget):
             self._field_widgets[field_name] = widget
             self._field_schemas[field_name] = field_schema
             self._connect_validation_reset(widget)
+            if isinstance(widget, OptionalIntegerEditor):
+                widget.inherit.toggled.connect(lambda _checked: self.content_size_changed.emit())
         self._bind_current_pose_sources()
         self._bind_dynamic_select_sources()
         if self._is_gripper_form():
@@ -1094,7 +1124,9 @@ class SchemaActionForm(QWidget):
         elif field_type == "boolean":
             widget = QCheckBox()
             widget.setChecked(bool(value))
-        elif field_type == "number" and _uses_integer_widget(schema):
+        elif field_type == "integer" and not schema.get("required") and "default" not in schema:
+            widget = OptionalIntegerEditor(schema, value)
+        elif field_type == "integer" or (field_type == "number" and _uses_integer_widget(schema)):
             widget = QSpinBox()
             widget.setRange(int(schema.get("min", -2_147_483_647)), int(schema.get("max", 2_147_483_647)))
             widget.setValue(int(value or 0))
@@ -1250,6 +1282,8 @@ class SchemaActionForm(QWidget):
             return value
         if isinstance(widget, QCheckBox):
             return widget.isChecked()
+        if isinstance(widget, OptionalIntegerEditor):
+            return widget.value()
         if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
             return widget.value()
         text = widget.text().strip()

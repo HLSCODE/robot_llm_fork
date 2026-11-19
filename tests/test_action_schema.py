@@ -14,6 +14,27 @@ from src.robot_server.ws_server import RobotWebSocketServer
 
 
 class ActionSchemaTests(unittest.TestCase):
+    def test_arm_speed_is_optional_and_validated_for_all_arm_move_modes(self):
+        for target in (
+            {"目标": "机械臂", "模式": "move_l", "点位": [0] * 6},
+            {"目标": "机械臂", "模式": "move_j", "点位": [0] * 6},
+            {"目标": "机械臂", "模式": "move_joints", "关节角": [0] * 7},
+            {"目标": "机械臂相对", "臂": "左", "x_mm": 10},
+        ):
+            legacy = validate_action_parameters(ActionType.MOVE, target)
+            self.assertTrue(legacy.is_valid, legacy.message)
+            self.assertNotIn("velocity_percent", legacy.parameters)
+            for valid in (1, 100):
+                result = validate_action_parameters(ActionType.MOVE, {**target, "velocity_percent": valid})
+                self.assertTrue(result.is_valid, result.message)
+                self.assertEqual(valid, result.parameters["velocity_percent"])
+            for invalid in (0, 101, True, "5", 5.0, 5.5, None, float("nan")):
+                with self.subTest(target=target, invalid=invalid):
+                    result = validate_action_parameters(ActionType.MOVE, {**target, "velocity_percent": invalid})
+                    self.assertFalse(result.is_valid)
+        result = validate_action_parameters(ActionType.MOVE, {"目标": "身体", "位置": 1, "velocity_percent": 5})
+        self.assertIn(ActionParameterIssueCode.UNKNOWN_FIELD, {issue.code for issue in result.issues})
+
     def test_joint_motion_requires_seven_finite_angles_without_pose_compensation(self):
         parameters = {"目标": "机械臂", "臂": "右", "模式": "move_joints", "关节角": [1] * 7}
         self.assertTrue(validate_action_parameters(ActionType.MOVE, parameters).is_valid)

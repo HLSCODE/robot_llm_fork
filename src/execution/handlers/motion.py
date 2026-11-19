@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 from ...domain.execution_context import ExecutionContext
 from ...domain.models import ActionType
-from ...domain.action_schema import validate_action_parameters
+from ...domain.action_schema import arm_speed_override, validate_action_parameters
 from ..target_pose import resolve_robot_target_pose
 from ...configuration.settings import VisionSettings
 from ...devices import (
@@ -89,6 +89,10 @@ class MoveActionHandler:
         return handler(parameters, context)
 
 
+class _ArmVelocityOverride(TypedDict, total=False):
+    velocity_percent: int
+
+
 class RobotMoveActionHandler:
     """Execute vendor-neutral arm pose movement with bounded retries."""
 
@@ -117,8 +121,18 @@ class RobotMoveActionHandler:
         target = str(parameters.get("目标", "机械臂"))
         target_pose_text = parameters.get("点位", "")
         mode_name = str(parameters.get("模式", ""))
+        try:
+            speed = arm_speed_override(parameters)
+        except ValueError as exc:
+            return context.failure(
+                ActionResultCode.INVALID_PARAMETERS,
+                str(exc),
+                operation=self._OPERATION,
+                device_id=ROBOT_SYSTEM,
+            )
+        velocity: _ArmVelocityOverride = {} if speed is None else {"velocity_percent": speed}
         if mode_name == "move_joints":
-            return self._move_joints(parameters, context)
+            return self._move_joints(parameters, context, velocity)
         context.log(
             f"机械臂移动动作: 臂={arm_name}, 模式={mode_name}, "
             f"点位={target_pose_text}",
@@ -181,7 +195,7 @@ class RobotMoveActionHandler:
             try:
                 context.invoke(
                     self._OPERATION,
-                    lambda: motion.move_to_pose(arm, pose, mode),
+                    lambda: motion.move_to_pose(arm, pose, mode, **velocity),
                 )
             except (ActionCancelledError, ActionTimeoutError):
                 raise
@@ -219,10 +233,8 @@ class RobotMoveActionHandler:
 
     def _move_joints(
         self, parameters: ActionParameters, context: ActionExecutionContext,
+        velocity: _ArmVelocityOverride,
     ) -> ActionHandlerResult:
-        from ...domain.action_schema import validate_action_parameters
-        from ...domain.models import ActionType
-
         operation = "robot_system.move_to_joints"
         validation = validate_action_parameters(ActionType.MOVE, dict(parameters))
         if not validation.is_valid:
@@ -234,7 +246,7 @@ class RobotMoveActionHandler:
             arm = ArmId.parse(parameters.get("臂", "左"))
             joints = JointVector.from_iterable(validation.parameters["关节角"])
             motion = self._device_runtime.require(ROBOT_SYSTEM, ArmJointMotion)
-            context.invoke(operation, lambda: motion.move_to_joints(arm, joints))
+            context.invoke(operation, lambda: motion.move_to_joints(arm, joints, **velocity))
         except (ActionCancelledError, ActionTimeoutError):
             raise
         except Exception as exc:

@@ -429,6 +429,22 @@ class TianjiDriverTests(unittest.TestCase):
         self.assertEqual([], runtime.moves)
         self.assertEqual([], runtime.joint_moves)
 
+    def test_action_speed_reaches_sdk_for_pose_and_joint_targets(self) -> None:
+        driver, runtime = _driver()
+        self.addCleanup(driver.close)
+        adapter = TianjiRobotAdapter(
+            driver, default_motion=MotionOptions(velocity_percent=12, blocking=False),
+        )
+        pose = CartesianPose(0.1, 0.2, 0.3, 0.0, 0.0, 0.0)
+        joints = JointVector.from_iterable([10] * 7)
+        adapter.move_to_pose(ArmId.LEFT, pose, MotionMode.LINEAR, velocity_percent=4)
+        adapter.move_to_pose(ArmId.LEFT, pose, MotionMode.JOINT, velocity_percent=5)
+        adapter.move_to_joints(ArmId.LEFT, joints, velocity_percent=6)
+        adapter.move_to_joints(ArmId.LEFT, joints)
+        self.assertEqual((4, False), runtime.moves[-1][2:])
+        self.assertEqual((5, False), runtime.joint_pose_moves[-1][2:])
+        self.assertEqual([(6, False), (12, False)], [call[2:] for call in runtime.joint_moves])
+
     def test_joint_targets_are_separate_and_rejected_before_sdk_clipping(self) -> None:
         driver, runtime = _driver()
         self.addCleanup(driver.close)

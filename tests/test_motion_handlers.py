@@ -44,6 +44,7 @@ class _RecordingArmMotion:
         self.failures_before_success = failures_before_success
         self.rejection = rejection
         self.calls: list[tuple[ArmId, CartesianPose, MotionMode]] = []
+        self.speeds: list[int | None] = []
 
     def move_to_pose(
         self,
@@ -51,8 +52,11 @@ class _RecordingArmMotion:
         pose: CartesianPose,
         mode: MotionMode,
         _options=None,
+        *,
+        velocity_percent: int | None = None,
     ) -> None:
         self.calls.append((arm, pose, mode))
+        self.speeds.append(velocity_percent)
         if self.rejection is not None:
             raise self.rejection
         if len(self.calls) <= self.failures_before_success:
@@ -163,8 +167,8 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
                 super().__init__()
                 self.joint_calls = []
 
-            def move_to_joints(self, arm, joints, options=None):
-                self.joint_calls.append((arm, joints))
+            def move_to_joints(self, arm, joints, options=None, *, velocity_percent=None):
+                self.joint_calls.append((arm, joints, velocity_percent))
 
         robot = JointRobot()
         runtime = _runtime_with(ROBOT_SYSTEM, DeviceCapability.ARM_MOTION, robot)
@@ -175,11 +179,15 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
         parameters = {"目标": "机械臂", "臂": "右", "模式": "move_joints", "关节角": [10] * 7}
         context, _ = _action_context()
         self.assertTrue(handler(parameters, context).successful)
-        self.assertEqual([(ArmId.RIGHT, JointVector((10.0,) * 7))], robot.joint_calls)
+        self.assertTrue(handler({**parameters, "velocity_percent": 5}, context).successful)
+        self.assertEqual(
+            [(ArmId.RIGHT, JointVector((10.0,) * 7), speed) for speed in (None, 5)],
+            robot.joint_calls,
+        )
         self.assertEqual([], robot.calls)
         invalid_context, _ = _action_context()
         self.assertFalse(handler({**parameters, "关节角": [10] * 6}, invalid_context).successful)
-        self.assertEqual(1, len(robot.joint_calls))
+        self.assertEqual(2, len(robot.joint_calls))
 
     def test_relative_motion_reads_current_pose_and_preserves_orientation(self):
         robot = _RecordingArmMotion()
@@ -212,11 +220,13 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
                 "x_mm": 10,
                 "y_mm": -20,
                 "z_mm": 5,
+                "velocity_percent": 7,
             },
             context,
         )
 
         self.assertTrue(result.successful)
+        self.assertEqual([7], robot.speeds)
         arm, pose, mode = robot.calls[-1]
         self.assertEqual(ArmId.RIGHT, arm)
         self.assertEqual(MotionMode.LINEAR, mode)
@@ -260,11 +270,26 @@ class RobotMoveActionHandlerTests(unittest.TestCase):
 
         self.assertTrue(result.successful)
         self.assertEqual(3, len(arm_motion.calls))
+        self.assertEqual([None, None, None], arm_motion.speeds)
         arm, pose, mode = arm_motion.calls[-1]
         self.assertEqual(ArmId.LEFT, arm)
         self.assertEqual(MotionMode.JOINT, mode)
         self.assertEqual(0.2, pose.z_m)
         self.assertIn(("机械臂移动执行完成", "info"), logs)
+
+    def test_pose_speed_override_is_per_call_and_invalid_speed_never_reaches_device(self):
+        robot = _RecordingArmMotion()
+        handler = RobotMoveActionHandler(
+            _runtime_with(ROBOT_SYSTEM, DeviceCapability.ARM_MOTION, robot),
+            ExecutionContext(), MotionHandlerOptions(), VisionSettings(), lambda **_kwargs: None,
+        )
+        parameters = {"臂": "左", "模式": "move_j", "点位": [0, 0.1, 0.2, 0, 0, 0]}
+        context, _ = _action_context()
+        self.assertTrue(handler({**parameters, "velocity_percent": 8}, context).successful)
+        self.assertTrue(handler(parameters, context).successful)
+        invalid = handler({**parameters, "velocity_percent": True}, context)
+        self.assertEqual(ActionResultCode.INVALID_PARAMETERS, invalid.code)
+        self.assertEqual([8, None], robot.speeds)
 
     def test_explicit_robot_rejection_is_not_retried(self):
         rejection = RobotOperationError(

@@ -67,6 +67,8 @@ class SimulatedRobotSystem:
         pose: CartesianPose,
         _mode: MotionMode,
         _options: MotionOptions | None = None,
+        *,
+        velocity_percent: int | None = None,
     ) -> None:
         self.states[arm] = ArmState(
             arm=arm,
@@ -76,6 +78,7 @@ class SimulatedRobotSystem:
 
     def move_to_joints(
         self, arm: ArmId, joints: JointVector, options: MotionOptions | None = None,
+        *, velocity_percent: int | None = None,
     ) -> None:
         self.states[arm] = ArmState(arm=arm, pose=self.states[arm].pose, joints=joints)
 

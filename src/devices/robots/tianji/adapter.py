@@ -99,8 +99,10 @@ class TianjiRobotAdapter:
         arm: ArmId,
         joints: JointVector,
         options: MotionOptions | None = None,
+        *,
+        velocity_percent: int | None = None,
     ) -> None:
-        selected = options or self._default_motion
+        selected = (options or self._default_motion).with_velocity_override(velocity_percent)
         if selected.blend_radius or selected.connected:
             raise RobotOperationError(
                 "move_to_joints",
@@ -203,10 +205,12 @@ class TianjiRobotAdapter:
         pose: CartesianPose,
         mode: MotionMode,
         options: MotionOptions | None = None,
+        *,
+        velocity_percent: int | None = None,
     ) -> None:
         if not isinstance(mode, MotionMode):
             raise TypeError("mode must be a MotionMode")
-        selected = options or self._default_motion
+        selected = (options or self._default_motion).with_velocity_override(velocity_percent)
         if selected.blend_radius != 0 or selected.connected:
             raise RobotOperationError(
                 "move_to_pose",

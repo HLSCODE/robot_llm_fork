@@ -233,10 +233,12 @@ class RealManRobotAdapter:
         pose: CartesianPose,
         mode: MotionMode,
         options: MotionOptions | None = None,
+        *,
+        velocity_percent: int | None = None,
     ) -> None:
         if not isinstance(mode, MotionMode):
             raise TypeError("mode must be a MotionMode")
-        selected = options or self._default_motion
+        selected = (options or self._default_motion).with_velocity_override(velocity_percent)
         code = self._controller.move_to_pose(
             self._arm_key(arm),
             pose.to_list(),

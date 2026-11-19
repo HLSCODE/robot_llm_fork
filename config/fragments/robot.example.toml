@@ -10,6 +10,7 @@ provider = "realman"
 profile_id = ""
 
 # Provider 无关的默认运动参数。
+# 未设置动作级速度比例时使用此值（1–100 %）。
 move_velocity = 10
 move_radius = 0
 move_connect = 0

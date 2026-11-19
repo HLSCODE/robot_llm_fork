@@ -18,8 +18,10 @@ class VisionRobotFacade:
         pose: CartesianPose,
         mode: MotionMode,
         options: MotionOptions | None = None,
+        *,
+        velocity_percent: int | None = None,
     ) -> None:
-        self._robot.move_to_pose(arm, pose, mode, options)
+        self._robot.move_to_pose(arm, pose, mode, options, velocity_percent=velocity_percent)
 
     def read_arm_state(self, arm: ArmId) -> ArmState:
         return self._robot.read_arm_state(arm)

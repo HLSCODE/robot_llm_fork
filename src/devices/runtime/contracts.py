@@ -41,6 +41,8 @@ class ArmMotion(Protocol):
         pose: CartesianPose,
         mode: MotionMode,
         options: MotionOptions | None = None,
+        *,
+        velocity_percent: int | None = None,
     ) -> None: ...
 
 
@@ -50,6 +52,7 @@ class ArmJointMotion(Protocol):
 
     def move_to_joints(
         self, arm: ArmId, joints: JointVector, options: MotionOptions | None = None,
+        *, velocity_percent: int | None = None,
     ) -> None: ...
 
 
