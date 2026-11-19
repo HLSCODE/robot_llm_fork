@@ -635,7 +635,7 @@ class _FloatingDetailPanel(QFrame):
         self.title_label.setText(page.title)
         self.stack.setCurrentWidget(page.widget)
 
-    def preferred_size(self) -> QSize:
+    def preferred_size(self, available_width: int) -> QSize:
         page = next((page for page in self._pages.values() if page.widget is self.stack.currentWidget()), None)
         if page is None or not page.fit_content:
             return QSize(DETAIL_PANEL_DEFAULT_WIDTH, DETAIL_PANEL_DEFAULT_HEIGHT)
@@ -644,9 +644,18 @@ class _FloatingDetailPanel(QFrame):
         assert layout is not None
         margins = layout.contentsMargins()
         frame = self.contentsMargins()
+        horizontal_padding = margins.left() + margins.right() + frame.left() + frame.right()
+        width = min(
+            available_width,
+            max(DETAIL_PANEL_DEFAULT_WIDTH, content.width() + horizontal_padding),
+        )
+        # A scrollable page can measure its inner content at this width even
+        # when its outer layout (which only sees the viewport) reports no HFW.
+        measured_height = page.widget.heightForWidth(max(1, width - horizontal_padding))
+        content_height = content.height() if measured_height < 0 else measured_height
         return QSize(
-            max(DETAIL_PANEL_DEFAULT_WIDTH, content.width() + margins.left() + margins.right() + frame.left() + frame.right()),
-            max(1, content.height() + margins.top() + margins.bottom()
+            width,
+            max(1, content_height + margins.top() + margins.bottom()
                 + self._header_layout.sizeHint().height() + layout.spacing() + frame.top() + frame.bottom()),
         )
 
@@ -1021,7 +1030,7 @@ class WorkbenchView(QWidget):
             1,
             self.height() - self.status_bar.height() - (2 * DETAIL_PANEL_MARGIN),
         )
-        preferred = self.detail_panel.preferred_size()
+        preferred = self.detail_panel.preferred_size(available_width)
         width = min(preferred.width(), available_width)
         height = min(preferred.height(), available_height)
         x = max(DETAIL_PANEL_MARGIN, self.width() - DETAIL_PANEL_MARGIN - width)

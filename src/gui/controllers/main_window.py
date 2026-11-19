@@ -471,7 +471,9 @@ class MainWindow(RoundedMainWindow):
             ),
             editor=self.workflow_view,
             bottom_pages=(
-                WorkbenchPage("devices", "设备", IconName.DEVICES, self.device_status_view),
+                WorkbenchPage(
+                    "devices", "设备", IconName.DEVICES, self.device_status_view, fit_content=True,
+                ),
                 WorkbenchPage("poses", "位姿", IconName.POSES, self.device_pose_view),
                 WorkbenchPage("controls", "控制", IconName.CONTROLS, self.device_control_view, fit_content=True),
                 WorkbenchPage("logs", "日志", IconName.LOGS, self.log_widget),

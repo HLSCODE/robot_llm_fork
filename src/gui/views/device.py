@@ -4,6 +4,7 @@ from collections.abc import Callable
 from functools import partial
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QFrame,
     QComboBox,
@@ -36,15 +37,63 @@ _DEVICE_STATUS_TITLES = {
 class DeviceHealthView(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setAccessibleName("设备状态详情")
+        self._content = QWidget()
+        layout = QVBoxLayout(self._content)
         layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
         layout.addWidget(self._create_status_panel())
-        self._end_effectors = QLabel()
-        self._end_effectors.setTextFormat(Qt.TextFormat.PlainText)
-        self._end_effectors.setWordWrap(True)
+        self._end_effectors = self._status_label()
         self._end_effectors.setVisible(False)
         layout.addWidget(self._end_effectors)
         layout.addStretch(1)
+        self.scroll_area.setWidget(self._content)
+        self._content.setAutoFillBackground(False)
+        self.scroll_area.viewport().setAutoFillBackground(False)
+        outer.addWidget(self.scroll_area)
+        self._content.installEventFilter(self)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return self._content.sizeHint()
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        return self._content.heightForWidth(width)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self._sync_scroll_policy()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if watched is self._content and event.type() is QEvent.Type.LayoutRequest:
+            self._sync_scroll_policy()
+            self.updateGeometry()
+        return super().eventFilter(watched, event)
+
+    def _sync_scroll_policy(self) -> None:
+        # Use the full viewport width to decide whether scrolling is needed.
+        # A scrollbar left over from an earlier layout can narrow the viewport
+        # enough to add a wrapped line and keep itself visible.
+        viewport = self.scroll_area.maximumViewportSize()
+        needs_scroll = self.heightForWidth(viewport.width()) > viewport.height()
+        self.scroll_area.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded if needs_scroll else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+
+    @staticmethod
+    def _status_label(text: str = "") -> QLabel:
+        label = QLabel(text)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        policy = label.sizePolicy()
+        policy.setHorizontalPolicy(QSizePolicy.Policy.Ignored)
+        label.setSizePolicy(policy)
+        return label
 
     def render_end_effectors(self, mounts: list[dict[str, object]], states: list[dict[str, object]]) -> None:
         import datetime
@@ -80,7 +129,7 @@ class DeviceHealthView(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
-        title = QLabel("🔌 设备状态")
+        title = QLabel("设备状态")
         title_font = title.font()
         title_font.setBold(True)
         title.setFont(title_font)
@@ -120,11 +169,10 @@ class DeviceHealthView(QWidget):
         indicator = QLabel()
         indicator.setFixedSize(16, 16)
         indicator.setObjectName(f"{key}_indicator")
-        text = QLabel(f"{title}: 未连接")
+        text = DeviceHealthView._status_label(f"{title}: 未连接")
         text.setObjectName(f"{key}_status_text")
         layout.addWidget(indicator)
-        layout.addWidget(text)
-        layout.addStretch()
+        layout.addWidget(text, stretch=1)
         return widget, indicator, text
 
     def render_state(self, state: DeviceViewState) -> None:
@@ -147,6 +195,7 @@ class DeviceHealthView(QWidget):
                 break
             widget = item.widget()
             if widget is not None:
+                widget.hide()
                 widget.deleteLater()
         if not cameras:
             label = QLabel("尚未检测")
@@ -167,8 +216,7 @@ class DeviceHealthView(QWidget):
             else:
                 status_text = f"启动失败：{error}"
                 color = "#ef4444" if required else "#f59e0b"
-            row = QLabel(f"●  {label_text}：{status_text}")
-            row.setWordWrap(True)
+            row = self._status_label(f"●  {label_text}：{status_text}")
             row.setStyleSheet(f"color: {color};")
             row.setToolTip(error if not healthy else f"{label_text} 工作正常")
             self._camera_layout.addWidget(row)
